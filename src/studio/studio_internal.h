@@ -231,6 +231,11 @@ private:
     void TabRing(const RectF& view, float y, float& bottom);
     void TabIcon(const RectF& view, float y, float& bottom);
     void ThemesPage(const RectF& r);
+    void ThemeHero(const RectF& hero, const ThemeInfo& t, bool trying);
+    void ThemeCard(int index, const ThemeInfo& t, const RectF& cr, const RectF& view);
+    void ThemePicture(const ThemeInfo& t, const RectF& r, float radius);
+    void Scrim(const RectF& clip, float radius, const RectF& band, Color from, Color to, bool horizontal);
+    Bitmap* ThemeArt(const ThemeInfo& t, int maxSide);
     void BehaviorPage(const RectF& r);
     void DeskPage(const RectF& r);
     void SystemPage(const RectF& r);
@@ -246,7 +251,7 @@ private:
     void JournalOverlay(float w, float h);
     void LibraryOverlay(float w, float h);
     void MoreOverlay();
-    Bitmap* Img(const std::wstring& path, int maxSide);
+    Bitmap* Img(const std::wstring& path, int maxSide, const std::wstring& tag = L"");  // tag - часть ключа кэша
     bool FieldOrText(int id, const RectF& r, const RectF& view, const std::wstring& value,
                      std::function<void(const std::wstring&)> onChange, const std::wstring& ph = L"");
 
@@ -260,7 +265,10 @@ private:
     std::shared_ptr<lockscreen::Job> lockJob_;
     std::wstring logonStatus_;
     std::wstring boostStatus_;
-    volatile int boostTask_ = -1;  // задача очистки: -1 не знаем, 0 нет, 1 есть, 2 создаётся
+    std::shared_ptr<volatile int> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
+    std::wstring boostDir_;
+    bool boostPurge_ = true;
+    ULONGLONG boostReadAt_ = 0;
     bool savePending_ = false;
     std::vector<Config> undo_, redo_;
     int renaming_ = -1;  // сектор, который переименовывают прямо в списке

@@ -375,8 +375,8 @@ void Studio::AddPaths(const std::vector<std::wstring>& paths, bool asChildren) {
     Save();
 }
 
-Bitmap* Studio::Img(const std::wstring& path, int maxSide) {
-    std::wstring key = std::to_wstring(maxSide) + L"|" + path;
+Bitmap* Studio::Img(const std::wstring& path, int maxSide, const std::wstring& tag) {
+    std::wstring key = std::to_wstring(maxSide) + L"|" + path + tag;
     auto it = imgs_.find(key);
     if (it != imgs_.end()) return it->second.get();
     auto b = LoadImageFile(path, maxSide);

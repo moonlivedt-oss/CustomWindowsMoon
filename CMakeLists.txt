@@ -19,5 +19,7 @@ if(MINGW)
   target_link_options(RadialMenu PRIVATE -municode -static -s)
 endif()
 
-# exe кладём в корень проекта рядом с radial.cfg и icons/
-set_target_properties(RadialMenu PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
+# exe кладём в корень проекта рядом с radial.cfg и icons/;
+# для проверочной сборки без остановки работающей копии: -DRADIAL_OUT_DIR=<папка>
+set(RADIAL_OUT_DIR ${CMAKE_SOURCE_DIR} CACHE PATH "куда класть RadialMenu.exe")
+set_target_properties(RadialMenu PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_OUT_DIR})
