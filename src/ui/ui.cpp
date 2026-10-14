@@ -83,8 +83,10 @@ float Ui::Anim(int id, bool on, float speed) {
     float target = on ? 1.0f : 0.0f;
     float step = std::min(1.0f, dt_ * speed);
     v += (target - v) * step;
-    if (std::fabs(target - v) < 0.01f) v = target;
-    else repaint_ = true;
+    if (std::fabs(target - v) < 0.01f)
+        v = target;
+    else
+        repaint_ = true;
     anims_[id] = v;
     return v;
 }
@@ -271,9 +273,18 @@ bool Ui::Dragging(int id) const {
 float Ui::Scroll(int id, const RectF& view, float content) {
     if (interactive) scrollViews_.push_back({id, view});
     float maxOff = std::max(0.0f, content - view.Height);
-    float& off = scroll_[id];
-    off = std::clamp(off, 0.0f, maxOff);
-    return off;
+    float& target = scroll_[id];
+    target = std::clamp(target, 0.0f, maxOff);
+    // колесо задаёт цель, страница доезжает до неё плавно
+    auto it = scrollShown_.find(id);
+    float shown = it == scrollShown_.end() ? target : it->second;
+    shown += (target - shown) * std::min(1.0f, dt_ * 16);
+    if (std::fabs(target - shown) < 0.5f)
+        shown = target;
+    else
+        repaint_ = true;
+    scrollShown_[id] = shown;
+    return shown;
 }
 
 // ---------- рисование ----------

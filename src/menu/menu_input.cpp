@@ -161,7 +161,7 @@ void RadialMenu::OnKey(UINT vk) {
             }
             break;
         case VK_RETURN:
-            if (const Item* it = HoveredItem()) Activate(*it);
+            ActivateHover();  // по копии: Activate закрывает меню и чистит списки, на которые указывает пункт
             break;
         case VK_UP:
         case VK_LEFT:

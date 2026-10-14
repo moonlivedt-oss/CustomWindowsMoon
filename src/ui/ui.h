@@ -72,7 +72,10 @@ public:
     POINT PressPt() const { return press_; }
     bool Dragging(int id) const;  // нажали на id и уже тянут
     float Scroll(int id, const RectF& view, float content);
-    void ResetScroll(int id) { scroll_[id] = 0; }
+    void ResetScroll(int id) {
+        scroll_[id] = 0;
+        scrollShown_[id] = 0;
+    }
 
     // рисование
     void Fill(const RectF& r, Color c, float radius = 0);
@@ -132,7 +135,7 @@ private:
     UiColors c_{};
     double k_ = 1;
     std::vector<Hit> hits_, prevHits_;
-    std::map<int, float> scroll_;
+    std::map<int, float> scroll_, scrollShown_;  // куда прокрутить и где страница сейчас
     std::vector<std::pair<int, RectF>> scrollViews_, prevScrollViews_;
     int hot_ = 0, active_ = 0, clicked_ = 0, released_ = 0, rdown_ = 0, rclicked_ = 0, dbl_ = 0;
     bool hotChanged_ = false;

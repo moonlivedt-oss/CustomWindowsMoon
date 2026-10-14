@@ -379,7 +379,7 @@ void AddTray() {
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_TRAY;
     nid.hIcon = (HICON)LoadImageW(g_inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
-                                  GetSystemMetrics(SM_CYSMICON), 0);
+                                  GetSystemMetrics(SM_CYSMICON), LR_SHARED);  // один раз, без утечки на TaskbarCreated
     wcsncpy_s(nid.szTip, TrayTip().c_str(), _TRUNCATE);
     Shell_NotifyIconW(NIM_ADD, &nid);
 }
