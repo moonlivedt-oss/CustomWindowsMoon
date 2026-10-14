@@ -1,0 +1,510 @@
+// Разделы «Темы», «Поведение», «Клавиши».
+#include <windows.h>
+#include <commdlg.h>
+#include <dwmapi.h>
+#include <shellapi.h>
+#include <shellscalingapi.h>
+#include <shlwapi.h>
+#include <shobjidl.h>
+
+#include <algorithm>
+#include <cmath>
+#include <ctime>
+
+#include "core/files.h"
+#include "core/perf.h"
+#include "app/autostart.h"
+#include "core/text.h"
+#include "desk/corners.h"
+#include "gfx/accent.h"
+#include "gfx/draw.h"
+#include "gfx/icons.h"
+#include "studio/studio.h"
+#include "studio/studio_internal.h"
+
+using namespace Gdiplus;
+using ui::Kind;
+
+namespace studio {
+
+void Studio::ThemesPage(const RectF& r) {
+    const UiColors& c = ui.C();
+    RectF in = Inset(r, ui.S(28), ui.S(20));
+    Header(in, L"Темы", L"Тема красит и кольца, и эту студию. Наведи и кликни.");
+    RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
+    float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
+    GraphicsState st = ui.G().Save();
+    ui.G().SetClip(view);
+    float x = view.X + ui.S(4), w = view.Width - ui.S(8), y = view.Y - off, y0 = y;
+    const auto& themes = Themes();
+    float gap = ui.S(14);
+    int cols = std::max(2, (int)((w + gap) / (ui.S(240) + gap)));
+    float cw = (w - gap * (cols - 1)) / cols, ih = cw * 0.48f, ch = ih + ui.S(46);
+    wchar_t wp[MAX_PATH] = {};
+    SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
+    for (int i = 0; i < (int)themes.size(); ++i) {
+        const ThemeInfo& t = themes[i];
+        RectF cr(x + (i % cols) * (cw + gap), y + (i / cols) * (ch + gap), cw, ch);
+        RectF vis = Intersect(cr, view);
+        int id = ID_THEME + i;
+        bool on = cfg.theme == t.key;
+        if (vis.Height > 1 && ui.Click(id, vis) && !on) {
+            Change();
+            cfg.theme = t.key;
+            ApplyAccent();
+            Log(std::wstring(L"Тема: ") + t.name);
+            Save();
+            on = true;
+        }
+        bool hot = ui.Hot(id);
+        if (hot && !on) hoverThemeNext_ = t.key;
+        ui.Tip(id, on ? L"Эта тема сейчас выбрана" : L"Наведи, чтобы примерить, кликни, чтобы выбрать");
+        ui.Fill(cr, hot ? c.cardHi : c.card, ui.S(14));
+        RectF img(cr.X, cr.Y, cr.Width, ih);
+        ThemeInfo shown = t;
+        if (std::wstring(t.key) == L"custom") {
+            shown.bg = cfg.customBg;
+            shown.ac = cfg.customAccent;
+            shown.glow = cfg.customAccent2;
+            shown.gold = cfg.customGold;
+        }
+        if (std::wstring(t.key) == L"wallpaper") {
+            shown.ac = shown.glow = cfg.accent;
+            ui.Picture(Img(wp, 480), img, ui.S(14), false);
+        } else if (t.image[0]) {
+            ui.Picture(Img(ExeDir() + L"\\themes\\" + t.image, 480), img, ui.S(14), false);
+        } else {
+            LinearGradientBrush lg(PointF(img.X, img.Y), PointF(img.X + img.Width, img.Y + img.Height),
+                                   ToColor(shown.bg), ToColor(shown.ac));
+            Color cols3[] = {ToColor(shown.bg), ToColor(shown.glow), ToColor(shown.ac)};
+            REAL pos[] = {0, 0.6f, 1};
+            lg.SetInterpolationColors(cols3, pos, 3);
+            ui.G().FillPath(&lg, ui.Round(img, ui.S(14), true, false));
+        }
+        // кружки палитры поверх картинки
+        COLORREF sw[] = {shown.ac, shown.glow, shown.gold, shown.panel};
+        float d = ui.S(18);
+        for (int k2 = 0; k2 < 4; ++k2) {
+            RectF dr(img.X + ui.S(10) + k2 * (d - ui.S(3)), img.Y + img.Height - d - ui.S(8), d, d);
+            SolidBrush b(ToColor(sw[k2]));
+            Pen p(c.card, ui.S(2.5f));
+            ui.G().FillEllipse(&b, dr);
+            ui.G().DrawEllipse(&p, dr);
+        }
+        ui.Text(std::wstring(t.name) + (on ? L"  ✓" : L""),
+                RectF(cr.X + ui.S(14), img.Y + img.Height, cr.Width, ui.S(46)), on ? c.accent : c.text, 13.5f, true);
+        if (on)
+            ui.Stroke(cr, c.accent, ui.S(14), ui.S(2.5f));
+        else
+            ui.Stroke(cr, hot ? c.muted : c.border, ui.S(14));
+    }
+    y += ((int)themes.size() + cols - 1) / cols * (ch + gap) + ui.S(6);
+
+    if (cfg.theme == L"custom") {
+        RectF card(x, y, w, ui.S(120));
+        Card(card);
+        ui.Text(L"Своя палитра", RectF(card.X + ui.S(16), card.Y + ui.S(12), w, ui.S(24)), c.text, 14, true);
+        struct {
+            COLORREF* v;
+            const wchar_t* name;
+        } sw[] = {{&cfg.customBg, L"Фон"},
+                  {&cfg.customAccent, L"Акцент"},
+                  {&cfg.customAccent2, L"Второй"},
+                  {&cfg.customGold, L"Кромка"}};
+        for (int k2 = 0; k2 < 4; ++k2) {
+            RectF sr(card.X + ui.S(16) + k2 * ui.S(130), card.Y + ui.S(46), ui.S(118), ui.S(58));
+            int id = ID_CUSTOM + k2;
+            if (ui.Click(id, sr)) {
+                COLORREF* target = sw[k2].v;
+                Defer([this, target] {
+                    COLORREF v = *target;
+                    if (!PickColor(v)) return;
+                    Change();
+                    *target = v;
+                    Save();
+                });
+            }
+            ui.Fill(sr, ui.Hot(id) ? c.cardHi : c.field, ui.S(10));
+            ui.Stroke(sr, c.border, ui.S(10));
+            ui.Fill(RectF(sr.X + ui.S(10), sr.Y + ui.S(13), ui.S(32), ui.S(32)), ToColor(*sw[k2].v), ui.S(8));
+            ui.Text(sw[k2].name, RectF(sr.X + ui.S(50), sr.Y, sr.Width, sr.Height), c.text, 12.5f);
+        }
+        y += card.Height + ui.S(10);
+    } else if (cfg.theme == L"wallpaper") {
+        ui.Text(L"Цвет акцента сам подстраивается, когда меняются обои.", RectF(x, y, w, ui.S(22)), c.muted, 12);
+        y += ui.S(30);
+    }
+    pageContentH_ = y - y0 + ui.S(10);
+    ui.G().Restore(st);
+}
+
+void Studio::BehaviorPage(const RectF& r) {
+    const UiColors& c = ui.C();
+    RectF in = Inset(r, ui.S(28), ui.S(20));
+    Header(in, L"Поведение", L"Где и как открывается меню. Всё применяется сразу.");
+    RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
+    float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
+    GraphicsState st = ui.G().Save();
+    ui.G().SetClip(view);
+    float x = view.X + ui.S(4), w = view.Width - ui.S(8), y0 = view.Y - off;
+    float gap = ui.S(16);
+    bool two = w > ui.S(820);
+    float cw = two ? (w - gap) / 2 : w;
+    float colY[2] = {y0, y0};
+    auto card = [&](const wchar_t* title, int rows, auto&& body) {
+        int col = two && colY[1] < colY[0] ? 1 : 0;
+        float h = ui.S(52) + rows * ui.S(50);
+        RectF cr(x + col * (cw + gap), colY[col], cw, h);
+        Card(cr);
+        ui.Text(title, RectF(cr.X + ui.S(18), cr.Y + ui.S(14), cr.Width, ui.S(24)), c.text, 14, true);
+        body(RectF(cr.X + ui.S(18), cr.Y + ui.S(48), cr.Width - ui.S(36), rows * ui.S(50)));
+        colY[col] += h + gap;
+    };
+    auto row = [&](const RectF& b, int n, const wchar_t* label) {
+        RectF rr(b.X, b.Y + n * ui.S(50), b.Width, ui.S(44));
+        ui.Text(label, RectF(rr.X, rr.Y, rr.Width * 0.55f, rr.Height), c.text, 12.5f);
+        return rr;
+    };
+    auto toggle = [&](const RectF& rr, int id, bool& v) {
+        bool val = v;
+        if (ui.Toggle(id, RectF(rr.X + rr.Width - ui.S(42), rr.Y + ui.S(7), ui.S(42), ui.S(30)), val)) {
+            Change();
+            v = val;
+            Save();
+        }
+    };
+    card(L"Где открывать", 2, [&](const RectF& b) {
+        toggle(row(b, 0, L"Только когда активен рабочий стол"), ID_DESKTOP_ONLY, cfg.desktopOnly);
+        toggle(row(b, 1, L"Не мешать играм и видео на весь экран"), ID_SKIP_FULL, cfg.skipFullscreen);
+    });
+    card(L"Вид", 3, [&](const RectF& b) {
+        toggle(row(b, 0, L"Стекло под кольцом"), ID_BLUR, cfg.blur);
+        RectF s = row(b, 1, L"Размер колец");
+        int sc = (int)std::lround(cfg.scale * 100);
+        ui.Text(std::to_wstring(sc) + L"%", RectF(s.X + s.Width - ui.S(52), s.Y, ui.S(52), s.Height), c.muted, 12,
+                false, ui::Right);
+        if (ui.Slider(ID_SCALE, RectF(s.X + s.Width * 0.5f, s.Y, s.Width * 0.5f - ui.S(60), s.Height), sc, 60, 200,
+                      5)) {
+            FieldEdit(ID_SCALE);
+            cfg.scale = sc / 100.0;
+        }
+        RectF m = row(b, 2, L"Пунктов во втором кольце");
+        RectF plus(m.X + m.Width - ui.S(36), m.Y + ui.S(5), ui.S(36), ui.S(34));
+        RectF minus(plus.X - ui.S(90), plus.Y, ui.S(36), ui.S(34));
+        if (ui.Button(ID_MAXCH_MINUS, minus, L"−") && cfg.maxChildren > 4) {
+            Change();
+            --cfg.maxChildren;
+            Save();
+        }
+        ui.Text(std::to_wstring(cfg.maxChildren), RectF(minus.X + minus.Width, m.Y, ui.S(54), m.Height), c.text, 14,
+                true, ui::Center);
+        if (ui.Button(ID_MAXCH_PLUS, plus, L"+") && cfg.maxChildren < 24) {
+            Change();
+            ++cfg.maxChildren;
+            Save();
+        }
+    });
+    card(L"Звук", 2, [&](const RectF& b) {
+        toggle(row(b, 0, L"Тихие звуки при открытии и наведении"), ID_SOUNDS, cfg.sounds);
+        RectF s = row(b, 1, L"Громкость");
+        int v = cfg.volume;
+        ui.Text(std::to_wstring(v) + L"%", RectF(s.X + s.Width - ui.S(52), s.Y, ui.S(52), s.Height), c.muted, 12, false,
+                ui::Right);
+        if (ui.Slider(ID_VOLUME, RectF(s.X + s.Width * 0.5f, s.Y, s.Width * 0.5f - ui.S(60), s.Height), v, 0, 100, 5)) {
+            FieldEdit(ID_VOLUME);
+            cfg.volume = v;
+        }
+    });
+    card(L"Действия", 1, [&](const RectF& b) {
+        RectF s = row(b, 0, L"Терминал по Ctrl");
+        int sel = _wcsicmp(cfg.terminal.c_str(), L"powershell") == 0 ? 1
+                  : _wcsicmp(cfg.terminal.c_str(), L"cmd") == 0      ? 2
+                                                                     : 0;
+        if (ui.Segmented(ID_TERMINAL, RectF(s.X + s.Width * 0.45f, s.Y + ui.S(3), s.Width * 0.55f, ui.S(38)),
+                         {L"Terminal", L"PowerShell", L"cmd"}, sel)) {
+            Change();
+            cfg.terminal = sel == 1 ? L"powershell" : sel == 2 ? L"cmd" : L"wt";
+            Save();
+        }
+    });
+    card(L"Система", 2, [&](const RectF& b) {
+        RectF a = row(b, 0, L"Запускать вместе с Windows");
+        bool on = AutostartOn();
+        if (ui.Toggle(ID_AUTOSTART, RectF(a.X + a.Width - ui.S(42), a.Y + ui.S(7), ui.S(42), ui.S(30)), on)) {
+            SetAutostart(on);
+            Log(on ? L"Автозапуск включён" : L"Автозапуск выключен");
+        }
+        RectF f = row(b, 1, L"Файлы");
+        if (ui.Button(ID_OPEN_CFG, RectF(f.X + f.Width - ui.S(290), f.Y + ui.S(4), ui.S(150), ui.S(36)),
+                      L"radial.cfg")) {
+            std::wstring p = cfgPath;
+            Defer([p] {
+                ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + p + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+            });
+        }
+        if (ui.Button(ID_OPEN_DIR, RectF(f.X + f.Width - ui.S(132), f.Y + ui.S(4), ui.S(132), ui.S(36)), L"Папка"))
+            Defer([] { ShellExecuteW(nullptr, nullptr, ExeDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
+    });
+    pageContentH_ = std::max(colY[0], colY[1]) - y0;
+    ui.G().Restore(st);
+}
+
+void Studio::DeskPage(const RectF& r) {
+    const UiColors& c = ui.C();
+    RectF in = Inset(r, ui.S(28), ui.S(20));
+    Header(in, L"Стол", L"Горячие углы и панель «Сейчас играет». Всё применяется сразу.");
+    RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
+    float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
+    GraphicsState st = ui.G().Save();
+    ui.G().SetClip(view);
+    float x = view.X + ui.S(4), w = std::min(view.Width - ui.S(8), ui.S(900)), y = view.Y - off, y0 = y;
+
+    // горячие углы: слева схема экрана, справа по три действия на угол
+    float rowH = ui.S(50);
+    RectF card(x, y, w, ui.S(52) + ui.S(26) + 5 * rowH + ui.S(8));
+    Card(card);
+    ui.Text(L"Горячие углы", RectF(card.X + ui.S(18), card.Y + ui.S(14), w, ui.S(24)), c.text, 14, true);
+    ui.Text(L"Задержи курсор в углу, толкни в него дважды или покрути колесо. Alt + край по-прежнему открывает кольцо.",
+            RectF(card.X + ui.S(150), card.Y + ui.S(16), w - ui.S(170), ui.S(20)), c.muted, 11);
+    RectF scr(card.X + ui.S(22), card.Y + ui.S(96), ui.S(104), ui.S(66));
+    ui.Fill(scr, c.field, ui.S(6));
+    ui.Stroke(scr, c.border, ui.S(6), ui.S(1.5f));
+    ui.Fill(RectF(scr.X + ui.S(40), scr.Y + scr.Height, ui.S(24), ui.S(10)), c.border);
+    ui.Fill(RectF(scr.X + ui.S(30), scr.Y + scr.Height + ui.S(9), ui.S(44), ui.S(4)), c.border, ui.S(2));
+    // и нижний край, где выезжает «Сейчас играет»
+    if (cfg.media)
+        ui.Fill(RectF(scr.X + ui.S(22), scr.Y + scr.Height - ui.S(4), scr.Width - ui.S(44), ui.S(3)), c.accent2,
+                ui.S(1.5f));
+    RectF body(card.X + ui.S(150), card.Y + ui.S(48), w - ui.S(168), ui.S(26) + 5 * rowH);
+    float labelW = ui.S(132), colGap = ui.S(8);
+    float colW = (body.Width - labelW - colGap * 2) / 3;
+    const wchar_t* heads[3] = {L"Задержать", L"Толкнуть дважды", L"Колесо"};
+    for (int k2 = 0; k2 < 3; ++k2)
+        ui.Text(heads[k2], RectF(body.X + labelW + k2 * (colW + colGap) + ui.S(4), body.Y, colW, ui.S(20)), c.faint,
+                11);
+    const wchar_t* names[4] = {L"Левый верхний", L"Правый верхний", L"Левый нижний", L"Правый нижний"};
+    for (int i = 0; i < 4; ++i) {
+        bool hot = false, set = !cfg.corners[i].empty() || !cfg.corners2[i].empty() || !cfg.cornerWheel[i].empty();
+        RectF rr(body.X, body.Y + ui.S(26) + i * rowH, body.Width, ui.S(44));
+        ui.Text(names[i], RectF(rr.X, rr.Y, labelW, rr.Height), c.text, 12.5f);
+        std::wstring* vals[3] = {&cfg.corners[i], &cfg.corners2[i], &cfg.cornerWheel[i]};
+        for (int k2 = 0; k2 < 3; ++k2) {
+            int id = ID_CORNER + i * 4 + k2;
+            RectF b(rr.X + labelW + k2 * (colW + colGap), rr.Y + ui.S(4), colW, ui.S(36));
+            bool capturing = captureCorner_ == i && captureKind_ == k2;
+            std::wstring text = capturing ? L"Нажми сочетание..." : corners::ActionName(*vals[k2]) + L"  ▾";
+            if (ui.Button(id, b, text, capturing ? Kind::Primary : Kind::Secondary) && !capturing)
+                Defer([this, i, k2] { CornerMenu(i, k2); });
+            ui.Tip(id, capturing ? L"Esc - отмена" : L"Выбрать действие");
+            hot |= ui.Hot(id);
+        }
+        float d = ui.S(hot ? 16 : 12);
+        float cx = i % 2 ? scr.X + scr.Width : scr.X, cy = i < 2 ? scr.Y : scr.Y + scr.Height;
+        ui.Fill(RectF(cx - d / 2, cy - d / 2, d, d), set ? c.accent : c.faint, d / 2);
+    }
+    RectF s(body.X, body.Y + ui.S(26) + 4 * rowH, body.Width, ui.S(44));
+    ui.Text(L"Сколько держать курсор", RectF(s.X, s.Y, s.Width * 0.5f, s.Height), c.text, 12.5f);
+    int dl = cfg.cornerDelay;
+    ui.Text(std::to_wstring(dl) + L" мс", RectF(s.X + s.Width - ui.S(64), s.Y, ui.S(64), s.Height), c.muted, 12, false,
+            ui::Right);
+    if (ui.Slider(ID_CORNER_DELAY, RectF(s.X + labelW, s.Y, s.Width - labelW - ui.S(72), s.Height), dl, 100, 1000,
+                  50)) {
+        FieldEdit(ID_CORNER_DELAY);
+        cfg.cornerDelay = dl;
+    }
+    y += card.Height + ui.S(16);
+
+    // панель «Сейчас играет»
+    RectF mc(x, y, w, ui.S(52) + 2 * rowH + ui.S(66));
+    Card(mc);
+    ui.Text(L"Сейчас играет", RectF(mc.X + ui.S(18), mc.Y + ui.S(14), w, ui.S(24)), c.text, 14, true);
+    RectF mb(mc.X + ui.S(18), mc.Y + ui.S(48), w - ui.S(36), 2 * rowH);
+    auto toggle = [&](const RectF& base, int n, const wchar_t* label, int id, bool& v) {
+        RectF t(base.X, base.Y + n * rowH, base.Width, ui.S(44));
+        ui.Text(label, RectF(t.X, t.Y, t.Width * 0.7f, t.Height), c.text, 12.5f);
+        bool val = v;
+        if (ui.Toggle(id, RectF(t.X + t.Width - ui.S(42), t.Y + ui.S(7), ui.S(42), ui.S(30)), val)) {
+            Change();
+            v = val;
+            Save();
+        }
+    };
+    toggle(mb, 0, L"Панель у нижнего края", ID_MEDIA, cfg.media);
+    toggle(mb, 1, L"Показывать трек при смене", ID_MEDIA_TOAST, cfg.mediaToast);
+    ui.Text(
+        L"Доведи курсор до нижнего края экрана (не в угол): снизу выедет карточка с треком из любого плеера. "
+        L"Колесо над ней - громкость плеера, кнопка со строками - текст песни (lrclib.net), клик по строке "
+        L"перематывает. Если играют сразу несколько программ, сверху появится переключатель.",
+        RectF(mb.X, mb.Y + 2 * rowH, mb.Width, ui.S(60)), c.muted, 11.5f, false, ui::Left, true);
+    y += mc.Height + ui.S(16);
+
+    // окна: прозрачность и «поверх всех»
+    RectF wc(x, y, w, ui.S(52) + rowH + ui.S(118));
+    Card(wc);
+    ui.Text(L"Окна", RectF(wc.X + ui.S(18), wc.Y + ui.S(14), w, ui.S(24)), c.text, 14, true);
+    RectF wb(wc.X + ui.S(18), wc.Y + ui.S(48), w - ui.S(36) - ui.S(150), rowH);
+    toggle(wb, 0, L"Прозрачность и «поверх всех»", ID_WINFX, cfg.winFx);
+    // шпаргалка: клавиши слева, что делают - справа; рядом маленькое окно с рамкой цвета темы
+    struct Hint {
+        std::vector<std::wstring> keys;
+        const wchar_t* text;
+    } hints[] = {{{L"Alt", L"+", L"колесо"}, L"над верхней полосой окна - прозрачность, от 20% до 100%"},
+                 {{L"Alt", L"+", L"средняя кнопка"}, L"там же - закрепить поверх всех, окно получит рамку цвета темы"}};
+    float hy = wc.Y + ui.S(48) + rowH + ui.S(6);
+    for (auto& h : hints) {
+        float kx = wc.X + ui.S(18);
+        for (const auto& k2 : h.keys) {
+            if (k2 == L"+") {
+                ui.Text(k2, RectF(kx, hy, ui.S(16), ui.S(32)), c.faint, 13, true, ui::Center);
+                kx += ui.S(18);
+                continue;
+            }
+            float kw = ui.KeycapWidth(k2);
+            ui.Keycap(RectF(kx, hy, kw, ui.S(32)), k2);
+            kx += kw + ui.S(6);
+        }
+        ui.Text(h.text, RectF(wc.X + ui.S(250), hy, w - ui.S(400), ui.S(32)), c.muted, 11.5f);
+        hy += ui.S(42);
+    }
+    // набросок закреплённого окна
+    RectF win(wc.X + w - ui.S(130), wc.Y + ui.S(70), ui.S(104), ui.S(70));
+    ui.Fill(win, c.field, ui.S(8));
+    ui.Fill(RectF(win.X, win.Y, win.Width, ui.S(14)), c.cardHi, ui.S(8));
+    ui.Stroke(win, c.accent, ui.S(8), ui.S(2));
+    ui.Fill(RectF(win.X + ui.S(10), win.Y + ui.S(24), ui.S(60), ui.S(5)), c.border, ui.S(2.5f));
+    ui.Fill(RectF(win.X + ui.S(10), win.Y + ui.S(36), ui.S(80), ui.S(5)), c.border, ui.S(2.5f));
+    ui.Fill(RectF(win.X + ui.S(10), win.Y + ui.S(48), ui.S(44), ui.S(5)), c.border, ui.S(2.5f));
+    ui.Fill(RectF(win.X + win.Width - ui.S(14), win.Y - ui.S(6), ui.S(16), ui.S(16)), c.accent, ui.S(8));
+    y += wc.Height + ui.S(10);
+
+    pageContentH_ = y - y0;
+    ui.G().Restore(st);
+}
+
+void Studio::CornerMenu(int i, int kind) {
+    int n = 0;
+    const corners::Action* acts = kind == 2 ? corners::WheelActions(n) : corners::Actions(n);
+    std::wstring& slot = kind == 0 ? cfg.corners[i] : kind == 1 ? cfg.corners2[i] : cfg.cornerWheel[i];
+    std::wstring cur = slot;
+    bool custom = !cur.empty();
+    HMENU m = CreatePopupMenu();
+    for (int a = 0; a < n; ++a) {
+        bool chk = cur == acts[a].key;
+        if (chk) custom = false;
+        AppendMenuW(m, MF_STRING | (chk ? MF_CHECKED : 0), 1 + a, acts[a].name);
+        if (a == 0) AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    }
+    if (kind != 2) {
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+        if (custom) AppendMenuW(m, MF_STRING | MF_CHECKED | MF_DISABLED, 999, corners::ActionName(cur).c_str());
+        AppendMenuW(m, MF_STRING, 1001, L"Сочетание клавиш...");
+        AppendMenuW(m, MF_STRING, 1000, L"Программа или файл...");
+    }
+    POINT p;
+    GetCursorPos(&p);
+    int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, p.x, p.y, 0, wnd, nullptr);
+    DestroyMenu(m);
+    std::wstring val;
+    if (cmd >= 1 && cmd <= n) {
+        val = acts[cmd - 1].key;
+    } else if (cmd == 1000) {
+        val = PickPath(false);
+        if (val.empty()) return;
+    } else if (cmd == 1001) {
+        captureCorner_ = i;  // следующее сочетание в окне студии запишется в этот угол
+        captureKind_ = kind;
+        SetFocus(wnd);
+        ui.Invalidate();
+        return;
+    } else {
+        return;
+    }
+    SetCorner(i, kind, val);
+}
+
+void Studio::SetCorner(int i, int kind, const std::wstring& val) {
+    std::wstring& slot = kind == 0 ? cfg.corners[i] : kind == 1 ? cfg.corners2[i] : cfg.cornerWheel[i];
+    if (val == slot) return;
+    static const wchar_t* names[4] = {L"левый верхний", L"правый верхний", L"левый нижний", L"правый нижний"};
+    static const wchar_t* kinds[3] = {L"", L", дважды", L", колесо"};
+    Change();
+    slot = val;
+    Log(std::wstring(L"Угол ") + names[i] + kinds[kind] + L": " + corners::ActionName(val));
+    Save();
+}
+
+// Запись сочетания для угла: модификаторы копятся, первая обычная клавиша завершает запись.
+bool Studio::CaptureKey(WPARAM vk) {
+    if (captureCorner_ < 0) return false;
+    if (vk == VK_CONTROL || vk == VK_SHIFT || vk == VK_MENU || vk == VK_LWIN || vk == VK_RWIN) return true;
+    bool ctrl = GetKeyState(VK_CONTROL) & 0x8000, shift = GetKeyState(VK_SHIFT) & 0x8000,
+         alt = GetKeyState(VK_MENU) & 0x8000, win = (GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000;
+    int i = captureCorner_, kind = captureKind_;
+    captureCorner_ = -1;
+    InvalidateRect(wnd, nullptr, FALSE);
+    if (vk == VK_ESCAPE && !ctrl && !shift && !alt && !win) return true;  // отмена
+    std::wstring v = L"keys:";
+    if (ctrl) v += L"ctrl+";
+    if (shift) v += L"shift+";
+    if (alt) v += L"alt+";
+    if (win) v += L"win+";
+    v += corners::KeyName((UINT)vk);
+    SetCorner(i, kind, v);
+    return true;
+}
+
+void Studio::KeysPage(const RectF& r) {
+    const UiColors& c = ui.C();
+    RectF in = Inset(r, ui.S(28), ui.S(20));
+    Header(in, L"Клавиши", L"Всё, что умеет меню, на одной странице.");
+    ui.Icon(ExeDir() + L"\\icons\\mascot-read.webp",
+            RectF(in.X + in.Width - ui.S(84), in.Y - ui.S(6), ui.S(80), ui.S(80)));
+    RectF view(in.X - ui.S(4), in.Y + ui.S(76), in.Width + ui.S(8), in.Height - ui.S(76));
+    float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
+    GraphicsState st = ui.G().Save();
+    ui.G().SetClip(view);
+    struct K {
+        std::vector<std::wstring> keys;
+        const wchar_t* title;
+        const wchar_t* text;
+    } list[] = {
+        {{L"Alt", L"+", L"край экрана"}, L"Открыть кольцо", L"левый и правый край, у каждого свой набор"},
+        {{L"Alt"}, L"Отпустить над сектором", L"открывает его; можно и просто кликнуть"},
+        {{L"Shift", L"+", L"клик"}, L"Открыть в VS Code", L"папку или файл"},
+        {{L"Ctrl", L"+", L"клик"}, L"Терминал в папке", L"Windows Terminal, PowerShell или cmd"},
+        {{L"Ctrl", L"+", L"Shift", L"+", L"клик"}, L"Показать в Проводнике", L"с выделенным файлом"},
+        {{L"ПКМ"}, L"Зайти в папку", L"сверху появится путь, ПКМ мимо - назад"},
+        {{L"Колесо"}, L"Листать страницы", L"когда пунктов больше, чем влезает"},
+        {{L"абв"}, L"Поиск", L"просто печатай, раскладка не важна"},
+        {{L"Enter"}, L"Открыть найденное", L"стрелки выбирают из результатов"},
+        {{L"Esc"}, L"Назад или закрыть", L"сначала очищает поиск"},
+        {{L"файл", L"→", L"сектор"}, L"Перенести файл", L"на папку - перенос, на программу - открыть в ней"},
+    };
+    float x = view.X + ui.S(4), w = view.Width - ui.S(8), y0 = view.Y - off;
+    float gap = ui.S(14);
+    int cols = w > ui.S(760) ? 2 : 1;
+    float cw = (w - gap * (cols - 1)) / cols, ch = ui.S(104);
+    int n = (int)(sizeof(list) / sizeof(list[0]));
+    for (int i = 0; i < n; ++i) {
+        RectF cr(x + (i % cols) * (cw + gap), y0 + (i / cols) * (ch + gap), cw, ch);
+        Card(cr);
+        float kx = cr.X + ui.S(16), ky = cr.Y + ui.S(16);
+        for (const auto& k2 : list[i].keys) {
+            if (k2 == L"+" || k2 == L"→") {
+                ui.Text(k2, RectF(kx, ky, ui.S(18), ui.S(34)), c.faint, 14, true, ui::Center);
+                kx += ui.S(20);
+                continue;
+            }
+            float kw = ui.KeycapWidth(k2);
+            ui.Keycap(RectF(kx, ky, kw, ui.S(36)), k2);
+            kx += kw + ui.S(6);
+        }
+        ui.Text(list[i].title, RectF(cr.X + ui.S(16), cr.Y + ui.S(58), cr.Width - ui.S(32), ui.S(22)), c.text, 13.5f,
+                true);
+        ui.Text(list[i].text, RectF(cr.X + ui.S(16), cr.Y + ui.S(78), cr.Width - ui.S(32), ui.S(20)), c.muted, 11.5f);
+    }
+    pageContentH_ = ((n + cols - 1) / cols) * (ch + gap);
+    ui.G().Restore(st);
+}
+
+}  // namespace studio

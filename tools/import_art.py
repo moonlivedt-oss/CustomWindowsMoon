@@ -1,0 +1,199 @@
+"""Режет сгенерированные листы из art/ на значки и кладёт их в icons/.
+
+Запуск: python tools/import_art.py
+Значки на листе ищутся по прозрачным промежуткам между ними (порядок: по строкам, слева направо),
+поэтому неровная сетка не мешает. Если у картинки нет прозрачности, ровный зелёный фон вырезается.
+"""
+
+from pathlib import Path
+
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parent.parent
+ART = ROOT / "art"
+OUT = ROOT / "icons"
+SIZE = 256
+
+SHEETS = {
+    "sheet-root.png": ["projects", "code", "study", "career", "music", "apps"],
+    "sheet-sub.png": [
+        "cpp",
+        "java",
+        "web",
+        "game",
+        "db",
+        "table",
+        "files",
+        "contests",
+        "portfolio",
+        "folder",
+    ],
+    "sheet-extra.png": [
+        "downloads",
+        "desktop",
+        "recycle",
+        "search",
+        "back",
+        "terminal",
+        "editor",
+        "more",
+    ],
+    # разделы Radial Studio; пока листа нет, студия берёт прежние значки
+    "sheet-studio.png": [
+        "rail-rings",
+        "rail-themes",
+        "rail-behavior",
+        "rail-desk",
+        "rail-system",
+        "rail-keys",
+        "rail-tour",
+    ],
+}
+SINGLES = {"app.png": "app", "hub.png": "hub"}
+
+
+def find(name: str) -> Path | None:
+    stem = Path(name).stem
+    for ext in (".png", ".webp", ".jpg", ".jpeg"):
+        p = ART / (stem + ext)
+        if p.exists():
+            return p
+    return None
+
+
+def key_green(im: Image.Image) -> Image.Image:
+    """Зелёный хромакей с подавлением зелёной каймы (только для картинок без прозрачности)."""
+    im = im.convert("RGBA")
+    if im.getextrema()[3][0] < 250:  # уже есть прозрачность
+        return im
+    px = im.load()
+    w, h = im.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            dom = g - max(r, b)
+            if dom > 90:
+                px[x, y] = (0, 0, 0, 0)
+                continue
+            if dom > 25:
+                a = int(a * (1 - (dom - 25) / 65))
+            px[x, y] = (r, min(g, max(r, b) + 8), b, a)
+    return im
+
+
+def blobs(im: Image.Image, want: int) -> list[tuple[int, int, int, int]]:
+    """Рамки отдельных значков: связные области непрозрачных пикселей на уменьшенной маске."""
+    scale = 4
+    small = im.getchannel("A").resize((im.width // scale, im.height // scale))
+    w, h = small.size
+    mask = [[v > 40 for v in row] for row in _rows(small)]
+    seen = [[False] * w for _ in range(h)]
+    boxes = []
+    for y in range(h):
+        for x in range(w):
+            if not mask[y][x] or seen[y][x]:
+                continue
+            stack = [(x, y)]
+            seen[y][x] = True
+            x0 = x1 = x
+            y0 = y1 = y
+            n = 0
+            while stack:
+                cx, cy = stack.pop()
+                n += 1
+                x0, x1, y0, y1 = min(x0, cx), max(x1, cx), min(y0, cy), max(y1, cy)
+                for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                    if (
+                        0 <= nx < w
+                        and 0 <= ny < h
+                        and mask[ny][nx]
+                        and not seen[ny][nx]
+                    ):
+                        seen[ny][nx] = True
+                        stack.append((nx, ny))
+            boxes.append(
+                (n, (x0 * scale, y0 * scale, (x1 + 1) * scale, (y1 + 1) * scale))
+            )
+    # крупнейшие области - значки; мелкие (искры, ноты отдельно от предмета) приклеиваем к ближайшему
+    boxes.sort(key=lambda b: -b[0])
+    main = [list(b[1]) for b in boxes[:want]]
+    for _, (a0, b0, a1, b1) in boxes[want:]:
+        cx, cy = (a0 + a1) / 2, (b0 + b1) / 2
+        best = min(
+            main,
+            key=lambda m: ((m[0] + m[2]) / 2 - cx) ** 2 + ((m[1] + m[3]) / 2 - cy) ** 2,
+        )
+        best[0], best[1], best[2], best[3] = (
+            min(best[0], a0),
+            min(best[1], b0),
+            max(best[2], a1),
+            max(best[3], b1),
+        )
+    # порядок чтения: строки по высоте центра, внутри строки слева направо
+    main.sort(key=lambda m: (m[1] + m[3]) / 2)
+    rows, row = [], []
+    for m in main:
+        if row and (m[1] + m[3]) / 2 > max((r[3] for r in row)):
+            rows.append(row)
+            row = []
+        row.append(m)
+    rows.append(row)
+    return [tuple(m) for r in rows for m in sorted(r, key=lambda m: m[0])]
+
+
+def _rows(img: Image.Image):
+    w = img.width
+    data = img.tobytes()  # маска в режиме L: один байт на пиксель
+    for i in range(0, len(data), w):
+        yield data[i : i + w]
+
+
+def fit(im: Image.Image) -> Image.Image:
+    box = im.getchannel("A").point(lambda v: 255 if v > 12 else 0).getbbox()
+    if box:
+        im = im.crop(box)
+    pad = int(SIZE * 0.03)
+    im.thumbnail((SIZE - 2 * pad, SIZE - 2 * pad), Image.LANCZOS)
+    canvas = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    canvas.paste(im, ((SIZE - im.width) // 2, (SIZE - im.height) // 2), im)
+    return canvas
+
+
+def save(im: Image.Image, name: str) -> None:
+    fit(im).save(OUT / f"{name}.png")
+    print("ok", name)
+
+
+def main() -> None:
+    OUT.mkdir(exist_ok=True)
+    for sheet, names in SHEETS.items():
+        p = find(sheet)
+        if not p:
+            print("нет", sheet)
+            continue
+        im = key_green(Image.open(p))
+        found = blobs(im, len(names))
+        if len(found) != len(names):
+            print(
+                f"{sheet}: нашлось {len(found)} значков вместо {len(names)}, пропускаю"
+            )
+            continue
+        for name, box in zip(names, found):
+            save(im.crop(box), name)
+    for single, name in SINGLES.items():
+        p = find(single)
+        if not p:
+            print("нет", single)
+            continue
+        im = key_green(Image.open(p))
+        save(im, name)
+        if name == "app":
+            fit(im).save(
+                ROOT / "src" / "app.ico",
+                sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)],
+            )
+            print("ok app.ico (пересобери build.cmd)")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,766 @@
+// Radial Menu: Alt + курсор к левому или правому краю экрана открывает кольцо папок.
+#include <windows.h>
+#include <shellapi.h>
+#include <shellscalingapi.h>
+#include <wtsapi32.h>
+#include <objidl.h>
+#include <gdiplus.h>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+
+#include "app/autostart.h"
+#include "core/config.h"
+#include "core/filedlg.h"
+#include "core/fx.h"
+#include "core/themes.h"
+#include "desk/startbg.h"
+#include "desk/whreg.h"
+#include "core/night.h"
+#include "core/perf.h"
+#include "desk/battery.h"
+#include "desk/boost.h"
+#include "desk/boostcard.h"
+#include "desk/corners.h"
+#include "desk/cursor.h"
+#include "desk/deskclick.h"
+#include "desk/frame.h"
+#include "desk/gamemode.h"
+#include "desk/hexwave.h"
+#include "desk/lockscreen.h"
+#include "desk/ocr.h"
+#include "core/text.h"
+#include "desk/snip.h"
+#include "desk/widget.h"
+#include "desk/winfx.h"
+#include "gfx/accent.h"
+#include "gfx/sound.h"
+#include "menu/menu.h"
+#include "studio/studio.h"
+
+namespace {
+
+constexpr wchar_t kClass[] = L"MoonRadialMenuApp";
+constexpr UINT WM_TRAY = WM_APP + 1;
+constexpr UINT_PTR kPollTimer = 1, kWarmTimer = 2, kIntroTimer = 3;
+constexpr UINT kTrayId = 1;
+constexpr int kHotWindows = 1;  // Alt + ` - кольцо окон
+enum Cmd { CMD_EDITOR = 100, CMD_EDIT, CMD_FOLDER, CMD_RELOAD, CMD_AUTOSTART, CMD_RESET_WINDOWS, CMD_GAME, CMD_BOOST, CMD_EXIT };
+constexpr UINT WM_BOOST_DONE = WM_APP + 60;  // поток Boost закончил: lParam - boost::Result*
+
+HINSTANCE g_inst;
+HWND g_wnd;
+UINT g_taskbarCreated;
+RadialMenu g_menu;
+corners::HotCorners g_corners;
+MediaWidget g_media;
+WindowFx g_winfx;
+DeskClick g_deskClick;
+BatteryGlow g_battery;
+SnipCard g_snip;
+GameMode g_game;
+WindowFrame g_frame;
+lockscreen::Reveal g_reveal;
+HexWave g_wave;
+BoostCard g_boostCard;
+std::vector<boost::Group> g_boostGroups;  // что предложили закрыть
+std::vector<std::wstring> g_boostClosed;  // что закрыли - вернуть после игры
+bool g_boostBusy = false;
+HPOWERNOTIFY g_displayNotify = nullptr;
+int g_cfgCheck = 0;
+Config g_cfg;
+std::wstring g_cfgPath;
+FILETIME g_cfgTime{};
+bool g_armed = true;
+
+FILETIME FileTime(const std::wstring& p) {
+    WIN32_FILE_ATTRIBUTE_DATA d{};
+    GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &d);
+    return d.ftLastWriteTime;
+}
+
+void ApplyAccent() {
+    COLORREF c;
+    g_cfg.accent = g_cfg.accentAuto && WallpaperAccent(c) ? c : g_cfg.accentManual;
+}
+
+void Reload() {
+    if (g_menu.IsOpen()) return;  // меню держит указатели на старые пункты
+    Config c;
+    if (LoadConfig(g_cfgPath, c)) g_cfg = std::move(c);
+    g_cfgTime = FileTime(g_cfgPath);
+    ApplyAccent();
+    night::Set(night::Due(g_cfg));
+    fx::SetMotion(g_cfg.motion);
+    Sound::Init(night::On() ? g_cfg.volume / 2 : g_cfg.volume);  // ночью звуки вдвое тише
+    g_media.Apply(g_cfg);
+    g_winfx.Apply(g_cfg);
+    g_snip.Apply(g_cfg);
+    g_deskClick.enabled = g_cfg.deskDouble;
+    cursor::Apply(g_cfg);
+    g_menu.ResetIcons();
+    if (g_wnd) {
+        g_frame.Apply(g_cfg);
+        g_reveal.Apply(g_cfg);
+        UnregisterHotKey(g_wnd, kHotWindows);
+        if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
+    }
+    if (g_wnd) SetTimer(g_wnd, kWarmTimer, 500, nullptr);  // прогреть новые значки
+}
+
+UINT MonitorDpi(HMONITOR m) {
+    UINT x = 96, y = 96;
+    if (FAILED(GetDpiForMonitor(m, MDT_EFFECTIVE_DPI, &x, &y))) x = 96;
+    return x;
+}
+
+bool IsDesktopForeground() {
+    HWND fg = GetForegroundWindow();
+    if (!fg) return true;
+    wchar_t cls[64];
+    GetClassNameW(fg, cls, 64);
+    return !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW");
+}
+
+// Полноэкранное окно (игра, видео) - меню не мешает.
+bool IsFullscreenForeground(HMONITOR mon, const RECT& mr) { return corners::FullscreenOn(mon, mr); }
+
+// Пустое нажатие, чтобы отпущенный Alt не открыл меню окна под курсором.
+void MaskAlt() {
+    INPUT in[2]{};
+    in[0].type = in[1].type = INPUT_KEYBOARD;
+    in[0].ki.wVk = in[1].ki.wVk = 0xE8;  // не назначенная клавиша
+    in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, in, sizeof(INPUT));
+}
+
+void Poll() {
+    bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
+    // radial.cfg мог поменяться не через студию: раз в секунду проверяем, чтобы углы и плашка подхватили правку
+    if (++g_cfgCheck >= 50 && !g_menu.IsOpen()) {
+        g_cfgCheck = 0;
+        FILETIME ft = FileTime(g_cfgPath);
+        if (CompareFileTime(&g_cfgTime, &ft) != 0) Reload();
+        // ночной режим включается и выключается по часам
+        if (night::Due(g_cfg) != night::On()) {
+            night::Set(!night::On());
+            Sound::Init(night::On() ? g_cfg.volume / 2 : g_cfg.volume);
+        }
+    }
+    g_corners.Tick(g_cfg, alt || g_menu.IsOpen());
+    g_game.Tick(g_cfg);
+    g_media.Tick(g_cfg, alt || g_menu.IsOpen() || fx::Game());
+    g_winfx.Tick();
+    g_battery.Tick(g_cfg);
+    g_snip.Tick();
+    g_boostCard.Tick();
+    if (!alt) {
+        g_armed = true;
+        return;
+    }
+    if (g_menu.IsOpen()) return;
+    // во время перетаскивания файла Shift и Ctrl выбирают перенос или копию, им не мешаем
+    bool dragging = GetAsyncKeyState(VK_LBUTTON) & 0x8000;
+    bool other = ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) ||
+                 (!dragging && ((GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_SHIFT)) & 0x8000));
+
+    POINT pt;
+    GetCursorPos(&pt);
+    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(mon, &mi);
+    const RECT& r = mi.rcMonitor;
+    // край считается только внешний: за ним не должно быть другого монитора
+    bool left = pt.x <= r.left && !MonitorFromPoint({pt.x - 1, pt.y}, MONITOR_DEFAULTTONULL);
+    bool right = pt.x >= r.right - 1 && !MonitorFromPoint({pt.x + 1, pt.y}, MONITOR_DEFAULTTONULL);
+    if (!left && !right) {
+        g_armed = true;
+        return;
+    }
+    if (!g_armed || other) return;
+    g_armed = false;
+
+    FILETIME ft = FileTime(g_cfgPath);
+    if (CompareFileTime(&g_cfgTime, &ft) != 0) Reload();
+    if (g_cfg.desktopOnly && !IsDesktopForeground()) return;
+    if (g_cfg.skipFullscreen && IsFullscreenForeground(mon, r)) return;
+
+    MaskAlt();
+    g_menu.Show(&g_cfg, pt, r, left, MonitorDpi(mon));
+}
+
+// Кольцо открытых окон вокруг курсора (Alt + ` или горячий угол).
+void ShowWindowsRing() {
+    if (g_menu.IsOpen()) return;
+    POINT pt;
+    GetCursorPos(&pt);
+    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(mon, &mi);
+    if (g_cfg.skipFullscreen && IsFullscreenForeground(mon, mi.rcMonitor)) return;
+    g_menu.ShowWindows(&g_cfg, pt, mi.rcWork, MonitorDpi(mon));
+}
+
+// «Показать меню» из студии: кольцо у края того монитора, где открыта студия.
+void ShowFromStudio(bool left, HWND studio) {
+    if (g_menu.IsOpen()) return;
+    Reload();
+    HMONITOR mon = MonitorFromWindow(studio, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(mon, &mi);
+    const RECT& r = mi.rcMonitor;
+    POINT pt{left ? r.left : r.right - 1, (r.top + r.bottom) / 2};
+    g_menu.Show(&g_cfg, pt, r, left, MonitorDpi(mon), true);
+}
+
+std::wstring TrayTip() {
+    return g_game.On() ? L"Radial Menu: игровой режим (" + g_game.Reason() + L")" : L"Radial Menu: Alt + край экрана";
+}
+
+void UpdateTrayTip() {
+    NOTIFYICONDATAW nid{sizeof(nid)};
+    nid.hWnd = g_wnd;
+    nid.uID = kTrayId;
+    nid.uFlags = NIF_TIP;
+    wcsncpy_s(nid.szTip, TrayTip().c_str(), _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+std::wstring BoostDir() { return boost::Dir(g_cfg.boostDir); }
+
+std::wstring Size(double mb) {
+    wchar_t b[32];
+    if (mb >= 1024)
+        swprintf(b, 32, L"%.1f ГБ", mb / 1024);
+    else
+        swprintf(b, 32, L"%d МБ", (int)mb);
+    return b;
+}
+
+// «Discord, Telegram, Edge WebView и ещё 3»
+std::wstring Names(const std::vector<std::wstring>& names) {
+    std::wstring s;
+    size_t shown = std::min<size_t>(names.size(), 3);
+    for (size_t i = 0; i < shown; ++i) s += (i ? L", " : L"") + names[i];
+    if (names.size() > shown) s += L" и ещё " + std::to_wstring(names.size() - shown);
+    return s;
+}
+
+DWORD WINAPI BoostThread(void* p) {
+    std::unique_ptr<std::vector<boost::Group>> groups((std::vector<boost::Group>*)p);
+    std::wstring dir = BoostDir();
+    auto* r = new boost::Result(boost::Free(boost::Load(dir), dir, *groups));
+    PostMessageW(g_wnd, WM_BOOST_DONE, 0, (LPARAM)r);
+    return 0;
+}
+
+void StartBoost() {
+    if (g_boostBusy || g_boostGroups.empty()) return;
+    g_boostBusy = true;
+    g_boostCard.Show(BoostCard::WORKING, L"Освобождаю память...",
+                     L"Программы закрываются мягко, как крестиком; кто не закрылся - через пару секунд добивается.",
+                     CurrentTheme(g_cfg));
+    auto* groups = new std::vector<boost::Group>(g_boostGroups);
+    if (HANDLE th = CreateThread(nullptr, 0, BoostThread, groups, 0, nullptr)) {
+        CloseHandle(th);
+    } else {
+        delete groups;
+        g_boostBusy = false;
+    }
+}
+
+// Карточка «освободить память»: при запуске игры (если памяти мало по minFreePercent и есть что закрыть)
+// или вручную из трея, угла, студии.
+void OfferBoost(bool manual) {
+    if (g_boostBusy) return;
+    boost::Settings s = boost::Load(BoostDir());
+    ThemeInfo t = CurrentTheme(g_cfg);
+    if (!s.ok) {
+        if (manual)
+            g_boostCard.Show(BoostCard::DONE, L"Boost не найден", L"Укажи папку Boost в студии: Красота - Память перед игрой.",
+                             t);
+        return;
+    }
+    int used = 0;
+    double avail = boost::AvailMb(&used);
+    if (!manual && s.minFreePercent > 0 && 100 - used >= s.minFreePercent) return;  // памяти и так хватает
+    g_boostGroups = boost::Scan(s);
+    double mb = boost::TotalMb(g_boostGroups);
+    if (g_boostGroups.empty() || (!manual && mb < 150)) {
+        if (manual) g_boostCard.Show(BoostCard::DONE, L"Закрывать нечего", L"Свободно " + Size(avail) + L".", t);
+        return;
+    }
+    std::vector<std::wstring> names;
+    for (const auto& g : g_boostGroups) names.push_back(g.title.empty() ? g.name : g.title);
+    g_boostCard.onYes = [] { StartBoost(); };
+    g_boostCard.Show(BoostCard::OFFER, L"Освободить ~" + Size(mb) + (manual ? L"" : L" перед игрой?"),
+                     Names(names) + L". Сейчас свободно " + Size(avail) + L".", t);
+}
+
+void BoostDone(boost::Result* r) {
+    g_boostBusy = false;
+    for (const auto& p : r->reopen)
+        if (std::find(g_boostClosed.begin(), g_boostClosed.end(), p) == g_boostClosed.end()) g_boostClosed.push_back(p);
+    g_boostCard.Show(BoostCard::DONE, L"Освобождено " + Size(r->freedMb),
+                     L"Закрыто программ: " + std::to_wstring(r->closed) + L". Свободно " + Size(boost::AvailMb()) +
+                         (g_cfg.boostRestore && !r->reopen.empty() ? L". После игры их можно будет вернуть." : L"."),
+                     CurrentTheme(g_cfg));
+    delete r;
+}
+
+// Игра закрылась: приоритеты и таймер назад, ещё одна очистка, предложить вернуть закрытое.
+void BoostAfterGame() {
+    boost::Settings s = boost::Load(BoostDir());
+    boost::GameTweaks(s, false);
+    if (g_cfg.boostAfter && s.purge) boost::RunPurge();
+    if (!g_cfg.boostRestore || g_boostClosed.empty()) return;
+    std::vector<std::wstring> names;
+    for (const auto& p : g_boostClosed) {
+        std::wstring n = p.substr(p.find_last_of(L'\\') + 1);
+        names.push_back(n.size() > 4 ? n.substr(0, n.size() - 4) : n);
+    }
+    g_boostCard.onYes = [] {
+        boost::Reopen(g_boostClosed);
+        boost::ClearSession(BoostDir());
+        g_boostClosed.clear();
+        g_boostCard.Show(BoostCard::DONE, L"Программы открываются", L"Они запускаются свёрнутыми.", CurrentTheme(g_cfg));
+    };
+    g_boostCard.Show(BoostCard::RESTORE, L"Вернуть закрытые программы?", Names(names), CurrentTheme(g_cfg));
+}
+
+// Игровой режим включился или выключился: эффекты, рамки окон и перехват мыши.
+void OnGameMode(bool on) {
+    fx::SetGame(on);
+    g_frame.Suspend(on);
+    g_corners.Hook(!on);
+    g_winfx.Hook(!on);
+    g_deskClick.Hook(!on);
+    UpdateTrayTip();
+    // Boost: во время игры таймер и приоритеты, при запуске - предложить освободить память
+    if (on) {
+        boost::GameTweaks(boost::Load(BoostDir()), true);
+        if (g_cfg.boostOffer) OfferBoost(false);
+    } else {
+        BoostAfterGame();
+    }
+    // волна сот по краям экрана - видно, что режим переключился
+    if (g_cfg.hexGlass)
+        g_wave.Play(on, on ? L"Игровой режим: " + g_game.Reason() : L"Игровой режим выключен", CurrentTheme(g_cfg));
+}
+
+// Программу запустили вместе со входом в Windows: Проводник стартовал меньше полутора минут назад.
+bool JustLoggedOn() {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetShellWindow(), &pid);
+    HANDLE p = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
+    if (!p) return false;
+    FILETIME created, a, b, c, now;
+    bool ok = GetProcessTimes(p, &created, &a, &b, &c);
+    CloseHandle(p);
+    GetSystemTimeAsFileTime(&now);
+    ULONGLONG t0 = (ULONGLONG)created.dwHighDateTime << 32 | created.dwLowDateTime,
+              t1 = (ULONGLONG)now.dwHighDateTime << 32 | now.dwLowDateTime;
+    return ok && t1 > t0 && (t1 - t0) / 10000 < 90000;
+}
+
+void AddTray() {
+    NOTIFYICONDATAW nid{sizeof(nid)};
+    nid.hWnd = g_wnd;
+    nid.uID = kTrayId;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    nid.uCallbackMessage = WM_TRAY;
+    nid.hIcon = (HICON)LoadImageW(g_inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                  GetSystemMetrics(SM_CYSMICON), 0);
+    wcsncpy_s(nid.szTip, TrayTip().c_str(), _TRUNCATE);
+    Shell_NotifyIconW(NIM_ADD, &nid);
+}
+
+void RemoveTray() {
+    NOTIFYICONDATAW nid{sizeof(nid)};
+    nid.hWnd = g_wnd;
+    nid.uID = kTrayId;
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+}
+
+void TrayMenu() {
+    HMENU m = CreatePopupMenu();
+    AppendMenuW(m, MF_STRING | MF_DEFAULT, CMD_EDITOR, L"Редактор колец");
+    AppendMenuW(m, MF_STRING, CMD_EDIT, L"Открыть radial.cfg");
+    AppendMenuW(m, MF_STRING, CMD_FOLDER, L"Папка программы");
+    AppendMenuW(m, MF_STRING, CMD_RELOAD, L"Перечитать настройки");
+    AppendMenuW(m, MF_STRING, CMD_RESET_WINDOWS, L"Вернуть окнам прозрачность и закрепление");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    std::wstring game = L"Игровой режим";
+    if (g_game.On() && !g_game.Manual()) game += L": " + g_game.Reason();
+    AppendMenuW(m, MF_STRING | (g_game.On() ? MF_CHECKED : 0), CMD_GAME, game.c_str());
+    AppendMenuW(m, MF_STRING, CMD_BOOST, L"Освободить память...");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_STRING | (AutostartOn() ? MF_CHECKED : 0), CMD_AUTOSTART, L"Запускать вместе с Windows");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_STRING, CMD_EXIT, L"Выход");
+    POINT p;
+    GetCursorPos(&p);
+    SetForegroundWindow(g_wnd);
+    TrackPopupMenu(m, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, p.x, p.y, 0, g_wnd, nullptr);
+    PostMessageW(g_wnd, WM_NULL, 0, 0);
+    DestroyMenu(m);
+}
+
+LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_TIMER:
+            if (wp == kPollTimer) Poll();
+            if (wp == kIntroTimer) {
+                KillTimer(h, kIntroTimer);
+                g_reveal.Intro();
+            }
+            if (wp == kWarmTimer) {
+                // значки грузятся порциями по 8 мс раз в 30 мс: программа не замирает
+                POINT o{0, 0};
+                if (g_menu.IsOpen()) return 0;
+                if (g_menu.Prewarm(&g_cfg, MonitorDpi(MonitorFromPoint(o, MONITOR_DEFAULTTOPRIMARY)))) {
+                    KillTimer(h, kWarmTimer);
+                    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+                } else {
+                    SetTimer(h, kWarmTimer, 30, nullptr);
+                }
+            }
+            return 0;
+        case WM_HOTKEY:
+            if (wp == kHotWindows) ShowWindowsRing();
+            return 0;
+        case WM_TRAY:
+            if (LOWORD(lp) == WM_RBUTTONUP) TrayMenu();
+            if (LOWORD(lp) == WM_LBUTTONDBLCLK) PostMessageW(h, WM_COMMAND, CMD_EDITOR, 0);
+            return 0;
+        case WM_COMMAND:
+            switch (LOWORD(wp)) {
+                case CMD_EDITOR:
+                    OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
+                    break;
+                case CMD_EDIT:
+                    ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + g_cfgPath + L"\"").c_str(), nullptr,
+                                  SW_SHOWNORMAL);
+                    break;
+                case CMD_FOLDER:
+                    ShellExecuteW(nullptr, nullptr, ExeDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    break;
+                case CMD_RELOAD:
+                    Reload();
+                    break;
+                case CMD_RESET_WINDOWS:
+                    g_winfx.ResetAll();
+                    break;
+                case CMD_BOOST:
+                    OfferBoost(true);
+                    break;
+                case CMD_GAME:
+                    g_game.SetManual(!g_game.On(), g_cfg);  // выключили посреди игры - до её выхода
+                    break;
+                case CMD_AUTOSTART:
+                    SetAutostart(!AutostartOn());
+                    break;
+                case CMD_EXIT:
+                    DestroyWindow(h);
+                    break;
+            }
+            return 0;
+        case WM_SETTINGCHANGE:
+            if (wp == SPI_SETDESKWALLPAPER && g_cfg.accentAuto) ApplyAccent();
+            return 0;
+        case WM_BOOST_DONE:
+            BoostDone(reinterpret_cast<boost::Result*>(lp));
+            return 0;
+        case WM_WTSSESSION_CHANGE:
+            g_reveal.OnSession(wp);
+            return 0;
+        case WM_APP + 50:  // для проверки: выполнить действие угла «выключить экран»
+            corners::Run(L"screen_off");
+            return 0;
+        case WM_APP + 51:  // для проверки: портал, как при входе после включения
+            g_reveal.Intro();
+            return 0;
+        case WM_POWERBROADCAST:
+            if (wp == PBT_POWERSETTINGCHANGE) {
+                auto* s = reinterpret_cast<POWERBROADCAST_SETTING*>(lp);
+                if (s && IsEqualGUID(s->PowerSetting, GUID_CONSOLE_DISPLAY_STATE) && s->DataLength >= 4)
+                    g_reveal.OnDisplay(*reinterpret_cast<DWORD*>(s->Data) == 1);
+            } else {
+                g_reveal.OnPower(wp);
+            }
+            return TRUE;
+        case WM_DESTROY:
+            WTSUnRegisterSessionNotification(h);
+            if (g_displayNotify) UnregisterPowerSettingNotification(g_displayNotify);
+            g_wave.Destroy();
+            g_boostCard.Destroy();
+            boost::GameTweaks(boost::Load(BoostDir()), false);
+            g_frame.Destroy();
+            g_game.Shutdown();
+            g_reveal.Destroy();
+            g_media.Destroy();
+            g_corners.Destroy();
+            g_winfx.Destroy();
+            g_deskClick.Destroy();
+            g_snip.Destroy();
+            cursor::Restore();
+            RemoveTray();
+            PostQuitMessage(0);
+            return 0;
+    }
+    if (msg == g_taskbarCreated) {
+        AddTray();
+        return 0;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+}  // namespace
+
+int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
+    // для разработки: RadialMenu.exe --ocr картинка.png - распознать текст в ocr_out.txt рядом с exe и выйти
+    if (const wchar_t* o = wcsstr(GetCommandLineW(), L"--ocr ")) {
+        std::wstring path = o + 6;
+        if (!path.empty() && path.front() == L'"') path = path.substr(1, path.find(L'"', 1) - 1);
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        std::vector<uint8_t> png;
+        HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (f != INVALID_HANDLE_VALUE) {
+            png.resize(GetFileSize(f, nullptr));
+            DWORD got = 0;
+            ReadFile(f, png.data(), (DWORD)png.size(), &got, nullptr);
+            CloseHandle(f);
+        }
+        std::wstring err, text = ocr::Recognize(png, &err);
+        std::string out = Narrow(L"error=[" + err + L"]\r\n" + text);
+        HANDLE w =
+            CreateFileW((ExeDir() + L"\\ocr_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        DWORD put = 0;
+        if (w != INVALID_HANDLE_VALUE) {
+            WriteFile(w, out.data(), (DWORD)out.size(), &put, nullptr);
+            CloseHandle(w);
+        }
+        return 0;
+    }
+    // для разработки: RadialMenu.exe --dlg путь - перевести открытый диалог «Открыть/Сохранить» в путь и выйти
+    if (const wchar_t* o = wcsstr(GetCommandLineW(), L"--dlg ")) {
+        std::wstring path = o + 6;
+        if (!path.empty() && path.front() == L'"') path = path.substr(1, path.find(L'"', 1) - 1);
+        HWND dlg = nullptr;
+        EnumWindows(
+            [](HWND h, LPARAM lp) -> BOOL {
+                if (!IsWindowVisible(h) || !filedlg::Is(h)) return TRUE;
+                *reinterpret_cast<HWND*>(lp) = h;
+                return FALSE;
+            },
+            (LPARAM)&dlg);
+        if (!dlg || !filedlg::Go(dlg, path, (GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_DIRECTORY) != 0))
+            return 1;
+        ULONGLONG until = GetTickCount64() + 1500;  // таймер возврата имени
+        MSG m;
+        while (GetTickCount64() < until) {
+            while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+            Sleep(10);
+        }
+        return 0;
+    }
+    // для разработки: RadialMenu.exe --explorer-reg / --notify-reg / --settings-reg / --search-reg / --all-reg -
+    // собрать .reg по текущей теме в %APPDATA%\MoonDesk (не применяя)
+    if (std::wstring cmd = GetCommandLineW(); cmd.find(L" --") != std::wstring::npos && cmd.find(L"-reg") != std::wstring::npos) {
+        Config c;
+        LoadConfig(ExeDir() + L"\\radial.cfg", c);
+        ThemeInfo t = CurrentTheme(c);
+        std::wstring out;
+        if (cmd.find(L"--explorer-reg") != std::wstring::npos) out = whreg::ExplorerReg(t.bg, t.ac);
+        if (cmd.find(L"--notify-reg") != std::wstring::npos) out = whreg::NotificationReg(t.bg, t.ac);
+        if (cmd.find(L"--settings-reg") != std::wstring::npos) out = whreg::SettingsReg(t.bg, t.panel, t.ac);
+        if (cmd.find(L"--search-reg") != std::wstring::npos) out = whreg::SearchReg(t.bg, t.ac);
+        if (cmd.find(L"--all-reg") != std::wstring::npos) out = whreg::AllReg(t.bg, t.panel, t.ac, nullptr);
+        return out.empty() ? 1 : 0;
+    }
+    // для разработки: RadialMenu.exe --start-apply - оформить Пуск Start11 по текущей теме (как кнопка студии)
+    if (wcsstr(GetCommandLineW(), L"--start-apply")) {
+        Gdiplus::GdiplusStartupInput in;
+        ULONG_PTR tok;
+        Gdiplus::GdiplusStartup(&tok, &in, nullptr);
+        Config c;
+        LoadConfig(ExeDir() + L"\\radial.cfg", c);
+        std::wstring msg;
+        bool ok = startbg::Apply(CurrentTheme(c), msg);
+        Gdiplus::GdiplusShutdown(tok);
+        return ok ? 0 : 1;
+    }
+    // RadialMenu.exe --purge - очистка памяти по boost.config.json; запускает задача планировщика с правами
+    if (wcsstr(GetCommandLineW(), L"--purge")) {
+        Config c;
+        LoadConfig(ExeDir() + L"\\radial.cfg", c);
+        return boost::PurgeMain(boost::Load(boost::Dir(c.boostDir)));
+    }
+    // для разработки: RadialMenu.exe --lock-apply - собрать экран блокировки по теме и поставить его,
+    // итог пишется в lock_out.txt рядом с exe
+    if (wcsstr(GetCommandLineW(), L"--lock-apply")) {
+        Gdiplus::GdiplusStartupInput in;
+        ULONG_PTR tok;
+        Gdiplus::GdiplusStartup(&tok, &in, nullptr);
+        Config c;
+        LoadConfig(ExeDir() + L"\\radial.cfg", c);
+        auto job = lockscreen::ApplyAsync(c, nullptr);
+        while (!job->done) Sleep(20);
+        std::string out = Narrow(job->message);
+        HANDLE w = CreateFileW((ExeDir() + L"\\lock_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
+                               nullptr);
+        DWORD put = 0;
+        if (w != INVALID_HANDLE_VALUE) {
+            WriteFile(w, out.data(), (DWORD)out.size(), &put, nullptr);
+            CloseHandle(w);
+        }
+        Gdiplus::GdiplusShutdown(tok);
+        return job->ok ? 0 : 1;
+    }
+    // для разработки: RadialMenu.exe --game-test - включить игровой режим на 3 секунды и выключить,
+    // состояние системы до, во время и после пишется в game_out.txt рядом с exe
+    if (wcsstr(GetCommandLineW(), L"--game-test")) {
+        Config c;
+        LoadConfig(ExeDir() + L"\\radial.cfg", c);
+        auto state = [] {
+            BOOL anim = TRUE;
+            SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &anim, 0);
+            DWORD tr = 1, sz = sizeof(tr);
+            RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                         L"EnableTransparency", RRF_RT_REG_DWORD, nullptr, &tr, &sz);
+            return L"anim=" + std::to_wstring(anim) + L" transparency=" + std::to_wstring(tr) + L"\r\n";
+        };
+        GameMode gm;
+        std::wstring log = L"before: " + state();
+        gm.SetManual(true, c);
+        log += L"during: " + state();
+        Sleep(3000);
+        gm.SetManual(false, c);
+        log += L"after: " + state();
+        std::string out = Narrow(log);
+        HANDLE w = CreateFileW((ExeDir() + L"\\game_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
+                               nullptr);
+        DWORD put = 0;
+        if (w != INVALID_HANDLE_VALUE) {
+            WriteFile(w, out.data(), (DWORD)out.size(), &put, nullptr);
+            CloseHandle(w);
+        }
+        return 0;
+    }
+    // для разработки: RadialMenu.exe --avatar - нарисовать аватар в %APPDATA%\MoonDesk\avatar.png
+    if (wcsstr(GetCommandLineW(), L"--avatar")) {
+        Gdiplus::GdiplusStartupInput in;
+        ULONG_PTR tok;
+        Gdiplus::GdiplusStartup(&tok, &in, nullptr);
+        Config c;
+        LoadConfig(ExeDir() + L"\\radial.cfg", c);
+        std::wstring out, msg;
+        bool ok = lockscreen::BuildAvatar(c, out, msg);
+        Gdiplus::GdiplusShutdown(tok);
+        return ok ? 0 : 1;
+    }
+    bool wantEditor = wcsstr(GetCommandLineW(), L"--editor") != nullptr;
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\MoonRadialMenu");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        // уже запущено: попросить работающую копию открыть редактор
+        if (HWND w = FindWindowW(kClass, nullptr); w && wantEditor) {
+            AllowSetForegroundWindow(ASFW_ANY);
+            PostMessageW(w, WM_COMMAND, CMD_EDITOR, 0);
+        }
+        return 0;
+    }
+
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    OleInitialize(nullptr);  // OLE нужен для перетаскивания файлов на меню
+    Gdiplus::GdiplusStartupInput gsi;
+    ULONG_PTR gdipToken;
+    Gdiplus::GdiplusStartup(&gdipToken, &gsi, nullptr);
+
+    g_inst = inst;
+    g_game.Recover();  // если прошлый запуск упал в игровом режиме - вернуть анимации, прозрачность, обои
+    g_cfgPath = ExeDir() + L"\\radial.cfg";
+    g_media.Create(inst);
+    g_media.onTurnOff = [] {
+        g_cfg.media = false;
+        SaveConfig(g_cfgPath, g_cfg);
+        g_cfgTime = FileTime(g_cfgPath);
+        g_media.Apply(g_cfg);
+    };
+    Reload();
+
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.lpfnWndProc = AppProc;
+    wc.hInstance = inst;
+    wc.lpszClassName = kClass;
+    RegisterClassExW(&wc);
+    g_wnd = CreateWindowExW(0, kClass, L"Radial Menu", 0, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
+    g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
+    corners::SetWindowsRing(ShowWindowsRing);
+
+    g_menu.Create(inst);
+    g_corners.Create(inst);
+    g_winfx.Create(inst);
+    g_winfx.Apply(g_cfg);
+    g_battery.Create(inst);
+    SetEditorPreview([](int what) {
+        if (what == PREVIEW_LOCK_REVEAL)
+            g_reveal.Demo();
+        else if (what == PREVIEW_BOOST)
+            OfferBoost(true);
+        else if (what == PREVIEW_GAME_WAVE)
+            g_wave.Play(true, L"Игровой режим: так это выглядит", CurrentTheme(g_cfg));
+        else
+            g_battery.Test(what == PREVIEW_BATTERY_CHARGE);
+    });
+    SetEditorGameStatus([] {
+        return g_game.On() ? L"включён (" + g_game.Reason() + L")" : std::wstring(L"выключен");
+    });
+    g_snip.Create(inst);
+    g_snip.Apply(g_cfg);
+    g_deskClick.Create(inst);
+    g_deskClick.enabled = g_cfg.deskDouble;
+    // двойной клик по пустому столу: целое кольцо вокруг курсора
+    g_deskClick.onDouble = [](POINT pt) {
+        if (g_menu.IsOpen()) return;
+        FILETIME ft = FileTime(g_cfgPath);
+        if (CompareFileTime(&g_cfgTime, &ft) != 0) Reload();
+        HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(mon, &mi);
+        g_menu.ShowAround(&g_cfg, pt, mi.rcWork, MonitorDpi(mon));
+    };
+    g_frame.skip = [](HWND w) { return g_winfx.Pinned(w); };
+    g_frame.Create(inst);
+    g_frame.Apply(g_cfg);
+    g_reveal.Create(inst, g_wnd);
+    g_reveal.Apply(g_cfg);
+    WTSRegisterSessionNotification(g_wnd, NOTIFY_FOR_THIS_SESSION);
+    corners::SetLock([] { g_reveal.LockWithCurtain(); });
+    corners::SetScreenOff([] { return g_reveal.ScreenOff(); });
+    g_displayNotify = RegisterPowerSettingNotification(g_wnd, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
+    g_wave.Create(inst);
+    g_boostCard.Create(inst);
+    corners::SetBoost([] { OfferBoost(true); });
+    // вошли в Windows только что: стол открывается порталом
+    if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
+    g_game.onChange = OnGameMode;
+    AddTray();
+    SetTimer(g_wnd, kPollTimer, 20, nullptr);
+    SetTimer(g_wnd, kWarmTimer, 1500, nullptr);
+    if (wantEditor) PostMessageW(g_wnd, WM_COMMAND, CMD_EDITOR, 0);
+
+    MSG m;
+    while (GetMessageW(&m, nullptr, 0, 0) > 0) {
+        if (EditorPreTranslate(&m)) continue;
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+
+    perf::Flush();
+    Gdiplus::GdiplusShutdown(gdipToken);
+    OleUninitialize();
+    ReleaseMutex(mutex);
+    return 0;
+}

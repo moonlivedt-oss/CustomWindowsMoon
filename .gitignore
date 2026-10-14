@@ -1,0 +1,15 @@
+# сборка
+build/
+RadialMenu.exe
+*.exe
+
+# личное: свои кольца, копии настроек
+radial.cfg
+backups/
+
+# служебные файлы отладки
+*.log
+*_out.txt
+media_snap.png
+.ruff_cache/
+__pycache__/
