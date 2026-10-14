@@ -210,40 +210,47 @@ void Studio::StylePage(const RectF& r) {
 
     // Boost: память перед игрой
     card(L"Память перед игрой", 6.7f, [&](const RectF& b) {
-        std::wstring dir = boost::Dir(cfg.boostDir);
-        boost::Settings bs = boost::Load(dir);
+        // boost.config.json читается не на каждый кадр, а раз в пару секунд
+        ULONGLONG now = GetTickCount64();
+        if (!boostReadAt_ || now - boostReadAt_ > 2000) {
+            boostReadAt_ = now;
+            boostDir_ = boost::Dir(cfg.boostDir);
+            boostPurge_ = boost::Load(boostDir_).purge;
+        }
+        const std::wstring& dir = boostDir_;
         toggle(row(b, 0, L"Предлагать освободить память"), ID_BOOST_OFFER, cfg.boostOffer);
         toggle(row(b, 1, L"После игры вернуть закрытое"), ID_BOOST_RESTORE, cfg.boostRestore);
         toggle(row(b, 2, L"После игры почистить ещё раз"), ID_BOOST_AFTER, cfg.boostAfter);
-        if (boostTask_ < 0) boostTask_ = boost::PurgeTaskExists() ? 1 : 0;
-        RectF tr = row(b, 3, boostTask_ == 1 ? L"Очистка кэша: без запросов" : L"Очистка кэша без запросов");
-        if (boostTask_ == 2) {
+        if (!boostTask_) boostTask_ = std::make_shared<volatile int>(boost::PurgeTaskExists() ? 1 : 0);
+        int task = *boostTask_;
+        RectF tr = row(b, 3, task == 1 ? L"Очистка кэша: без запросов" : L"Очистка кэша без запросов");
+        if (task == 2) {
             ui.Text(L"жду разрешения...", RectF(tr.X + tr.Width - ui.S(150), tr.Y, ui.S(150), tr.Height), c.muted, 12,
                     false, ui::Right);
             ui.Invalidate();
         } else if (ui.Button(ID_BOOST_TASK, RectF(tr.X + tr.Width - ui.S(150), tr.Y + ui.S(4), ui.S(150), ui.S(36)),
-                             boostTask_ == 1 ? L"Пересоздать" : L"Настроить", boostTask_ == 1 ? Kind::Ghost : Kind::Primary)) {
-            boostTask_ = 2;
+                             task == 1 ? L"Пересоздать" : L"Настроить", task == 1 ? Kind::Ghost : Kind::Primary)) {
+            // поток держит своё состояние: студию могут закрыть, пока Windows ждёт подтверждения UAC
             struct Ctx {
-                Studio* st;
+                std::shared_ptr<volatile int> state;
                 HWND wnd;
             };
-            auto* ctx = new Ctx{this, wnd};
+            *boostTask_ = 2;
+            auto* ctx = new Ctx{boostTask_, wnd};
             HANDLE th = CreateThread(
                 nullptr, 0,
                 [](void* p) -> DWORD {
                     std::unique_ptr<Ctx> c((Ctx*)p);
-                    bool ok = boost::SetupPurgeTask();
-                    c->st->boostTask_ = ok ? 1 : 0;
-                    InvalidateRect(c->wnd, nullptr, FALSE);
+                    *c->state = boost::SetupPurgeTask() ? 1 : 0;
+                    if (IsWindow(c->wnd)) InvalidateRect(c->wnd, nullptr, FALSE);
                     return 0;
                 },
                 ctx, 0, nullptr);
-            if (th)
+            if (th) {
                 CloseHandle(th);
-            else {
+            } else {
                 delete ctx;
-                boostTask_ = 0;
+                *boostTask_ = 0;
             }
         }
         RectF nr = row(b, 4, L"");
@@ -262,7 +269,7 @@ void Studio::StylePage(const RectF& r) {
         std::wstring s = dir.empty()
                              ? L"Папка Boost не найдена: положи её рядом с RadialMenu или укажи boost_dir в radial.cfg."
                              : std::wstring(mem) + L"Списки и что чистить - в boost.config.json, общем со скриптами Boost" +
-                                   (bs.purge ? L"." : L"; очистка кэша там выключена (purgeStandby).");
+                                   (boostPurge_ ? L"." : L"; очистка кэша там выключена (purgeStandby).");
         note(b, 5, 3, s, dir.empty() ? c.warn : c.muted);
     });
 
