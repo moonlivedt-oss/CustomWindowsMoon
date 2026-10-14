@@ -11,12 +11,11 @@
 #include <string>
 
 #include "app/autostart.h"
+#include "app/devcli.h"
 #include "core/config.h"
-#include "core/filedlg.h"
+#include "core/files.h"
 #include "core/fx.h"
 #include "core/themes.h"
-#include "desk/startbg.h"
-#include "desk/whreg.h"
 #include "core/night.h"
 #include "core/perf.h"
 #include "desk/battery.h"
@@ -29,8 +28,6 @@
 #include "desk/gamemode.h"
 #include "desk/hexwave.h"
 #include "desk/lockscreen.h"
-#include "desk/ocr.h"
-#include "core/text.h"
 #include "desk/snip.h"
 #include "desk/widget.h"
 #include "desk/winfx.h"
@@ -46,7 +43,17 @@ constexpr UINT WM_TRAY = WM_APP + 1;
 constexpr UINT_PTR kPollTimer = 1, kWarmTimer = 2, kIntroTimer = 3;
 constexpr UINT kTrayId = 1;
 constexpr int kHotWindows = 1;  // Alt + ` - кольцо окон
-enum Cmd { CMD_EDITOR = 100, CMD_EDIT, CMD_FOLDER, CMD_RELOAD, CMD_AUTOSTART, CMD_RESET_WINDOWS, CMD_GAME, CMD_BOOST, CMD_EXIT };
+enum Cmd {
+    CMD_EDITOR = 100,
+    CMD_EDIT,
+    CMD_FOLDER,
+    CMD_RELOAD,
+    CMD_AUTOSTART,
+    CMD_RESET_WINDOWS,
+    CMD_GAME,
+    CMD_BOOST,
+    CMD_EXIT
+};
 constexpr UINT WM_BOOST_DONE = WM_APP + 60;  // поток Boost закончил: lParam - boost::Result*
 
 HINSTANCE g_inst;
@@ -278,8 +285,8 @@ void OfferBoost(bool manual) {
     ThemeInfo t = CurrentTheme(g_cfg);
     if (!s.ok) {
         if (manual)
-            g_boostCard.Show(BoostCard::DONE, L"Boost не найден", L"Укажи папку Boost в студии: Красота - Память перед игрой.",
-                             t);
+            g_boostCard.Show(BoostCard::DONE, L"Boost не найден",
+                             L"Укажи папку Boost в студии: Красота - Память перед игрой.", t);
         return;
     }
     int used = 0;
@@ -324,7 +331,8 @@ void BoostAfterGame() {
         boost::Reopen(g_boostClosed);
         boost::ClearSession(BoostDir());
         g_boostClosed.clear();
-        g_boostCard.Show(BoostCard::DONE, L"Программы открываются", L"Они запускаются свёрнутыми.", CurrentTheme(g_cfg));
+        g_boostCard.Show(BoostCard::DONE, L"Программы открываются", L"Они запускаются свёрнутыми.",
+                         CurrentTheme(g_cfg));
     };
     g_boostCard.Show(BoostCard::RESTORE, L"Вернуть закрытые программы?", Names(names), CurrentTheme(g_cfg));
 }
@@ -519,148 +527,8 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
-    // для разработки: RadialMenu.exe --ocr картинка.png - распознать текст в ocr_out.txt рядом с exe и выйти
-    if (const wchar_t* o = wcsstr(GetCommandLineW(), L"--ocr ")) {
-        std::wstring path = o + 6;
-        if (!path.empty() && path.front() == L'"') path = path.substr(1, path.find(L'"', 1) - 1);
-        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        std::vector<uint8_t> png;
-        HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-        if (f != INVALID_HANDLE_VALUE) {
-            png.resize(GetFileSize(f, nullptr));
-            DWORD got = 0;
-            ReadFile(f, png.data(), (DWORD)png.size(), &got, nullptr);
-            CloseHandle(f);
-        }
-        std::wstring err, text = ocr::Recognize(png, &err);
-        std::string out = Narrow(L"error=[" + err + L"]\r\n" + text);
-        HANDLE w =
-            CreateFileW((ExeDir() + L"\\ocr_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
-        DWORD put = 0;
-        if (w != INVALID_HANDLE_VALUE) {
-            WriteFile(w, out.data(), (DWORD)out.size(), &put, nullptr);
-            CloseHandle(w);
-        }
-        return 0;
-    }
-    // для разработки: RadialMenu.exe --dlg путь - перевести открытый диалог «Открыть/Сохранить» в путь и выйти
-    if (const wchar_t* o = wcsstr(GetCommandLineW(), L"--dlg ")) {
-        std::wstring path = o + 6;
-        if (!path.empty() && path.front() == L'"') path = path.substr(1, path.find(L'"', 1) - 1);
-        HWND dlg = nullptr;
-        EnumWindows(
-            [](HWND h, LPARAM lp) -> BOOL {
-                if (!IsWindowVisible(h) || !filedlg::Is(h)) return TRUE;
-                *reinterpret_cast<HWND*>(lp) = h;
-                return FALSE;
-            },
-            (LPARAM)&dlg);
-        if (!dlg || !filedlg::Go(dlg, path, (GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_DIRECTORY) != 0))
-            return 1;
-        ULONGLONG until = GetTickCount64() + 1500;  // таймер возврата имени
-        MSG m;
-        while (GetTickCount64() < until) {
-            while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
-            Sleep(10);
-        }
-        return 0;
-    }
-    // для разработки: RadialMenu.exe --explorer-reg / --notify-reg / --settings-reg / --search-reg / --all-reg -
-    // собрать .reg по текущей теме в %APPDATA%\MoonDesk (не применяя)
-    if (std::wstring cmd = GetCommandLineW(); cmd.find(L" --") != std::wstring::npos && cmd.find(L"-reg") != std::wstring::npos) {
-        Config c;
-        LoadConfig(ExeDir() + L"\\radial.cfg", c);
-        ThemeInfo t = CurrentTheme(c);
-        std::wstring out;
-        if (cmd.find(L"--explorer-reg") != std::wstring::npos) out = whreg::ExplorerReg(t.bg, t.ac);
-        if (cmd.find(L"--notify-reg") != std::wstring::npos) out = whreg::NotificationReg(t.bg, t.ac);
-        if (cmd.find(L"--settings-reg") != std::wstring::npos) out = whreg::SettingsReg(t.bg, t.panel, t.ac);
-        if (cmd.find(L"--search-reg") != std::wstring::npos) out = whreg::SearchReg(t.bg, t.ac);
-        if (cmd.find(L"--all-reg") != std::wstring::npos) out = whreg::AllReg(t.bg, t.panel, t.ac, nullptr);
-        return out.empty() ? 1 : 0;
-    }
-    // для разработки: RadialMenu.exe --start-apply - оформить Пуск Start11 по текущей теме (как кнопка студии)
-    if (wcsstr(GetCommandLineW(), L"--start-apply")) {
-        Gdiplus::GdiplusStartupInput in;
-        ULONG_PTR tok;
-        Gdiplus::GdiplusStartup(&tok, &in, nullptr);
-        Config c;
-        LoadConfig(ExeDir() + L"\\radial.cfg", c);
-        std::wstring msg;
-        bool ok = startbg::Apply(CurrentTheme(c), msg);
-        Gdiplus::GdiplusShutdown(tok);
-        return ok ? 0 : 1;
-    }
-    // RadialMenu.exe --purge - очистка памяти по boost.config.json; запускает задача планировщика с правами
-    if (wcsstr(GetCommandLineW(), L"--purge")) {
-        Config c;
-        LoadConfig(ExeDir() + L"\\radial.cfg", c);
-        return boost::PurgeMain(boost::Load(boost::Dir(c.boostDir)));
-    }
-    // для разработки: RadialMenu.exe --lock-apply - собрать экран блокировки по теме и поставить его,
-    // итог пишется в lock_out.txt рядом с exe
-    if (wcsstr(GetCommandLineW(), L"--lock-apply")) {
-        Gdiplus::GdiplusStartupInput in;
-        ULONG_PTR tok;
-        Gdiplus::GdiplusStartup(&tok, &in, nullptr);
-        Config c;
-        LoadConfig(ExeDir() + L"\\radial.cfg", c);
-        auto job = lockscreen::ApplyAsync(c, nullptr);
-        while (!job->done) Sleep(20);
-        std::string out = Narrow(job->message);
-        HANDLE w = CreateFileW((ExeDir() + L"\\lock_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
-                               nullptr);
-        DWORD put = 0;
-        if (w != INVALID_HANDLE_VALUE) {
-            WriteFile(w, out.data(), (DWORD)out.size(), &put, nullptr);
-            CloseHandle(w);
-        }
-        Gdiplus::GdiplusShutdown(tok);
-        return job->ok ? 0 : 1;
-    }
-    // для разработки: RadialMenu.exe --game-test - включить игровой режим на 3 секунды и выключить,
-    // состояние системы до, во время и после пишется в game_out.txt рядом с exe
-    if (wcsstr(GetCommandLineW(), L"--game-test")) {
-        Config c;
-        LoadConfig(ExeDir() + L"\\radial.cfg", c);
-        auto state = [] {
-            BOOL anim = TRUE;
-            SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &anim, 0);
-            DWORD tr = 1, sz = sizeof(tr);
-            RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                         L"EnableTransparency", RRF_RT_REG_DWORD, nullptr, &tr, &sz);
-            return L"anim=" + std::to_wstring(anim) + L" transparency=" + std::to_wstring(tr) + L"\r\n";
-        };
-        GameMode gm;
-        std::wstring log = L"before: " + state();
-        gm.SetManual(true, c);
-        log += L"during: " + state();
-        Sleep(3000);
-        gm.SetManual(false, c);
-        log += L"after: " + state();
-        std::string out = Narrow(log);
-        HANDLE w = CreateFileW((ExeDir() + L"\\game_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
-                               nullptr);
-        DWORD put = 0;
-        if (w != INVALID_HANDLE_VALUE) {
-            WriteFile(w, out.data(), (DWORD)out.size(), &put, nullptr);
-            CloseHandle(w);
-        }
-        return 0;
-    }
-    // для разработки: RadialMenu.exe --avatar - нарисовать аватар в %APPDATA%\MoonDesk\avatar.png
-    if (wcsstr(GetCommandLineW(), L"--avatar")) {
-        Gdiplus::GdiplusStartupInput in;
-        ULONG_PTR tok;
-        Gdiplus::GdiplusStartup(&tok, &in, nullptr);
-        Config c;
-        LoadConfig(ExeDir() + L"\\radial.cfg", c);
-        std::wstring out, msg;
-        bool ok = lockscreen::BuildAvatar(c, out, msg);
-        Gdiplus::GdiplusShutdown(tok);
-        return ok ? 0 : 1;
-    }
-    bool wantEditor = wcsstr(GetCommandLineW(), L"--editor") != nullptr;
+    if (int code = 0; devcli::Run(code)) return code;
+    bool wantEditor = devcli::HasFlag(L"--editor");
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\MoonRadialMenu");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // уже запущено: попросить работающую копию открыть редактор
@@ -680,6 +548,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_inst = inst;
     g_game.Recover();  // если прошлый запуск упал в игровом режиме - вернуть анимации, прозрачность, обои
     g_cfgPath = ExeDir() + L"\\radial.cfg";
+    // первый запуск после клонирования: своих колец ещё нет - берём пример с общими папками
+    if (!Exists(g_cfgPath)) CopyFileW((ExeDir() + L"\\radial.example.cfg").c_str(), g_cfgPath.c_str(), TRUE);
     g_media.Create(inst);
     g_media.onTurnOff = [] {
         g_cfg.media = false;
@@ -714,9 +584,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         else
             g_battery.Test(what == PREVIEW_BATTERY_CHARGE);
     });
-    SetEditorGameStatus([] {
-        return g_game.On() ? L"включён (" + g_game.Reason() + L")" : std::wstring(L"выключен");
-    });
+    SetEditorGameStatus([] { return g_game.On() ? L"включён (" + g_game.Reason() + L")" : std::wstring(L"выключен"); });
     g_snip.Create(inst);
     g_snip.Apply(g_cfg);
     g_deskClick.Create(inst);
