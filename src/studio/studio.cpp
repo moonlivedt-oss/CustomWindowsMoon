@@ -146,6 +146,11 @@ void Studio::Header(const RectF& r, const std::wstring& title, const std::wstrin
     ui.Text(sub, RectF(r.X, r.Y + ui.S(32), r.Width, ui.S(20)), ui.C().muted, 12);
 }
 
+RectF Studio::Column(const RectF& in, float maxW) const {
+    float w = std::min(in.Width, maxW);
+    return RectF(in.X + (in.Width - w) / 2, in.Y, w, in.Height);
+}
+
 void Studio::Mascot(const RectF& r, const std::wstring& file, const std::wstring& title, const std::wstring& text) {
     float m = std::min(ui.S(120), r.Height * 0.45f);
     ui.Icon(ExeDir() + L"\\icons\\" + file, RectF(r.X + (r.Width - m) / 2, r.Y, m, m));
@@ -198,10 +203,18 @@ void Studio::Rail(const RectF& r) {
             page_ = e.p;
             ui.ResetScroll(ID_PAGE_SCROLL);
         }
-        if (on)
-            ui.Fill(b, c.cardHi, ui.S(12));
-        else if (ui.Hot(ID_RAIL + e.p))
-            ui.Fill(b, c.card, ui.S(12));
+        // выбранный раздел: фон и полоска акцента у левого края; она вырастает на новом разделе и
+        // гаснет на прежнем, при наведении на другой раздел видна короткая бледная полоска
+        float sel = ui.Anim(ID_RAIL_BAR + e.p, on, 16);
+        float hov = ui.Anim(ID_RAIL_HOVER + e.p, !on && ui.Hot(ID_RAIL + e.p), 18);
+        if (sel > 0.01f) ui.Fill(b, WithAlpha(c.cardHi, (BYTE)(255 * sel)), ui.S(12));
+        if (hov > 0.01f) ui.Fill(b, WithAlpha(c.card, (BYTE)(255 * hov * (1 - sel))), ui.S(12));
+        float barH = ui.S(34) * sel + ui.S(14) * hov * (1 - sel);
+        if (barH > ui.S(1)) {
+            Color bar = sel > hov ? WithAlpha(c.accent, (BYTE)(255 * std::min(1.0f, sel * 1.4f)))
+                                  : WithAlpha(c.muted, (BYTE)(160 * hov));
+            ui.Fill(RectF(r.X + ui.S(1), b.Y + (b.Height - barH) / 2, ui.S(4), barH), bar, ui.S(2));
+        }
         ui.Icon(railIcon(e.own, e.icon), RectF(b.X + (b.Width - ui.S(30)) / 2, b.Y + ui.S(8), ui.S(30), ui.S(30)));
         ui.Text(e.name, RectF(b.X, b.Y + ui.S(42), b.Width, ui.S(18)), on ? c.text : c.muted, 10.5f, on, ui::Center);
         y += ui.S(72);

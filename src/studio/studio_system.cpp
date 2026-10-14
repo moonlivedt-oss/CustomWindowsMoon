@@ -15,6 +15,7 @@
 #include "gfx/draw.h"
 #include "studio/studio.h"
 #include "studio/studio_internal.h"
+#include "studio/studio_layout.h"
 
 using namespace Gdiplus;
 using ui::Kind;
@@ -53,33 +54,16 @@ std::wstring HexColor(COLORREF c) {
 void Studio::SystemPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(in, L"Система", L"Чтобы Windows выглядела одной темой с кольцами: значки, Пуск, курсор и мелочи.");
+    Header(Column(in, ui.S(900)), L"Система", L"Чтобы Windows выглядела одной темой с кольцами: значки, Пуск, курсор и мелочи.");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
     ui.G().SetClip(view);
-    float x = view.X + ui.S(4), w = std::min(view.Width - ui.S(8), ui.S(900)), y0 = view.Y - off;
-    float gap = ui.S(16);
-    bool two = w > ui.S(820);
-    float cw = two ? (w - gap) / 2 : w;
-    float colY[2] = {y0, y0};
-    float rowH = ui.S(50);
+    CardColumns cols(ui, cardGrow_, view, off, ui.S(900));
+    float rowH = cols.RowH();
+    auto card = [&](const wchar_t* title, float rows, auto&& body) { cols.Card(title, rows, body); };
+    auto row = [&](const RectF& b, float n, const wchar_t* label) { return cols.Row(b, n, label, 0.55f); };
     ThemeInfo t = CurrentTheme(cfg);
-
-    auto card = [&](const wchar_t* title, float rows, auto&& body) {
-        int col = two && colY[1] < colY[0] ? 1 : 0;
-        float h = ui.S(52) + rows * rowH;
-        RectF cr(x + col * (cw + gap), colY[col], cw, h);
-        Card(cr);
-        ui.Text(title, RectF(cr.X + ui.S(18), cr.Y + ui.S(14), cr.Width, ui.S(24)), c.text, 14, true);
-        body(RectF(cr.X + ui.S(18), cr.Y + ui.S(48), cr.Width - ui.S(36), rows * rowH));
-        colY[col] += h + gap;
-    };
-    auto row = [&](const RectF& b, float n, const wchar_t* label) {
-        RectF rr(b.X, b.Y + n * rowH, b.Width, ui.S(44));
-        ui.Text(label, RectF(rr.X, rr.Y, rr.Width * 0.55f, rr.Height), c.text, 12.5f);
-        return rr;
-    };
     auto toggle = [&](const RectF& rr, int id, bool& v) {
         bool val = v;
         if (ui.Toggle(id, RectF(rr.X + rr.Width - ui.S(42), rr.Y + ui.S(7), ui.S(42), ui.S(30)), val)) {
@@ -88,9 +72,7 @@ void Studio::SystemPage(const RectF& r) {
             Save();
         }
     };
-    auto note = [&](const RectF& b, float n, float lines, const std::wstring& s, Color col) {
-        ui.Text(s, RectF(b.X, b.Y + n * rowH, b.Width, ui.S(20) * lines), col, 11.5f, false, ui::Left, true);
-    };
+    auto note = [&](const RectF& b, float n, float, const std::wstring& s, Color col) { cols.Note(b, n, s, col); };
 
     // всё оформление системы одной кнопкой: моды Windhawk одним .reg и Пуск Start11
     card(L"Тема везде", 1.9f, [&](const RectF& b) {
@@ -322,12 +304,12 @@ void Studio::SystemPage(const RectF& r) {
         toggle(row(b, 2, L"Карточка после снимка области"), ID_SYS_SNIP, cfg.snipCard);
     });
 
-    float bottom = std::max(colY[0], colY[1]);
+    float bottom = cols.Bottom();
     if (!sysStatus_.empty()) {
-        ui.Text(sysStatus_, RectF(x, bottom, w, ui.S(40)), c.accent, 12, false, ui::Left, true);
+        ui.Text(sysStatus_, RectF(cols.X(), bottom, cols.Width(), ui.S(40)), c.accent, 12, false, ui::Left, true);
         bottom += ui.S(44);
     }
-    pageContentH_ = bottom - y0;
+    pageContentH_ = bottom - cols.Top();
     ui.G().Restore(st);
 }
 

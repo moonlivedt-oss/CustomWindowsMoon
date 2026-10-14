@@ -62,7 +62,7 @@ public:
     bool Click(int id, const RectF& r);
     bool Hot(int id) const { return hot_ == id; }
     bool Active(int id) const { return active_ == id; }
-    bool Released(int id);  // кнопку отпустили, а нажата она была на id (для перетаскивания)
+    bool Released(int id);                    // кнопку отпустили, а нажата она была на id (для перетаскивания)
     bool RightClick(int id, const RectF& r);  // правая кнопка отпущена над id
     bool DoubleClick(int id);                 // двойной клик по id (Hover/Click уже зарегистрировали рамку)
     bool HotChanged();                        // наведение сменилось с прошлого вопроса (для таймера подсказок)
@@ -85,7 +85,8 @@ public:
     float Measure(const std::wstring& s, float size, bool bold = false);
     float MeasureWrapped(const std::wstring& s, float size, bool bold, float width);
     void Icon(const std::wstring& file, const RectF& r, const std::wstring& shellPath = L"");
-    void Picture(Gdiplus::Bitmap* b, const RectF& r, float radius, bool roundBottom = true);
+    // alpha < 255 - картинка полупрозрачная (растворение одной в другую)
+    void Picture(Gdiplus::Bitmap* b, const RectF& r, float radius, bool roundBottom = true, BYTE alpha = 255);
     Gdiplus::GraphicsPath* Round(const RectF& r, float radius, bool top = true, bool bottom = true);
 
     // плавность: значение тянется к on (0..1), пока не дотянется - кадры продолжаются

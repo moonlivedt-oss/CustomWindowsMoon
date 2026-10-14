@@ -22,7 +22,6 @@ using Gdiplus::Bitmap;
 using Gdiplus::Color;
 using Gdiplus::RectF;
 
-
 inline constexpr wchar_t kClass[] = L"MoonRadialStudio";
 inline constexpr UINT WM_RUN = WM_APP + 40;
 inline constexpr UINT_PTR kSaveTimer = 1;
@@ -135,17 +134,19 @@ enum Id {
     ID_LOGON_AVATAR_PICK,
     ID_LOGON_AVATAR_EMBLEM,
     ID_LOGON_CRISP,
-    ID_BACKUP = 7000,  // +i
-    ID_SECTOR = 1000,     // +i
-    ID_CHILD = 2000,      // +j*8 + поле
-    ID_THEME = 3000,      // +i
-    ID_CUSTOM = 3100,     // +цвет
-    ID_CORNER = 3200,     // +угол*4 + действие
-    ID_SYS_CURSOR = 3300, // +образец цвета
-    ID_GRID_ICON = 4000,  // +i
-    ID_LIB_CAT = 5000,    // +i
-    ID_LIB_ICON = 6000,   // +i
-    ID_MORE_ITEM = 9000,  // +пункт
+    ID_BACKUP = 7000,      // +i
+    ID_SECTOR = 1000,      // +i
+    ID_CHILD = 2000,       // +j*8 + поле
+    ID_THEME = 3000,       // +i
+    ID_CUSTOM = 3100,      // +цвет
+    ID_CORNER = 3200,      // +угол*4 + действие
+    ID_SYS_CURSOR = 3300,  // +образец цвета
+    ID_GRID_ICON = 4000,   // +i
+    ID_LIB_CAT = 5000,     // +i
+    ID_LIB_ICON = 6000,    // +i
+    ID_MORE_ITEM = 9000,   // +пункт
+    ID_RAIL_BAR = 9500,    // +страница: анимация полоски выбранного раздела
+    ID_RAIL_HOVER = 9600,  // +страница: анимация наведения на раздел
 };
 
 struct Problem {
@@ -175,7 +176,7 @@ struct IconJob {
     HWND wnd = nullptr;
 };
 
-void Preview(int what);   // studio.h: EditorPreview
+void Preview(int what);     // studio.h: EditorPreview
 std::wstring GameStatus();  // studio.h: SetEditorGameStatus
 
 class Studio {
@@ -233,7 +234,8 @@ private:
     void ThemesPage(const RectF& r);
     void ThemeHero(const RectF& hero, const ThemeInfo& t, bool trying);
     void ThemeCard(int index, const ThemeInfo& t, const RectF& cr, const RectF& view);
-    void ThemePicture(const ThemeInfo& t, const RectF& r, float radius);
+    void ThemePicture(const ThemeInfo& t, const RectF& r, float radius, float alpha);
+    void HeroText(const RectF& hero, const ThemeInfo& t, bool trying, float alpha);
     void Scrim(const RectF& clip, float radius, const RectF& band, Color from, Color to, bool horizontal);
     Bitmap* ThemeArt(const ThemeInfo& t, int maxSide);
     void BehaviorPage(const RectF& r);
@@ -245,6 +247,7 @@ private:
     bool CaptureKey(WPARAM vk);
     void KeysPage(const RectF& r);
     void Header(const RectF& r, const std::wstring& title, const std::wstring& sub);
+    RectF Column(const RectF& in, float maxW) const;  // полоса шириной не больше maxW по центру in
     void Card(const RectF& r, bool hi = false);
     void Mascot(const RectF& r, const std::wstring& file, const std::wstring& title, const std::wstring& text);
     void TourOverlay(float w, float h);
@@ -279,6 +282,11 @@ private:
     std::wstring toast_;
     ULONGLONG toastUntil_ = 0, pageAt_ = 0, lastBackup_ = 0;
     std::wstring hoverTheme_, hoverThemeNext_;  // примерка темы наведением
+    // витрина тем: прежняя тема растворяется в новую
+    ThemeInfo heroCur_{}, heroPrev_{};
+    std::wstring heroKey_;
+    bool heroTrying_ = false, heroPrevTrying_ = false;
+    ULONGLONG heroAt_ = 0;
     UiColors curUi_{};
     bool curUiReady_ = false;
     ULONGLONG lastPaint_ = 0;
@@ -289,12 +297,13 @@ private:
     bool problemsHidden_ = false;
     std::map<std::wstring, FolderStats> stats_;
     std::map<std::wstring, std::vector<Item>> listings_;  // содержимое папок для вкладки «Второе кольцо»
-    std::vector<std::wstring> programIcons_;               // icons\*.png, читаются один раз
+    std::vector<std::wstring> programIcons_;              // icons\*.png, читаются один раз
     const std::vector<Item>& Listing(const Item& it);
     std::map<std::wstring, std::unique_ptr<Bitmap>> imgs_;
     std::vector<std::function<void()>> deferred_;
     RectF iconTile_, childArea_, moreAnchor_;
     float mainContentH_ = 0, pageContentH_ = 0;
+    std::map<std::wstring, float> cardGrow_;  // насколько карточки выросли под длинный текст (CardColumns)
     // библиотека значков
     std::vector<std::wstring> libDirs_, libFiles_;
     int libCat_ = -1;

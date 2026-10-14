@@ -72,16 +72,17 @@ Bitmap* Studio::ThemeArt(const ThemeInfo& t, int maxSide) {
     return Img(ExeDir() + L"\\themes\\" + t.image, maxSide);
 }
 
-// Пейзаж (или градиент палитры, если картинки нет) на всю рамку со скруглением.
-void Studio::ThemePicture(const ThemeInfo& t, const RectF& r, float radius) {
+// Пейзаж (или градиент палитры, если картинки нет) на всю рамку со скруглением; alpha 0..1 - для растворения.
+void Studio::ThemePicture(const ThemeInfo& t, const RectF& r, float radius, float alpha) {
     if (Bitmap* b = ThemeArt(t, 960)) {
-        ui.Picture(b, r, radius, true);
+        ui.Picture(b, r, radius, true, (BYTE)(255 * alpha));
         return;
     }
     GraphicsState st = ui.G().Save();
     ui.G().SetClip(ui.Round(r, radius), CombineModeIntersect);
-    LinearGradientBrush lg(Grow(r, 1), ToColor(t.bg), ToColor(t.ac), LinearGradientModeForwardDiagonal);
-    Color cols[] = {ToColor(t.bg), MixColor(ToColor(t.bg), ToColor(t.glow), 0.55), ToColor(t.ac)};
+    BYTE a = (BYTE)(255 * alpha);
+    LinearGradientBrush lg(Grow(r, 1), ToColor(t.bg, a), ToColor(t.ac, a), LinearGradientModeForwardDiagonal);
+    Color cols[] = {ToColor(t.bg, a), MixColor(ToColor(t.bg), ToColor(t.glow), 0.55, a), ToColor(t.ac, a)};
     REAL pos[] = {0, 0.55f, 1};
     lg.SetInterpolationColors(cols, pos, 3);
     ui.G().FillRectangle(&lg, Grow(r, 1));
@@ -90,7 +91,7 @@ void Studio::ThemePicture(const ThemeInfo& t, const RectF& r, float radius) {
     RectF spot(r.X + r.Width * 0.55f, r.Y - r.Height * 0.35f, r.Width * 0.7f, r.Height * 0.9f);
     glow.AddEllipse(spot);
     PathGradientBrush pg(&glow);
-    pg.SetCenterColor(ToColor(t.gold, 120));
+    pg.SetCenterColor(ToColor(t.gold, (BYTE)(120 * alpha)));
     Color edge = ToColor(t.gold, 0);
     INT n = 1;
     pg.SetSurroundColors(&edge, &n);
@@ -108,23 +109,17 @@ void Studio::Scrim(const RectF& clip, float radius, const RectF& band, Color fro
     ui.G().Restore(st);
 }
 
-// Витрина: выбранная тема или та, на которую сейчас наведено (примерка).
-void Studio::ThemeHero(const RectF& hero, const ThemeInfo& t, bool trying) {
-    float rad = ui.S(18);
-    ThemePicture(t, hero, rad);
-    Scrim(hero, rad, RectF(hero.X, hero.Y, hero.Width * 0.72f, hero.Height), ToColor(t.bg, 235), ToColor(t.bg, 0),
-          true);
-    Scrim(hero, rad, RectF(hero.X, hero.Y + hero.Height * 0.55f, hero.Width, hero.Height * 0.45f), Color(0, 0, 0, 0),
-          Color(110, 0, 0, 0), false);
-    ui.Stroke(hero, Color(40, 255, 255, 255), rad);
-
+// Подписи витрины: метка, имя, настроение и палитра; alpha - для растворения при смене темы.
+void Studio::HeroText(const RectF& hero, const ThemeInfo& t, bool trying, float alpha) {
+    if (alpha <= 0.01f) return;
+    auto A = [alpha](Color c) { return WithAlpha(c, (BYTE)(c.GetA() * alpha)); };
     float px = hero.X + ui.S(26), py = hero.Y + ui.S(22);
     const wchar_t* label = trying ? L"Примерка" : L"Сейчас";
     float lw = ui.Measure(label, 10.5f, true) + ui.S(22);
-    ui.Chip(RectF(px, py, lw, ui.S(24)), label, ToColor(t.ac, trying ? 70 : 235),
-            trying ? kOnImage : MixColor(ToColor(t.bg), Color(0, 0, 0), 0.3));
-    ui.Text(t.name, RectF(px, py + ui.S(32), hero.Width * 0.6f, ui.S(42)), ToColor(t.fg), 25, true);
-    ui.Text(Tagline(t.key), RectF(px, py + ui.S(72), hero.Width * 0.6f, ui.S(22)), ToColor(t.muted), 12.5f);
+    ui.Chip(RectF(px, py, lw, ui.S(24)), label, A(ToColor(t.ac, trying ? 70 : 235)),
+            A(trying ? kOnImage : MixColor(ToColor(t.bg), Color(0, 0, 0), 0.3)));
+    ui.Text(t.name, RectF(px, py + ui.S(32), hero.Width * 0.6f, ui.S(42)), A(ToColor(t.fg)), 25, true);
+    ui.Text(Tagline(t.key), RectF(px, py + ui.S(72), hero.Width * 0.6f, ui.S(22)), A(ToColor(t.muted)), 12.5f);
 
     // палитра: кружок, роль и код цвета; в узкой витрине - только кружки
     struct {
@@ -137,14 +132,52 @@ void Studio::ThemeHero(const RectF& hero, const ThemeInfo& t, bool trying) {
     for (int i = 0; i < 4; ++i) {
         float sx = px + i * (text ? slot : d + ui.S(10));
         RectF dr(sx, sy, d, d);
-        SolidBrush b(ToColor(sw[i].c));
-        Pen ring(Color(90, 255, 255, 255), ui.S(1.5f));
+        SolidBrush b(A(ToColor(sw[i].c)));
+        Pen ring(A(Color(90, 255, 255, 255)), ui.S(1.5f));
         ui.G().FillEllipse(&b, dr);
         ui.G().DrawEllipse(&ring, dr);
         if (!text) continue;
-        ui.Text(sw[i].role, RectF(sx + d + ui.S(8), sy - ui.S(3), slot - d, ui.S(16)), ToColor(t.muted), 10);
-        ui.Text(Hex(sw[i].c), RectF(sx + d + ui.S(8), sy + ui.S(12), slot - d, ui.S(17)), ToColor(t.fg), 11, true);
+        ui.Text(sw[i].role, RectF(sx + d + ui.S(8), sy - ui.S(3), slot - d, ui.S(16)), A(ToColor(t.muted)), 10);
+        ui.Text(Hex(sw[i].c), RectF(sx + d + ui.S(8), sy + ui.S(12), slot - d, ui.S(17)), A(ToColor(t.fg)), 11, true);
     }
+}
+
+// Витрина: выбранная тема или та, на которую сейчас наведено (примерка).
+// При смене прежняя картинка растворяется в новую, подписи - тоже.
+void Studio::ThemeHero(const RectF& hero, const ThemeInfo& t, bool trying) {
+    ULONGLONG now = GetTickCount64();
+    if (heroKey_ != t.key) {
+        if (!heroKey_.empty()) {
+            heroPrev_ = heroCur_;
+            heroPrevTrying_ = heroTrying_;
+            heroAt_ = now;
+        }
+        heroKey_ = t.key;
+    }
+    heroCur_ = t;
+    heroTrying_ = trying;
+    float lin = (float)Clamp01((now - heroAt_) / 380.0), k = (float)EaseOut(lin);
+    bool fading = k < 1 && heroPrev_.key;
+    if (fading) ui.Invalidate();
+
+    float rad = ui.S(18);
+    if (fading) ThemePicture(heroPrev_, hero, rad, 1);
+    ThemePicture(t, hero, rad, fading ? k : 1);
+    Color bg = fading ? MixColor(ToColor(heroPrev_.bg), ToColor(t.bg), k) : ToColor(t.bg);
+    Scrim(hero, rad, RectF(hero.X, hero.Y, hero.Width * 0.72f, hero.Height), WithAlpha(bg, 235), WithAlpha(bg, 0),
+          true);
+    Scrim(hero, rad, RectF(hero.X, hero.Y + hero.Height * 0.55f, hero.Width, hero.Height * 0.45f), Color(0, 0, 0, 0),
+          Color(110, 0, 0, 0), false);
+    ui.Stroke(hero, Color(40, 255, 255, 255), rad);
+    // подписи не накладываются: прежние гаснут в первой половине, новые проступают во второй и чуть поднимаются
+    if (!fading) {
+        HeroText(hero, t, trying, 1);
+        return;
+    }
+    HeroText(hero, heroPrev_, heroPrevTrying_, std::max(0.0f, 1 - 2 * lin));
+    float in = (float)EaseOut(std::max(0.0f, 2 * lin - 1));
+    RectF moved(hero.X, hero.Y + ui.S(8) * (1 - in), hero.Width, hero.Height);
+    HeroText(moved, t, trying, in);
 }
 
 // Карточка темы: пейзаж на всю карточку, имя и палитра поверх затемнения снизу.
@@ -175,7 +208,7 @@ void Studio::ThemeCard(int index, const ThemeInfo& t, const RectF& cr, const Rec
             ui.Fill(Grow(RectF(r.X, r.Y + ui.S(5), r.Width, r.Height), k * ui.S(2.5f)),
                     ToColor(t.ac, (BYTE)(glow * 16)), rad + k * ui.S(2.5f));
     }
-    ThemePicture(t, r, rad);
+    ThemePicture(t, r, rad, 1);
     Scrim(r, rad, RectF(r.X, r.Y + r.Height * 0.42f, r.Width, r.Height * 0.58f), Color(0, 0, 0, 0),
           Color((BYTE)(175 + 30 * a), 0, 0, 0), false);
 

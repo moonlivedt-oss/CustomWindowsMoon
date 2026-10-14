@@ -11,6 +11,7 @@
 #include "gfx/draw.h"
 #include "studio/studio.h"
 #include "studio/studio_internal.h"
+#include "studio/studio_layout.h"
 
 using namespace Gdiplus;
 using ui::Kind;
@@ -42,32 +43,15 @@ std::wstring AvatarFile() {
 void Studio::StylePage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(in, L"Красота", L"Движение, окна и экран блокировки. В играх всё это само выключается.");
+    Header(Column(in, ui.S(900)), L"Красота", L"Движение, окна и экран блокировки. В играх всё это само выключается.");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
     ui.G().SetClip(view);
-    float x = view.X + ui.S(4), w = std::min(view.Width - ui.S(8), ui.S(900)), y0 = view.Y - off;
-    float gap = ui.S(16);
-    bool two = w > ui.S(820);
-    float cw = two ? (w - gap) / 2 : w;
-    float colY[2] = {y0, y0};
-    float rowH = ui.S(50);
-
-    auto card = [&](const wchar_t* title, float rows, auto&& body) {
-        int col = two && colY[1] < colY[0] ? 1 : 0;
-        float h = ui.S(52) + rows * rowH;
-        RectF cr(x + col * (cw + gap), colY[col], cw, h);
-        Card(cr);
-        ui.Text(title, RectF(cr.X + ui.S(18), cr.Y + ui.S(14), cr.Width, ui.S(24)), c.text, 14, true);
-        body(RectF(cr.X + ui.S(18), cr.Y + ui.S(48), cr.Width - ui.S(36), rows * rowH));
-        colY[col] += h + gap;
-    };
-    auto row = [&](const RectF& b, float n, const wchar_t* label) {
-        RectF rr(b.X, b.Y + n * rowH, b.Width, ui.S(44));
-        ui.Text(label, RectF(rr.X, rr.Y, rr.Width * 0.62f, rr.Height), c.text, 12.5f);
-        return rr;
-    };
+    CardColumns cols(ui, cardGrow_, view, off, ui.S(900));
+    float rowH = cols.RowH();
+    auto card = [&](const wchar_t* title, float rows, auto&& body) { cols.Card(title, rows, body); };
+    auto row = [&](const RectF& b, float n, const wchar_t* label) { return cols.Row(b, n, label, 0.62f); };
     auto toggle = [&](const RectF& rr, int id, bool& v) {
         bool val = v;
         if (ui.Toggle(id, RectF(rr.X + rr.Width - ui.S(42), rr.Y + ui.S(7), ui.S(42), ui.S(30)), val)) {
@@ -76,9 +60,7 @@ void Studio::StylePage(const RectF& r) {
             Save();
         }
     };
-    auto note = [&](const RectF& b, float n, float lines, const std::wstring& s, Color col) {
-        ui.Text(s, RectF(b.X, b.Y + n * rowH, b.Width, ui.S(20) * lines), col, 11.5f, false, ui::Left, true);
-    };
+    auto note = [&](const RectF& b, float n, float, const std::wstring& s, Color col) { cols.Note(b, n, s, col); };
 
     // скорость всех анимаций программы
     card(L"Движение", 1.9f, [&](const RectF& b) {
@@ -340,8 +322,8 @@ void Studio::StylePage(const RectF& r) {
         note(b, 3, 4, s, logonStatus_.empty() ? c.muted : c.accent);
     });
 
-    float bottom = std::max(colY[0], colY[1]);
-    pageContentH_ = bottom - y0;
+    float bottom = cols.Bottom();
+    pageContentH_ = bottom - cols.Top();
     ui.G().Restore(st);
 }
 

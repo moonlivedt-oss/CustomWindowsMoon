@@ -21,6 +21,7 @@
 #include "gfx/icons.h"
 #include "studio/studio.h"
 #include "studio/studio_internal.h"
+#include "studio/studio_layout.h"
 
 using namespace Gdiplus;
 using ui::Kind;
@@ -30,30 +31,16 @@ namespace studio {
 void Studio::BehaviorPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(in, L"Поведение", L"Где и как открывается меню. Всё применяется сразу.");
+    Header(Column(in, ui.S(900)), L"Поведение", L"Где и как открывается меню. Всё применяется сразу.");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
     ui.G().SetClip(view);
-    float x = view.X + ui.S(4), w = view.Width - ui.S(8), y0 = view.Y - off;
-    float gap = ui.S(16);
-    bool two = w > ui.S(820);
-    float cw = two ? (w - gap) / 2 : w;
-    float colY[2] = {y0, y0};
-    auto card = [&](const wchar_t* title, int rows, auto&& body) {
-        int col = two && colY[1] < colY[0] ? 1 : 0;
-        float h = ui.S(52) + rows * ui.S(50);
-        RectF cr(x + col * (cw + gap), colY[col], cw, h);
-        Card(cr);
-        ui.Text(title, RectF(cr.X + ui.S(18), cr.Y + ui.S(14), cr.Width, ui.S(24)), c.text, 14, true);
-        body(RectF(cr.X + ui.S(18), cr.Y + ui.S(48), cr.Width - ui.S(36), rows * ui.S(50)));
-        colY[col] += h + gap;
-    };
-    auto row = [&](const RectF& b, int n, const wchar_t* label) {
-        RectF rr(b.X, b.Y + n * ui.S(50), b.Width, ui.S(44));
-        ui.Text(label, RectF(rr.X, rr.Y, rr.Width * 0.55f, rr.Height), c.text, 12.5f);
-        return rr;
-    };
+    CardColumns cols(ui, cardGrow_, view, off, ui.S(900));
+    float rowH = cols.RowH();
+    auto card = [&](const wchar_t* title, float rows, auto&& body) { cols.Card(title, rows, body); };
+    // справа только переключатель или короткий ползунок - подписи можно почти всю строку
+    auto row = [&](const RectF& b, float n, const wchar_t* label) { return cols.Row(b, n, label, 0.86f); };
     auto toggle = [&](const RectF& rr, int id, bool& v) {
         bool val = v;
         if (ui.Toggle(id, RectF(rr.X + rr.Width - ui.S(42), rr.Y + ui.S(7), ui.S(42), ui.S(30)), val)) {
@@ -134,19 +121,19 @@ void Studio::BehaviorPage(const RectF& r) {
         if (ui.Button(ID_OPEN_DIR, RectF(f.X + f.Width - ui.S(132), f.Y + ui.S(4), ui.S(132), ui.S(36)), L"Папка"))
             Defer([] { ShellExecuteW(nullptr, nullptr, ExeDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
     });
-    pageContentH_ = std::max(colY[0], colY[1]) - y0;
+    pageContentH_ = cols.Height();
     ui.G().Restore(st);
 }
 
 void Studio::DeskPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(in, L"Стол", L"Горячие углы и панель «Сейчас играет». Всё применяется сразу.");
+    Header(Column(in, ui.S(900)), L"Стол", L"Горячие углы и панель «Сейчас играет». Всё применяется сразу.");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
     ui.G().SetClip(view);
-    float x = view.X + ui.S(4), w = std::min(view.Width - ui.S(8), ui.S(900)), y = view.Y - off, y0 = y;
+    float w = std::min(view.Width - ui.S(8), ui.S(900)), x = view.X + (view.Width - w) / 2, y = view.Y - off, y0 = y;
 
     // горячие углы: слева схема экрана, справа по три действия на угол
     float rowH = ui.S(50);
@@ -192,7 +179,7 @@ void Studio::DeskPage(const RectF& r) {
         ui.Fill(RectF(cx - d / 2, cy - d / 2, d, d), set ? c.accent : c.faint, d / 2);
     }
     RectF s(body.X, body.Y + ui.S(26) + 4 * rowH, body.Width, ui.S(44));
-    ui.Text(L"Сколько держать курсор", RectF(s.X, s.Y, s.Width * 0.5f, s.Height), c.text, 12.5f);
+    ui.Text(L"Задержка в углу", RectF(s.X, s.Y, labelW, s.Height), c.text, 12.5f);
     int dl = cfg.cornerDelay;
     ui.Text(std::to_wstring(dl) + L" мс", RectF(s.X + s.Width - ui.S(64), s.Y, ui.S(64), s.Height), c.muted, 12, false,
             ui::Right);
@@ -204,7 +191,12 @@ void Studio::DeskPage(const RectF& r) {
     y += card.Height + ui.S(16);
 
     // панель «Сейчас играет»
-    RectF mc(x, y, w, ui.S(52) + 2 * rowH + ui.S(66));
+    const wchar_t* mediaNote =
+        L"Доведи курсор до нижнего края экрана (не в угол): снизу выедет карточка с треком из любого плеера. "
+        L"Колесо над ней - громкость плеера, кнопка со строками - текст песни (lrclib.net), клик по строке "
+        L"перематывает. Если играют сразу несколько программ, сверху появится переключатель.";
+    float noteH = ui.MeasureWrapped(mediaNote, 11.5f, false, w - ui.S(36)) + ui.S(4);  // высота по тексту
+    RectF mc(x, y, w, ui.S(52) + 2 * rowH + noteH + ui.S(20));
     Card(mc);
     ui.Text(L"Сейчас играет", RectF(mc.X + ui.S(18), mc.Y + ui.S(14), w, ui.S(24)), c.text, 14, true);
     RectF mb(mc.X + ui.S(18), mc.Y + ui.S(48), w - ui.S(36), 2 * rowH);
@@ -220,11 +212,7 @@ void Studio::DeskPage(const RectF& r) {
     };
     toggle(mb, 0, L"Панель у нижнего края", ID_MEDIA, cfg.media);
     toggle(mb, 1, L"Показывать трек при смене", ID_MEDIA_TOAST, cfg.mediaToast);
-    ui.Text(
-        L"Доведи курсор до нижнего края экрана (не в угол): снизу выедет карточка с треком из любого плеера. "
-        L"Колесо над ней - громкость плеера, кнопка со строками - текст песни (lrclib.net), клик по строке "
-        L"перематывает. Если играют сразу несколько программ, сверху появится переключатель.",
-        RectF(mb.X, mb.Y + 2 * rowH, mb.Width, ui.S(60)), c.muted, 11.5f, false, ui::Left, true);
+    ui.Text(mediaNote, RectF(mb.X, mb.Y + 2 * rowH, mb.Width, noteH), c.muted, 11.5f, false, ui::Left, true);
     y += mc.Height + ui.S(16);
 
     // окна: прозрачность и «поверх всех»

@@ -386,8 +386,8 @@ void Ui::Icon(const std::wstring& file, const RectF& r, const std::wstring& shel
 }
 
 // Картинка «cover»: заполняет рамку, лишнее обрезается, углы скругляются.
-void Ui::Picture(Bitmap* b, const RectF& r, float radius, bool roundBottom) {
-    if (!b) return;
+void Ui::Picture(Bitmap* b, const RectF& r, float radius, bool roundBottom, BYTE alpha) {
+    if (!b || !alpha) return;
     int w = (int)std::lround(r.Width), h = (int)std::lround(r.Height);
     if (w <= 0 || h <= 0) return;
     // Уменьшение с обрезкой и скругление дорогие, а карточки одни и те же: готовая картинка кэшируется.
@@ -414,7 +414,16 @@ void Ui::Picture(Bitmap* b, const RectF& r, float radius, bool roundBottom) {
     }
     InterpolationMode im = g_->GetInterpolationMode();
     g_->SetInterpolationMode(InterpolationModeNearestNeighbor);
-    g_->DrawImage(it->second.get(), (int)std::lround(r.X), (int)std::lround(r.Y), w, h);
+    Rect dst((int)std::lround(r.X), (int)std::lround(r.Y), w, h);
+    if (alpha == 255) {
+        g_->DrawImage(it->second.get(), dst);
+    } else {
+        ColorMatrix cm = {
+            {{1, 0, 0, 0, 0}, {0, 1, 0, 0, 0}, {0, 0, 1, 0, 0}, {0, 0, 0, alpha / 255.0f, 0}, {0, 0, 0, 0, 1}}};
+        ImageAttributes ia;
+        ia.SetColorMatrix(&cm);
+        g_->DrawImage(it->second.get(), dst, 0, 0, w, h, UnitPixel, &ia);
+    }
     g_->SetInterpolationMode(im);
 }
 
