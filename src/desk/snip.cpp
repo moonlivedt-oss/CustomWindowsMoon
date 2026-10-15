@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/mem.h"
 #include "core/fx.h"
 #include "core/config.h"
 #include "core/night.h"
@@ -239,7 +240,10 @@ void SnipCard::Tick() {
     step(slide_, open_ ? 1.0f : 0.0f, 0.09f, 0.1f);
     for (int i = 0; i < kHits; ++i) step(hover_[i], i == hot_ ? 1.0f : 0.0f, 0.2f, 0.14f);
     if (slide_ <= 0) {
-        ShowWindow(wnd_, SW_HIDE);
+        if (IsWindowVisible(wnd_)) {
+            ShowWindow(wnd_, SW_HIDE);
+            mem::TrimSoon();
+        }
         return;
     }
     if (anim || dirty_ || busy_) Render();

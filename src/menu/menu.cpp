@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <set>
 
+#include "core/mem.h"
 #include "core/filedlg.h"
 #include "core/files.h"
 #include "core/launch.h"
@@ -266,7 +267,7 @@ void RadialMenu::Hide() {
     blurBmp_.reset();
     searchPool_.clear();
     searchPool_.shrink_to_fit();
-    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);  // в покое память не держим
+    mem::TrimSoon();  // в покое память не держим
 }
 
 void RadialMenu::Tick() {

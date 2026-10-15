@@ -12,6 +12,7 @@
 
 #include "app/autostart.h"
 #include "app/devcli.h"
+#include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
 #include "core/fx.h"
@@ -40,7 +41,7 @@ namespace {
 
 constexpr wchar_t kClass[] = L"MoonRadialMenuApp";
 constexpr UINT WM_TRAY = WM_APP + 1;
-constexpr UINT_PTR kPollTimer = 1, kWarmTimer = 2, kIntroTimer = 3;
+constexpr UINT_PTR kPollTimer = 1, kWarmTimer = 2, kIntroTimer = 3, kAutostartTimer = 4;
 constexpr UINT kTrayId = 1;
 constexpr int kHotWindows = 1;  // Alt + ` - кольцо окон
 enum Cmd {
@@ -419,6 +420,10 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_TIMER:
             if (wp == kPollTimer) Poll();
+            if (wp == kAutostartTimer) {
+                KillTimer(h, kAutostartTimer);
+                AutostartRefresh();
+            }
             if (wp == kIntroTimer) {
                 KillTimer(h, kIntroTimer);
                 g_reveal.Intro();
@@ -429,7 +434,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 if (g_menu.IsOpen()) return 0;
                 if (g_menu.Prewarm(&g_cfg, MonitorDpi(MonitorFromPoint(o, MONITOR_DEFAULTTOPRIMARY)))) {
                     KillTimer(h, kWarmTimer);
-                    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+                    mem::TrimSoon(500);
                 } else {
                     SetTimer(h, kWarmTimer, 30, nullptr);
                 }
@@ -538,8 +543,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         }
         return 0;
     }
-    AutostartRefresh();
-
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     OleInitialize(nullptr);  // OLE нужен для перетаскивания файлов на меню
     Gdiplus::GdiplusStartupInput gsi;
@@ -569,6 +572,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
     corners::SetWindowsRing(ShowWindowsRing);
+    mem::SetBusy([] { return g_menu.IsOpen(); });
 
     g_menu.Create(inst);
     g_corners.Create(inst);
@@ -618,6 +622,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     AddTray();
     SetTimer(g_wnd, kPollTimer, 20, nullptr);
     SetTimer(g_wnd, kWarmTimer, 1500, nullptr);
+    SetTimer(g_wnd, kAutostartTimer, 8000, nullptr);  // планировщик трогаем, когда вход уже прошёл
     if (wantEditor) PostMessageW(g_wnd, WM_COMMAND, CMD_EDITOR, 0);
 
     MSG m;

@@ -108,7 +108,9 @@ void Studio::BehaviorPage(const RectF& r) {
         bool on = AutostartOn();
         if (ui.Toggle(ID_AUTOSTART, RectF(a.X + a.Width - ui.S(42), a.Y + ui.S(7), ui.S(42), ui.S(30)), on)) {
             SetAutostart(on);
-            Log(on ? L"Автозапуск включён" : L"Автозапуск выключен");
+            Log(!on                ? L"Автозапуск выключен"
+                : AutostartEarly() ? L"Автозапуск включён: задача планировщика, сразу после входа"
+                                   : L"Автозапуск включён (через Run: планировщик недоступен)");
         }
         RectF f = row(b, 1, L"Файлы");
         if (ui.Button(ID_OPEN_CFG, RectF(f.X + f.Width - ui.S(290), f.Y + ui.S(4), ui.S(150), ui.S(36)),

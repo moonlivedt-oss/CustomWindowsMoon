@@ -11,6 +11,7 @@
 #include <cmath>
 #include <ctime>
 
+#include "core/mem.h"
 #include "core/files.h"
 #include "core/perf.h"
 #include "app/autostart.h"
@@ -468,6 +469,7 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             }
             g_st = nullptr;
             delete this;
+            mem::TrimSoon(1500);  // студия закрыта: её страницы и картинки больше не нужны
             return 0;
     }
     return DefWindowProcW(wnd, msg, wp, lp);

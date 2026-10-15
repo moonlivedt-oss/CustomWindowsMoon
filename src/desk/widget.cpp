@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "core/mem.h"
 #include "core/fx.h"
 #include "core/config.h"
 #include "core/night.h"
@@ -445,7 +446,10 @@ void MediaWidget::Tick(const Config& cfg, bool blocked) {
         dirty_ = true;
     }
     if (slide_ <= 0) {
-        if (IsWindowVisible(wnd_)) ShowWindow(wnd_, SW_HIDE);
+        if (IsWindowVisible(wnd_)) {
+            ShowWindow(wnd_, SW_HIDE);
+            mem::TrimSoon();
+        }
         return;
     }
     if (anim || dirty_) Render();

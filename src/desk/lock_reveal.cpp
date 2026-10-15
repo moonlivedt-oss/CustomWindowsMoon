@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
 #include "core/fx.h"
@@ -343,7 +344,7 @@ void Reveal::Hide() {
     std::vector<uint16_t>().swap(cell_);
     std::vector<uint8_t>().swap(edge_);
     std::vector<int8_t>().swap(tex_);
-    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+    mem::TrimSoon(1000);
 }
 
 }  // namespace lockscreen
