@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -26,6 +27,10 @@ public:
     void ShowAround(const Config* cfg, POINT cursor, const RECT& work, UINT dpi);
     // Кольцо открытых окон вокруг курсора (Alt + ` или угол): в середине живая миниатюра наведённого окна.
     void ShowWindows(const Config* cfg, POINT cursor, const RECT& work, UINT dpi);
+    // Кольцо «Сеть» (действие угла): пункты - действия (special 3, ключ в path), сверху строка состояния.
+    void ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi);
+    std::function<void(const std::wstring& key)> onNet;  // выбрали действие сети
+    std::function<std::wstring()> netStatus;            // строка состояния для кольца сети
     void Close();
     bool IsOpen() const { return open_; }
     // Заранее грузит значки, чтобы первое открытие не подтормаживало. Работает порциями не дольше budgetMs,
@@ -151,7 +156,7 @@ private:
     LabelFit LayoutLabel(const Ring& r, double a0, double a1, const Item& it);
     float TextWidth(const std::wstring& s);
     Gdiplus::Bitmap* LabelBitmap(const std::wstring& text, bool bright);
-    void DrawInfoCard(Gdiplus::Graphics& g, double grow, double alpha);
+    void DrawInfoCard(Gdiplus::Graphics& g, double grow, double alpha, bool below);  // below - под кольцом
     void Render();
     void EnsureHexGlass();  // узор сотового стекла под размер окна (строится раз, потом из кэша)
     void DrawHexLift(Gdiplus::Graphics& g, Gdiplus::GraphicsPath& sector, double hl);  // сота под курсором
@@ -213,6 +218,9 @@ private:
     std::vector<Item> fullRing_;  // секторы обоих краёв для целого кольца
     bool winMode_ = false;        // кольцо окон
     std::vector<Item> winRing_;
+    bool netMode_ = false;  // кольцо сети
+    bool reached_ = false;  // курсор уже был внутри кольца (до этого далёкий курсор меню не закрывает)
+    std::vector<Item> netRing_;
     HTHUMBNAIL thumb_ = nullptr;  // миниатюра DWM наведённого окна
     HWND thumbWin_ = nullptr;
     HWND dialog_ = nullptr;  // диалог «Открыть/Сохранить», который был впереди, когда открылось меню

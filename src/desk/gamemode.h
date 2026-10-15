@@ -2,6 +2,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
@@ -22,6 +23,7 @@ public:
     bool Manual() const { return manual_; }
     bool On() const { return on_; }
     const std::wstring& Reason() const { return reason_; }  // что включило режим: имя игры или «вручную»
+    std::vector<DWORD> GamePids() const;  // процессы игр; для полноэкранной без маски - процесс активного окна
     void Shutdown();                                        // при выходе: вернуть систему как была
 
 private:

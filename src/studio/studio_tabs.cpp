@@ -127,15 +127,15 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
     // карточки с цифрами
     FolderStats fs = Stats(*it);
     int count = (int)it->children.size() + (it->expand ? fs.total : 0);
-    int per = std::max(2, cfg.maxChildren - 1);
-    int pages = count == 0 ? 0 : (count > cfg.maxChildren ? (count + per - 1) / per : 1);
+    bool spins = count > 12;  // у края в полукруг влезает около 12 пунктов, дальше кольцо прокручивается
     struct {
         std::wstring v, l;
         Color col;
     } cards[] = {
         {std::to_wstring(count), L"во втором кольце", c.gold},
         {it->dir ? std::to_wstring(fs.dirs) : L"—", L"папок внутри", c.text},
-        {pages ? std::to_wstring(pages) : L"—", pages > 1 ? L"страницы, листаются колесом" : L"страница", c.text}};
+        {count ? (spins ? L"крутится" : L"целиком") : L"—",
+         spins ? L"не влезает: тянуть или колесом" : L"всё видно сразу", c.text}};
     float cw = (w - 2 * ui.S(12)) / 3;
     for (int k2 = 0; k2 < 3; ++k2) {
         RectF cr(x + k2 * (cw + ui.S(12)), y, cw, ui.S(78));
@@ -152,7 +152,7 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
     struct Row {
         std::vector<std::wstring> keys;
         const wchar_t* text;
-    } rows[] = {{{L"Alt"}, L"отпустить над сектором: открыть"},
+    } rows[] = {{{L"2 клика"}, L"открыть; один клик - выбрать"},
                 {{L"Shift"}, L"открыть в VS Code"},
                 {{L"Ctrl"}, L"терминал в этой папке"},
                 {{L"ПКМ"}, L"зайти внутрь папки"}};

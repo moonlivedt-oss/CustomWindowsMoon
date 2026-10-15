@@ -123,7 +123,7 @@ void RadialMenu::Show(const Config* cfg, POINT cursor, const RECT& mon, bool lef
     EnsureSurface();
     left_ = leftEdge;
     full_ = false;
-    winMode_ = false;
+    winMode_ = netMode_ = false;
 
     // центр держим так, чтобы второе кольцо и плашки помещались по высоте экрана
     int margin = (int)(geo_.r4 + 92 * geo_.k);
@@ -144,7 +144,7 @@ void RadialMenu::ShowAround(const Config* cfg, POINT cursor, const RECT& work, U
     cfg_ = cfg;
     ring_ = &fullRing_;
     geo_ = MakeGeo(dpi / 96.0 * cfg->scale);
-    winMode_ = false;
+    winMode_ = netMode_ = false;
     PlaceAround(cursor, work);
     Start();
 }
@@ -166,6 +166,21 @@ void RadialMenu::ShowWindows(const Config* cfg, POINT cursor, const RECT& work, 
     geo_.r4 = 372 * k;
     geo_.h = (int)(2 * (geo_.r4 + 72 * k));
     winMode_ = true;
+    netMode_ = false;
+    PlaceAround(cursor, work);
+    Start();
+}
+
+void RadialMenu::ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi) {
+    PERF_SCOPE("menu.ShowNet");
+    if (items.empty()) return;
+    netRing_ = std::move(items);
+    demo_ = false;
+    cfg_ = cfg;
+    ring_ = &netRing_;
+    geo_ = MakeGeo(dpi / 96.0 * cfg->scale);
+    winMode_ = false;
+    netMode_ = true;
     PlaceAround(cursor, work);
     Start();
 }
@@ -216,6 +231,7 @@ void RadialMenu::Start() {
     open_ = true;
     closing_ = false;
     altWasDown_ = GetAsyncKeyState(VK_MENU) & 0x8000;
+    reached_ = false;
     if (altWasDown_) {
         // отпускание Alt больше ничего не открывает и уйдёт окну под меню - а там включит строку меню;
         // пустое нажатие, пока Alt ещё зажат, это гасит
@@ -310,7 +326,10 @@ void RadialMenu::Tick() {
             OnDragLeave();
         // Во время перетаскивания наведение задаёт сама Windows (OnDragOver), иначе два источника спорят.
         if (!dragging_) UpdateHover(h, now);
-        if (!demo_ && h.dist > Extent() + 170 * geo_.k) Close();  // курсор увели далеко - меню само гаснет
+        // курсор увели далеко - меню само гаснет; но кольцо из угла открывается в стороне от курсора,
+        // поэтому считаем только после того, как курсор в нём побывал
+        if (h.dist <= Extent()) reached_ = true;
+        if (!demo_ && reached_ && h.dist > Extent() + 170 * geo_.k) Close();
 
         bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
         bool mouseDown = GetAsyncKeyState(VK_LBUTTON) & 0x8000;

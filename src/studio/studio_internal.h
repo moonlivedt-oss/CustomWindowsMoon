@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "desk/lockscreen.h"
+#include "net/net.h"
 #include "core/config.h"
 #include "core/themes.h"
 #include "ui/ui.h"
@@ -26,7 +27,7 @@ inline constexpr wchar_t kClass[] = L"MoonRadialStudio";
 inline constexpr UINT WM_RUN = WM_APP + 40;
 inline constexpr UINT_PTR kSaveTimer = 1;
 
-enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_KEYS };
+enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_KEYS };
 enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE };
 
 // идентификаторы элементов: постоянные и диапазоны для списков
@@ -134,7 +135,23 @@ enum Id {
     ID_LOGON_AVATAR_PICK,
     ID_LOGON_AVATAR_EMBLEM,
     ID_LOGON_CRISP,
+    ID_NET_CHECK,
+    ID_NET_SMART,
+    ID_NET_PROXY,
+    ID_NET_VPN,
+    ID_NET_IP,
+    ID_NET_ADAPTER,
+    ID_NET_FW_RESTORE,
+    ID_NET_DEEP,
+    ID_NET_DNS,
+    ID_NET_DNS_TEST,
+    ID_NET_ADMIN,
+    ID_NET_WATCH,
+    ID_NET_EXIT,
+    ID_NET_GAME,
+    ID_NET_INTERVAL,
     ID_BACKUP = 7000,      // +i
+    ID_NET_KILL = 8000,    // +i: «Завершить» у прокси-процесса
     ID_SECTOR = 1000,      // +i
     ID_CHILD = 2000,       // +j*8 + поле
     ID_THEME = 3000,       // +i
@@ -173,6 +190,18 @@ struct IconJob {
     std::wstring out, message, previous;
     COLORREF body = 0, accent = 0;
     std::wstring name;
+    HWND wnd = nullptr;
+};
+
+// Работа раздела «Сеть» в своём потоке: журнал и отчёт под замком, страница только читает.
+struct NetJob {
+    SRWLOCK lock = SRWLOCK_INIT;
+    volatile bool done = false;
+    bool ok = false, hasReport = false;
+    net::Report report;
+    std::vector<std::wstring> log;
+    std::wstring title;
+    std::function<bool(const net::Log&, NetJob&)> work;
     HWND wnd = nullptr;
 };
 
@@ -242,6 +271,9 @@ private:
     void DeskPage(const RectF& r);
     void SystemPage(const RectF& r);
     void StylePage(const RectF& r);
+    void NetPage(const RectF& r);
+    void NetCheck();
+    void NetRun(const std::wstring& title, std::function<bool(const net::Log&, NetJob&)> work);
     void CornerMenu(int corner, int kind);  // kind: 0 задержка, 1 двойной толчок, 2 колесо
     void SetCorner(int corner, int kind, const std::wstring& val);
     bool CaptureKey(WPARAM vk);
@@ -258,6 +290,10 @@ private:
     bool FieldOrText(int id, const RectF& r, const RectF& view, const std::wstring& value,
                      std::function<void(const std::wstring&)> onChange, const std::wstring& ph = L"");
 
+public:
+    void GoPage(Page p);
+
+private:
     Page page_ = PAGE_RINGS;
     Overlay ov_ = OV_NONE;
     int ring_ = 0, sel_ = 0, tab_ = 0, tourStep_ = 0;
@@ -268,6 +304,11 @@ private:
     std::shared_ptr<lockscreen::Job> lockJob_;
     std::wstring logonStatus_;
     std::wstring boostStatus_;
+    std::shared_ptr<NetJob> netJob_;
+    std::shared_ptr<net::Report> netReport_;
+    std::vector<net::ProxyProc> netProcs_;
+    ULONGLONG netProcsAt_ = 0, netHistAt_ = 0;
+    std::vector<std::pair<std::wstring, std::wstring>> netHist_;
     std::shared_ptr<volatile int> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
     std::wstring boostDir_;
     bool boostPurge_ = true;

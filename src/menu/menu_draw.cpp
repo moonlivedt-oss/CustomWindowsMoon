@@ -322,7 +322,15 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
         return L"Отпустите Alt над окном   |   средняя кнопка: закрыть";
     }
     if (it && !clickKey_.empty() && clickKey_ == hoverKey_ && GetTickCount64() - clickT_ <= GetDoubleClickTime())
-        return L"Ещё раз - открыть";
+        return netMode_ ? L"Ещё раз - выполнить" : L"Ещё раз - открыть";
+    if (netMode_) {
+        alpha = 0.55;
+        if (!it) {  // ни на что не наведено - внизу состояние сети
+            alpha = 1;
+            return netStatus ? netStatus() : L"";
+        }
+        return it->path.empty() ? L"Наведите на действие" : L"2 клика: выполнить";
+    }
     if (it && ToDialog(*it)) return it->dir ? L"Перейти сюда в диалоге" : L"Выбрать в диалоге";
     if (it && !it->special && !it->full.empty()) {
         if (shift_ && ctrl_) return L"Показать в Проводнике";
@@ -574,12 +582,18 @@ void RadialMenu::Render() {
         bool card = !winMode_ && HoveredItem() && GetTickCount64() - keyT_ > 120;
         std::wstring top = card ? L"" : TopHint();
         DrawPill(g, top, ExeDir() + L"\\icons\\back.png", cy - geo_.r4 * grow - ph - 18 * geo_.k, openE, false);
+        // кольцо у верхнего края (например, из угла): над ним карточке места нет - она встаёт вниз,
+        // на место подсказки
+        bool below = false;
         if (card) {
+            MONITORINFO mi{sizeof(mi)};
+            GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &mi);
+            below = origin_.y + cy - geo_.r4 * grow - 90 * geo_.k < mi.rcMonitor.top;
             PERF_SCOPE("menu.r.Card");
-            DrawInfoCard(g, grow, openE);
+            DrawInfoCard(g, grow, openE, below);
         }
         double ha = 1;
-        std::wstring bottom = BottomHint(ha);
+        std::wstring bottom = below ? L"" : BottomHint(ha);
         bool search = mode_ == Mode::Search;
         DrawPill(g, bottom, search ? ExeDir() + L"\\icons\\search.png" : L"", cy + geo_.r4 * grow + 18 * geo_.k,
                  openE * ha, search || dragging_ || ha >= 1);

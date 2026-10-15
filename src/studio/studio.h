@@ -10,6 +10,9 @@
 void OpenEditor(HINSTANCE inst, const std::wstring& cfgPath, std::function<void()> onSaved,
                 std::function<void(bool left, HWND studio)> showMenu);
 
+// Открытая студия переходит в раздел «Сеть» (из кольца сети: «Проверить сеть»).
+void EditorGoNet();
+
 // Для цикла сообщений: горячие клавиши студии (Ctrl+Z, Enter в поле).
 bool EditorPreTranslate(MSG* m);
 

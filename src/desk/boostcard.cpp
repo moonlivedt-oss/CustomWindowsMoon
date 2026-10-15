@@ -19,19 +19,17 @@ namespace {
 
 constexpr wchar_t kClass[] = L"MoonRadialBoost";
 constexpr float kW = 390, kH = 138, kM = 26;  // карточка и поля под тень, до масштаба
-BoostCard* g_self = nullptr;
 
 }  // namespace
 
 void BoostCard::Create(HINSTANCE inst) {
-    g_self = this;
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = Proc;
     wc.hInstance = inst;
     wc.lpszClassName = kClass;
     RegisterClassExW(&wc);
     wnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, kClass, L"Boost",
-                           WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
+                           WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, this);
 }
 
 void BoostCard::Destroy() {
@@ -39,7 +37,8 @@ void BoostCard::Destroy() {
     wnd_ = nullptr;
 }
 
-void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme) {
+void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme,
+                     int holdMs) {
     MONITORINFO mi{sizeof(mi)};
     HMONITOR mon = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
     GetMonitorInfoW(mon, &mi);
@@ -53,7 +52,7 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
     theme_ = theme;
     open_ = true;
     // вопрос висит дольше, итог - коротко
-    until_ = GetTickCount64() + (mode == DONE ? 4500 : mode == WORKING ? 60000 : 16000);
+    until_ = GetTickCount64() + (holdMs > 0 ? holdMs : mode == DONE ? 4500 : mode == WORKING ? 60000 : 16000);
     dirty_ = true;
 }
 
@@ -98,6 +97,8 @@ void BoostCard::Tick() {
     };
     step(slide_, open_ ? 1.0f : 0.0f, 0.09f, 0.1f);
     for (int i = 0; i < kHits; ++i) step(hover_[i], i == hot_ ? 1.0f : 0.0f, 0.2f, 0.14f);
+    // нижняя карточка видна - встаём над ней
+    step(lift_, below && below->slide_ > 0.01f ? below->slide_ : 0.0f, 0.12f, 0.08f);
     if (slide_ <= 0) {
         if (IsWindowVisible(wnd_)) {
             ShowWindow(wnd_, SW_HIDE);
@@ -109,7 +110,9 @@ void BoostCard::Tick() {
 }
 
 LRESULT CALLBACK BoostCard::Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
-    if (g_self && g_self->wnd_ == h) return g_self->Handle(msg, wp, lp);
+    if (msg == WM_NCCREATE) SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+    auto* self = (BoostCard*)GetWindowLongPtrW(h, GWLP_USERDATA);
+    if (self && self->wnd_ == h) return self->Handle(msg, wp, lp);
     return DefWindowProcW(h, msg, wp, lp);
 }
 
@@ -244,8 +247,12 @@ void BoostCard::Render() {
                     Pen bpn(Color(50, 255, 255, 255), 1 * k);
                     g.DrawPath(&bpn, &bp);
                 }
-                std::wstring label = h == H_YES ? (mode_ == OFFER ? L"Освободить" : L"Вернуть")
-                                                : (mode_ == OFFER ? L"Не сейчас" : L"Не нужно");
+                std::wstring label = h == H_YES ? (!yesLabel.empty()  ? yesLabel
+                                                   : mode_ == OFFER ? L"Освободить"
+                                                                    : L"Вернуть")
+                                                : (!noLabel.empty()  ? noLabel
+                                                   : mode_ == OFFER ? L"Не сейчас"
+                                                                    : L"Не нужно");
                 double lum = (0.299 * ac.GetR() + 0.587 * ac.GetG() + 0.114 * ac.GetB()) / 255;
                 SolidBrush lb(primary ? (lum > 0.72 ? Color(255, 24, 20, 28) : Color(255, 255, 255, 255)) : fg);
                 StringFormat cf;
@@ -270,7 +277,8 @@ void BoostCard::Render() {
     float e = (float)EaseOut(slide_);
     LONG x = work_.right - W + (LONG)(kM * k) - (LONG)(14 * k);
     LONG yShown = work_.bottom - H + (LONG)(kM * k) - (LONG)(14 * k), yHidden = work_.bottom - (LONG)(kM * k);
-    POINT at{x, (LONG)(yHidden + (yShown - yHidden) * e)};
+    LONG lift = (LONG)(EaseOut(lift_) * (kH + 12) * k);  // над нижней карточкой
+    POINT at{x, (LONG)(yHidden + (yShown - lift - yHidden) * e)};
     POINT src{0, 0};
     SIZE sz{W, H};
     BLENDFUNCTION bf{AC_SRC_OVER, 0, (BYTE)(255 * std::min(1.0f, e * 1.4f)), AC_SRC_ALPHA};

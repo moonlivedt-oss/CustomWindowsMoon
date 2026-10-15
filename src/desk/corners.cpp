@@ -51,6 +51,7 @@ const Action kActions[] = {
     {L"mute", L"Выключить звук"},
     {L"pin", L"Окно поверх всех"},
     {L"boost", L"Освободить память"},
+    {L"net", L"Кольцо сети"},
 };
 
 const Action kWheel[] = {
@@ -192,6 +193,10 @@ void (*g_boost)() = nullptr;
 
 void SetBoost(void (*boost)()) { g_boost = boost; }
 
+void (*g_net)() = nullptr;
+
+void SetNet(void (*net)()) { g_net = net; }
+
 void Run(const std::wstring& a) {
     if (a.empty()) return;
     if (a == L"windows") {
@@ -203,6 +208,10 @@ void Run(const std::wstring& a) {
     if (a == L"start") return Keys({VK_LWIN});
     if (a == L"boost") {
         if (g_boost) g_boost();
+        return;
+    }
+    if (a == L"net") {
+        if (g_net) g_net();
         return;
     }
     if (a == L"screen_off") {

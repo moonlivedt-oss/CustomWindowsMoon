@@ -119,6 +119,14 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.boostRestore = ParseBool(val);
             else if (key == L"boost_after")
                 cfg.boostAfter = ParseBool(val);
+            else if (key == L"net_watch")
+                cfg.netWatch = ParseBool(val);
+            else if (key == L"net_exit")
+                cfg.netExit = ParseBool(val);
+            else if (key == L"net_game")
+                cfg.netGame = ParseBool(val);
+            else if (key == L"net_interval")
+                cfg.netInterval = std::clamp(_wtoi(val.c_str()), 5, 600);
             else if (key == L"hex_glass")
                 cfg.hexGlass = ParseBool(val);
             else if (key == L"boot_portal")
@@ -327,6 +335,12 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"boost_offer = " << (c.boostOffer ? 1 : 0) << L"\n";
     o << L"boost_restore = " << (c.boostRestore ? 1 : 0) << L"\n";
     o << L"boost_after = " << (c.boostAfter ? 1 : 0) << L"\n";
+    o << L"# сеть: net_watch - следить за интернетом (при обрыве карточка «Починить?»), net_exit - сообщать о смене\n"
+         L"# выходного узла, net_game - при запуске игры проверить маршрут и пинг, net_interval - период проверки, с\n";
+    o << L"net_watch = " << (c.netWatch ? 1 : 0) << L"\n";
+    o << L"net_exit = " << (c.netExit ? 1 : 0) << L"\n";
+    o << L"net_game = " << (c.netGame ? 1 : 0) << L"\n";
+    o << L"net_interval = " << c.netInterval << L"\n";
     o << L"# сотовое стекло в углах, кольце, свечении заряда и волне игрового режима\n";
     o << L"hex_glass = " << (c.hexGlass ? 1 : 0) << L"\n";
     o << L"# портал при входе после включения и после сна / выключения экрана из угла\n";

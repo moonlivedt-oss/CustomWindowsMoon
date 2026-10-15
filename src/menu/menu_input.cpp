@@ -146,7 +146,7 @@ bool RadialMenu::OnRawKey(DWORD vk, DWORD scan, bool down) {
 }
 
 void RadialMenu::OnChar(wchar_t ch) {
-    if (query_.empty() && ch == L' ') return;
+    if (netMode_ || (query_.empty() && ch == L' ')) return;  // в кольце сети искать нечего
     if (!poolBuilt_) BuildSearchPool();
     bool entering = mode_ != Mode::Search;
     query_ += ch;
@@ -322,6 +322,15 @@ void RadialMenu::OnClick(POINT p) {
 void RadialMenu::Activate(const Item& it) {
     if (it.special == 1) {
         TurnPage(1);
+        return;
+    }
+    if (it.special == 3) {  // действие сети: делает main, меню только гаснет
+        if (it.path.empty()) return;  // группа (DNS, пинг): действия - во втором кольце
+        std::wstring key = it.path;
+        StopHooks();
+        Launch();
+        if (cfg_->sounds) Sound::Play(Sound::Select);
+        if (onNet) onNet(key);
         return;
     }
     if (it.special == 2) {

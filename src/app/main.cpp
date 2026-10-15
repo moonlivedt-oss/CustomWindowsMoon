@@ -12,6 +12,7 @@
 
 #include "app/autostart.h"
 #include "app/devcli.h"
+#include "app/netui.h"
 #include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -35,6 +36,7 @@
 #include "gfx/accent.h"
 #include "gfx/sound.h"
 #include "menu/menu.h"
+#include "net/watch.h"
 #include "studio/studio.h"
 
 namespace {
@@ -114,6 +116,7 @@ void Reload() {
         UnregisterHotKey(g_wnd, kHotWindows);
         if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
     }
+    if (g_wnd) netui::Apply(g_cfg);
     if (g_wnd) SetTimer(g_wnd, kWarmTimer, 500, nullptr);  // прогреть новые значки
 }
 
@@ -163,6 +166,7 @@ void Poll() {
     g_battery.Tick(g_cfg);
     g_snip.Tick();
     g_boostCard.Tick();
+    netui::Tick();
     if (!alt) {
         g_armed = true;
         return;
@@ -347,6 +351,7 @@ void OnGameMode(bool on) {
     g_deskClick.Hook(!on);
     UpdateTrayTip();
     // Boost: во время игры таймер и приоритеты, при запуске - предложить освободить память
+    netui::Game(on, g_game.GamePids(), g_game.Reason());  // сеть в игре: туннель и пинг до сервера
     if (on) {
         boost::GameTweaks(boost::Load(BoostDir()), true);
         if (g_cfg.boostOffer) OfferBoost(false);
@@ -487,6 +492,13 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_WTSSESSION_CHANGE:
             g_reveal.OnSession(wp);
+            if (wp == WTS_SESSION_UNLOCK) netui::Wake();
+            return 0;
+        case netui::WM_NET_EVENT:
+            netui::OnEvent(lp);
+            return 0;
+        case netui::WM_NET_JOB:
+            netui::OnJob(lp);
             return 0;
         case WM_APP + 50:  // для проверки: выполнить действие угла «выключить экран»
             corners::Run(L"screen_off");
@@ -494,6 +506,18 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP + 51:  // для проверки: портал, как при входе после включения
             g_reveal.Intro();
             return 0;
+        case WM_APP + 52:  // для проверки: кольцо сети у курсора, как из угла
+            corners::Run(L"net");
+            return 0;
+        case WM_APP + 53: {  // для проверки: карточка обрыва, как от сторожа (причина выдуманная)
+            auto* e = new net::Event;
+            e->kind = net::Event::DOWN;
+            e->report.fix = net::FIX_PROXY;
+            e->report.fixLabel = L"Сбросить прокси";
+            e->report.fixReason = L"Застрял мёртвый прокси 127.0.0.1:10809 - сброс вернёт прямое подключение.";
+            netui::OnEvent((LPARAM)e);
+            return 0;
+        }
         case WM_POWERBROADCAST:
             if (wp == PBT_POWERSETTINGCHANGE) {
                 auto* s = reinterpret_cast<POWERBROADCAST_SETTING*>(lp);
@@ -501,6 +525,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     g_reveal.OnDisplay(*reinterpret_cast<DWORD*>(s->Data) == 1);
             } else {
                 g_reveal.OnPower(wp);
+                if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) netui::Wake();
             }
             return TRUE;
         case WM_DESTROY:
@@ -508,6 +533,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             if (g_displayNotify) UnregisterPowerSettingNotification(g_displayNotify);
             g_wave.Destroy();
             g_boostCard.Destroy();
+            netui::Shutdown();
             boost::GameTweaks(boost::Load(BoostDir()), false);
             g_frame.Destroy();
             g_game.Shutdown();
@@ -616,6 +642,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_wave.Create(inst);
     g_boostCard.Create(inst);
     corners::SetBoost([] { OfferBoost(true); });
+    netui::Init(inst, g_wnd, &g_cfg, &g_boostCard, [] {
+        OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
+        EditorGoNet();
+    });
+    corners::SetNet([] {
+        if (g_menu.IsOpen()) return;
+        netui::ShowRing(g_menu);
+    });
     // вошли в Windows только что: стол открывается порталом
     if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
     g_game.onChange = OnGameMode;

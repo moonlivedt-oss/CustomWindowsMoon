@@ -171,6 +171,18 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
     return found;
 }
 
+std::vector<DWORD> GameMode::GamePids() const {
+    std::vector<DWORD> out;
+    for (const auto& [pid, name] : games_)
+        if (!name.empty()) out.push_back(pid);
+    if (out.empty()) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+        if (pid) out.push_back(pid);
+    }
+    return out;
+}
+
 void GameMode::Tick(const Config& cfg) {
     ULONGLONG now = GetTickCount64();
     if (now - lastCheck_ < kCheckMs) return;

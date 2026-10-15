@@ -405,13 +405,16 @@ RadialMenu::LabelFit RadialMenu::LayoutLabel(const Ring& r, double a0, double a1
 }
 
 // Карточка над кольцом: что это, сколько внутри, когда менялось, где лежит.
-void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha) {
+void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below) {
     const Item* it = HoveredItem();
-    if (!it || winMode_ || it->special || alpha <= 0.01) return;
+    if (!it || winMode_ || (it->special && it->special != 3) || alpha <= 0.01) return;
     double a = alpha * Clamp01((GetTickCount64() - keyT_ - 120) / 160.0);
     if (a <= 0.01) return;
     std::wstring kind, detail, path;
-    if (it->full.empty()) {
+    if (it->special == 3) {  // действие сети: что сделает
+        kind = it->path.empty() ? L"Группа" : L"Действие";
+        detail = it->note;
+    } else if (it->full.empty()) {
         kind = L"Группа";
         int n = (int)it->children.size();
         if (n) detail = Plural(n, L"пункт", L"пункта", L"пунктов");
@@ -422,14 +425,16 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha) {
         detail = in.detail;
         path = in.path;
     }
-    std::wstring line2 = kind + (detail.empty() ? L"" : L"   |   " + detail);
+    // у действий сети пояснение длинное: ему две строки с переносом вместо строки пути
+    bool note2 = it->special == 3;
+    std::wstring line2 = note2 ? detail : kind + (detail.empty() ? L"" : L"   |   " + detail);
 
     const double k = geo_.k, pad = 10 * k, isz = 38 * k;
     double fTitle = geo_.font * 1.12, fSmall = geo_.font * 0.92;
-    double ch = pad * 2 + fTitle * 1.3 + fSmall * 1.35 * (path.empty() ? 1 : 2);
+    double ch = pad * 2 + fTitle * 1.3 + fSmall * 1.35 * (path.empty() && !note2 ? 1 : 2);
     double cw = std::min(geo_.w - 24 * k, 340 * k);
     double cx = full_ ? (geo_.w - cw) / 2 : left_ ? 12 * k : geo_.w - 12 * k - cw;
-    double cy = center_.y - geo_.r4 * grow - 14 * k - ch;
+    double cy = below ? center_.y + geo_.r4 * grow + 14 * k : center_.y - geo_.r4 * grow - 14 * k - ch;
     RectF card((REAL)cx, (REAL)cy, (REAL)cw, (REAL)ch);
     Palette pal = Pal(cfg_);
     BYTE ba = (BYTE)(240 * a);
@@ -459,7 +464,13 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha) {
     y += fTitle * 1.3;
     Font small(Family(), (REAL)fSmall, FontStyleRegular, UnitPixel);
     SolidBrush mb(WithAlpha(pal.text, (BYTE)(175 * a)));
-    g.DrawString(line2.c_str(), -1, &small, RectF((REAL)tx, (REAL)y, (REAL)tw, (REAL)(fSmall * 1.4)), &sf, &mb);
+    if (note2) {
+        StringFormat wf;
+        wf.SetTrimming(StringTrimmingEllipsisWord);
+        g.DrawString(line2.c_str(), -1, &small, RectF((REAL)tx, (REAL)y, (REAL)tw, (REAL)(fSmall * 2.75)), &wf, &mb);
+    } else {
+        g.DrawString(line2.c_str(), -1, &small, RectF((REAL)tx, (REAL)y, (REAL)tw, (REAL)(fSmall * 1.4)), &sf, &mb);
+    }
     if (!path.empty()) {
         y += fSmall * 1.35;
         StringFormat pf(StringFormatFlagsNoWrap);

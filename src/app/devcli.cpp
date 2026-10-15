@@ -19,6 +19,7 @@
 #include "desk/ocr.h"
 #include "desk/startbg.h"
 #include "desk/whreg.h"
+#include "net/net.h"
 
 namespace devcli {
 
@@ -156,6 +157,28 @@ int GameTest() {
     return 0;
 }
 
+// Проверка сети без окна: отчёт в net_out.txt (то же, что раздел «Сеть» в студии)
+int NetDiag() {
+    net::Report r = net::Diagnose(true);
+    static const wchar_t* kLevel[] = {L"ok  ", L"info", L"WARN", L"BAD "};
+    const std::wstring nl = L"\r\n";
+    std::wstring s = net::Summary(r) + nl + nl;
+    for (const net::Check& c : r.checks) s += std::wstring(kLevel[c.level]) + L"  " + c.title + L": " + c.detail + nl;
+    s += nl + L"Совет: " + (r.fixLabel.empty() ? std::wstring(L"нет") : r.fixLabel + L" - " + r.fixReason) + nl;
+    s += nl + L"Прокси-процессы:" + nl;
+    for (const net::ProxyProc& p : net::ProxyProcesses()) {
+        s += L"  " + p.name + L" pid " + std::to_wstring(p.pid) + L" порты";
+        for (int port : p.ports) s += L" " + std::to_wstring(port);
+        s += nl;
+    }
+    s += nl + L"DNS:" + nl;
+    for (const net::DnsResult& d : net::TestDns())
+        s += L"  " + d.name + L" " + d.ip + L": " + std::to_wstring(d.ms) + L" мс" + nl;
+    s += nl + L"Задача с правами: " + std::wstring(net::AdminReady() ? L"есть" : L"нет") + nl;
+    WriteOut(L"net_out.txt", s);
+    return 0;
+}
+
 }  // namespace
 
 bool HasFlag(const wchar_t* flag) { return Has(Args(), flag); }
@@ -176,6 +199,10 @@ bool Run(int& exitCode) {
         exitCode = startbg::Apply(CurrentTheme(LoadOwnConfig()), msg) ? 0 : 1;
     } else if (Has(args, L"--purge")) {  // очистка памяти; запускает задача планировщика с правами
         exitCode = boost::PurgeMain(boost::Load(boost::Dir(LoadOwnConfig().boostDir)));
+    } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
+        exitCode = net::AdminMain();
+    } else if (Has(args, L"--net-diag")) {
+        exitCode = NetDiag();
     } else if (Has(args, L"--lock-apply")) {
         exitCode = LockApply();
     } else if (Has(args, L"--game-test")) {

@@ -26,7 +26,8 @@ void Run(const std::wstring& action);
 void SetWindowsRing(void (*show)());
 void SetLock(void (*lock)());
 void SetScreenOff(bool (*off)());
-void SetBoost(void (*boost)());  // действие boost: карточка «освободить память» (main.cpp)  // screen_off: выключить с переходом; false - выключить по-старому  // действие lock: блокировку с переходом делает main.cpp  // действие windows: кольцо окон показывает main.cpp
+void SetBoost(void (*boost)());
+void SetNet(void (*net)());  // действие net: кольцо «Сеть» (main.cpp)  // действие boost: карточка «освободить память» (main.cpp)  // screen_off: выключить с переходом; false - выключить по-старому  // действие lock: блокировку с переходом делает main.cpp  // действие windows: кольцо окон показывает main.cpp
 // keys:ctrl+shift+esc -> «Ctrl + Shift + Esc»; виртуальная клавиша -> имя для keys:
 std::wstring KeyName(UINT vk);
 // на этом мониторе открыта игра или видео на весь экран

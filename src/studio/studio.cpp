@@ -36,7 +36,7 @@ void Studio::Paint() {
     // по одному имени на каждый раздел из enum Page, в том же порядке
     static const char* kPageScope[] = {"studio.page.rings", "studio.page.themes", "studio.page.behavior",
                                        "studio.page.desk",  "studio.page.system", "studio.page.style",
-                                       "studio.page.keys"};
+                                       "studio.page.net",   "studio.page.keys"};
     static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_KEYS + 1, "имя замера на каждый раздел");
     perf::Scope pageScope(kPageScope[page_]);
     PAINTSTRUCT ps;
@@ -113,6 +113,9 @@ void Studio::Frame(float w, float h) {
             break;
         case PAGE_STYLE:
             StylePage(body);
+            break;
+        case PAGE_NET:
+            NetPage(body);
             break;
         case PAGE_KEYS:
             KeysPage(body);
@@ -193,6 +196,7 @@ void Studio::Rail(const RectF& r) {
                  {PAGE_DESK, L"rail-desk.png", L"music.png", L"Стол"},
                  {PAGE_SYSTEM, L"rail-system.png", L"files.png", L"Система"},
                  {PAGE_STYLE, L"rail-style.png", L"game.png", L"Красота"},
+                 {PAGE_NET, L"rail-net.png", L"net-globe.png", L"Сеть"},
                  {PAGE_KEYS, L"rail-keys.png", L"terminal.png", L"Клавиши"}};
     float y = ui.S(72);
     for (auto& e : items) {
@@ -247,6 +251,15 @@ void Studio::StatusBar(const RectF& r) {
     if (ui.Button(ID_UNDO, u, L"Отменить", undo_.empty() ? Kind::Ghost : Kind::Secondary)) Undo();
     ui.Tip(ID_UNDO,
            undo_.empty() ? L"Пока нечего отменять" : L"Отменить последнее изменение (Ctrl+Z). Вернуть - Ctrl+Y");
+}
+
+void Studio::GoPage(Page p) {
+    if (page_ == p) return;
+    pageAt_ = GetTickCount64();
+    renaming_ = -1;
+    page_ = p;
+    ui.ResetScroll(ID_PAGE_SCROLL);
+    if (wnd) InvalidateRect(wnd, nullptr, FALSE);
 }
 
 void Studio::Open() {
@@ -517,6 +530,10 @@ void Preview(int what) {
     if (g_preview) g_preview(what);
 }
 }  // namespace studio
+
+void EditorGoNet() {
+    if (g_st) g_st->GoPage(PAGE_NET);
+}
 
 void SetEditorPreview(std::function<void(int)> f) { studio::g_preview = std::move(f); }
 
