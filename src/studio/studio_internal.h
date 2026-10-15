@@ -13,6 +13,7 @@
 
 #include "desk/lockscreen.h"
 #include "net/net.h"
+#include "tools/tools.h"
 #include "core/config.h"
 #include "core/themes.h"
 #include "ui/ui.h"
@@ -27,7 +28,7 @@ inline constexpr wchar_t kClass[] = L"MoonRadialStudio";
 inline constexpr UINT WM_RUN = WM_APP + 40;
 inline constexpr UINT_PTR kSaveTimer = 1;
 
-enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_KEYS };
+enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_TOOLS, PAGE_KEYS };
 enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE };
 
 // идентификаторы элементов: постоянные и диапазоны для списков
@@ -150,8 +151,31 @@ enum Id {
     ID_NET_EXIT,
     ID_NET_GAME,
     ID_NET_INTERVAL,
+    ID_TOOLS_TAB,
+    ID_TOOLS_ADD,
+    ID_TOOLS_ADD_BTN,
+    ID_TOOLS_CLEAN,
+    ID_TOOLS_SYSCLEAN,
+    ID_TOOLS_RESTORE,
+    ID_TOOLS_ENV_NAME,
+    ID_TOOLS_ENV_VALUE,
+    ID_TOOLS_ENV_SET,
+    ID_TOOLS_HEALTH,
+    ID_TOOLS_SCAN_PATH,
+    ID_TOOLS_SCAN,
+    ID_TOOLS_SCAN_UP,
+    ID_TOOLS_JUNK_SCAN,
+    ID_TOOLS_LOCK_PATH,
+    ID_TOOLS_LOCK,
+    ID_TOOLS_LOCK_CLIP,
     ID_BACKUP = 7000,      // +i
     ID_NET_KILL = 8000,    // +i: «Завершить» у прокси-процесса
+    ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
+    ID_TOOLS_SIZE = 8400,    // +i*2: «Внутрь» и «Открыть» в «Что занимает место»
+    ID_TOOLS_JUNK = 8450,    // +i: «Очистить» у кэша
+    ID_TOOLS_START = 8500,   // +i: переключатель автозагрузки
+    ID_TOOLS_PORT = 8600,    // +i: «Завершить» у порта
+    ID_TOOLS_LOCKER = 8700,  // +i: «Завершить» у того, кто держит файл
     ID_SECTOR = 1000,      // +i
     ID_CHILD = 2000,       // +j*8 + поле
     ID_THEME = 3000,       // +i
@@ -202,6 +226,21 @@ struct NetJob {
     std::vector<std::wstring> log;
     std::wstring title;
     std::function<bool(const net::Log&, NetJob&)> work;
+    HWND wnd = nullptr;
+};
+
+// Работа раздела «Утилиты» в своём потоке; что успело посчитаться - под замком.
+struct ToolsJob {
+    SRWLOCK lock = SRWLOCK_INIT;
+    volatile bool done = false, cancel = false;
+    volatile long progress = 0;
+    bool ok = false, hasSizes = false, hasJunk = false, hasPhys = false;
+    std::vector<tools::FolderSize> sizes;
+    std::vector<tools::Junk> junk;
+    std::vector<tools::Physical> phys;
+    std::vector<std::wstring> log;
+    std::wstring title;
+    std::function<bool(const tools::Log&, ToolsJob&)> work;
     HWND wnd = nullptr;
 };
 
@@ -272,6 +311,9 @@ private:
     void SystemPage(const RectF& r);
     void StylePage(const RectF& r);
     void NetPage(const RectF& r);
+    void ToolsPage(const RectF& r);
+    void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
+    void ToolsScan(const std::wstring& dir);
     void NetCheck();
     void NetRun(const std::wstring& title, std::function<bool(const net::Log&, NetJob&)> work);
     void CornerMenu(int corner, int kind);  // kind: 0 задержка, 1 двойной толчок, 2 колесо
@@ -292,6 +334,7 @@ private:
 
 public:
     void GoPage(Page p);
+    void GoTools(int tab, const std::wstring& scan);
 
 private:
     Page page_ = PAGE_RINGS;
@@ -309,6 +352,20 @@ private:
     std::vector<net::ProxyProc> netProcs_;
     ULONGLONG netProcsAt_ = 0, netHistAt_ = 0;
     std::vector<std::pair<std::wstring, std::wstring>> netHist_;
+    int toolsTab_ = 0;
+    ULONGLONG toolsAt_ = 0;
+    std::shared_ptr<ToolsJob> toolsJob_;
+    std::vector<tools::PathEntry> toolsPath_;
+    std::vector<tools::Which> toolsWhich_;
+    std::vector<tools::EnvVar> toolsEnv_;
+    std::vector<tools::Volume> toolsVols_;
+    std::vector<tools::Physical> toolsPhys_;
+    std::vector<tools::Junk> toolsJunk_;
+    std::vector<tools::StartItem> toolsStarts_;
+    std::vector<tools::Listener> toolsPorts_;
+    std::vector<tools::Locker> toolsLockers_;
+    bool toolsLockChecked_ = false;
+    std::wstring toolsAddPath_, toolsEnvName_, toolsEnvValue_, toolsScanPath_, toolsLockPath_;
     std::shared_ptr<volatile int> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
     std::wstring boostDir_;
     bool boostPurge_ = true;

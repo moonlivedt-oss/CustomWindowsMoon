@@ -20,6 +20,7 @@
 #include "desk/startbg.h"
 #include "desk/whreg.h"
 #include "net/net.h"
+#include "tools/tools.h"
 
 namespace devcli {
 
@@ -179,6 +180,45 @@ int NetDiag() {
     return 0;
 }
 
+// Утилиты без окна: отчёт в tools_out.txt
+int ToolsDiag() {
+    const std::wstring nl = L"\r\n";
+    std::wstring s = L"PATH:" + nl;
+    for (const tools::PathEntry& e : tools::ReadPath())
+        s += std::wstring(e.system ? L"  sys " : L"  usr ") + (e.dead ? L"DEAD " : e.dup ? L"DUP  " : L"     ") + e.raw +
+             (e.provides.empty() ? L"" : L"   <- " + e.provides) + nl;
+    s += nl + L"Что найдётся первым:" + nl;
+    for (const tools::Which& w : tools::WhichAll()) {
+        s += L"  " + w.cmd + L" = " + w.path;
+        for (const std::wstring& o : w.other) s += L" | затенён: " + o;
+        s += nl;
+    }
+    s += nl + L"Тома:" + nl;
+    for (const tools::Volume& v : tools::Volumes())
+        s += L"  " + v.root + L" " + v.label + L" " + v.fs + L": свободно " + tools::Bytes(v.free) + L" из " +
+             tools::Bytes(v.total) + nl;
+    s += nl + L"Диски:" + nl;
+    for (const tools::Physical& d : tools::PhysicalDisks())
+        s += L"  " + d.name + (d.ssd ? L" SSD" : L" HDD") + L" здоровье " + std::to_wstring(d.health) + L" " +
+             tools::Bytes(d.size) + nl;
+    s += nl + L"Кэши:" + nl;
+    for (const tools::Junk& j : tools::FindJunk()) s += L"  " + j.name + L" " + tools::Bytes(j.bytes) + L" " + j.path + nl;
+    s += nl + L"Автозагрузка:" + nl;
+    for (const tools::StartItem& it : tools::StartupItems())
+        s += std::wstring(it.enabled ? L"  on  " : L"  off ") + (it.canToggle ? L"   " : L"[A]") + it.where + L": " +
+             it.name + L" = " + it.command + nl;
+    s += nl + L"Порты:" + nl;
+    for (const tools::Listener& l : tools::Listeners())
+        if (l.dev || !l.udp)
+            s += std::wstring(l.dev ? L"  * " : L"    ") + (l.udp ? L"udp " : L"tcp ") + std::to_wstring(l.port) + L" " +
+                 l.process + L" pid " + std::to_wstring(l.pid) + nl;
+    s += nl + L"Кто держит RadialMenu.exe:" + nl;
+    for (const tools::Locker& k : tools::WhoLocks(ExeDir() + L"\\RadialMenu.exe"))
+        s += L"  " + k.name + L" pid " + std::to_wstring(k.pid) + nl;
+    WriteOut(L"tools_out.txt", s);
+    return 0;
+}
+
 }  // namespace
 
 bool HasFlag(const wchar_t* flag) { return Has(Args(), flag); }
@@ -201,6 +241,8 @@ bool Run(int& exitCode) {
         exitCode = boost::PurgeMain(boost::Load(boost::Dir(LoadOwnConfig().boostDir)));
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
+    } else if (Has(args, L"--tools-diag")) {
+        exitCode = ToolsDiag();
     } else if (Has(args, L"--net-diag")) {
         exitCode = NetDiag();
     } else if (Has(args, L"--lock-apply")) {

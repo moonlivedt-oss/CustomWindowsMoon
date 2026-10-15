@@ -125,6 +125,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.netExit = ParseBool(val);
             else if (key == L"net_game")
                 cfg.netGame = ParseBool(val);
+            else if (key == L"tools_disk_warn")
+                cfg.toolsDiskWarn = ParseBool(val);
             else if (key == L"net_interval")
                 cfg.netInterval = std::clamp(_wtoi(val.c_str()), 5, 600);
             else if (key == L"hex_glass")
@@ -341,6 +343,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"net_exit = " << (c.netExit ? 1 : 0) << L"\n";
     o << L"net_game = " << (c.netGame ? 1 : 0) << L"\n";
     o << L"net_interval = " << c.netInterval << L"\n";
+    o << L"# утилиты: карточка, когда на диске мало места\n";
+    o << L"tools_disk_warn = " << (c.toolsDiskWarn ? 1 : 0) << L"\n";
     o << L"# сотовое стекло в углах, кольце, свечении заряда и волне игрового режима\n";
     o << L"hex_glass = " << (c.hexGlass ? 1 : 0) << L"\n";
     o << L"# портал при входе после включения и после сна / выключения экрана из угла\n";

@@ -52,6 +52,7 @@ const Action kActions[] = {
     {L"pin", L"Окно поверх всех"},
     {L"boost", L"Освободить память"},
     {L"net", L"Кольцо сети"},
+    {L"tools", L"Кольцо утилит"},
 };
 
 const Action kWheel[] = {
@@ -197,6 +198,10 @@ void (*g_net)() = nullptr;
 
 void SetNet(void (*net)()) { g_net = net; }
 
+void (*g_tools)() = nullptr;
+
+void SetTools(void (*tools)()) { g_tools = tools; }
+
 void Run(const std::wstring& a) {
     if (a.empty()) return;
     if (a == L"windows") {
@@ -212,6 +217,10 @@ void Run(const std::wstring& a) {
     }
     if (a == L"net") {
         if (g_net) g_net();
+        return;
+    }
+    if (a == L"tools") {
+        if (g_tools) g_tools();
         return;
     }
     if (a == L"screen_off") {

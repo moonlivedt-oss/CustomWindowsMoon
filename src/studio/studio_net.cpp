@@ -252,7 +252,7 @@ void Studio::NetPage(const RectF& r) {
     // --- права ---
     card(L"Права администратора", 1.9f, [&](const RectF& b) {
         bool ready = net::AdminReady();
-        RectF rr = row(b, 0, ready ? L"Задача MoonDesk\\RadialMenuNet готова" : L"Задачи пока нет");
+        RectF rr = row(b, 0, ready ? L"Задача MoonRadial\\RadialMenuNet готова" : L"Задачи пока нет");
         if (!ready &&
             ui.Button(ID_NET_ADMIN, RectF(rr.X + rr.Width - ui.S(170), rr.Y + ui.S(4), ui.S(170), ui.S(36)),
                       L"Настроить", Kind::Primary) &&

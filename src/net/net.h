@@ -97,7 +97,7 @@ using Log = std::function<void(const std::wstring&)>;
 void ResetProxy(const Log& log);  // системный прокси, PAC/WPAD, переменные окружения, кэш DNS (без прав)
 void FlushDns(const Log& log);
 
-// Действия с правами администратора идут через задачу планировщика MoonDesk\RadialMenuNet:
+// Действия с правами администратора идут через задачу планировщика MoonRadial\RadialMenuNet:
 // один раз согласие UAC, дальше без вопросов. Задача выполняет только эти действия.
 enum Job {
     JOB_SMART,       // шаг «Починить умно»: WinHTTP-прокси и зависшие маршруты
@@ -111,6 +111,8 @@ enum Job {
     JOB_FW_RESTORE,  // вернуть брандмауэр из последнего бэкапа
     JOB_ADAPTER,     // перезапустить физический адаптер
     JOB_DEEP,
+    JOB_DISK_HEALTH,    // утилиты: прочитать износ и температуру дисков (только чтение)
+    JOB_SYSPATH_CLEAN,  // утилиты: убрать из системного PATH мёртвые папки и дубли (ничего не добавляет)
     kJobs
 };
 const wchar_t* JobKey(Job j);

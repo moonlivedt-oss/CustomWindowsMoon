@@ -9,16 +9,18 @@
 
 #include "core/perf.h"
 #include "core/text.h"
+#include "tools/tools.h"
 
 namespace net {
 
 namespace {
 
 constexpr wchar_t kInet[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
-constexpr wchar_t kTask[] = L"MoonDesk\\RadialMenuNet";
+constexpr wchar_t kTask[] = L"MoonRadial\\RadialMenuNet";
 
-const wchar_t* const kJobKeys[kJobs] = {L"smart",      L"winhttp",  L"routes",     L"ip",      L"vpn", L"dns-cf",
-                                        L"dns-google", L"dns-auto", L"fw-restore", L"adapter", L"deep"};
+const wchar_t* const kJobKeys[kJobs] = {L"smart",  L"winhttp",     L"routes",       L"ip",         L"vpn",
+                                        L"dns-cf", L"dns-google",  L"dns-auto",     L"fw-restore", L"adapter",
+                                        L"deep",   L"disk-health", L"syspath-clean"};
 
 std::wstring JobFile() { return DataDir() + L"\\job.txt"; }
 std::wstring ResultFile() { return DataDir() + L"\\job-result.txt"; }
@@ -346,6 +348,13 @@ bool Job_(Job j, const Log& log) {
             log(Okish(code, out) ? L"Адаптер «" + ad.name + L"» перезапущен." : L"Адаптер перезапустить не удалось.");
             return Okish(code, out);
         }
+        case JOB_DISK_HEALTH:
+            for (const std::wstring& line : Split(tools::DiskHealthAdminMain(), L'\n'))
+                if (!Trim(line).empty()) log(Trim(line));
+            return true;
+        case JOB_SYSPATH_CLEAN:
+            tools::CleanSystemPath(log);
+            return true;
         case JOB_DEEP: {
             int a = Exec(L"netsh.exe", L"winsock reset", &out);
             int b = Exec(L"netsh.exe", L"int ip reset", &out);

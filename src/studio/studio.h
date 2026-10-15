@@ -12,6 +12,8 @@ void OpenEditor(HINSTANCE inst, const std::wstring& cfgPath, std::function<void(
 
 // Открытая студия переходит в раздел «Сеть» (из кольца сети: «Проверить сеть»).
 void EditorGoNet();
+// Раздел «Утилиты»: tab 0 PATH, 1 диски, 2 автозагрузка, 3 порты; scan - сразу посчитать, что занимает место.
+void EditorGoTools(int tab, const std::wstring& scan);
 
 // Для цикла сообщений: горячие клавиши студии (Ctrl+Z, Enter в поле).
 bool EditorPreTranslate(MSG* m);

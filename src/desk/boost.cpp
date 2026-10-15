@@ -16,7 +16,7 @@ namespace boost {
 
 namespace {
 
-constexpr wchar_t kTask[] = L"MoonDesk\\RadialMenuPurge";
+constexpr wchar_t kTask[] = L"MoonRadial\\RadialMenuPurge";
 
 std::wstring ReadText(const std::wstring& file) {
     HANDLE f =

@@ -9,7 +9,7 @@ namespace {
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kApprovedKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
 constexpr wchar_t kRunName[] = L"MoonRadialMenu";
-constexpr wchar_t kTaskFolder[] = L"\\MoonDesk";
+constexpr wchar_t kTaskFolder[] = L"\\MoonRadial";  // не MoonDesk: ту папку однажды испортил откат антивируса
 constexpr wchar_t kTaskName[] = L"RadialMenuStart";
 
 std::wstring ExePath() {

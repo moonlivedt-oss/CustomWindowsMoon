@@ -36,7 +36,7 @@ void Studio::Paint() {
     // по одному имени на каждый раздел из enum Page, в том же порядке
     static const char* kPageScope[] = {"studio.page.rings", "studio.page.themes", "studio.page.behavior",
                                        "studio.page.desk",  "studio.page.system", "studio.page.style",
-                                       "studio.page.net",   "studio.page.keys"};
+                                       "studio.page.net",   "studio.page.tools", "studio.page.keys"};
     static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_KEYS + 1, "имя замера на каждый раздел");
     perf::Scope pageScope(kPageScope[page_]);
     PAINTSTRUCT ps;
@@ -116,6 +116,9 @@ void Studio::Frame(float w, float h) {
             break;
         case PAGE_NET:
             NetPage(body);
+            break;
+        case PAGE_TOOLS:
+            ToolsPage(body);
             break;
         case PAGE_KEYS:
             KeysPage(body);
@@ -197,6 +200,7 @@ void Studio::Rail(const RectF& r) {
                  {PAGE_SYSTEM, L"rail-system.png", L"files.png", L"Система"},
                  {PAGE_STYLE, L"rail-style.png", L"game.png", L"Красота"},
                  {PAGE_NET, L"rail-net.png", L"net-globe.png", L"Сеть"},
+                 {PAGE_TOOLS, L"rail-tools.png", L"tools-box.png", L"Утилиты"},
                  {PAGE_KEYS, L"rail-keys.png", L"terminal.png", L"Клавиши"}};
     float y = ui.S(72);
     for (auto& e : items) {
@@ -533,6 +537,10 @@ void Preview(int what) {
 
 void EditorGoNet() {
     if (g_st) g_st->GoPage(PAGE_NET);
+}
+
+void EditorGoTools(int tab, const std::wstring& scan) {
+    if (g_st) g_st->GoTools(tab, scan);
 }
 
 void SetEditorPreview(std::function<void(int)> f) { studio::g_preview = std::move(f); }

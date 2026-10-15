@@ -13,6 +13,7 @@
 #include "app/autostart.h"
 #include "app/devcli.h"
 #include "app/netui.h"
+#include "app/toolsui.h"
 #include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -167,6 +168,7 @@ void Poll() {
     g_snip.Tick();
     g_boostCard.Tick();
     netui::Tick();
+    toolsui::Tick();
     if (!alt) {
         g_armed = true;
         return;
@@ -500,6 +502,12 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case netui::WM_NET_JOB:
             netui::OnJob(lp);
             return 0;
+        case toolsui::WM_TOOLS_JOB:
+            toolsui::OnJob(lp);
+            return 0;
+        case WM_APP + 54:  // для проверки: кольцо утилит у курсора
+            corners::Run(L"tools");
+            return 0;
         case WM_APP + 50:  // для проверки: выполнить действие угла «выключить экран»
             corners::Run(L"screen_off");
             return 0;
@@ -534,6 +542,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             g_wave.Destroy();
             g_boostCard.Destroy();
             netui::Shutdown();
+            toolsui::Shutdown();
             boost::GameTweaks(boost::Load(BoostDir()), false);
             g_frame.Destroy();
             g_game.Shutdown();
@@ -649,6 +658,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     corners::SetNet([] {
         if (g_menu.IsOpen()) return;
         netui::ShowRing(g_menu);
+    });
+    toolsui::Init(inst, g_wnd, &g_cfg, &g_boostCard, [](int page, const std::wstring& scan) {
+        OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
+        EditorGoTools(page, scan);
+    });
+    corners::SetTools([] {
+        if (g_menu.IsOpen()) return;
+        toolsui::ShowRing(g_menu);
     });
     // вошли в Windows только что: стол открывается порталом
     if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
