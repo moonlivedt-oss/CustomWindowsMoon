@@ -538,6 +538,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         }
         return 0;
     }
+    AutostartRefresh();
 
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     OleInitialize(nullptr);  // OLE нужен для перетаскивания файлов на меню
