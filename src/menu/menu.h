@@ -152,9 +152,14 @@ private:
     struct LabelFit {
         std::wstring text;  // строки через \n, уже сокращённые
         double x = 0, y = 0;
+        float px = 0;  // размер шрифта, при котором влезло
     };
     LabelFit LayoutLabel(const Ring& r, double a0, double a1, const Item& it);
+    LabelFit LayoutLabelAt(const Ring& r, double a0, double a1, const Item& it);  // при текущем LabelPx
     float TextWidth(const std::wstring& s);
+    // размер подписей секторов: крупный, а если имя не влезает - чуть мельче (подбирает LayoutLabel)
+    float LabelPx() const { return labelPx_ > 0 ? labelPx_ : geo_.font * 1.15f; }
+    float labelPx_ = 0;
     Gdiplus::Bitmap* LabelBitmap(const std::wstring& text, bool bright);
     void DrawInfoCard(Gdiplus::Graphics& g, double grow, double alpha, bool below);  // below - под кольцом
     void Render();

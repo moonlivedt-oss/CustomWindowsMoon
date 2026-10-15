@@ -59,6 +59,12 @@ void BlurAlpha(std::vector<uint8_t>& a, int w, int h, int r) {
     }
 }
 
+// Подписи секторов: на стекле и сотах тонкий шрифт теряется - крупнее и настоящим жирным Segoe UI.
+Gdiplus::FontFamily* LabelFamily() {
+    static Gdiplus::FontFamily* fam = new Gdiplus::FontFamily(L"Segoe UI");
+    return fam->GetLastStatus() == Gdiplus::Ok ? fam : Family();
+}
+
 }  // namespace
 
 // Группы различаются оттенком в пределах темы: от одного края кольца к другому ±20°.
@@ -186,13 +192,13 @@ void RadialMenu::DrawIcon(Graphics& g, Bitmap* icon, const Item& it, double x, d
 }
 
 float RadialMenu::TextWidth(const std::wstring& s) {
-    std::wstring key = s + L"|" + std::to_wstring((int)(geo_.font * 10));
+    std::wstring key = s + L"|" + std::to_wstring((int)(LabelPx() * 10));
     auto it = textW_.find(key);
     if (it != textW_.end()) return it->second;
     static Bitmap one(1, 1, PixelFormat32bppPARGB);
     Graphics g(&one);
     g.SetTextRenderingHint(TextRenderingHintAntiAlias);
-    Font font(Family(), geo_.font, FontStyleRegular, UnitPixel);
+    Font font(LabelFamily(), LabelPx(), FontStyleBold, UnitPixel);
     RectF tb;
     g.MeasureString(s.c_str(), -1, &font, PointF(0, 0), StringFormat::GenericTypographic(), &tb);
     return textW_[key] = tb.Width;
@@ -203,18 +209,18 @@ float RadialMenu::TextWidth(const std::wstring& s) {
 Bitmap* RadialMenu::LabelBitmap(const std::wstring& text, bool bright) {
     Palette pal = Pal(cfg_);
     Color tc = pal.text, sc = pal.shadow;
-    std::wstring key = text + (bright ? L"|b|" : L"|d|") + std::to_wstring((int)(geo_.font * 10)) + L"|" +
+    std::wstring key = text + (bright ? L"|b|" : L"|d|") + std::to_wstring((int)(LabelPx() * 10)) + L"|" +
                        std::to_wstring(tc.GetValue()) + L"|" + std::to_wstring(sc.GetValue());
     auto found = labels_.find(key);
     if (found != labels_.end()) return found->second.bmp.get();
     PERF_SCOPE("menu.LabelBitmap");
     std::vector<std::wstring> lines = Split(text, L'\n');
-    double lh = geo_.font * 1.22, pad = 4 * geo_.k;
+    double lh = LabelPx() * 1.22, pad = 4 * geo_.k;
     float tw = 0;
     for (auto& l : lines) tw = std::max(tw, TextWidth(l));
     int w = (int)(tw + 2 * pad + 2), h = (int)(lines.size() * lh + 2 * pad + 1);
     auto bmp = std::make_unique<Bitmap>(w, h, PixelFormat32bppPARGB);
-    Font font(Family(), geo_.font, FontStyleRegular, UnitPixel);
+    Font font(LabelFamily(), LabelPx(), FontStyleBold, UnitPixel);
     StringFormat sf(StringFormat::GenericTypographic());
     sf.SetAlignment(StringAlignmentCenter);
     auto drawText = [&](Graphics& g, Brush& b) {
@@ -235,11 +241,11 @@ Bitmap* RadialMenu::LabelBitmap(const std::wstring& text, bool bright) {
         std::vector<uint8_t> a((size_t)w * h);
         for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x) a[(size_t)y * w + x] = ((uint32_t*)((BYTE*)bd.Scan0 + y * bd.Stride))[x] >> 24;
-        BlurAlpha(a, w, h, std::max(1, (int)(1.6 * geo_.k + 0.5)));
+        BlurAlpha(a, w, h, std::max(1, (int)(1.8 * geo_.k + 0.5)));
         for (int y = 0; y < h; ++y) {
             auto* row = (uint32_t*)((BYTE*)bd.Scan0 + y * bd.Stride);
             for (int x = 0; x < w; ++x) {
-                uint32_t al = std::min(255u, (uint32_t)a[(size_t)y * w + x] * 2u) * 200u / 255u;
+                uint32_t al = std::min(255u, (uint32_t)a[(size_t)y * w + x] * 3u) * 235u / 255u;
                 row[x] = (al << 24) | ((sc.GetR() * al / 255) << 16) | ((sc.GetG() * al / 255) << 8) |
                          (sc.GetB() * al / 255);
             }
@@ -249,7 +255,7 @@ Bitmap* RadialMenu::LabelBitmap(const std::wstring& text, bool bright) {
     {
         Graphics g(bmp.get());
         g.SetTextRenderingHint(TextRenderingHintAntiAlias);
-        SolidBrush b(WithAlpha(tc, bright ? 255 : 210));
+        SolidBrush b(WithAlpha(tc, bright ? 255 : 240));
         drawText(g, b);
     }
     Bitmap* raw = bmp.get();
@@ -306,7 +312,9 @@ void RadialMenu::DrawLabel(Graphics& g, const Ring& r, double a0, double a1, con
     if (cached == labelFit_.end()) cached = labelFit_.emplace(fitKey, LayoutLabel(r, a0, a1, it)).first;
     const LabelFit& lf = cached->second;
     if (lf.text.empty()) return;
+    labelPx_ = lf.px;
     Bitmap* bmp = LabelBitmap(lf.text, hl > 0.5);
+    labelPx_ = 0;
     if (!bmp) return;
     REAL w = (REAL)bmp->GetWidth(), h = (REAL)bmp->GetHeight();
     RectF dst((REAL)(lf.x - w / 2), (REAL)(lf.y - h / 2), w, h);
@@ -324,7 +332,19 @@ void RadialMenu::DrawLabel(Graphics& g, const Ring& r, double a0, double a1, con
 RadialMenu::LabelFit RadialMenu::LayoutLabel(const Ring& r, double a0, double a1, const Item& it) {
     PERF_SCOPE("menu.LayoutLabel");
     LabelFit out;
-    double lh = geo_.font * 1.22;
+    for (float scale : {1.15f, 1.04f, 0.95f}) {  // крупно, если влезает целиком; иначе мельче, но не обрезая
+        labelPx_ = geo_.font * scale;
+        out = LayoutLabelAt(r, a0, a1, it);
+        out.px = labelPx_;
+        if (out.text.find(L'…') == std::wstring::npos && !out.text.empty()) break;
+    }
+    labelPx_ = 0;
+    return out;
+}
+
+RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double a1, const Item& it) {
+    LabelFit out;
+    double lh = LabelPx() * 1.22;
     // где подписи просторнее: на своём радиусе или чуть ближе к центру (у края у горизонтальных секторов тесно)
     double f0 = (r.rLabel - r.rIn) / (r.rOut - r.rIn);
     auto best = [&](double halfH, double& x, double& y) {
