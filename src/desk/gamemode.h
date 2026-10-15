@@ -8,6 +8,15 @@
 
 struct Config;
 
+// Общее с режимом разработки (desk/devmode).
+namespace gm {
+std::wstring FileName(const std::wstring& path);
+bool MatchAny(const std::wstring& path, const std::wstring& masks);  // маска с \ - по полному пути, иначе по имени
+std::wstring ProcessPath(DWORD pid);
+std::wstring WallpaperEngine();                                       // путь к запущенному wallpaper64.exe или пусто
+void WallpaperControl(const std::wstring& exe, const wchar_t* what);  // pause / play
+}  // namespace gm
+
 // Игровой режим: пока запущена игра (по маскам путей из radial.cfg) или что-то идёт в эксклюзивном
 // полноэкранном режиме, вся красота выключается: анимации, стекло, свечения, рамки окон, перехват мыши.
 // По желанию заодно выключаются анимации и прозрачность самой Windows и ставится на паузу Wallpaper Engine.

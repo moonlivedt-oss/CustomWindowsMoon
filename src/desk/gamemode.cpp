@@ -117,6 +117,14 @@ void SaveState(bool anim, bool transp, const std::wstring& wallpaper) {
 
 }  // namespace
 
+namespace gm {
+std::wstring FileName(const std::wstring& path) { return ::FileName(path); }
+bool MatchAny(const std::wstring& path, const std::wstring& masks) { return ::MatchAny(path, masks); }
+std::wstring ProcessPath(DWORD pid) { return ::ProcessPath(pid); }
+std::wstring WallpaperEngine() { return ::WallpaperEngine(); }
+void WallpaperControl(const std::wstring& exe, const wchar_t* what) { ::WallpaperControl(exe, what); }
+}  // namespace gm
+
 void GameMode::Recover() {
     std::wstring file = StateFile();
     HANDLE f = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -145,7 +153,7 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
     // маски поменяли в студии - уже открытые процессы проверяются заново
-    std::wstring masks = cfg.games + L"\x1" + cfg.gamesSkip;
+    std::wstring masks = cfg.games + L"\x1" + cfg.gamesSkip + L"\x1" + cfg.devApps;
     if (masks != masks_) {
         masks_ = masks;
         games_.clear();
@@ -164,7 +172,9 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
         } else {
             // путь спрашиваем только у новых процессов: старые уже проверены
             std::wstring path = ProcessPath(pid);
-            if (!path.empty() && MatchAny(path, cfg.games) && !MatchAny(path, cfg.gamesSkip)) game = FileName(path);
+            if (!path.empty() && MatchAny(path, cfg.games) && !MatchAny(path, cfg.gamesSkip) &&
+                !MatchAny(path, cfg.devApps))  // редактор из папки Epic Games - не игра
+                game = FileName(path);
         }
         seen[pid] = {pe.szExeFile, game};
         if (!game.empty() && !found) {

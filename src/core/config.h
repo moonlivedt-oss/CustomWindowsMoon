@@ -76,6 +76,11 @@ struct Config {
     bool gameWinAnim = true;       // выключать анимации Windows
     bool gameTransparency = true;  // выключать прозрачность Windows
     bool gameWallpaper = true;     // ставить Wallpaper Engine на паузу
+    // режим разработки: пока открыт тяжёлый редактор, ему отдаются память и видеокарта (красота остаётся)
+    bool devAuto = true;
+    std::wstring devApps = L"UnrealEditor.exe|UE4Editor.exe";  // маски, как у games
+    bool devWallpaper = true;  // ставить Wallpaper Engine на паузу
+    bool devBoost = true;      // при запуске редактора предлагать освободить память
     // экран блокировки
     std::wstring lockSource;  // картинка для экрана блокировки, пусто - обои
     bool lockReveal = true;

@@ -28,6 +28,7 @@
 #include "desk/corners.h"
 #include "desk/cursor.h"
 #include "desk/deskclick.h"
+#include "desk/devmode.h"
 #include "desk/frame.h"
 #include "desk/gamemode.h"
 #include "desk/hexwave.h"
@@ -56,6 +57,7 @@ enum Cmd {
     CMD_AUTOSTART,
     CMD_RESET_WINDOWS,
     CMD_GAME,
+    CMD_DEV,
     CMD_BOOST,
     CMD_EXIT
 };
@@ -72,6 +74,7 @@ DeskClick g_deskClick;
 BatteryGlow g_battery;
 SnipCard g_snip;
 GameMode g_game;
+DevMode g_dev;
 WindowFrame g_frame;
 lockscreen::Reveal g_reveal;
 HexWave g_wave;
@@ -163,6 +166,7 @@ void Poll() {
     }
     g_corners.Tick(g_cfg, alt || g_menu.IsOpen());
     g_game.Tick(g_cfg);
+    g_dev.Tick(g_cfg);
     g_media.Tick(g_cfg, alt || g_menu.IsOpen() || fx::Game());
     g_winfx.Tick();
     g_battery.Tick(g_cfg);
@@ -230,7 +234,9 @@ void ShowFromStudio(bool left, HWND studio) {
 }
 
 std::wstring TrayTip() {
-    return g_game.On() ? L"Radial Menu: игровой режим (" + g_game.Reason() + L")" : L"Radial Menu: Alt + край экрана";
+    if (g_game.On()) return L"Radial Menu: игровой режим (" + g_game.Reason() + L")";
+    if (g_dev.On()) return L"Radial Menu: режим разработки (" + g_dev.Reason() + L")";
+    return L"Radial Menu: Alt + край экрана";
 }
 
 void UpdateTrayTip() {
@@ -285,9 +291,9 @@ void StartBoost() {
     }
 }
 
-// Карточка «освободить память»: при запуске игры (если памяти мало по minFreePercent и есть что закрыть)
-// или вручную из трея, угла, студии.
-void OfferBoost(bool manual) {
+// Карточка «освободить память»: при запуске игры или редактора (если памяти мало по minFreePercent и есть
+// что закрыть) или вручную из трея, угла, студии. why - к чему готовимся: «перед игрой», «для Unreal Editor».
+void OfferBoost(bool manual, const std::wstring& why = L"перед игрой") {
     if (g_boostBusy) return;
     boost::Settings s = boost::Load(BoostDir());
     ThemeInfo t = CurrentTheme(g_cfg);
@@ -309,7 +315,7 @@ void OfferBoost(bool manual) {
     std::vector<std::wstring> names;
     for (const auto& g : g_boostGroups) names.push_back(g.title.empty() ? g.name : g.title);
     g_boostCard.onYes = [] { StartBoost(); };
-    g_boostCard.Show(BoostCard::OFFER, L"Освободить ~" + Size(mb) + (manual ? L"" : L" перед игрой?"),
+    g_boostCard.Show(BoostCard::OFFER, L"Освободить ~" + Size(mb) + (manual ? L"" : L" " + why + L"?"),
                      Names(names) + L". Сейчас свободно " + Size(avail) + L".", t);
 }
 
@@ -324,12 +330,9 @@ void BoostDone(boost::Result* r) {
     delete r;
 }
 
-// Игра закрылась: приоритеты и таймер назад, ещё одна очистка, предложить вернуть закрытое.
-void BoostAfterGame() {
-    boost::Settings s = boost::Load(BoostDir());
-    boost::GameTweaks(s, false);
-    if (g_cfg.boostAfter && s.purge) boost::RunPurge();
-    if (!g_cfg.boostRestore || g_boostClosed.empty()) return;
+// Предложить вернуть то, что Boost закрыл перед игрой или редактором.
+void OfferRestore() {
+    if (!g_cfg.boostRestore || g_boostClosed.empty() || g_game.On() || g_dev.On()) return;
     std::vector<std::wstring> names;
     for (const auto& p : g_boostClosed) {
         std::wstring n = p.substr(p.find_last_of(L'\\') + 1);
@@ -345,6 +348,24 @@ void BoostAfterGame() {
     g_boostCard.Show(BoostCard::RESTORE, L"Вернуть закрытые программы?", Names(names), CurrentTheme(g_cfg));
 }
 
+// Игра закрылась: приоритеты и таймер назад, ещё одна очистка, предложить вернуть закрытое.
+void BoostAfterGame() {
+    boost::Settings s = boost::Load(BoostDir());
+    boost::GameTweaks(s, false);
+    if (g_cfg.boostAfter && s.purge) boost::RunPurge();
+    OfferRestore();
+}
+
+// Режим разработки включился или выключился: обои и память, красота и перехват мыши не трогаются.
+void OnDevMode(bool on) {
+    UpdateTrayTip();
+    if (on && g_cfg.devBoost && !g_game.On()) OfferBoost(false, L"для " + g_dev.Reason());
+    if (!on) OfferRestore();
+    if (g_cfg.hexGlass && !g_game.On())
+        g_wave.Play(on, on ? L"Режим разработки: " + g_dev.Reason() : L"Режим разработки выключен",
+                    CurrentTheme(g_cfg));
+}
+
 // Игровой режим включился или выключился: эффекты, рамки окон и перехват мыши.
 void OnGameMode(bool on) {
     fx::SetGame(on);
@@ -358,6 +379,7 @@ void OnGameMode(bool on) {
         if (g_cfg.boostOffer) OfferBoost(false);
     } else {
         BoostAfterGame();
+        g_dev.Reapply(g_cfg);  // игра вернула обои, а редактор ещё открыт
     }
     // волна сот по краям экрана - видно, что режим переключился
     if (g_cfg.hexGlass)
@@ -409,6 +431,9 @@ void TrayMenu() {
     std::wstring game = L"Игровой режим";
     if (g_game.On() && !g_game.Manual()) game += L": " + g_game.Reason();
     AppendMenuW(m, MF_STRING | (g_game.On() ? MF_CHECKED : 0), CMD_GAME, game.c_str());
+    std::wstring dev = L"Режим разработки";
+    if (g_dev.On() && !g_dev.Manual()) dev += L": " + g_dev.Reason();
+    AppendMenuW(m, MF_STRING | (g_dev.On() ? MF_CHECKED : 0), CMD_DEV, dev.c_str());
     AppendMenuW(m, MF_STRING, CMD_BOOST, L"Освободить память...");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | (AutostartOn() ? MF_CHECKED : 0), CMD_AUTOSTART, L"Запускать вместе с Windows");
@@ -477,6 +502,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 case CMD_GAME:
                     g_game.SetManual(!g_game.On(), g_cfg);  // выключили посреди игры - до её выхода
                     break;
+                case CMD_DEV:
+                    g_dev.SetManual(!g_dev.On(), g_cfg);  // выключили при открытом редакторе - до его закрытия
+                    break;
                 case CMD_AUTOSTART:
                     SetAutostart(!AutostartOn());
                     break;
@@ -544,6 +572,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             toolsui::Shutdown();
             boost::GameTweaks(boost::Load(BoostDir()), false);
             g_frame.Destroy();
+            g_dev.Shutdown();
             g_game.Shutdown();
             g_reveal.Destroy();
             g_media.Destroy();
@@ -586,6 +615,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
 
     g_inst = inst;
     g_game.Recover();  // если прошлый запуск упал в игровом режиме - вернуть анимации, прозрачность, обои
+    g_dev.Recover();
     g_cfgPath = ExeDir() + L"\\radial.cfg";
     // первый запуск после клонирования: своих колец ещё нет - берём пример с общими папками
     if (!Exists(g_cfgPath)) CopyFileW((ExeDir() + L"\\radial.example.cfg").c_str(), g_cfgPath.c_str(), TRUE);
@@ -626,6 +656,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     });
     SetEditorNetStatus([] { return netui::Status(); });
     SetEditorGameStatus([] { return g_game.On() ? L"включён (" + g_game.Reason() + L")" : std::wstring(L"выключен"); });
+    SetEditorDevStatus([] { return g_dev.On() ? L"включён (" + g_dev.Reason() + L")" : std::wstring(L"выключен"); });
     g_snip.Create(inst);
     g_snip.Apply(g_cfg);
     // двойной клик по пустому столу: целое кольцо вокруг курсора
@@ -671,6 +702,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     // вошли в Windows только что: стол открывается порталом
     if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
     g_game.onChange = OnGameMode;
+    g_dev.onChange = OnDevMode;
+    g_dev.gameOn = [] { return g_game.On() && g_cfg.gameWallpaper; };
     AddTray();
     SetTimer(g_wnd, kPollTimer, 20, nullptr);
     SetTimer(g_wnd, kWarmTimer, 1500, nullptr);

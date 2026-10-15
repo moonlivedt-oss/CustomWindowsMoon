@@ -107,6 +107,14 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.gameTransparency = ParseBool(val);
             else if (key == L"game_wallpaper")
                 cfg.gameWallpaper = ParseBool(val);
+            else if (key == L"dev_auto")
+                cfg.devAuto = ParseBool(val);
+            else if (key == L"dev_apps")
+                cfg.devApps = val;
+            else if (key == L"dev_wallpaper")
+                cfg.devWallpaper = ParseBool(val);
+            else if (key == L"dev_boost")
+                cfg.devBoost = ParseBool(val);
             else if (key == L"lock_source")
                 cfg.lockSource = val;
             else if (key == L"lock_reveal")
@@ -324,6 +332,12 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"game_win_anim = " << (c.gameWinAnim ? 1 : 0) << L"\n";
     o << L"game_transparency = " << (c.gameTransparency ? 1 : 0) << L"\n";
     o << L"game_wallpaper = " << (c.gameWallpaper ? 1 : 0) << L"\n";
+    o << L"# режим разработки: пока открыт редактор (dev_apps - маски через |), Wallpaper Engine на паузе\n"
+         L"# (dev_wallpaper) и при запуске - карточка «освободить память» (dev_boost); углы и кольца работают\n";
+    o << L"dev_auto = " << (c.devAuto ? 1 : 0) << L"\n";
+    o << L"dev_apps = " << c.devApps << L"\n";
+    o << L"dev_wallpaper = " << (c.devWallpaper ? 1 : 0) << L"\n";
+    o << L"dev_boost = " << (c.devBoost ? 1 : 0) << L"\n";
     o << L"# экран блокировки: lock_source - картинка (пусто - обои), lock_reveal - после входа картинка\n"
          L"# плавно растворяется в рабочий стол\n";
     o << L"lock_source = " << c.lockSource << L"\n";

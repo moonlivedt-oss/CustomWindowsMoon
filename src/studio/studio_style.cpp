@@ -108,6 +108,27 @@ void Studio::StylePage(const RectF& r) {
              c.muted);
     });
 
+    // режим разработки: тяжёлому редактору - память и видеокарту, углы и кольца остаются
+    card(L"Режим разработки", 5.6f, [&](const RectF& b) {
+        toggle(row(b, 0, L"Включать сам, когда открыт редактор"), ID_DEV_AUTO, cfg.devAuto);
+        toggle(row(b, 1, L"Пауза Wallpaper Engine"), ID_DEV_WALL, cfg.devWallpaper);
+        toggle(row(b, 2, L"Предлагать освободить память"), ID_DEV_BOOST, cfg.devBoost);
+        RectF fr(b.X, b.Y + 3 * rowH + ui.S(4), b.Width, ui.S(36));
+        FieldOrText(
+            ID_DEV_LIST, fr, view, cfg.devApps,
+            [this](const std::wstring& s) {
+                FieldEdit(ID_DEV_LIST);
+                cfg.devApps = s;
+            },
+            L"Редакторы через |, например UnrealEditor.exe|blender.exe");
+        std::wstring now = DevStatus();
+        note(b, 4, 3,
+             (now.empty() ? L"" : L"Сейчас: " + now + L". ") +
+                 L"Пока открыт редактор, обои стоят на паузе, а при его запуске можно закрыть лишнее (как перед "
+                 L"игрой). Анимации, углы и кольца работают; включить вручную - в меню значка в трее.",
+             c.muted);
+    });
+
     // экран блокировки
     card(L"Экран блокировки", 7.6f, [&](const RectF& b) {
         bool busy = lockJob_ && !lockJob_->done;

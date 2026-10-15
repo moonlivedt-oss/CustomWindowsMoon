@@ -656,9 +656,12 @@ void SetEditorPreview(std::function<void(int)> f) { studio::g_preview = std::mov
 namespace studio {
 std::function<std::wstring()> g_gameStatus;
 std::wstring GameStatus() { return g_gameStatus ? g_gameStatus() : L""; }
+std::function<std::wstring()> g_devStatus;
+std::wstring DevStatus() { return g_devStatus ? g_devStatus() : L""; }
 }  // namespace studio
 
 void SetEditorGameStatus(std::function<std::wstring()> f) { studio::g_gameStatus = std::move(f); }
+void SetEditorDevStatus(std::function<std::wstring()> f) { studio::g_devStatus = std::move(f); }
 
 bool EditorPreTranslate(MSG* m) {
     if (!g_st || !g_st->wnd) return false;

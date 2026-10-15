@@ -114,6 +114,10 @@ enum Id {
     ID_GAME_TRANSP,
     ID_GAME_WALL,
     ID_GAME_LIST,
+    ID_DEV_AUTO,
+    ID_DEV_WALL,
+    ID_DEV_BOOST,
+    ID_DEV_LIST,
     ID_LOCK_APPLY,
     ID_LOCK_PICK,
     ID_LOCK_WALL,
@@ -249,6 +253,7 @@ struct ToolsJob {
 
 void Preview(int what);     // studio.h: EditorPreview
 std::wstring GameStatus();  // studio.h: SetEditorGameStatus
+std::wstring DevStatus();   // studio.h: SetEditorDevStatus
 
 class Studio {
 public:
