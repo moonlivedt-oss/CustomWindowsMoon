@@ -150,30 +150,14 @@ void ShowRing(RadialMenu& menu) {
         Act(L"Самый быстрый", L"net-ping.png", L"dns-test", L"Замерить Cloudflare, Google, Quad9, Яндекс..."),
         Act(L"Cloudflare", L"net-dns.png", L"dns-cf", L"1.1.1.1 и 1.0.0.1 на подключённом адаптере"),
         Act(L"Google", L"net-dns.png", L"dns-google", L"8.8.8.8 и 8.8.4.4 на подключённом адаптере"),
-        Act(L"От роутера", L"net-router.png", L"dns-auto", L"DNS снова выдаёт роутер (DHCP)"),
-        Act(L"Очистить кэш", L"net-renew.png", L"dns-flush", L"Забыть сохранённые адреса сайтов")};
+        Act(L"От роутера", L"net-router.png", L"dns-auto", L"DNS снова выдаёт роутер (DHCP)")};
     ring.push_back(dns);
-    Item procs = Act(L"Прокси-процессы", L"net-procs.png", L"", L"Прокси-клиенты и порты, которые они слушают");
-    for (const net::ProxyProc& p : net::ProxyProcesses()) {
-        std::wstring ports;
-        for (size_t i = 0; i < p.ports.size() && i < 4; ++i) ports += (i ? L", " : L"") + std::to_wstring(p.ports[i]);
-        std::wstring name =
-            p.name.size() > 4 && EndsWithI(p.name, L".exe") ? p.name.substr(0, p.name.size() - 4) : p.name;
-        procs.children.push_back(
-            Act(name.c_str(), L"net-procs.png", L"kill:" + std::to_wstring(p.pid),
-                L"Завершить процесс " + std::to_wstring(p.pid) + (ports.empty() ? L"" : L", порты " + ports)));
-    }
-    if (procs.children.empty())
-        procs.children.push_back(Act(L"Ничего не запущено", L"net-check.png", L"", L"Прокси-клиентов не видно"));
-    ring.push_back(procs);
     Item ping = Act(L"Пинг", L"net-ping.png", L"", L"Задержка, потери и через какой адаптер идёт маршрут");
     ping.children = {Act(L"Cloudflare", L"net-ping.png", L"ping:1.1.1.1", L"1.1.1.1"),
                      Act(L"Google", L"net-ping.png", L"ping:8.8.8.8", L"8.8.8.8"),
                      Act(L"Яндекс", L"net-ping.png", L"ping:ya.ru", L"ya.ru"),
                      Act(L"GitHub", L"net-ping.png", L"ping:github.com", L"github.com")};
     ring.push_back(ping);
-    ring.push_back(Act(L"Обновить IP", L"net-renew.png", L"ip",
-                       L"Получить адрес у роутера заново; связь пропадёт на пару секунд"));
     ring.push_back(Act(L"Проверить сеть", L"net-check.png", L"check",
                        L"Полная проверка в студии: прокси, туннели, остатки VPN, история"));
 

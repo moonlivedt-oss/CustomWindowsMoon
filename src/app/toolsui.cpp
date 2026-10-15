@@ -125,9 +125,8 @@ void ShowRing(RadialMenu& menu) {
                 L"Удалить содержимое " + g_junk[i].path + L"; программа скачает или создаст заново"));
     ring.push_back(clean);
     // PATH
-    int dead = 0, dup = 0, sdead = 0;
+    int dead = 0, dup = 0;
     for (const tools::PathEntry& e : tools::ReadPath()) {
-        if (e.system && (e.dead || e.dup)) ++sdead;
         if (!e.system && e.dead) ++dead;
         if (!e.system && e.dup) ++dup;
     }
@@ -136,26 +135,9 @@ void ShowRing(RadialMenu& menu) {
         Act(L"Почистить", L"tools-clean.png", L"path-clean",
             L"PATH пользователя: мёртвых " + std::to_wstring(dead) + L", дублей " + std::to_wstring(dup) +
                 L" (с бэкапом)"),
-        Act(L"Системный", L"tools-path.png", L"syspath-clean",
-            L"Системный PATH: лишних " + std::to_wstring(sdead) + L"; только убрать мёртвые и дубли, нужны права"),
         Act(L"Что где", L"tools-env.png", L"which", L"Какой python, g++, node, cmake... найдётся первым"),
-        Act(L"Добавить", L"tools-path.png", L"path-add", L"Добавить в PATH папку из буфера (скопируй её в Проводнике)"),
-        Act(L"Редактор", L"tools-box.png", L"studio:0", L"Весь PATH и переменные в студии")};
+        Act(L"Добавить", L"tools-path.png", L"path-add", L"Добавить в PATH папку из буфера (скопируй её в Проводнике)")};
     ring.push_back(path);
-    // автозагрузка
-    g_starts.clear();
-    Item start = Act(L"Автозагрузка", L"tools-start.png", L"", L"Что запускается с Windows; 2 клика - не запускать");
-    for (const tools::StartItem& s : tools::StartupItems())
-        if (s.enabled && s.canToggle && !s.command.empty()) {
-            start.children.push_back(Act(Short(s.name, 24), L"tools-start.png",
-                                         L"start-off:" + std::to_wstring(g_starts.size()),
-                                         s.where + L". Больше не запускать с Windows (вернуть - в студии)"));
-            g_starts.push_back(s);
-        }
-    if (start.children.empty())
-        start.children.push_back(
-            Act(L"Всё выключено", L"tools-start.png", L"studio:2", L"Включённого и своего нет; список - в студии"));
-    ring.push_back(start);
     // порты
     Item ports = Act(L"Порты", L"tools-ports.png", L"", L"Кто занял порты разработки; 2 клика - завершить");
     int nports = 0;

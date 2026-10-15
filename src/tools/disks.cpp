@@ -213,7 +213,7 @@ std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* canc
     std::wstring base = dir.back() == L'\\' ? dir.substr(0, dir.size() - 1) : dir;
     std::vector<FolderSize> out;
     FolderSize loose;
-    loose.name = L"(файлы прямо здесь)";
+    loose.name = L"(файлы в корне)";
     loose.path = dir;
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileExW((base + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr,

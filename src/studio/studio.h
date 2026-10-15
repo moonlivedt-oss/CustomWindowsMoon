@@ -15,6 +15,9 @@ void EditorGoNet();
 // Раздел «Утилиты»: tab 0 PATH, 1 диски, 2 автозагрузка, 3 порты; scan - сразу посчитать, что занимает место.
 void EditorGoTools(int tab, const std::wstring& scan);
 
+// Для проверки без окна: раздел (page - номер из enum Page, tab - вкладка утилит) в PNG.
+int EditorSnapshot(HINSTANCE inst, const std::wstring& cfgPath, int page, int tab, const std::wstring& out, int ms);
+
 // Для цикла сообщений: горячие клавиши студии (Ctrl+Z, Enter в поле).
 bool EditorPreTranslate(MSG* m);
 
@@ -23,3 +26,5 @@ enum EditorPreview { PREVIEW_BATTERY_LOW = 1, PREVIEW_BATTERY_CHARGE, PREVIEW_LO
 void SetEditorPreview(std::function<void(int what)> f);
 // Состояние игрового режима для студии («выключен», «включён: cs2.exe»): задаёт main.
 void SetEditorGameStatus(std::function<std::wstring()> f);
+// Строка состояния сети для «Обзора» («Интернет есть | Швеция | 190 мс»): задаёт main.
+void SetEditorNetStatus(std::function<std::wstring()> f);

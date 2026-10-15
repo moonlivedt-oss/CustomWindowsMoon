@@ -29,14 +29,46 @@ namespace studio {
 
 namespace {
 Studio* g_st = nullptr;
+
+// Группы боковой панели: в каждой - разделы, которые показываются вкладками над страницей.
+struct GroupPage {
+    Page page;
+    const wchar_t* name;
+};
+struct Group {
+    const wchar_t* name;
+    const wchar_t* own;  // свой значок группы (icons\rail-*.png), пока его нет - общий
+    const wchar_t* icon;
+    GroupPage pages[3];
+    int count;
+};
+const Group kGroups[] = {
+    {L"Обзор", L"rail-home.png", L"hub.png", {{PAGE_HOME, L"Обзор"}}, 1},
+    {L"Кольца", L"rail-rings.png", L"apps.png", {{PAGE_RINGS, L"Кольца"}, {PAGE_THEMES, L"Темы"}}, 2},
+    {L"Стол",
+     L"rail-desk.png",
+     L"desktop.png",
+     {{PAGE_DESK, L"Углы и панель"}, {PAGE_STYLE, L"Красота"}, {PAGE_SYSTEM, L"Система"}},
+     3},
+    {L"Сервис", L"rail-tools.png", L"tools-box.png", {{PAGE_NET, L"Сеть"}, {PAGE_TOOLS, L"Утилиты"}}, 2},
+    {L"Настройки", L"rail-behavior.png", L"editor.png", {{PAGE_BEHAVIOR, L"Поведение"}, {PAGE_KEYS, L"Клавиши"}}, 2},
+};
+constexpr int kGroupCount = sizeof(kGroups) / sizeof(kGroups[0]);
+
+int GroupOf(Page p) {
+    for (int g = 0; g < kGroupCount; ++g)
+        for (int k = 0; k < kGroups[g].count; ++k)
+            if (kGroups[g].pages[k].page == p) return g;
+    return 0;
+}
 }  // namespace
 
 void Studio::Paint() {
     PERF_SCOPE("studio.Paint");
     // по одному имени на каждый раздел из enum Page, в том же порядке
-    static const char* kPageScope[] = {"studio.page.rings", "studio.page.themes", "studio.page.behavior",
-                                       "studio.page.desk",  "studio.page.system", "studio.page.style",
-                                       "studio.page.net",   "studio.page.tools", "studio.page.keys"};
+    static const char* kPageScope[] = {
+        "studio.page.rings", "studio.page.themes", "studio.page.behavior", "studio.page.desk", "studio.page.system",
+        "studio.page.style", "studio.page.net",    "studio.page.tools",    "studio.page.home", "studio.page.keys"};
     static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_KEYS + 1, "имя замера на каждый раздел");
     perf::Scope pageScope(kPageScope[page_]);
     PAINTSTRUCT ps;
@@ -93,6 +125,9 @@ void Studio::Frame(float w, float h) {
     ui.interactive = ov_ == OV_NONE;
     Rail(RectF(0, 0, rail, h));
     RectF body(rail, 0, w - rail, h - status);
+    float tabsH = SubTabs(body);  // вкладки группы (Кольца | Темы...) над страницей
+    body.Y += tabsH;
+    body.Height -= tabsH;
     childDragShown_ = childDrag_;
     childDrag_ = -1;
     switch (page_) {
@@ -119,6 +154,9 @@ void Studio::Frame(float w, float h) {
             break;
         case PAGE_TOOLS:
             ToolsPage(body);
+            break;
+        case PAGE_HOME:
+            HomePage(body);
             break;
         case PAGE_KEYS:
             KeysPage(body);
@@ -188,34 +226,22 @@ void Studio::Rail(const RectF& r) {
         std::wstring p = ExeDir() + L"\\icons\\" + own;
         return Exists(p) ? p : ExeDir() + L"\\icons\\" + fallback;
     };
-    struct Entry {
-        Page p;
-        const wchar_t* own;
-        const wchar_t* icon;
-        const wchar_t* name;
-    } items[] = {{PAGE_RINGS, L"rail-rings.png", L"apps.png", L"Кольца"},
-                 {PAGE_THEMES, L"rail-themes.png", L"hub.png", L"Темы"},
-                 {PAGE_BEHAVIOR, L"rail-behavior.png", L"desktop.png", L"Поведение"},
-                 {PAGE_DESK, L"rail-desk.png", L"music.png", L"Стол"},
-                 {PAGE_SYSTEM, L"rail-system.png", L"files.png", L"Система"},
-                 {PAGE_STYLE, L"rail-style.png", L"game.png", L"Красота"},
-                 {PAGE_NET, L"rail-net.png", L"net-globe.png", L"Сеть"},
-                 {PAGE_TOOLS, L"rail-tools.png", L"tools-box.png", L"Утилиты"},
-                 {PAGE_KEYS, L"rail-keys.png", L"terminal.png", L"Клавиши"}};
+    // пять групп вместо десяти разделов; внутри группы - вкладки над страницей (SubTabs)
     float y = ui.S(72);
-    for (auto& e : items) {
+    for (int gi = 0; gi < kGroupCount; ++gi) {
+        const Group& e = kGroups[gi];
         RectF b(r.X + ui.S(7), y, r.Width - ui.S(14), ui.S(66));
-        bool on = page_ == e.p;
-        if (ui.Click(ID_RAIL + e.p, b) && page_ != e.p) {
+        bool on = GroupOf(page_) == gi;
+        if (ui.Click(ID_RAIL + gi, b) && !on) {
             pageAt_ = GetTickCount64();
             renaming_ = -1;
-            page_ = e.p;
+            page_ = groupLast_[gi];
             ui.ResetScroll(ID_PAGE_SCROLL);
         }
-        // выбранный раздел: фон и полоска акцента у левого края; она вырастает на новом разделе и
-        // гаснет на прежнем, при наведении на другой раздел видна короткая бледная полоска
-        float sel = ui.Anim(ID_RAIL_BAR + e.p, on, 16);
-        float hov = ui.Anim(ID_RAIL_HOVER + e.p, !on && ui.Hot(ID_RAIL + e.p), 18);
+        // выбранная группа: фон и полоска акцента у левого края; она вырастает на новой группе и
+        // гаснет на прежней, при наведении на другую видна короткая бледная полоска
+        float sel = ui.Anim(ID_RAIL_BAR + gi, on, 16);
+        float hov = ui.Anim(ID_RAIL_HOVER + gi, !on && ui.Hot(ID_RAIL + gi), 18);
         if (sel > 0.01f) ui.Fill(b, WithAlpha(c.cardHi, (BYTE)(255 * sel)), ui.S(12));
         if (hov > 0.01f) ui.Fill(b, WithAlpha(c.card, (BYTE)(255 * hov * (1 - sel))), ui.S(12));
         float barH = ui.S(34) * sel + ui.S(14) * hov * (1 - sel);
@@ -225,7 +251,11 @@ void Studio::Rail(const RectF& r) {
             ui.Fill(RectF(r.X + ui.S(1), b.Y + (b.Height - barH) / 2, ui.S(4), barH), bar, ui.S(2));
         }
         ui.Icon(railIcon(e.own, e.icon), RectF(b.X + (b.Width - ui.S(30)) / 2, b.Y + ui.S(8), ui.S(30), ui.S(30)));
-        ui.Text(e.name, RectF(b.X, b.Y + ui.S(42), b.Width, ui.S(18)), on ? c.text : c.muted, 10.5f, on, ui::Center);
+        ui.Text(e.name, RectF(b.X - ui.S(4), b.Y + ui.S(42), b.Width + ui.S(8), ui.S(18)), on ? c.text : c.muted, 10.5f,
+                on, ui::Center);
+        std::wstring tip;
+        for (int k = 0; k < e.count; ++k) tip += (k ? L", " : L"") + std::wstring(e.pages[k].name);
+        if (e.count > 1) ui.Tip(ID_RAIL + gi, tip);
         y += ui.S(72);
     }
     RectF t(r.X + ui.S(7), r.Height - ui.S(122), r.Width - ui.S(14), ui.S(66));
@@ -237,6 +267,34 @@ void Studio::Rail(const RectF& r) {
     ui.Icon(railIcon(L"rail-tour.png", L"study.png"),
             RectF(t.X + (t.Width - ui.S(30)) / 2, t.Y + ui.S(8), ui.S(30), ui.S(30)));
     ui.Text(L"Тур", RectF(t.X, t.Y + ui.S(42), t.Width, ui.S(18)), c.muted, 10.5f, false, ui::Center);
+}
+
+float Studio::SubTabs(const RectF& body) {
+    int gi = GroupOf(page_);
+    groupLast_[gi] = page_;
+    const Group& g = kGroups[gi];
+    if (g.count < 2) return 0;
+    const UiColors& c = ui.C();
+    float x = body.X + ui.S(28), y = ui.S(14), h = ui.S(34);
+    for (int k = 0; k < g.count; ++k) {
+        const wchar_t* name = g.pages[k].name;
+        float w = ui.Measure(name, 12.5f, true) + ui.S(30);
+        RectF tr(x, y, w, h);
+        bool on = page_ == g.pages[k].page;
+        int id = ID_SUBTAB + g.pages[k].page;
+        if (ui.Click(id, tr) && !on) {
+            Page p = g.pages[k].page;
+            Defer([this, p] { GoPage(p); });
+        }
+        float hov = ui.Anim(id + 40, !on && ui.Hot(id), 18);
+        if (on)
+            ui.Fill(tr, c.accent, h / 2);
+        else
+            ui.Fill(tr, WithAlpha(c.cardHi, (BYTE)(90 + 140 * hov)), h / 2);
+        ui.Text(name, tr, on ? c.onAccent : c.muted, 12.5f, on, ui::Center);
+        x += w + ui.S(8);
+    }
+    return ui.S(44);
 }
 
 void Studio::StatusBar(const RectF& r) {
@@ -264,6 +322,44 @@ void Studio::GoPage(Page p) {
     page_ = p;
     ui.ResetScroll(ID_PAGE_SCROLL);
     if (wnd) InvalidateRect(wnd, nullptr, FALSE);
+}
+
+int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
+    OleInitialize(nullptr);  // как в программе: значки (WIC) и планировщик (автозапуск) идут через COM
+    LoadConfig(cfgPath, cfg);
+    ApplyAccent();
+    Recheck();
+    k = 1.0;
+    const int w = 1240, h = 800;
+    wnd = CreateWindowExW(WS_EX_TOOLWINDOW, kClass, L"Radial Studio snapshot", WS_POPUP, -5000, -5000, w, h, nullptr,
+                          nullptr, inst, nullptr);  // не показывается
+    ui.Attach(wnd);
+    ov_ = OV_NONE;
+    if (page == PAGE_TOOLS)
+        GoTools(tab, L"");
+    else
+        GoPage((Page)page);
+    Bitmap bmp(w, h, PixelFormat32bppARGB);
+    ULONGLONG end = GetTickCount64() + ms;
+    do {
+        MSG m;
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+        pageAt_ = 0;  // без проступания страницы
+        Graphics g(&bmp);
+        ui.Begin(g, UiPalette(cfg), k);
+        Frame((float)w, (float)h);
+        ui.End();
+        Sleep(120);
+    } while (GetTickCount64() < end);
+    CLSID png{};
+    UINT n = 0, size = 0;
+    Gdiplus::GetImageEncodersSize(&n, &size);
+    std::vector<BYTE> buf(size);
+    auto* codecs = (Gdiplus::ImageCodecInfo*)buf.data();
+    Gdiplus::GetImageEncoders(n, size, codecs);
+    for (UINT i = 0; i < n; ++i)
+        if (!wcscmp(codecs[i].MimeType, L"image/png")) png = codecs[i].Clsid;
+    return bmp.Save(out.c_str(), &png, nullptr) == Gdiplus::Ok ? 0 : 1;
 }
 
 void Studio::Open() {
@@ -500,6 +596,18 @@ LRESULT CALLBACK StudioProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 }  // namespace studio
 
 using namespace studio;
+
+int EditorSnapshot(HINSTANCE inst, const std::wstring& cfgPath, int page, int tab, const std::wstring& out, int ms) {
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.lpfnWndProc = StudioProc;
+    wc.hInstance = inst;
+    wc.lpszClassName = kClass;
+    RegisterClassExW(&wc);
+    g_st = new Studio;
+    g_st->inst = inst;
+    g_st->cfgPath = cfgPath;
+    return g_st->Snapshot(page, tab, out, ms);
+}
 
 void OpenEditor(HINSTANCE inst, const std::wstring& cfgPath, std::function<void()> onSaved,
                 std::function<void(bool, HWND)> showMenu) {

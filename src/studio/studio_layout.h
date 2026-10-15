@@ -56,6 +56,28 @@ public:
         colY_[col] += cr.Height + gap_;
     }
 
+    // Карточка на всю ширину (длинные списки): встаёт под обе колонки.
+    template <class Body>
+    void Wide(const wchar_t* title, float rows, Body&& body) {
+        const UiColors& c = ui_.C();
+        float y = std::max(colY_[0], colY_[1]);
+        float base = rows * rowH_;
+        float& extra = grow_[title];
+        RectF cr(x_, y, w_, ui_.S(52) + base + extra);
+        ui_.Fill(cr, c.card, ui_.S(12));
+        ui_.Stroke(cr, c.border, ui_.S(12));
+        ui_.Text(title, RectF(cr.X + ui_.S(18), cr.Y + ui_.S(14), cr.Width, ui_.S(24)), c.text, 14, true);
+        RectF b(cr.X + ui_.S(18), cr.Y + ui_.S(48), cr.Width - ui_.S(36), base);
+        need_ = b.Y + base;
+        body(b);
+        float want = std::max(0.0f, need_ - (b.Y + base));
+        if (std::fabs(want - extra) > 0.5f) {
+            extra = want;
+            ui_.Invalidate();
+        }
+        colY_[0] = colY_[1] = cr.Y + cr.Height + gap_;
+    }
+
     // Строка с подписью слева; справа - место под переключатель или кнопку.
     RectF Row(const RectF& b, float n, const std::wstring& label, float labelShare = 0.6f) {
         RectF rr(b.X, b.Y + n * rowH_, b.Width, ui_.S(44));

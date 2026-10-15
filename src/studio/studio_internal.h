@@ -28,7 +28,7 @@ inline constexpr wchar_t kClass[] = L"MoonRadialStudio";
 inline constexpr UINT WM_RUN = WM_APP + 40;
 inline constexpr UINT_PTR kSaveTimer = 1;
 
-enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_TOOLS, PAGE_KEYS };
+enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_TOOLS, PAGE_HOME, PAGE_KEYS };
 enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE };
 
 // идентификаторы элементов: постоянные и диапазоны для списков
@@ -168,6 +168,7 @@ enum Id {
     ID_TOOLS_LOCK_PATH,
     ID_TOOLS_LOCK,
     ID_TOOLS_LOCK_CLIP,
+    ID_TOOLS_SYS_TOGGLE,
     ID_BACKUP = 7000,      // +i
     ID_NET_KILL = 8000,    // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -188,6 +189,8 @@ enum Id {
     ID_MORE_ITEM = 9000,   // +пункт
     ID_RAIL_BAR = 9500,    // +страница: анимация полоски выбранного раздела
     ID_RAIL_HOVER = 9600,  // +страница: анимация наведения на раздел
+    ID_SUBTAB = 9700,      // +страница: вкладка внутри группы
+    ID_HOME_TILE = 9800,   // +i: плитка «Обзора» (+50 - её анимация)
 };
 
 struct Problem {
@@ -311,6 +314,8 @@ private:
     void SystemPage(const RectF& r);
     void StylePage(const RectF& r);
     void NetPage(const RectF& r);
+    void HomePage(const RectF& r);
+    float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
     void ToolsPage(const RectF& r);
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
     void ToolsScan(const std::wstring& dir);
@@ -333,11 +338,18 @@ private:
                      std::function<void(const std::wstring&)> onChange, const std::wstring& ph = L"");
 
 public:
+    // для проверки без окна: нарисовать раздел в PNG (скрытое окно, ms - сколько дать фоновым задачам)
+    int Snapshot(int page, int tab, const std::wstring& out, int ms);
     void GoPage(Page p);
     void GoTools(int tab, const std::wstring& scan);
 
 private:
-    Page page_ = PAGE_RINGS;
+    Page page_ = PAGE_HOME;
+    Page groupLast_[5] = {PAGE_HOME, PAGE_RINGS, PAGE_DESK, PAGE_NET, PAGE_BEHAVIOR};  // последняя вкладка группы
+    ULONGLONG homeAt_ = 0;
+    std::vector<tools::Volume> homeVols_;
+    int homePathBad_ = 0;
+    bool homeAuto_ = false;
     Overlay ov_ = OV_NONE;
     int ring_ = 0, sel_ = 0, tab_ = 0, tourStep_ = 0;
     int editingField_ = 0;
@@ -364,7 +376,7 @@ private:
     std::vector<tools::StartItem> toolsStarts_;
     std::vector<tools::Listener> toolsPorts_;
     std::vector<tools::Locker> toolsLockers_;
-    bool toolsLockChecked_ = false;
+    bool toolsLockChecked_ = false, toolsJunkAsked_ = false, toolsShowSys_ = false;
     std::wstring toolsAddPath_, toolsEnvName_, toolsEnvValue_, toolsScanPath_, toolsLockPath_;
     std::shared_ptr<volatile int> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
     std::wstring boostDir_;

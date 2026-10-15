@@ -513,6 +513,22 @@ void HotCorners::Paint() {
             g.DrawArc(&arc, cx - ar, cy - ar, ar * 2, ar * 2, start, 90 * progress_);
         }
 
+        // пока курсор ждёт - рядом проступает, что сейчас случится: «Кольцо сети», «Показать рабочий стол»
+        if (!fired_ && progress_ > 0 && lv <= 0 && cfg_ && corner_ >= 0 && !cfg_->corners[corner_].empty()) {
+            std::wstring name = ActionName(cfg_->corners[corner_]);
+            Font f(Family(), 11.5f * k, FontStyleRegular, UnitPixel);
+            StringFormat sf;
+            sf.SetAlignment(left ? StringAlignmentNear : StringAlignmentFar);
+            sf.SetLineAlignment(StringAlignmentCenter);
+            float bw = s * 0.62f, bh = s * 0.14f;
+            RectF box(left ? cx + s * 0.30f : cx - s * 0.30f - bw, cy + dy2 * s * 0.42f - bh / 2, bw, bh);
+            RectF sh = box;
+            sh.Offset(0, 1.2f * k);
+            SolidBrush shadow(Color((BYTE)(150 * e), 0, 0, 0)), text(Color((BYTE)(250 * e), 255, 255, 255));
+            g.DrawString(name.c_str(), -1, &f, sh, &sf, &shadow);
+            g.DrawString(name.c_str(), -1, &f, box, &sf, &text);
+        }
+
         // уровень после колеса: дуга и число
         if (lv > 0) {
             float ar = s * 0.36f;

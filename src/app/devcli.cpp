@@ -5,6 +5,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "desk/startbg.h"
 #include "desk/whreg.h"
 #include "net/net.h"
+#include "studio/studio.h"
 #include "tools/tools.h"
 
 namespace devcli {
@@ -185,8 +187,11 @@ int ToolsDiag() {
     const std::wstring nl = L"\r\n";
     std::wstring s = L"PATH:" + nl;
     for (const tools::PathEntry& e : tools::ReadPath())
-        s += std::wstring(e.system ? L"  sys " : L"  usr ") + (e.dead ? L"DEAD " : e.dup ? L"DUP  " : L"     ") + e.raw +
-             (e.provides.empty() ? L"" : L"   <- " + e.provides) + nl;
+        s += std::wstring(e.system ? L"  sys " : L"  usr ") +
+             (e.dead  ? L"DEAD "
+              : e.dup ? L"DUP  "
+                      : L"     ") +
+             e.raw + (e.provides.empty() ? L"" : L"   <- " + e.provides) + nl;
     s += nl + L"Что найдётся первым:" + nl;
     for (const tools::Which& w : tools::WhichAll()) {
         s += L"  " + w.cmd + L" = " + w.path;
@@ -202,7 +207,8 @@ int ToolsDiag() {
         s += L"  " + d.name + (d.ssd ? L" SSD" : L" HDD") + L" здоровье " + std::to_wstring(d.health) + L" " +
              tools::Bytes(d.size) + nl;
     s += nl + L"Кэши:" + nl;
-    for (const tools::Junk& j : tools::FindJunk()) s += L"  " + j.name + L" " + tools::Bytes(j.bytes) + L" " + j.path + nl;
+    for (const tools::Junk& j : tools::FindJunk())
+        s += L"  " + j.name + L" " + tools::Bytes(j.bytes) + L" " + j.path + nl;
     s += nl + L"Автозагрузка:" + nl;
     for (const tools::StartItem& it : tools::StartupItems())
         s += std::wstring(it.enabled ? L"  on  " : L"  off ") + (it.canToggle ? L"   " : L"[A]") + it.where + L": " +
@@ -210,8 +216,8 @@ int ToolsDiag() {
     s += nl + L"Порты:" + nl;
     for (const tools::Listener& l : tools::Listeners())
         if (l.dev || !l.udp)
-            s += std::wstring(l.dev ? L"  * " : L"    ") + (l.udp ? L"udp " : L"tcp ") + std::to_wstring(l.port) + L" " +
-                 l.process + L" pid " + std::to_wstring(l.pid) + nl;
+            s += std::wstring(l.dev ? L"  * " : L"    ") + (l.udp ? L"udp " : L"tcp ") + std::to_wstring(l.port) +
+                 L" " + l.process + L" pid " + std::to_wstring(l.pid) + nl;
     s += nl + L"Кто держит RadialMenu.exe:" + nl;
     for (const tools::Locker& k : tools::WhoLocks(ExeDir() + L"\\RadialMenu.exe"))
         s += L"  " + k.name + L" pid " + std::to_wstring(k.pid) + nl;
@@ -241,6 +247,14 @@ bool Run(int& exitCode) {
         exitCode = boost::PurgeMain(boost::Load(boost::Dir(LoadOwnConfig().boostDir)));
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
+    } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку
+        Gdip gdip;
+        size_t i = std::find(args.begin(), args.end(), L"--studio-snap") - args.begin();
+        int page = i + 1 < args.size() ? _wtoi(args[i + 1].c_str()) : 0;
+        int tab = i + 2 < args.size() ? _wtoi(args[i + 2].c_str()) : 0;
+        std::wstring out = i + 3 < args.size() ? args[i + 3] : ExeDir() + L"\\studio_snap.png";
+        int ms = i + 4 < args.size() ? _wtoi(args[i + 4].c_str()) : 2500;
+        exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
     } else if (Has(args, L"--tools-diag")) {
         exitCode = ToolsDiag();
     } else if (Has(args, L"--net-diag")) {

@@ -99,6 +99,18 @@ void Studio::ToolsPage(const RectF& r) {
     CardColumns cols(ui, cardGrow_, view, off, ui.S(900));
     float rowH = cols.RowH();
     auto card = [&](const wchar_t* title, float rows, auto&& body) { cols.Card(title, rows, body); };
+    auto wide = [&](const wchar_t* title, float rows, auto&& body) { cols.Wide(title, rows, body); };
+    // строка списка: подсветка при наведении, по клику - действие (если есть)
+    auto rowHover = [&](int id, const RectF& rr) {
+        bool click = ui.Click(id, rr);
+        if (ui.Hot(id)) ui.Fill(rr, WithAlpha(c.cardHi, 200), ui.S(6));
+        return click;
+    };
+    // курсор над строкой: кнопки строки показываются только тогда, иначе список - лес одинаковых кнопок
+    auto rowHot = [&](const RectF& rr) {
+        POINT m = ui.Mouse();
+        return ui.interactive && m.x >= rr.X && m.x < rr.X + rr.Width && m.y >= rr.Y && m.y < rr.Y + rr.Height;
+    };
     auto note = [&](const RectF& b, float n, const std::wstring& s, Color col) { cols.Note(b, n, s, col); };
     float lineH = ui.S(30);
     auto rowsFor = [&](size_t n) { return (float)(n * lineH / rowH); };
@@ -117,6 +129,19 @@ void Studio::ToolsPage(const RectF& r) {
         } else if (toolsTab_ == 1) {
             toolsVols_ = tools::Volumes();
             if (toolsPhys_.empty()) toolsPhys_ = tools::PhysicalDisks();
+            // размеры кэшей - сами, один раз при входе на вкладку (считаются в фоне)
+            if (toolsJunk_.empty() && !toolsJunkAsked_ && !(toolsJob_ && !toolsJob_->done)) {
+                toolsJunkAsked_ = true;
+                ToolsRun(L"Кэши", [](const tools::Log& l, ToolsJob& job) {
+                    l(L"Считаю размеры кэшей...");
+                    std::vector<tools::Junk> j = tools::FindJunk(true);
+                    AcquireSRWLockExclusive(&job.lock);
+                    job.junk = j;
+                    job.hasJunk = true;
+                    ReleaseSRWLockExclusive(&job.lock);
+                    return true;
+                });
+            }
         } else if (toolsTab_ == 2) {
             toolsStarts_ = tools::StartupItems();
         } else {
@@ -141,14 +166,44 @@ void Studio::ToolsPage(const RectF& r) {
             ndead += e.dead;
             ndup += e.dup && !e.dead;
         }
-        card(L"PATH", rowsFor(toolsPath_.size()) + 3.2f, [&](const RectF& b) {
+        size_t nsys = 0, sysBad = 0;
+        for (const tools::PathEntry& e : toolsPath_)
+            if (e.system) {
+                ++nsys;
+                sysBad += e.dead || e.dup;
+            }
+        size_t visible = toolsPath_.size() - (toolsShowSys_ ? 0 : nsys) + 1;
+        wide(L"PATH", rowsFor(visible) + 3.2f, [&](const RectF& b) {
             std::vector<std::wstring> user;
             for (const tools::PathEntry& e : toolsPath_)
                 if (!e.system) user.push_back(e.raw);
             float y = b.Y;
             int ui_ = 0;
-            for (size_t i = 0; i < toolsPath_.size(); ++i) {
+            // сначала свой PATH (его и правят), системный свёрнут: он длинный, а трогать его почти не нужно
+            std::vector<size_t> order;
+            for (size_t i = 0; i < toolsPath_.size(); ++i)
+                if (!toolsPath_[i].system) order.push_back(i);
+            order.push_back(SIZE_MAX);  // строка «системный PATH»
+            if (toolsShowSys_)
+                for (size_t i = 0; i < toolsPath_.size(); ++i)
+                    if (toolsPath_[i].system) order.push_back(i);
+            for (size_t i : order) {
+                if (i == SIZE_MAX) {
+                    RectF rr(b.X - ui.S(6), y, b.Width + ui.S(12), lineH);
+                    if (rowHover(ID_TOOLS_SYS_TOGGLE, rr)) toolsShowSys_ = !toolsShowSys_;
+                    ui.Text(std::wstring(toolsShowSys_ ? L"Скрыть" : L"Показать") + L" системный PATH (" +
+                                std::to_wstring(nsys) + L")" +
+                                (sysBad ? L", лишних " + std::to_wstring(sysBad) : std::wstring()) +
+                                L" - Windows ищет в нём раньше, чем в своём",
+                            RectF(b.X, y, b.Width, lineH), sysBad ? c.gold : c.accent, 11.5f, true);
+                    y += lineH;
+                    continue;
+                }
                 const tools::PathEntry& e = toolsPath_[i];
+                RectF rowR(b.X - ui.S(6), y, b.Width + ui.S(12), lineH);
+                bool hot = !e.system && rowHot(rowR);
+                if (hot) ui.Fill(rowR, WithAlpha(c.cardHi, 170), ui.S(6));
+                int kk = e.system ? -1 : ui_++;
                 Color col = e.dead ? c.warn : e.dup ? c.gold : c.text;
                 ui.Text(e.system ? L"система" : L"свой", RectF(b.X, y, ui.S(64), lineH), c.faint, 10.5f);
                 float bw = e.system ? 0 : ui.S(210);
@@ -157,25 +212,24 @@ void Studio::ToolsPage(const RectF& r) {
                 if (!e.provides.empty())
                     ui.Text(e.provides, RectF(b.X + b.Width - bw - ui.S(148), y, ui.S(144), lineH), c.muted, 10.5f,
                             false, ui::Right);
-                if (!e.system) {
+                if (hot) {
                     float bx = b.X + b.Width - bw;
-                    int k = ui_++;
+                    int k = kk;
                     auto move = [&](int to) {
                         std::vector<std::wstring> v = user;
                         std::swap(v[k], v[to]);
                         ToolsRun(L"PATH", [v](const tools::Log& l, ToolsJob&) { return tools::WriteUserPath(v, l); });
                         refresh();
                     };
-                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4, RectF(bx, y + ui.S(2), ui.S(64), ui.S(26)), L"Выше",
-                                  Kind::Ghost) &&
+                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4, RectF(bx, y + ui.S(2), ui.S(64), ui.S(26)), L"Выше") &&
                         k > 0 && !busy)
                         move(k - 1);
                     if (ui.Button(ID_TOOLS_ROW + (int)i * 4 + 1, RectF(bx + ui.S(70), y + ui.S(2), ui.S(64), ui.S(26)),
-                                  L"Ниже", Kind::Ghost) &&
+                                  L"Ниже") &&
                         k + 1 < (int)user.size() && !busy)
                         move(k + 1);
                     if (ui.Button(ID_TOOLS_ROW + (int)i * 4 + 2, RectF(bx + ui.S(140), y + ui.S(2), ui.S(70), ui.S(26)),
-                                  L"Убрать", Kind::Ghost) &&
+                                  L"Убрать") &&
                         !busy) {
                         std::vector<std::wstring> v = user;
                         v.erase(v.begin() + k);
@@ -230,7 +284,7 @@ void Studio::ToolsPage(const RectF& r) {
                      L"Каждая правка сохраняет прежний PATH в бэкап.",
                  c.muted);
         });
-        card(L"Что найдётся первым", rowsFor(toolsWhich_.size()), [&](const RectF& b) {
+        wide(L"Что найдётся первым", rowsFor(toolsWhich_.size()), [&](const RectF& b) {
             float y = b.Y;
             for (const tools::Which& w : toolsWhich_) {
                 ui.Text(w.cmd, RectF(b.X, y, ui.S(70), lineH), c.text, 12, true);
@@ -241,7 +295,7 @@ void Studio::ToolsPage(const RectF& r) {
                 y += lineH;
             }
         });
-        card(L"Переменные окружения", rowsFor(toolsEnv_.size()) + 1.2f, [&](const RectF& b) {
+        wide(L"Переменные окружения", rowsFor(toolsEnv_.size()) + 1.2f, [&](const RectF& b) {
             float y = b.Y;
             for (const tools::EnvVar& v : toolsEnv_) {
                 ui.Text(v.system ? L"система" : L"свой", RectF(b.X, y, ui.S(64), lineH), c.faint, 10.5f);
@@ -311,8 +365,8 @@ void Studio::ToolsPage(const RectF& r) {
                     return ok;
                 });
             }
-            ui.Text(L"нужны права: задача планировщика, только чтение",
-                    RectF(b.X + ui.S(252), y + ui.S(6), b.Width, ui.S(36)), c.faint, 11);
+            note(b, (y + ui.S(48) - b.Y) / rowH, L"Нужны права: один раз - задача планировщика, она только читает.",
+                 c.faint);
         });
         if (toolsJob_ && toolsJob_->done && toolsJob_->hasPhys) {
             toolsPhys_ = toolsJob_->phys;
@@ -330,7 +384,7 @@ void Studio::ToolsPage(const RectF& r) {
             seen = toolsJob_->progress;
         }
         size_t shown = std::min<size_t>(sizes.size(), 20);
-        card(L"Что занимает место", rowsFor(shown) + 2.0f, [&](const RectF& b) {
+        wide(L"Что занимает место", rowsFor(shown) + 2.0f + (scanning ? 1 : 0), [&](const RectF& b) {
             std::wstring dir = toolsScanPath_.empty() ? L"C:\\" : toolsScanPath_;
             RectF fr(b.X, b.Y, b.Width - ui.S(290), ui.S(36));
             FieldOrText(
@@ -358,28 +412,28 @@ void Studio::ToolsPage(const RectF& r) {
             for (size_t i = 0; i < shown; ++i) {
                 const tools::FolderSize& f = sizes[i];
                 float yy = y + (scanning ? lineH : 0) + i * lineH;
-                RectF bar(b.X, yy + lineH - ui.S(6), (REAL)((b.Width - ui.S(220)) * (double)f.bytes / top), ui.S(3));
-                ui.Fill(bar, WithAlpha(c.accent, 140), ui.S(1.5f));
-                ui.Text(Ellip(f.name, 48), RectF(b.X, yy, b.Width - ui.S(320), lineH), c.text, 11.5f);
-                ui.Text(tools::Bytes(f.bytes), RectF(b.X + b.Width - ui.S(320), yy, ui.S(96), lineH), c.muted, 11.5f,
-                        false, ui::Right);
                 bool isDir = f.name.front() != L'(';
-                if (isDir &&
-                    ui.Button(ID_TOOLS_SIZE + (int)i * 2,
-                              RectF(b.X + b.Width - ui.S(212), yy + ui.S(2), ui.S(100), ui.S(26)), L"Внутрь",
-                              Kind::Ghost) &&
-                    !busy)
-                    ToolsScan(f.path);
-                if (ui.Button(ID_TOOLS_SIZE + (int)i * 2 + 1,
-                              RectF(b.X + b.Width - ui.S(106), yy + ui.S(2), ui.S(106), ui.S(26)), L"Открыть",
-                              Kind::Ghost)) {
+                // вся строка - «зайти внутрь»; размер полоской на всю ширину строки
+                RectF rr(b.X - ui.S(6), yy, b.Width - ui.S(110), lineH);
+                if (rowHover(ID_TOOLS_SIZE + (int)i * 2, rr) && isDir && !busy) ToolsScan(f.path);
+                RectF bar(b.X, yy + lineH - ui.S(5), (REAL)((b.Width - ui.S(240)) * (double)f.bytes / top), ui.S(3));
+                ui.Fill(bar, WithAlpha(c.accent, 150), ui.S(1.5f));
+                ui.Text(f.name, RectF(b.X, yy, b.Width - ui.S(360), lineH), isDir ? c.text : c.muted, 12, isDir);
+                ui.Text(tools::Bytes(f.bytes), RectF(b.X + b.Width - ui.S(360), yy, ui.S(110), lineH), c.text, 12, true,
+                        ui::Right);
+                if (f.files)
+                    ui.Text(Plural(f.files, L"файл", L"файла", L"файлов"),
+                            RectF(b.X + b.Width - ui.S(240), yy, ui.S(124), lineH), c.faint, 10.5f, false, ui::Right);
+                if (rowHot(RectF(b.X - ui.S(6), yy, b.Width + ui.S(12), lineH)) &&
+                    ui.Button(ID_TOOLS_SIZE + (int)i * 2 + 1,
+                              RectF(b.X + b.Width - ui.S(100), yy + ui.S(2), ui.S(100), ui.S(26)), L"Открыть")) {
                     std::wstring p = f.path;
                     Defer([p] { ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
                 }
             }
         });
         // кэши
-        card(L"Кэши и временные файлы", rowsFor(toolsJunk_.size()) + 1.6f, [&](const RectF& b) {
+        wide(L"Кэши и временные файлы", rowsFor(toolsJunk_.size()) + 1.6f, [&](const RectF& b) {
             if (toolsJob_ && toolsJob_->done && toolsJob_->hasJunk) {
                 toolsJunk_ = toolsJob_->junk;
                 toolsJob_->hasJunk = false;
@@ -392,8 +446,7 @@ void Studio::ToolsPage(const RectF& r) {
                 ui.Text(tools::Bytes(j.bytes), RectF(b.X + b.Width - ui.S(240), y, ui.S(110), lineH), c.gold, 12, true,
                         ui::Right);
                 if (ui.Button(ID_TOOLS_JUNK + (int)i,
-                              RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Очистить",
-                              Kind::Ghost) &&
+                              RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Очистить") &&
                     !busy &&
                     MessageBoxW(wnd,
                                 (L"Удалить содержимое\n" + j.path + L"\n(" + tools::Bytes(j.bytes) +
@@ -425,7 +478,7 @@ void Studio::ToolsPage(const RectF& r) {
                 note(b, (y + ui.S(48) - b.Y) / rowH, log(), c.muted);
         });
     } else if (toolsTab_ == 2) {  // ---------------- автозагрузка ----------------
-        card(L"Запускается вместе с Windows", rowsFor(toolsStarts_.size()) * 1.5f + 0.8f, [&](const RectF& b) {
+        wide(L"Запускается вместе с Windows", rowsFor(toolsStarts_.size()) * 1.5f + 0.8f, [&](const RectF& b) {
             float y = b.Y;
             for (size_t i = 0; i < toolsStarts_.size(); ++i) {
                 tools::StartItem& it = toolsStarts_[i];
@@ -455,17 +508,18 @@ void Studio::ToolsPage(const RectF& r) {
                  c.muted);
         });
     } else {  // ---------------- порты ----------------
-        card(L"Кто слушает порты", rowsFor(std::min<size_t>(toolsPorts_.size(), 40)), [&](const RectF& b) {
+        wide(L"Кто слушает порты", rowsFor(std::min<size_t>(toolsPorts_.size(), 40)), [&](const RectF& b) {
             float y = b.Y;
             for (size_t i = 0; i < toolsPorts_.size() && i < 40; ++i) {
                 const tools::Listener& l = toolsPorts_[i];
+                RectF portR(b.X - ui.S(6), y, b.Width + ui.S(12), lineH);
+                if (rowHot(portR)) ui.Fill(portR, WithAlpha(c.cardHi, 170), ui.S(6));
                 ui.Text(std::wstring(l.udp ? L"UDP " : L"TCP ") + std::to_wstring(l.port),
                         RectF(b.X, y, ui.S(90), lineH), l.dev ? c.gold : c.text, 12, l.dev);
                 ui.Text(l.process + L"   PID " + std::to_wstring(l.pid),
                         RectF(b.X + ui.S(96), y, b.Width - ui.S(230), lineH), c.muted, 11.5f);
-                if (ui.Button(ID_TOOLS_PORT + (int)i,
-                              RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Завершить",
-                              Kind::Ghost)) {
+                if (rowHot(portR) && ui.Button(ID_TOOLS_PORT + (int)i,
+                              RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Завершить")) {
                     bool ok = tools::KillPid(l.pid);
                     Toast(ok ? L"Завершён " + l.process : L"Не удалось завершить " + l.process);
                     refresh();
@@ -473,7 +527,7 @@ void Studio::ToolsPage(const RectF& r) {
                 y += lineH;
             }
         });
-        card(L"Кто держит файл или папку", rowsFor(toolsLockers_.size()) + 1.8f, [&](const RectF& b) {
+        wide(L"Кто держит файл или папку", rowsFor(toolsLockers_.size()) + 1.8f, [&](const RectF& b) {
             RectF fr(b.X, b.Y, b.Width - ui.S(290), ui.S(36));
             FieldOrText(
                 ID_TOOLS_LOCK_PATH, fr, view, toolsLockPath_, [this](const std::wstring& s) { toolsLockPath_ = s; },
@@ -497,8 +551,7 @@ void Studio::ToolsPage(const RectF& r) {
                 ui.Text(k.name + L"   PID " + std::to_wstring(k.pid), RectF(b.X, y, b.Width - ui.S(130), lineH), c.text,
                         12);
                 if (ui.Button(ID_TOOLS_LOCKER + (int)i,
-                              RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Завершить",
-                              Kind::Ghost)) {
+                              RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Завершить")) {
                     bool ok = tools::KillPid(k.pid);
                     Toast(ok ? L"Завершён " + k.name : L"Не удалось завершить " + k.name);
                     toolsLockers_ = tools::WhoLocks(toolsLockPath_);

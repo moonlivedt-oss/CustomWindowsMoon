@@ -624,6 +624,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         else
             g_battery.Test(what == PREVIEW_BATTERY_CHARGE);
     });
+    SetEditorNetStatus([] { return netui::Status(); });
     SetEditorGameStatus([] { return g_game.On() ? L"включён (" + g_game.Reason() + L")" : std::wstring(L"выключен"); });
     g_snip.Create(inst);
     g_snip.Apply(g_cfg);
