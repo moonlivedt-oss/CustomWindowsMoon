@@ -39,10 +39,14 @@ std::wstring KnownFolder(REFKNOWNFOLDERID id) {
 }  // namespace
 
 std::wstring ExeDir() {
-    wchar_t buf[MAX_PATH];
-    GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    PathRemoveFileSpecW(buf);
-    return buf;
+    // зовётся на каждом кадре (пути значков плашек): exe никуда не переезжает, считаем один раз
+    static const std::wstring dir = [] {
+        wchar_t buf[MAX_PATH];
+        GetModuleFileNameW(nullptr, buf, MAX_PATH);
+        PathRemoveFileSpecW(buf);
+        return std::wstring(buf);
+    }();
+    return dir;
 }
 
 std::wstring ExpandPath(const std::wstring& p) {

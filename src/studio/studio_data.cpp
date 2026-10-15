@@ -321,7 +321,7 @@ std::wstring Studio::PickPath(bool folder) {
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d)))) return {};
     DWORD opts = 0;
     d->GetOptions(&opts);
-    d->SetOptions(opts | FOS_FORCEFILESYSTEM | (folder ? FOS_PICKFOLDERS : 0));
+    d->SetOptions(opts | FOS_FORCEFILESYSTEM | (folder ? (DWORD)FOS_PICKFOLDERS : 0));
     std::wstring out;
     if (SUCCEEDED(d->Show(wnd))) {
         IShellItem* it = nullptr;

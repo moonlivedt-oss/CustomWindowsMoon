@@ -37,7 +37,6 @@ void Studio::BehaviorPage(const RectF& r) {
     GraphicsState st = ui.G().Save();
     ui.G().SetClip(view);
     CardColumns cols(ui, cardGrow_, view, off, ui.S(900));
-    float rowH = cols.RowH();
     auto card = [&](const wchar_t* title, float rows, auto&& body) { cols.Card(title, rows, body); };
     // справа только переключатель или короткий ползунок - подписи можно почти всю строку
     auto row = [&](const RectF& b, float n, const wchar_t* label) { return cols.Row(b, n, label, 0.86f); };

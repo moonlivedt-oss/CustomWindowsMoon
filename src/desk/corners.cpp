@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/fx.h"
+#include "core/llmouse.h"
 #include "core/config.h"
 #include "core/night.h"
 #include "core/files.h"
@@ -261,23 +262,13 @@ void HotCorners::Create(HINSTANCE inst) {
     wnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                            kClass, L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
     bright_.Start(wnd_, WM_BRIGHT);
-    // колесо нужно поймать раньше окна под курсором, поэтому перехват мыши всей системы
-    hook_ = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, inst, 0);
-}
-
-void HotCorners::Hook(bool on) {
-    // в игровом режиме перехват мыши снимается: каждое движение мыши не ходит через нас
-    if (on && !hook_)
-        hook_ = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, GetModuleHandleW(nullptr), 0);
-    else if (!on && hook_) {
-        UnhookWindowsHookEx(hook_);
-        hook_ = nullptr;
-    }
+    // колесо нужно поймать раньше окна под курсором, поэтому перехват мыши всей системы;
+    // ставится, только когда колесу в каком-нибудь углу что-то назначено (Tick)
+    llmouse::Set(llmouse::CORNERS, OnMouse);
 }
 
 void HotCorners::Destroy() {
-    if (hook_) UnhookWindowsHookEx(hook_);
-    hook_ = nullptr;
+    llmouse::Need(llmouse::CORNERS, false);
     bright_.Stop();
 }
 
@@ -295,21 +286,18 @@ LRESULT CALLBACK HotCorners::Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(h, msg, wp, lp);
 }
 
-LRESULT CALLBACK HotCorners::MouseHook(int code, WPARAM wp, LPARAM lp) {
-    // тут только быстрая проверка: сама работа уходит сообщением, иначе Windows снимет перехват
-    if (code == HC_ACTION && wp == WM_MOUSEWHEEL && g_self && g_self->cfg_) {
-        auto* m = (MSLLHOOKSTRUCT*)lp;
-        POINT at;
-        RECT mon;
-        HMONITOR hm;
-        int c = g_self->CornerAt(m->pt, kWheelTol, &at, &mon, &hm);
-        const Config& cfg = *g_self->cfg_;
-        if (c >= 0 && !cfg.cornerWheel[c].empty() && !(cfg.skipFullscreen && FullscreenOn(hm, mon))) {
-            PostMessageW(g_self->wnd_, WM_WHEEL, (WPARAM)c, (LPARAM)(short)HIWORD(m->mouseData));
-            return 1;
-        }
-    }
-    return CallNextHookEx(nullptr, code, wp, lp);
+bool HotCorners::OnMouse(WPARAM wp, const MSLLHOOKSTRUCT& m) {
+    // поток перехвата (core/llmouse): только быстрая проверка, сама работа уходит сообщением,
+    // иначе Windows снимет перехват. Настройки отсюда не читаются (их меняет основной поток) - только снимок.
+    if (wp != WM_MOUSEWHEEL || !g_self) return false;
+    POINT at;
+    RECT mon;
+    HMONITOR hm;
+    int c = g_self->CornerAt(m.pt, kWheelTol, &at, &mon, &hm);
+    if (c < 0 || !(g_self->wheelMask_ >> c & 1)) return false;
+    if (g_self->skipFullscreen_ && FullscreenOn(hm, mon)) return false;
+    PostMessageW(g_self->wnd_, WM_WHEEL, (WPARAM)c, (LPARAM)(short)HIWORD(m.mouseData));
+    return true;
 }
 
 int HotCorners::CornerAt(POINT pt, int tol, POINT* at, RECT* monRect, HMONITOR* hmon) const {
@@ -370,6 +358,11 @@ void HotCorners::ShowLevel(int c, int level, const wchar_t* label) {
 
 void HotCorners::Tick(const Config& cfg, bool blocked) {
     cfg_ = &cfg;
+    int mask = 0;
+    for (int i = 0; i < kCount; ++i)
+        if (!cfg.cornerWheel[i].empty()) mask |= 1 << i;
+    skipFullscreen_ = cfg.skipFullscreen;
+    if (wheelMask_.exchange(mask) != mask) llmouse::Need(llmouse::CORNERS, mask != 0);
     POINT pt, at{};
     GetCursorPos(&pt);
     RECT r;

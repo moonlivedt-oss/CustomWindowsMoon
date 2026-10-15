@@ -144,7 +144,13 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
     }
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
-    std::map<DWORD, std::wstring> seen;
+    // маски поменяли в студии - уже открытые процессы проверяются заново
+    std::wstring masks = cfg.games + L"\x1" + cfg.gamesSkip;
+    if (masks != masks_) {
+        masks_ = masks;
+        games_.clear();
+    }
+    std::map<DWORD, Seen> seen;
     DWORD self = GetCurrentProcessId();
     bool found = false;
     PROCESSENTRY32W pe{sizeof(pe)};
@@ -153,14 +159,14 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
         if (pid == self || pid <= 4) continue;
         auto it = games_.find(pid);
         std::wstring game;
-        if (it != games_.end()) {
-            game = it->second;
+        if (it != games_.end() && it->second.exe == pe.szExeFile) {
+            game = it->second.game;
         } else {
             // путь спрашиваем только у новых процессов: старые уже проверены
             std::wstring path = ProcessPath(pid);
             if (!path.empty() && MatchAny(path, cfg.games) && !MatchAny(path, cfg.gamesSkip)) game = FileName(path);
         }
-        seen[pid] = game;
+        seen[pid] = {pe.szExeFile, game};
         if (!game.empty() && !found) {
             found = true;
             name = game;
@@ -173,8 +179,8 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
 
 std::vector<DWORD> GameMode::GamePids() const {
     std::vector<DWORD> out;
-    for (const auto& [pid, name] : games_)
-        if (!name.empty()) out.push_back(pid);
+    for (const auto& [pid, s] : games_)
+        if (!s.game.empty()) out.push_back(pid);
     if (out.empty()) {
         DWORD pid = 0;
         GetWindowThreadProcessId(GetForegroundWindow(), &pid);

@@ -36,7 +36,12 @@ private:
     std::wstring reason_;
     ULONGLONG lastCheck_ = 0;
     int misses_ = 0;
-    std::map<DWORD, std::wstring> games_;  // pid -> имя файла игры или пусто (уже проверен, не игра)
+    struct Seen {
+        std::wstring exe;   // имя файла процесса: номер мог достаться новому процессу
+        std::wstring game;  // имя файла игры или пусто (уже проверен, не игра)
+    };
+    std::map<DWORD, Seen> games_;  // по pid
+    std::wstring masks_;           // games и games_skip, по которым проверены процессы
     // что поменяли в системе
     bool changedAnim_ = false, changedTransp_ = false;
     std::wstring pausedWallpaper_;  // путь к wallpaper64.exe, если ставили на паузу

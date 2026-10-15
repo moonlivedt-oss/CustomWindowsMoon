@@ -294,9 +294,9 @@ void RadialMenu::DrawPill(Graphics& g, const std::wstring& text, const std::wstr
 }
 
 std::wstring RadialMenu::TopHint() const {
-    if (mode_ != Mode::Root || subParent_ < 0 || navStack_.empty()) return {};
-    std::wstring s = (*ring_)[subParent_].name;
-    for (const Item& f : navStack_) s += L" / " + f.name;
+    if (mode_ != Mode::Root || navStack_.empty()) return {};
+    std::wstring s = subParent_ >= 0 ? (*ring_)[subParent_].name : L"";  // из поиска - без сектора
+    for (const Item& f : navStack_) s += (s.empty() ? L"" : L" / ") + f.name;
     return s;
 }
 

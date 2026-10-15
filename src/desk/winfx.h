@@ -17,7 +17,6 @@ public:
     void Create(HINSTANCE inst);
     void Apply(const Config& cfg);
     void Tick();
-    void Hook(bool on);  // перехват мыши (снимается в игровом режиме)
     bool Pinned(HWND w) const {
         auto it = states_.find(w);
         return it != states_.end() && it->second.pinned;
@@ -33,7 +32,7 @@ private:
         bool pinned = false;
     };
     static LRESULT CALLBACK Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp);
-    static LRESULT CALLBACK MouseHook(int code, WPARAM wp, LPARAM lp);
+    static bool OnMouse(WPARAM msg, const MSLLHOOKSTRUCT& m);  // в потоке перехвата (core/llmouse)
     static HWND TargetAt(POINT pt);
     void Wheel(HWND w, int delta);
     void SetAlpha(HWND w, BYTE a);
@@ -42,7 +41,6 @@ private:
     void Paint();
 
     HWND wnd_ = nullptr;
-    HHOOK hook_ = nullptr;
     bool enabled_ = true;
     ThemeInfo theme_{};
     std::map<HWND, State> states_;

@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "core/fx.h"
+#include "core/llmouse.h"
 #include "core/config.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -27,7 +28,7 @@ constexpr DWORD kBorderDefault = 0xFFFFFFFF;  // DWMWA_COLOR_DEFAULT
 constexpr DWORD kBorderAttr = 34;             // DWMWA_BORDER_COLOR (Windows 11)
 
 WindowFx* g_fx = nullptr;
-bool g_swallowMiddleUp = false;
+bool g_swallowMiddleUp = false;  // только поток перехвата
 
 void RoundRect(GraphicsPath& p, const RectF& r, float rad) {
     float d = std::min(rad * 2, std::min(r.Width, r.Height));
@@ -76,11 +77,12 @@ void WindowFx::Create(HINSTANCE inst) {
     RegisterClassExW(&wc);
     wnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                            kClass, L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
-    hook_ = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, inst, 0);
+    llmouse::Set(llmouse::WINDOW_FX, OnMouse);
 }
 
 void WindowFx::Apply(const Config& cfg) {
     enabled_ = cfg.winFx;
+    llmouse::Need(llmouse::WINDOW_FX, enabled_ && wnd_);
     theme_ = CurrentTheme(cfg);
     // рамки закреплённых окон перекрасить в новый цвет темы
     for (auto& [w, s] : states_) {
@@ -90,19 +92,8 @@ void WindowFx::Apply(const Config& cfg) {
     }
 }
 
-void WindowFx::Hook(bool on) {
-    // в игровом режиме перехват мыши снимается: каждое движение мыши не ходит через нас
-    if (on && !hook_)
-        hook_ = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, GetModuleHandleW(nullptr), 0);
-    else if (!on && hook_) {
-        UnhookWindowsHookEx(hook_);
-        hook_ = nullptr;
-    }
-}
-
 void WindowFx::Destroy() {
-    if (hook_) UnhookWindowsHookEx(hook_);
-    hook_ = nullptr;
+    llmouse::Need(llmouse::WINDOW_FX, false);
     ResetAll();
 }
 
@@ -133,30 +124,27 @@ HWND WindowFx::TargetAt(POINT pt) {
     return w;
 }
 
-LRESULT CALLBACK WindowFx::MouseHook(int code, WPARAM wp, LPARAM lp) {
-    // только быстрые проверки: сама работа уходит сообщением
-    if (code == HC_ACTION && g_fx && g_fx->enabled_) {
-        auto* m = (MSLLHOOKSTRUCT*)lp;
-        if (wp == WM_MBUTTONUP && g_swallowMiddleUp) {
-            g_swallowMiddleUp = false;
-            return 1;
-        }
-        bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
-        bool other = (GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_SHIFT)) & 0x8000;
-        if (alt && !other && (wp == WM_MOUSEWHEEL || wp == WM_MBUTTONDOWN)) {
-            if (HWND w = TargetAt(m->pt)) {
-                if (wp == WM_MOUSEWHEEL) {
-                    PostMessageW(g_fx->wnd_, WM_FX_WHEEL, (WPARAM)w, (LPARAM)(short)HIWORD(m->mouseData));
-                } else {
-                    g_swallowMiddleUp = true;
-                    PostMessageW(g_fx->wnd_, WM_FX_PIN, (WPARAM)w, 0);
-                }
-                MaskAlt();  // сразу, пока Alt ещё зажат: иначе его отпускание откроет меню окна
-                return 1;
-            }
-        }
+bool WindowFx::OnMouse(WPARAM wp, const MSLLHOOKSTRUCT& m) {
+    // поток перехвата (core/llmouse): только быстрые проверки, сама работа уходит сообщением
+    if (!g_fx) return false;
+    if (wp == WM_MBUTTONUP && g_swallowMiddleUp) {
+        g_swallowMiddleUp = false;
+        return true;
     }
-    return CallNextHookEx(nullptr, code, wp, lp);
+    if (wp != WM_MOUSEWHEEL && wp != WM_MBUTTONDOWN) return false;
+    bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
+    bool other = (GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_SHIFT)) & 0x8000;
+    if (!alt || other) return false;
+    HWND w = TargetAt(m.pt);
+    if (!w) return false;
+    if (wp == WM_MOUSEWHEEL) {
+        PostMessageW(g_fx->wnd_, WM_FX_WHEEL, (WPARAM)w, (LPARAM)(short)HIWORD(m.mouseData));
+    } else {
+        g_swallowMiddleUp = true;
+        PostMessageW(g_fx->wnd_, WM_FX_PIN, (WPARAM)w, 0);
+    }
+    MaskAlt();  // сразу, пока Alt ещё зажат: иначе его отпускание откроет меню окна
+    return true;
 }
 
 LRESULT CALLBACK WindowFx::Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {

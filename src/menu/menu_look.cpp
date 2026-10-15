@@ -350,7 +350,7 @@ RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double 
     auto best = [&](double halfH, double& x, double& y) {
         double w = -1;
         for (double f : {f0, f0 - 0.04, f0 - 0.08, f0 - 0.12, f0 + 0.04}) {
-            double px, py, pw = FitWidth(r, a0, a1, r.rIn + (r.rOut - r.rIn) * f, halfH, px, py);
+            double px = 0, py = 0, pw = FitWidth(r, a0, a1, r.rIn + (r.rOut - r.rIn) * f, halfH, px, py);
             if (pw > w + 4 * geo_.k) {
                 w = pw;
                 x = px;
@@ -359,7 +359,7 @@ RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double 
         }
         return w;
     };
-    double lx, ly, w1 = best(lh * 0.55, lx, ly);
+    double lx = 0, ly = 0, w1 = best(lh * 0.55, lx, ly);
     if (w1 < 16 * geo_.k) return out;
     const std::wstring& name = it.name;
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <string>
 
 #include <windows.h>
@@ -23,12 +24,13 @@ const Action* Actions(int& count);               // список встроен�
 const Action* WheelActions(int& count);          // что делает колесо (первое - «ничего»)
 std::wstring ActionName(const std::wstring& v);  // подпись для значения из radial.cfg
 void Run(const std::wstring& action);
-void SetWindowsRing(void (*show)());
-void SetLock(void (*lock)());
-void SetScreenOff(bool (*off)());
-void SetBoost(void (*boost)());
-void SetNet(void (*net)());  // действие net: кольцо «Сеть» (main.cpp)
-void SetTools(void (*tools)());  // действие tools: кольцо «Утилиты» (main.cpp)  // действие boost: карточка «освободить память» (main.cpp)  // screen_off: выключить с переходом; false - выключить по-старому  // действие lock: блокировку с переходом делает main.cpp  // действие windows: кольцо окон показывает main.cpp
+// действия, которые делает main.cpp
+void SetWindowsRing(void (*show)());  // windows: кольцо окон
+void SetLock(void (*lock)());         // lock: блокировка с переходом
+void SetScreenOff(bool (*off)());     // screen_off: выключить с переходом; false - выключить по-старому
+void SetBoost(void (*boost)());       // boost: карточка «освободить память»
+void SetNet(void (*net)());           // net: кольцо «Сеть»
+void SetTools(void (*tools)());       // tools: кольцо «Утилиты»
 // keys:ctrl+shift+esc -> «Ctrl + Shift + Esc»; виртуальная клавиша -> имя для keys:
 std::wstring KeyName(UINT vk);
 // на этом мониторе открыта игра или видео на весь экран
@@ -38,13 +40,12 @@ class HotCorners {
 public:
     void Create(HINSTANCE inst);
     void Destroy();
-    void Hook(bool on);  // перехват колеса в углах (снимается в игровом режиме)
     // вызывается из опроса раз в 20 мс; blocked - сейчас нельзя (зажат Alt, открыто меню)
     void Tick(const Config& cfg, bool blocked);
 
 private:
     static LRESULT CALLBACK Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp);
-    static LRESULT CALLBACK MouseHook(int code, WPARAM wp, LPARAM lp);
+    static bool OnMouse(WPARAM msg, const MSLLHOOKSTRUCT& m);  // в потоке перехвата (core/llmouse)
     int CornerAt(POINT pt, int tol, POINT* at, RECT* mon, HMONITOR* hmon) const;
     void Wheel(int corner, int delta);
     void ShowLevel(int corner, int level, const wchar_t* label);
@@ -52,8 +53,9 @@ private:
     void Hide();
 
     HWND wnd_ = nullptr;
-    HHOOK hook_ = nullptr;
     const Config* cfg_ = nullptr;
+    std::atomic<int> wheelMask_{0};          // в каких углах колесу что-то назначено (снимок для перехвата)
+    std::atomic<bool> skipFullscreen_{true};
     Brightness bright_;
     int corner_ = -1;      // в каком углу курсор
     ULONGLONG since_ = 0;  // когда пришёл в угол

@@ -171,7 +171,7 @@ void RadialMenu::RebuildSub() {
         std::stable_sort(found.begin(), found.end(), [](auto& a, auto& b) { return a.first < b.first; });
         for (size_t i = 0; i < found.size() && (int)i < cap; ++i) list.push_back(*found[i].second);
         kbSel_ = std::clamp(kbSel_, 0, std::max(0, (int)list.size() - 1));
-    } else if (mode_ == Mode::Root && subParent_ >= 0) {
+    } else if (mode_ == Mode::Root && (subParent_ >= 0 || !navStack_.empty())) {
         if (!navStack_.empty()) {
             list = ListFolder(navStack_.back().full, true);
         } else {
@@ -194,7 +194,11 @@ void RadialMenu::RebuildSub() {
 
 void RadialMenu::Drill(Item folder) {
     if (!folder.dir) return;
-    if (mode_ != Mode::Root) {
+    if (mode_ == Mode::Search) {
+        // папка из найденного: второе кольцо - её содержимое, «назад» до конца - к первому кольцу
+        mode_ = Mode::Root;
+        subParent_ = -1;
+    } else if (mode_ != Mode::Root) {
         if (hoverRoot_ < 0) return;
         mode_ = Mode::Root;
         subParent_ = hoverRoot_;
@@ -220,7 +224,7 @@ bool RadialMenu::Back() {
     }
     if (navStack_.empty()) return false;
     navStack_.pop_back();
-    if (navStack_.empty() && !(*ring_)[subParent_].HasRing()) {
+    if (navStack_.empty() && (subParent_ < 0 || !(*ring_)[subParent_].HasRing())) {
         mode_ = Mode::None;
         subParent_ = -1;
         subItems_.clear();

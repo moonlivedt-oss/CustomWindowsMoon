@@ -18,6 +18,7 @@
 #include "core/config.h"
 #include "core/files.h"
 #include "core/fx.h"
+#include "core/llmouse.h"
 #include "core/themes.h"
 #include "core/night.h"
 #include "core/perf.h"
@@ -108,7 +109,7 @@ void Reload() {
     g_media.Apply(g_cfg);
     g_winfx.Apply(g_cfg);
     g_snip.Apply(g_cfg);
-    g_deskClick.enabled = g_cfg.deskDouble;
+    g_deskClick.SetEnabled(g_cfg.deskDouble);
     cursor::Apply(g_cfg);
     g_menu.ResetIcons();
     if (g_wnd) {
@@ -348,9 +349,7 @@ void BoostAfterGame() {
 void OnGameMode(bool on) {
     fx::SetGame(on);
     g_frame.Suspend(on);
-    g_corners.Hook(!on);
-    g_winfx.Hook(!on);
-    g_deskClick.Hook(!on);
+    llmouse::Suspend(on);  // перехват мыши снят: каждое движение мыши не ходит через нас
     UpdateTrayTip();
     // Boost: во время игры таймер и приоритеты, при запуске - предложить освободить память
     netui::Game(on, g_game.GamePids(), g_game.Reason());  // сеть в игре: туннель и пинг до сервера
@@ -551,6 +550,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             g_corners.Destroy();
             g_winfx.Destroy();
             g_deskClick.Destroy();
+            llmouse::Shutdown();
             g_snip.Destroy();
             cursor::Restore();
             RemoveTray();
@@ -628,8 +628,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     SetEditorGameStatus([] { return g_game.On() ? L"включён (" + g_game.Reason() + L")" : std::wstring(L"выключен"); });
     g_snip.Create(inst);
     g_snip.Apply(g_cfg);
-    g_deskClick.Create(inst);
-    g_deskClick.enabled = g_cfg.deskDouble;
     // двойной клик по пустому столу: целое кольцо вокруг курсора
     g_deskClick.onDouble = [](POINT pt) {
         if (g_menu.IsOpen()) return;
@@ -640,6 +638,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         GetMonitorInfoW(mon, &mi);
         g_menu.ShowAround(&g_cfg, pt, mi.rcWork, MonitorDpi(mon));
     };
+    g_deskClick.Create(inst);
+    g_deskClick.SetEnabled(g_cfg.deskDouble);
     g_frame.skip = [](HWND w) { return g_winfx.Pinned(w); };
     g_frame.Create(inst);
     g_frame.Apply(g_cfg);
