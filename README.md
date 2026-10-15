@@ -223,7 +223,8 @@ src/
             hexwave - волна сот игрового режима; boost, boostcard - Boost и его карточка
   menu/     menu.h - класс меню; menu.cpp - окно и перехватчики; menu_rings - второе кольцо и поиск;
             menu_input - мышь, клавиши, вращение, двойной клик; menu_drop - перетаскивание файлов;
-            menu_draw - рисование колец; menu_look - значки, подписи, оттенки групп, карточка
+            menu_draw - рисование колец (стекло, соты, значки и подписи 1:1 - прямо в пиксели кадра);
+            menu_look - значки, подписи, оттенки групп, карточка
   studio/   studio.h - вход; studio.cpp - окно и кадр; studio_data - отмена, сохранение, копии, проверки;
             studio_rings, studio_tabs - кольца и вкладки сектора; studio_themes - витрина и галерея тем;
             studio_pages, studio_system, studio_style, studio_overlays - остальные разделы и всплывающие окна

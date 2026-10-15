@@ -281,8 +281,8 @@ void RadialMenu::Hide() {
     grabSpun_ = false;
     if (GetCapture() == hwnd_) ReleaseCapture();
     ShowWindow(hwnd_, SW_HIDE);
-    blurBrush_.reset();
-    blurBmp_.reset();
+    blurPx_ = {};
+    maskPx_ = {};
     searchPool_.clear();
     searchPool_.shrink_to_fit();
     labels_.clear();  // подписи и ширины строк соберутся заново при следующем открытии

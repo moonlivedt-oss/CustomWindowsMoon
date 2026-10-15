@@ -31,8 +31,7 @@ using namespace menu_detail;
 // Всё на своих простых циклах: StretchBlt с экрана и растягивание GDI+ стоили по 10 мс каждое.
 void RadialMenu::CaptureBackdrop() {
     PERF_SCOPE("menu.CaptureBackdrop");
-    blurBrush_.reset();
-    blurBmp_.reset();
+    blurPx_ = {};
     if (!cfg_->blur || fx::Game()) return;  // в игровом режиме без стекла
     constexpr int kDown = 4;
     int w = geo_.w, h = geo_.h;
@@ -59,89 +58,205 @@ void RadialMenu::CaptureBackdrop() {
     Downscale((const uint32_t*)px, w, h, small.data(), sw, sh, kDown);
     BoxBlur(small.data(), sw, sh, std::max(1, (int)(2 * geo_.k)));
 
-    blurBmp_ = std::make_unique<Bitmap>(w, h, PixelFormat32bppPARGB);
-    BitmapData bd;
-    Rect r(0, 0, w, h);
-    if (blurBmp_->LockBits(&r, ImageLockModeWrite, PixelFormat32bppPARGB, &bd) == Ok) {
-        UpscaleBilinear(small.data(), sw, sh, (uint32_t*)bd.Scan0, w, h, bd.Stride / 4);
-        blurBmp_->UnlockBits(&bd);
-        blurBrush_ = std::make_unique<TextureBrush>(blurBmp_.get(), WrapModeClamp);
-    }
+    blurPx_.resize((size_t)w * h);
+    UpscaleBilinear(small.data(), sw, sh, blurPx_.data(), w, h, w);
     SelectObject(dc, old);
     DeleteObject(bmp);
     DeleteDC(dc);
 }
 
-void RadialMenu::DrawSector(Graphics& g, const Ring& r, double a0, double a1, const Item& it, double hl, double appear,
-                            bool active, double hue, bool hot) {
-    PERF_SCOPE("menu.r.Sector");
-    const double cx = center_.x, cy = center_.y;
-    const double gap = 3.0 * geo_.k;
-    const double rOut = r.rOut + 3.5 * geo_.k * hl;  // наведённый сектор чуть выдвигается наружу
-    double inO = gap / 2 / rOut * 180 / kPi, inI = gap / 2 / r.rIn * 180 / kPi;
-    double o0 = a0 + inO, o1 = a1 - inO, i0 = a0 + inI, i1 = a1 - inI;
-    if (o1 <= o0 || i1 <= i0) return;
+namespace {
 
-    double sgn = left_ || full_ ? 1 : -1;
-    GraphicsPath p;
-    p.AddArc((REAL)(cx - rOut), (REAL)(cy - rOut), (REAL)(2 * rOut), (REAL)(2 * rOut), (REAL)AbsAngle(o0),
-             (REAL)(sgn * (o1 - o0)));
-    p.AddArc((REAL)(cx - r.rIn), (REAL)(cy - r.rIn), (REAL)(2 * r.rIn), (REAL)(2 * r.rIn), (REAL)AbsAngle(i1),
-             (REAL)(-sgn * (i1 - i0)));
-    p.CloseFigure();
-
-    Palette pal = Pal(cfg_);
-    if (hue != 0) {  // у каждой группы свой оттенок
-        pal.hotIn = HueShift(pal.hotIn, hue);
-        pal.hotOut = HueShift(pal.hotOut, hue);
-        pal.active = HueShift(pal.active, hue);
-        pal.rim = HueShift(pal.rim, hue);
-    }
-    Color base = r.sub ? pal.baseSub : pal.base;
-    bool glass = blurBrush_ && appear > 0.5;
-    if (glass) g.FillPath(blurBrush_.get(), &p);  // размытая подложка: обои просвечивают сквозь кольцо
-    BYTE alpha = (BYTE)((glass ? 178 : 232) * appear);
-    // наведённый сектор переливается от центра к краю: малина -> коралл (в тёмной теме - один акцент)
-    double t = std::max(hl, active ? 0.32 : 0.0);
-    BYTE fillAlpha = std::max<BYTE>(alpha, (BYTE)(232 * appear * t));
-    Color from = hl >= 0.32 || !active ? pal.hotIn : pal.active, to = hl >= 0.32 || !active ? pal.hotOut : pal.active;
-    double mr = Rad(AbsAngle((a0 + a1) / 2));
-    PointF pin((REAL)(cx + std::cos(mr) * r.rIn), (REAL)(cy + std::sin(mr) * r.rIn));
-    PointF pout((REAL)(cx + std::cos(mr) * rOut), (REAL)(cy + std::sin(mr) * rOut));
-    LinearGradientBrush fill(pin, pout, MixColor(base, from, t * 0.92, fillAlpha),
-                             MixColor(base, to, t * 0.92, fillAlpha));
-    fill.SetWrapMode(WrapModeTileFlipXY);
-    g.FillPath(&fill, &p);
-    if (hexOn_ && appear > 0.5) {
-        g.FillPath(hexBrush_.get(), &p);  // грани сотового стекла
-        if (hl > 0.02) DrawHexLift(g, p, hl);
-    }
-    Pen border(WithAlpha(pal.border, (BYTE)((glass ? 46 : 34) * appear)), 1.0f);
-    g.DrawPath(&border, &p);
-    {  // тонкая полоса оттенка группы у внутреннего края: видно, чьё второе кольцо
-        Pen band(WithAlpha(pal.rim, (BYTE)((70 + 90 * std::max(hl, active ? 1.0 : 0.0)) * appear)),
-                 (REAL)(2.2 * geo_.k));
-        double rb = r.rIn + 2.4 * geo_.k;
-        g.DrawArc(&band, (REAL)(cx - rb), (REAL)(cy - rb), (REAL)(2 * rb), (REAL)(2 * rb), (REAL)AbsAngle(i0),
-                  (REAL)(sgn * (i1 - i0)));
-    }
-
-    if (hl > 0.02) {  // светящаяся кромка снаружи
-        Pen rim(WithAlpha(pal.rim, (BYTE)(230 * hl * appear)), (REAL)gap);
-        double rr = rOut + gap * 1.4;
-        g.DrawArc(&rim, (REAL)(cx - rr), (REAL)(cy - rr), (REAL)(2 * rr), (REAL)(2 * rr), (REAL)AbsAngle(o0),
-                  (REAL)(sgn * (o1 - o0)));
-    }
-
-    double mid = Rad(AbsAngle((a0 + a1) / 2));
-    if (Bitmap* icon = ItemIcon(it, r.iconPx)) {
-        double sz = r.iconPx * (0.7 + 0.3 * appear) * (1 + 0.1 * hl);
-        double ix = cx + std::cos(mid) * r.rIcon - sz / 2, iy = cy + std::sin(mid) * r.rIcon - sz / 2;
-        DrawIcon(g, icon, it, ix, iy, sz, hl, appear, hot);
-    }
-    DrawLabel(g, r, a0, a1, it, hl, appear);
+// Пиксель src (PARGB) поверх dst с покрытием cov 0..255, как заливка GDI+ со сглаживанием.
+// Каналы парами (красный с синим, альфа с зелёным): одно умножение на два канала.
+inline uint32_t Scale(uint32_t c, uint32_t k) {
+    uint32_t rb = (c & 0xFF00FF) * k + 0x800080, ag = (c >> 8 & 0xFF00FF) * k + 0x800080;
+    rb = (rb + (rb >> 8 & 0xFF00FF)) >> 8 & 0xFF00FF;  // деление на 255 с округлением
+    ag = (ag + (ag >> 8 & 0xFF00FF)) >> 8 & 0xFF00FF;
+    return rb | ag << 8;
 }
 
+inline uint32_t Over(uint32_t dst, uint32_t src, uint32_t cov) {
+    uint32_t s = cov == 255 ? src : Scale(src, cov);
+    uint32_t sa = s >> 24;
+    return sa == 255 ? s : sa ? s + Scale(dst, 255 - sa) : dst;
+}
+
+}  // namespace
+
+bool RadialMenu::Blit(Bitmap* bmp, double x, double y) {
+    if (!blitOk_) return false;
+    const int iw = (int)bmp->GetWidth(), ih = (int)bmp->GetHeight();
+    BitmapData bd;
+    Rect r(0, 0, iw, ih);
+    if (bmp->LockBits(&r, ImageLockModeRead, PixelFormat32bppPARGB, &bd) != Ok) return false;
+    // центр пикселя кадра j попадает в картинку на j - x: смешиваем соседние пиксели с весами дробной части
+    const int X0 = (int)std::floor(x), Y0 = (int)std::floor(y);
+    const uint32_t fx = (uint32_t)std::lround((x - X0) * 256), fy = (uint32_t)std::lround((y - Y0) * 256);
+    const uint32_t w00 = fx * fy >> 8, w10 = (256 - fx) * fy >> 8, w01 = fx * (256 - fy) >> 8,
+                   w11 = 256 - w00 - w10 - w01;
+    auto at = [&](int i, int j) -> uint32_t {
+        return i < 0 || j < 0 || i >= iw || j >= ih ? 0 : ((const uint32_t*)((const BYTE*)bd.Scan0 + j * bd.Stride))[i];
+    };
+    auto* px = static_cast<uint32_t*>(bits_);
+    const int jx0 = std::max(0, X0), jx1 = std::min(geo_.w, X0 + iw + 1);
+    const int jy0 = std::max(0, Y0), jy1 = std::min(geo_.h, Y0 + ih + 1);
+    for (int jy = jy0; jy < jy1; ++jy) {
+        int sy = jy - Y0;
+        for (int jx = jx0; jx < jx1; ++jx) {
+            int sx = jx - X0;
+            uint32_t a = at(sx - 1, sy - 1), b = at(sx, sy - 1), c = at(sx - 1, sy), d = at(sx, sy);
+            if (!(a | b | c | d)) continue;
+            uint32_t rb =
+                (a & 0xFF00FF) * w00 + (b & 0xFF00FF) * w10 + (c & 0xFF00FF) * w01 + (d & 0xFF00FF) * w11 + 0x800080;
+            uint32_t ag = (a >> 8 & 0xFF00FF) * w00 + (b >> 8 & 0xFF00FF) * w10 + (c >> 8 & 0xFF00FF) * w01 +
+                          (d >> 8 & 0xFF00FF) * w11 + 0x800080;
+            uint32_t src = (rb >> 8 & 0xFF00FF) | (ag & 0xFF00FF00);
+            uint32_t& dst = px[(size_t)jy * geo_.w + jx];
+            dst = Over(dst, src, 255);
+        }
+    }
+    bmp->UnlockBits(&bd);
+    return true;
+}
+
+void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, GraphicsPath* clip) {
+    const double cx = center_.x, cy = center_.y;
+    const double gap = 3.0 * geo_.k;
+    const double sgn = left_ || full_ ? 1 : -1;
+    struct Shape {
+        GraphicsPath path;
+        double rOut = 0, o0 = 0, o1 = 0, i0 = 0, i1 = 0;
+        bool ok = false;
+    };
+    std::vector<Shape> shapes(secs.size());
+    double reach = 0;
+    bool masked = false;
+    for (size_t k = 0; k < secs.size(); ++k) {
+        const Sector& s = secs[k];
+        Shape& sh = shapes[k];
+        sh.rOut = s.ring.rOut + 3.5 * geo_.k * s.hl;  // наведённый сектор чуть выдвигается наружу
+        double inO = gap / 2 / sh.rOut * 180 / kPi, inI = gap / 2 / s.ring.rIn * 180 / kPi;
+        sh.o0 = s.a0 + inO, sh.o1 = s.a1 - inO, sh.i0 = s.a0 + inI, sh.i1 = s.a1 - inI;
+        if (sh.o1 <= sh.o0 || sh.i1 <= sh.i0) continue;
+        sh.ok = true;
+        double ri = s.ring.rIn;
+        sh.path.AddArc((REAL)(cx - sh.rOut), (REAL)(cy - sh.rOut), (REAL)(2 * sh.rOut), (REAL)(2 * sh.rOut),
+                       (REAL)AbsAngle(sh.o0), (REAL)(sgn * (sh.o1 - sh.o0)));
+        sh.path.AddArc((REAL)(cx - ri), (REAL)(cy - ri), (REAL)(2 * ri), (REAL)(2 * ri), (REAL)AbsAngle(sh.i1),
+                       (REAL)(-sgn * (sh.i1 - sh.i0)));
+        sh.path.CloseFigure();
+        if (s.appear > 0.5) {
+            masked = true;
+            reach = std::max(reach, sh.rOut);
+        }
+    }
+
+    // Стекло и соты: маска всех проявившихся секторов одной сплошной заливкой, дальше проход по пикселям.
+    // Слои те же, что были у заливок TextureBrush: стекло под градиентом, соты над ним.
+    const bool glassOn = !blurPx_.empty(), hexOn = hexOn_ && !hexPx_.empty();
+    masked = masked && (glassOn || hexOn);
+    int x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    auto* px = static_cast<uint32_t*>(bits_);
+    if (masked) {
+        PERF_SCOPE("menu.r.Mask");
+        x0 = std::max(0, (int)(cx - reach - 3)), x1 = std::min(geo_.w, (int)(cx + reach + 4));
+        y0 = std::max(0, (int)(cy - reach - 3)), y1 = std::min(geo_.h, (int)(cy + reach + 4));
+        maskPx_.resize((size_t)geo_.w * geo_.h);
+        for (int y = y0; y < y1; ++y) memset(&maskPx_[(size_t)y * geo_.w + x0], 0, (size_t)(x1 - x0) * 4);
+        Bitmap mb(geo_.w, geo_.h, geo_.w * 4, PixelFormat32bppPARGB, (BYTE*)maskPx_.data());
+        Graphics mg(&mb);
+        mg.SetSmoothingMode(g.GetSmoothingMode());
+        mg.SetPixelOffsetMode(g.GetPixelOffsetMode());
+        if (clip) mg.SetClip(clip);
+        SolidBrush white(Color(255, 255, 255, 255));
+        for (size_t k = 0; k < secs.size(); ++k)
+            if (shapes[k].ok && secs[k].appear > 0.5) mg.FillPath(&white, &shapes[k].path);
+    }
+    auto composite = [&](const std::vector<uint32_t>& src) {
+        for (int y = y0; y < y1; ++y) {
+            size_t row = (size_t)y * geo_.w;
+            const uint32_t* m = &maskPx_[row];
+            for (int x = x0; x < x1; ++x) {
+                uint32_t cov = m[x] >> 24;
+                if (cov) px[row + x] = Over(px[row + x], src[row + x], cov);
+            }
+        }
+    };
+    if (masked && glassOn) {
+        PERF_SCOPE("menu.r.Glass");
+        composite(blurPx_);  // размытая подложка: обои просвечивают сквозь кольцо
+    }
+
+    std::vector<Palette> pals(secs.size(), Pal(cfg_));
+    for (size_t k = 0; k < secs.size(); ++k) {
+        if (!shapes[k].ok) continue;
+        const Sector& s = secs[k];
+        Palette& pal = pals[k];
+        if (s.hue != 0) {  // у каждой группы свой оттенок
+            pal.hotIn = HueShift(pal.hotIn, s.hue);
+            pal.hotOut = HueShift(pal.hotOut, s.hue);
+            pal.active = HueShift(pal.active, s.hue);
+            pal.rim = HueShift(pal.rim, s.hue);
+        }
+        Color base = s.ring.sub ? pal.baseSub : pal.base;
+        bool glass = glassOn && s.appear > 0.5;
+        BYTE alpha = (BYTE)((glass ? 178 : 232) * s.appear);
+        // наведённый сектор переливается от центра к краю: малина -> коралл (в тёмной теме - один акцент)
+        double t = std::max(s.hl, s.active ? 0.32 : 0.0);
+        BYTE fillAlpha = std::max<BYTE>(alpha, (BYTE)(232 * s.appear * t));
+        Color from = s.hl >= 0.32 || !s.active ? pal.hotIn : pal.active,
+              to = s.hl >= 0.32 || !s.active ? pal.hotOut : pal.active;
+        double mr = Rad(AbsAngle((s.a0 + s.a1) / 2));
+        PointF pin((REAL)(cx + std::cos(mr) * s.ring.rIn), (REAL)(cy + std::sin(mr) * s.ring.rIn));
+        PointF pout((REAL)(cx + std::cos(mr) * shapes[k].rOut), (REAL)(cy + std::sin(mr) * shapes[k].rOut));
+        LinearGradientBrush fill(pin, pout, MixColor(base, from, t * 0.92, fillAlpha),
+                                 MixColor(base, to, t * 0.92, fillAlpha));
+        fill.SetWrapMode(WrapModeTileFlipXY);
+        g.FillPath(&fill, &shapes[k].path);
+    }
+
+    if (masked && hexOn) {
+        PERF_SCOPE("menu.r.Hex");
+        composite(hexPx_);  // грани сотового стекла
+    }
+
+    blitOk_ = !clip;
+    for (size_t k = 0; k < secs.size(); ++k) {
+        if (!shapes[k].ok) continue;
+        PERF_SCOPE("menu.r.Sector");
+        const Sector& s = secs[k];
+        Shape& sh = shapes[k];
+        const Palette& pal = pals[k];
+        bool glass = glassOn && s.appear > 0.5;
+        if (hexOn && s.appear > 0.5 && s.hl > 0.02) DrawHexLift(g, sh.path, s.hl);
+        Pen border(WithAlpha(pal.border, (BYTE)((glass ? 46 : 34) * s.appear)), 1.0f);
+        g.DrawPath(&border, &sh.path);
+        {  // тонкая полоса оттенка группы у внутреннего края: видно, чьё второе кольцо
+            Pen band(WithAlpha(pal.rim, (BYTE)((70 + 90 * std::max(s.hl, s.active ? 1.0 : 0.0)) * s.appear)),
+                     (REAL)(2.2 * geo_.k));
+            double rb = s.ring.rIn + 2.4 * geo_.k;
+            g.DrawArc(&band, (REAL)(cx - rb), (REAL)(cy - rb), (REAL)(2 * rb), (REAL)(2 * rb), (REAL)AbsAngle(sh.i0),
+                      (REAL)(sgn * (sh.i1 - sh.i0)));
+        }
+
+        if (s.hl > 0.02) {  // светящаяся кромка снаружи
+            Pen rim(WithAlpha(pal.rim, (BYTE)(230 * s.hl * s.appear)), (REAL)gap);
+            double rr = sh.rOut + gap * 1.4;
+            g.DrawArc(&rim, (REAL)(cx - rr), (REAL)(cy - rr), (REAL)(2 * rr), (REAL)(2 * rr), (REAL)AbsAngle(sh.o0),
+                      (REAL)(sgn * (sh.o1 - sh.o0)));
+        }
+
+        double mid = Rad(AbsAngle((s.a0 + s.a1) / 2));
+        if (Bitmap* icon = ItemIcon(*s.it, s.ring.iconPx)) {
+            double sz = s.ring.iconPx * (0.7 + 0.3 * s.appear) * (1 + 0.1 * s.hl);
+            double ix = cx + std::cos(mid) * s.ring.rIcon - sz / 2, iy = cy + std::sin(mid) * s.ring.rIcon - sz / 2;
+            DrawIcon(g, icon, *s.it, ix, iy, sz, s.hl, s.appear, s.hot);
+        }
+        DrawLabel(g, s.ring, s.a0, s.a1, *s.it, s.hl, s.appear);
+    }
+    blitOk_ = false;
+}
 // Плашка с текстом у края экрана: путь вверху, поиск и подсказки внизу.
 void RadialMenu::DrawPill(Graphics& g, const std::wstring& text, const std::wstring& iconFile, double y, double alpha,
                           bool accentEdge) {
@@ -225,11 +340,18 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
 // Это в разы быстрее заливки градиентом GDI+ и заодно очищает кадр.
 void RadialMenu::PaintBase(double ext, double catcherR) {
     Color sc = Pal(cfg_).shadow;
-    const double peak = blurBrush_ ? 70 : 120;  // со стеклом тень слабее
-    const double soft = 26 * geo_.k;            // ширина размытого края
+    const double peak = blurPx_.empty() ? 120 : 70;  // со стеклом тень слабее
+    const double soft = 26 * geo_.k;                 // ширина размытого края
     const double outer = ext + soft;
     auto* px = static_cast<uint32_t*>(bits_);
     const double cx = center_.x, cy = center_.y;
+    auto pack = [&](double a) {
+        uint32_t ai = (uint32_t)(a + 0.5);
+        return (ai << 24) | ((sc.GetR() * ai / 255) << 16) | ((sc.GetG() * ai / 255) << 8) | (sc.GetB() * ai / 255);
+    };
+    // внутри тени прозрачность постоянна, корень нужен только в полосе мягкого края
+    const uint32_t full = pack(peak);
+    const double ext2 = ext * ext, outer2 = outer * outer;
     for (int y = 0; y < geo_.h; ++y) {
         uint32_t* row = px + (size_t)y * geo_.w;
         double dy = y + 0.5 - cy;
@@ -241,16 +363,18 @@ void RadialMenu::PaintBase(double ext, double catcherR) {
         for (int x = 0; x < geo_.w; ++x) {
             double dx = x + 0.5 - cx;
             double d2 = dx * dx + dy2;
-            if (d2 >= outer * outer) {
+            if (d2 >= outer2) {
                 row[x] = 0;
                 continue;
             }
+            if (d2 <= ext2) {
+                row[x] = full;
+                continue;
+            }
             double d = std::sqrt(d2);
-            double a = d <= ext ? peak : peak * (outer - d) / soft;
+            double a = peak * (outer - d) / soft;
             if (d <= catcherR && a < 1) a = 1;
-            uint32_t ai = (uint32_t)(a + 0.5);
-            row[x] =
-                (ai << 24) | ((sc.GetR() * ai / 255) << 16) | ((sc.GetG() * ai / 255) << 8) | (sc.GetB() * ai / 255);
+            row[x] = pack(a);
         }
     }
 }
@@ -309,13 +433,14 @@ void RadialMenu::Render() {
     // кольцо повёрнуто не на целый сектор: у края полукруга один сектор виден двумя половинками
     bool wrap = !full_ && std::fabs(rootRot_ - std::round(rootRot_)) > 1e-3;
     GraphicsState rootClip = g.Save();
+    GraphicsPath pie;
     if (wrap) {
-        GraphicsPath pie;
         double big = geo_.r2 * 1.3;
         pie.AddPie((REAL)(cx - big), (REAL)(cy - big), (REAL)(2 * big), (REAL)(2 * big), (REAL)AbsAngle(-Span()),
                    (REAL)((left_ ? 1 : -1) * 2 * Span()));
         g.SetClip(&pie);
     }
+    std::vector<Sector> secs;
     for (int i = 0; i < n; ++i) {
         double ap = EaseOut((elapsed - fx::Dur(kStaggerMs) * i) / fx::Dur(170));
         double slot = RootSlot(i);
@@ -324,12 +449,13 @@ void RadialMenu::Render() {
         if (launched) ripple = {true, root, a0, a1};
         double hl = launched ? 1.0 : hlRoot_[i];
         bool active = mode_ == Mode::Root && i == subParent_;
-        DrawSector(g, root, a0, a1, (*ring_)[i], hl, ap, active, RootHue(i), i == hoverRoot_);
+        secs.push_back({root, a0, a1, &(*ring_)[i], hl, ap, active, RootHue(i), i == hoverRoot_});
         if (wrap && slot > n - 1)  // хвост, ушедший за край, выходит с другой стороны
-            DrawSector(g, root, a0 - 2 * Span(), a1 - 2 * Span(), (*ring_)[i], hl, ap, active, RootHue(i),
-                       i == hoverRoot_);
+            secs.push_back(
+                {root, a0 - 2 * Span(), a1 - 2 * Span(), &(*ring_)[i], hl, ap, active, RootHue(i), i == hoverRoot_});
         if (i == hoverRoot_) pill = {&(*ring_)[i], root, a0, a1, hlRoot_[i]};
     }
+    DrawRing(g, secs, wrap ? &pie : nullptr);
     g.Restore(rootClip);
 
     if (mode_ == Mode::Search) {  // во время поиска первое кольцо уходит в тень
@@ -352,6 +478,7 @@ void RadialMenu::Render() {
         double mid = (subItems_.size() - 1) / 2.0;
         double wFrom = SubWinFrom(), wTo = SubWinTo();
         double hue = mode_ == Mode::Root ? RootHue(subParent_) : 0;
+        secs.clear();
         for (size_t i = 0; i < subItems_.size(); ++i) {
             double a0 = from + sstep * i, a1 = a0 + sstep, ap = subE;
             if (a1 <= wFrom || a0 >= wTo) continue;  // прокручено за край окна
@@ -369,10 +496,11 @@ void RadialMenu::Render() {
             }
             bool launched = launching_ && (int)i == launchSub_;
             if (launched) ripple = {true, sub, a0, a1};
-            DrawSector(g, sub, a0, a1, *subItems_[i], launched ? 1.0 : hlSub_[i], ap * edgeFade, false, hue,
-                       (int)i == hot);
+            secs.push_back(
+                {sub, a0, a1, subItems_[i], launched ? 1.0 : hlSub_[i], ap * edgeFade, false, hue, (int)i == hot});
             if ((int)i == hot) pill = {subItems_[i], sub, a0, a1, hlSub_[i]};
         }
+        DrawRing(g, secs, nullptr);
         // полоса прокрутки по внешнему краю: сколько видно и где мы
         if (SubMaxScroll() > 0 && subE > 0.5) {
             double rr = sub.rOut + 9 * geo_.k, win = wTo - wFrom, m = (double)subItems_.size();
@@ -526,12 +654,12 @@ void RadialMenu::Render() {
 // Узор сотового стекла: тонкие светлые грани и чуть разная яркость сот. Строится один раз на размер окна.
 void RadialMenu::EnsureHexGlass() {
     hexOn_ = cfg_->hexGlass && !fx::Game();
-    if (!hexOn_ || (hexBmp_ && hexW_ == geo_.w && hexH_ == geo_.h)) return;
+    if (!hexOn_ || (!hexPx_.empty() && hexW_ == geo_.w && hexH_ == geo_.h)) return;
     PERF_SCOPE("menu.HexGlass");
-    hexBrush_.reset();
-    hexBmp_ = std::make_unique<Bitmap>(geo_.w, geo_.h, PixelFormat32bppPARGB);
+    hexPx_.assign((size_t)geo_.w * geo_.h, 0);
     {
-        Graphics g(hexBmp_.get());
+        Bitmap bmp(geo_.w, geo_.h, geo_.w * 4, PixelFormat32bppPARGB, (BYTE*)hexPx_.data());
+        Graphics g(&bmp);
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         g.Clear(Color(0, 0, 0, 0));
         double s = 13 * geo_.k;
@@ -549,7 +677,6 @@ void RadialMenu::EnsureHexGlass() {
     }
     hexW_ = geo_.w;
     hexH_ = geo_.h;
-    hexBrush_ = std::make_unique<TextureBrush>(hexBmp_.get(), WrapModeClamp);
 }
 
 // Сота под курсором приподнята: светлее, с яркой кромкой, соседи чуть подсвечены.

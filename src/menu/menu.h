@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -155,8 +156,20 @@ private:
     void EnsureHexGlass();  // узор сотового стекла под размер окна (строится раз, потом из кэша)
     void DrawHexLift(Gdiplus::Graphics& g, Gdiplus::GraphicsPath& sector, double hl);  // сота под курсором
     void PaintBase(double ext, double catcherR);  // тень и подложка для кликов прямо в пикселях кадра
-    void DrawSector(Gdiplus::Graphics& g, const Ring& ring, double a0, double a1, const Item& it, double hl,
-                    double appear, bool active, double hue, bool hot);
+    struct Sector {
+        Ring ring;
+        double a0, a1;
+        const Item* it;
+        double hl, appear;
+        bool active;
+        double hue;
+        bool hot;
+    };
+    // кольцо целиком: стекло и соты одним проходом по пикселям под маской всех секторов, остальное по секторам
+    void DrawRing(Gdiplus::Graphics& g, const std::vector<Sector>& secs, Gdiplus::GraphicsPath* clip);
+    // картинка 1:1 прямо в пиксели кадра, с той же билинейной выборкой на дробной позиции, что у GDI+;
+    // false - когда так нельзя (кадр обрезан клипом), тогда рисует сам GDI+
+    bool Blit(Gdiplus::Bitmap* bmp, double x, double y);
     void DrawPill(Gdiplus::Graphics& g, const std::wstring& text, const std::wstring& iconFile, double y, double alpha,
                   bool accentEdge);
     std::wstring BottomHint(double& alpha) const;
@@ -181,10 +194,12 @@ private:
     HGDIOBJ oldBmp_ = nullptr;
     void* bits_ = nullptr;
     int surfW_ = 0, surfH_ = 0;
-    std::unique_ptr<Gdiplus::Bitmap> blurBmp_;
-    std::unique_ptr<Gdiplus::TextureBrush> blurBrush_;
-    std::unique_ptr<Gdiplus::Bitmap> hexBmp_;  // сотовое стекло: тонкие грани поверх секторов
-    std::unique_ptr<Gdiplus::TextureBrush> hexBrush_;
+    // стекло, соты и маска секторов - прямо пиксели размером с окно (PARGB): заливка TextureBrush
+    // стоила по 0.35 мс на сектор, проход по пикселям под маской - доли миллисекунды на всё кольцо
+    std::vector<uint32_t> blurPx_;
+    std::vector<uint32_t> hexPx_;   // сотовое стекло: тонкие грани поверх секторов
+    bool blitOk_ = false;  // Blit разрешён: рисуется кольцо без клипа
+    std::vector<uint32_t> maskPx_;  // покрытие секторов кольца (альфа), рисуется GDI+ сплошной заливкой
     int hexW_ = 0, hexH_ = 0;
     bool hexOn_ = false;
     POINT cursorLocal_{};  // курсор в координатах окна (для приподнятой соты)

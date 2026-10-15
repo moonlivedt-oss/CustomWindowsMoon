@@ -171,7 +171,10 @@ void RadialMenu::DrawIcon(Graphics& g, Bitmap* icon, const Item& it, double x, d
             break;
     }
     if (ang == 0 && scale == 1) {
-        part(RectF((REAL)(x + dx), (REAL)(y + dy), (REAL)sz, (REAL)sz), 0, ih);
+        RectF dst((REAL)(x + dx), (REAL)(y + dy), (REAL)sz, (REAL)sz);
+        // 1:1 - без GDI+; затухающая подсветка оставляет от масштаба миллионные доли пикселя
+        if (!attr && std::fabs(sz - iw) < 0.01 && iw == ih && Blit(icon, dst.X, dst.Y)) return;
+        part(dst, 0, ih);
         return;
     }
     GraphicsState st = g.Save();
@@ -308,7 +311,7 @@ void RadialMenu::DrawLabel(Graphics& g, const Ring& r, double a0, double a1, con
     REAL w = (REAL)bmp->GetWidth(), h = (REAL)bmp->GetHeight();
     RectF dst((REAL)(lf.x - w / 2), (REAL)(lf.y - h / 2), w, h);
     if (appear >= 0.999) {
-        g.DrawImage(bmp, dst);
+        if (!Blit(bmp, dst.X, dst.Y)) g.DrawImage(bmp, dst);
     } else {
         ColorMatrix cm = {
             {{1, 0, 0, 0, 0}, {0, 1, 0, 0, 0}, {0, 0, 1, 0, 0}, {0, 0, 0, (REAL)appear, 0}, {0, 0, 0, 0, 1}}};
