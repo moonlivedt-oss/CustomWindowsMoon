@@ -17,12 +17,14 @@ inline constexpr UINT WM_MENU_WHEEL = WM_APP + 8;
 
 inline constexpr double kHalfSpan = 84.0;  // полураскрыв колец в градусах от направления «внутрь»
 inline constexpr double kSubItemDeg = 17.0;
+inline constexpr double kSubMinDeg = 13.0;  // теснее не сжимаем: дальше второе кольцо прокручивается
 inline constexpr double kOpenMs = 230, kSubMs = 190, kCloseMs = 120;
 inline constexpr double kLaunchMs = 300;   // волна от сектора при запуске
 inline constexpr double kStaggerMs = 24;   // секторы первого кольца появляются по очереди
 inline constexpr double kSubWaveMs = 14;   // второе кольцо - волной от середины к краям
 inline constexpr ULONGLONG kSwitchDelay = 260;  // столько держать курсор на другом секторе, чтобы уйти из папки
 inline constexpr ULONGLONG kDwellMs = 750;      // столько держать файл над папкой, чтобы в неё зайти
+inline constexpr double kSpinStartPx = 7;       // столько протянуть по кругу, чтобы клик стал вращением
 
 // Приёмник перетаскивания (menu_drop.cpp).
 IDropTarget* CreateMenuDrop(class RadialMenu* m);

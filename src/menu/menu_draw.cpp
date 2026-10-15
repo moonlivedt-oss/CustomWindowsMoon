@@ -73,7 +73,8 @@ void RadialMenu::CaptureBackdrop() {
 }
 
 void RadialMenu::DrawSector(Graphics& g, const Ring& r, double a0, double a1, const Item& it, double hl, double appear,
-                            bool active) {
+                            bool active, double hue, bool hot) {
+    PERF_SCOPE("menu.r.Sector");
     const double cx = center_.x, cy = center_.y;
     const double gap = 3.0 * geo_.k;
     const double rOut = r.rOut + 3.5 * geo_.k * hl;  // наведённый сектор чуть выдвигается наружу
@@ -90,6 +91,12 @@ void RadialMenu::DrawSector(Graphics& g, const Ring& r, double a0, double a1, co
     p.CloseFigure();
 
     Palette pal = Pal(cfg_);
+    if (hue != 0) {  // у каждой группы свой оттенок
+        pal.hotIn = HueShift(pal.hotIn, hue);
+        pal.hotOut = HueShift(pal.hotOut, hue);
+        pal.active = HueShift(pal.active, hue);
+        pal.rim = HueShift(pal.rim, hue);
+    }
     Color base = r.sub ? pal.baseSub : pal.base;
     bool glass = blurBrush_ && appear > 0.5;
     if (glass) g.FillPath(blurBrush_.get(), &p);  // размытая подложка: обои просвечивают сквозь кольцо
@@ -111,6 +118,13 @@ void RadialMenu::DrawSector(Graphics& g, const Ring& r, double a0, double a1, co
     }
     Pen border(WithAlpha(pal.border, (BYTE)((glass ? 46 : 34) * appear)), 1.0f);
     g.DrawPath(&border, &p);
+    {  // тонкая полоса оттенка группы у внутреннего края: видно, чьё второе кольцо
+        Pen band(WithAlpha(pal.rim, (BYTE)((70 + 90 * std::max(hl, active ? 1.0 : 0.0)) * appear)),
+                 (REAL)(2.2 * geo_.k));
+        double rb = r.rIn + 2.4 * geo_.k;
+        g.DrawArc(&band, (REAL)(cx - rb), (REAL)(cy - rb), (REAL)(2 * rb), (REAL)(2 * rb), (REAL)AbsAngle(i0),
+                  (REAL)(sgn * (i1 - i0)));
+    }
 
     if (hl > 0.02) {  // светящаяся кромка снаружи
         Pen rim(WithAlpha(pal.rim, (BYTE)(230 * hl * appear)), (REAL)gap);
@@ -120,35 +134,12 @@ void RadialMenu::DrawSector(Graphics& g, const Ring& r, double a0, double a1, co
     }
 
     double mid = Rad(AbsAngle((a0 + a1) / 2));
-    Bitmap* icon = icons_.Get(IconPng(it), it.full, r.iconPx);
-    if (icon) {
+    if (Bitmap* icon = ItemIcon(it, r.iconPx)) {
         double sz = r.iconPx * (0.7 + 0.3 * appear) * (1 + 0.1 * hl);
         double ix = cx + std::cos(mid) * r.rIcon - sz / 2, iy = cy + std::sin(mid) * r.rIcon - sz / 2;
-        RectF dst((REAL)ix, (REAL)iy, (REAL)sz, (REAL)sz);
-        if (appear >= 0.999) {
-            g.DrawImage(icon, dst);
-        } else {
-            ColorMatrix cm = {
-                {{1, 0, 0, 0, 0}, {0, 1, 0, 0, 0}, {0, 0, 1, 0, 0}, {0, 0, 0, (REAL)appear, 0}, {0, 0, 0, 0, 1}}};
-            ImageAttributes ia;
-            ia.SetColorMatrix(&cm);
-            g.DrawImage(icon, dst, 0, 0, (REAL)icon->GetWidth(), (REAL)icon->GetHeight(), UnitPixel, &ia);
-        }
+        DrawIcon(g, icon, it, ix, iy, sz, hl, appear, hot);
     }
-
-    double arc = r.rLabel * Rad(a1 - a0) - 4;
-    if (arc > 12) {
-        Font font(Family(), geo_.font, FontStyleRegular, UnitPixel);
-        StringFormat sf(StringFormatFlagsNoWrap);
-        sf.SetAlignment(StringAlignmentCenter);
-        sf.SetLineAlignment(StringAlignmentCenter);
-        sf.SetTrimming(StringTrimmingEllipsisCharacter);
-        double lx = cx + std::cos(mid) * r.rLabel, ly = cy + std::sin(mid) * r.rLabel;
-        double lh = geo_.font * 1.6;
-        RectF box((REAL)(lx - arc / 2), (REAL)(ly - lh / 2), (REAL)arc, (REAL)lh);
-        SolidBrush txt(WithAlpha(pal.text, (BYTE)((200 + 55 * hl) * appear)));
-        g.DrawString(it.name.c_str(), -1, &font, box, &sf, &txt);
-    }
+    DrawLabel(g, r, a0, a1, it, hl, appear);
 }
 
 // Плашка с текстом у края экрана: путь вверху, поиск и подсказки внизу.
@@ -188,16 +179,9 @@ void RadialMenu::DrawPill(Graphics& g, const std::wstring& text, const std::wstr
 }
 
 std::wstring RadialMenu::TopHint() const {
-    if (mode_ != Mode::Root || subParent_ < 0) return {};
-    std::wstring s;
-    if (!navStack_.empty()) {
-        s = (*ring_)[subParent_].name;
-        for (const Item& f : navStack_) s += L" / " + f.name;
-    }
-    if (pageCount_ > 1) {
-        if (s.empty()) s = (*ring_)[subParent_].name;
-        s += L"   " + std::to_wstring(page_ + 1) + L" из " + std::to_wstring(pageCount_);
-    }
+    if (mode_ != Mode::Root || subParent_ < 0 || navStack_.empty()) return {};
+    std::wstring s = (*ring_)[subParent_].name;
+    for (const Item& f : navStack_) s += L" / " + f.name;
     return s;
 }
 
@@ -222,6 +206,8 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
         alpha = 0.55;
         return L"Отпустите Alt над окном   |   средняя кнопка: закрыть";
     }
+    if (it && !clickKey_.empty() && clickKey_ == hoverKey_ && GetTickCount64() - clickT_ <= GetDoubleClickTime())
+        return L"Ещё раз - открыть";
     if (it && ToDialog(*it)) return it->dir ? L"Перейти сюда в диалоге" : L"Выбрать в диалоге";
     if (it && !it->special && !it->full.empty()) {
         if (shift_ && ctrl_) return L"Показать в Проводнике";
@@ -229,7 +215,8 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
         if (ctrl_) return L"Терминал в этой папке";
     }
     alpha = 0.55;
-    if (it && it->dir) return L"ПКМ: внутрь   |   Shift: VS Code   |   Ctrl: терминал";
+    if (it && it->dir) return L"2 клика: открыть   |   ПКМ: внутрь   |   тянуть: вращать";
+    if (it) return L"2 клика: открыть   |   тянуть: вращать";
     return L"Печатайте для поиска";
 }
 
@@ -291,7 +278,10 @@ void RadialMenu::Render() {
     double ext = (mode_ != Mode::None ? geo_.r2 + (geo_.r4 - geo_.r2) * subE : geo_.r2) * grow;
     // у целого кольца второй ярус - узкий веер, а не полукруг у края: тень только под первым кольцом,
     // иначе вокруг висит большой затемнённый диск; подложка для кликов - на всю ширину
-    PaintBase(full_ ? geo_.r2 * grow : ext, ext + 10);  // заменяет и очистку кадра
+    {
+        PERF_SCOPE("menu.r.Base");
+        PaintBase(full_ ? geo_.r2 * grow : ext, ext + 10);  // заменяет и очистку кадра
+    }
     {
         POINT cp;
         GetCursorPos(&cp);
@@ -316,15 +306,31 @@ void RadialMenu::Render() {
     root.rIcon = root.rIn + (root.rOut - root.rIn) * 0.42;
     root.rLabel = root.rIn + (root.rOut - root.rIn) * 0.84;
     double elapsed = (double)(now - tOpen_);
+    // кольцо повёрнуто не на целый сектор: у края полукруга один сектор виден двумя половинками
+    bool wrap = !full_ && std::fabs(rootRot_ - std::round(rootRot_)) > 1e-3;
+    GraphicsState rootClip = g.Save();
+    if (wrap) {
+        GraphicsPath pie;
+        double big = geo_.r2 * 1.3;
+        pie.AddPie((REAL)(cx - big), (REAL)(cy - big), (REAL)(2 * big), (REAL)(2 * big), (REAL)AbsAngle(-Span()),
+                   (REAL)((left_ ? 1 : -1) * 2 * Span()));
+        g.SetClip(&pie);
+    }
     for (int i = 0; i < n; ++i) {
         double ap = EaseOut((elapsed - fx::Dur(kStaggerMs) * i) / fx::Dur(170));
-        double a0 = -Span() + step * i, a1 = a0 + step;
+        double slot = RootSlot(i);
+        double a0 = -Span() + step * slot, a1 = a0 + step;
         bool launched = launching_ && launchSub_ < 0 && i == launchRoot_;
         if (launched) ripple = {true, root, a0, a1};
-        DrawSector(g, root, a0, a1, (*ring_)[i], launched ? 1.0 : hlRoot_[i], ap,
-                   mode_ == Mode::Root && i == subParent_);
+        double hl = launched ? 1.0 : hlRoot_[i];
+        bool active = mode_ == Mode::Root && i == subParent_;
+        DrawSector(g, root, a0, a1, (*ring_)[i], hl, ap, active, RootHue(i), i == hoverRoot_);
+        if (wrap && slot > n - 1)  // хвост, ушедший за край, выходит с другой стороны
+            DrawSector(g, root, a0 - 2 * Span(), a1 - 2 * Span(), (*ring_)[i], hl, ap, active, RootHue(i),
+                       i == hoverRoot_);
         if (i == hoverRoot_) pill = {&(*ring_)[i], root, a0, a1, hlRoot_[i]};
     }
+    g.Restore(rootClip);
 
     if (mode_ == Mode::Search) {  // во время поиска первое кольцо уходит в тень
         GraphicsPath band;
@@ -344,8 +350,12 @@ void RadialMenu::Render() {
         sub.rLabel = sub.rIn + (sub.rOut - sub.rIn) * 0.76;
         int hot = HotSub();
         double mid = (subItems_.size() - 1) / 2.0;
+        double wFrom = SubWinFrom(), wTo = SubWinTo();
+        double hue = mode_ == Mode::Root ? RootHue(subParent_) : 0;
         for (size_t i = 0; i < subItems_.size(); ++i) {
             double a0 = from + sstep * i, a1 = a0 + sstep, ap = subE;
+            if (a1 <= wFrom || a0 >= wTo) continue;  // прокручено за край окна
+            double edgeFade = Clamp01(std::min(a1 - wFrom, wTo - a0) / sstep);
             if (subSlide_) {
                 // перелистывание: новая страница въезжает поворотом со стороны листания
                 double shift = -subSlide_ * (1 - subE) * sstep * 2.5;
@@ -359,8 +369,27 @@ void RadialMenu::Render() {
             }
             bool launched = launching_ && (int)i == launchSub_;
             if (launched) ripple = {true, sub, a0, a1};
-            DrawSector(g, sub, a0, a1, *subItems_[i], launched ? 1.0 : hlSub_[i], ap, false);
+            DrawSector(g, sub, a0, a1, *subItems_[i], launched ? 1.0 : hlSub_[i], ap * edgeFade, false, hue,
+                       (int)i == hot);
             if ((int)i == hot) pill = {subItems_[i], sub, a0, a1, hlSub_[i]};
+        }
+        // полоса прокрутки по внешнему краю: сколько видно и где мы
+        if (SubMaxScroll() > 0 && subE > 0.5) {
+            double rr = sub.rOut + 9 * geo_.k, win = wTo - wFrom, m = (double)subItems_.size();
+            double sgn = left_ || full_ ? 1 : -1;
+            Palette sp = Pal(cfg_);
+            Pen track(WithAlpha(sp.border, (BYTE)(40 * subE)), (REAL)(2 * geo_.k));
+            track.SetStartCap(LineCapRound);
+            track.SetEndCap(LineCapRound);
+            g.DrawArc(&track, (REAL)(cx - rr), (REAL)(cy - rr), (REAL)(2 * rr), (REAL)(2 * rr),
+                      (REAL)AbsAngle(wFrom + 2), (REAL)(sgn * (win - 4)));
+            double vis = win / sstep, s0 = std::clamp(subScroll_, 0.0, m - vis);
+            Pen thumb(WithAlpha(HueShift(sp.rim, hue), (BYTE)(150 * subE)), (REAL)(2.6 * geo_.k));
+            thumb.SetStartCap(LineCapRound);
+            thumb.SetEndCap(LineCapRound);
+            double t0 = wFrom + 2 + (win - 4) * s0 / m, tl = std::max(6.0, (win - 4) * vis / m);
+            g.DrawArc(&thumb, (REAL)(cx - rr), (REAL)(cy - rr), (REAL)(2 * rr), (REAL)(2 * rr), (REAL)AbsAngle(t0),
+                      (REAL)(sgn * tl));
         }
     }
 
@@ -383,7 +412,7 @@ void RadialMenu::Render() {
     }
 
     // полное имя наведённого сектора, если подпись не влезла
-    if (pill.it && pill.hl > 0.05) {
+    if (winMode_ && pill.it && pill.hl > 0.05) {
         Font font(Family(), geo_.font, FontStyleRegular, UnitPixel);
         RectF tb;
         g.MeasureString(pill.it->name.c_str(), -1, &font, PointF(0, 0), &tb);
@@ -414,8 +443,13 @@ void RadialMenu::Render() {
     // плашки: путь внутри папок сверху, поиск и подсказки снизу
     {
         double ph = geo_.font * 2.0;
-        std::wstring top = TopHint();
+        bool card = !winMode_ && HoveredItem() && GetTickCount64() - keyT_ > 120;
+        std::wstring top = card ? L"" : TopHint();
         DrawPill(g, top, ExeDir() + L"\\icons\\back.png", cy - geo_.r4 * grow - ph - 18 * geo_.k, openE, false);
+        if (card) {
+            PERF_SCOPE("menu.r.Card");
+            DrawInfoCard(g, grow, openE);
+        }
         double ha = 1;
         std::wstring bottom = BottomHint(ha);
         bool search = mode_ == Mode::Search;
@@ -451,7 +485,7 @@ void RadialMenu::Render() {
             StringFormat sf(StringFormatFlagsNoWrap);
             sf.SetAlignment(StringAlignmentCenter);
             SolidBrush txt(WithAlpha(pal.text, 200));
-            std::wstring label = std::to_wstring(total) + L" " + Plural(total, L"окно", L"окна", L"окон");
+            std::wstring label = Plural(total, L"окно", L"окна", L"окон");
             g.DrawString(label.c_str(), -1, &font, PointF((REAL)cx, (REAL)(cy + 30 * geo_.k * grow)), &sf, &txt);
         }
         double er = winMode_ ? 30 * geo_.k * grow : rh;
@@ -478,6 +512,7 @@ void RadialMenu::Render() {
         g.FillRectangle(&lg, seam);
     }
 
+    PERF_SCOPE("menu.r.Present");
     BYTE a = (BYTE)(255 * Clamp01(alpha));
     HDC screen = GetDC(nullptr);
     POINT src{0, 0};

@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@
 #include <gdiplus.h>
 
 #include "core/config.h"
+#include "core/project.h"
 #include "gfx/icons.h"
 
 class MenuDrop;
@@ -30,6 +32,8 @@ public:
     bool Prewarm(const Config* cfg, UINT dpi, int budgetMs = 8);
     void ResetIcons() {
         icons_.Clear();
+        composed_.clear();
+        project::Forget();  // значки проектов могли появиться или смениться
         warm_.clear();
         warmPos_ = 0;
     }
@@ -84,7 +88,23 @@ private:
     void RebuildSub();
     void Drill(Item folder);
     bool Back();
-    void TurnPage(int dir);
+    void TurnPage(int dir);  // прокрутить второе кольцо на почти целый экран пунктов
+
+    // вращение: первое кольцо поворачивается по кругу, второе прокручивается, если пункты не влезли
+    double RelAngle(POINT screen) const;  // угол курсора от направления «внутрь», -180..180
+    double RootSlot(int i) const;         // где стоит сектор i с учётом поворота, 0..n
+    int RootAt(double rel) const;         // какой сектор первого кольца под углом
+    double SubWinFrom() const;            // окно второго кольца по углу
+    double SubWinTo() const;
+    double SubMaxScroll() const;
+    void UpdateSubMid();  // второе кольцо держится у своего сектора, даже когда первое крутят
+    void ScrollSub(double items);
+    void EnsureSubVisible(int idx);
+    void BeginGrab(POINT p);
+    void DragGrab(POINT p, ULONGLONG now);
+    void EndGrab();
+    void OnClick(POINT p);  // одиночный клик выбирает, двойной - открывает
+    std::wstring ItemKey(const Item* it) const;
     void BuildSearchPool();
     int HotSub() const;
     const Item* HoveredItem() const;
@@ -113,14 +133,30 @@ private:
     double AbsAngle(double rel) const { return full_ ? rel + 90.0 : left_ ? rel : 180.0 - rel; }
     double Span() const;  // полураскрыв первого кольца в градусах
     double SubStep() const;
-    double SubFrom() const;
+    double SubFrom() const;  // угол начала первого пункта второго кольца (с учётом прокрутки)
     const std::wstring& IconPng(const Item& it) const;
+    double RootHue(int root) const;  // свой оттенок у каждой группы, сдвиг в градусах
+    // значок пункта; папки без своего значка - значок проекта или папка со значком типа
+    Gdiplus::Bitmap* ItemIcon(const Item& it, int px);
+    void DrawIcon(Gdiplus::Graphics& g, Gdiplus::Bitmap* icon, const Item& it, double x, double y, double sz,
+                  double hl, double appear, bool hot);
+    void DrawLabel(Gdiplus::Graphics& g, const Ring& r, double a0, double a1, const Item& it, double hl,
+                   double appear);
+    double FitWidth(const Ring& r, double a0, double a1, double rad, double halfH, double& x, double& y) const;
+    struct LabelFit {
+        std::wstring text;  // строки через \n, уже сокращённые
+        double x = 0, y = 0;
+    };
+    LabelFit LayoutLabel(const Ring& r, double a0, double a1, const Item& it);
+    float TextWidth(const std::wstring& s);
+    Gdiplus::Bitmap* LabelBitmap(const std::wstring& text, bool bright);
+    void DrawInfoCard(Gdiplus::Graphics& g, double grow, double alpha);
     void Render();
     void EnsureHexGlass();  // узор сотового стекла под размер окна (строится раз, потом из кэша)
     void DrawHexLift(Gdiplus::Graphics& g, Gdiplus::GraphicsPath& sector, double hl);  // сота под курсором
     void PaintBase(double ext, double catcherR);  // тень и подложка для кликов прямо в пикселях кадра
     void DrawSector(Gdiplus::Graphics& g, const Ring& ring, double a0, double a1, const Item& it, double hl,
-                    double appear, bool active);
+                    double appear, bool active, double hue, bool hot);
     void DrawPill(Gdiplus::Graphics& g, const std::wstring& text, const std::wstring& iconFile, double y, double alpha,
                   bool accentEdge);
     std::wstring BottomHint(double& alpha) const;
@@ -183,7 +219,28 @@ private:
     std::vector<Item> subOwned_;
     std::vector<const Item*> subItems_;
     std::vector<Item> navStack_;  // папки, в которые зашли внутри второго кольца
-    int page_ = 0, pageCount_ = 1;
+
+    double rootRot_ = 0, rootRotTo_ = 0;      // поворот первого кольца, в секторах
+    double subScroll_ = 0, subScrollTo_ = 0;  // прокрутка второго кольца, в пунктах
+    int grab_ = -1;                           // за какое кольцо тянут: 0 - первое, 1 - второе
+    bool grabSpun_ = false;                   // уже крутили, это не клик
+    double grabAngle_ = 0, grabPath_ = 0, grabVel_ = 0;
+    ULONGLONG grabT_ = 0;
+    std::wstring clickKey_;  // первый клик двойного
+    ULONGLONG clickT_ = 0;
+    POINT clickPt_{};
+    std::wstring hoverKey_;  // наведённый пункт
+    ULONGLONG keyT_ = 0;     // с какого момента наведён (карточка)
+    ULONGLONG hoverT_ = 0;   // с какого момента оживает значок (наведение или одиночный клик)
+
+    struct LabelBmp {
+        std::unique_ptr<Gdiplus::Bitmap> bmp;
+        int w = 0, h = 0;
+    };
+    std::map<std::wstring, LabelBmp> labels_;               // подписи с тенью, рисуются один раз
+    std::map<std::wstring, float> textW_;                   // ширина строк в пикселях
+    std::map<std::wstring, LabelFit> labelFit_;             // раскладка подписей по сектору и имени
+    std::map<std::wstring, std::unique_ptr<Gdiplus::Bitmap>> composed_;  // папка + значок типа
 
     std::wstring query_;
     std::vector<Item> searchPool_;

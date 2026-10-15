@@ -14,6 +14,7 @@
 #include "core/files.h"
 #include "core/launch.h"
 #include "core/perf.h"
+#include "core/project.h"
 #include "core/text.h"
 #include "core/themes.h"
 #include "core/winlist.h"
@@ -41,7 +42,7 @@ RadialMenu::Geo RadialMenu::MakeGeo(double k) {
     g.iconSub = (int)(34 * k + 0.5);
     g.font = (float)(12 * k);
     g.w = (int)(g.r4 + 30 * k);
-    g.h = (int)(2 * (g.r4 + 72 * k));  // сверху и снизу место под плашки
+    g.h = (int)(2 * (g.r4 + 92 * k));  // сверху место под карточку пункта, снизу - под подсказки
     return g;
 }
 
@@ -107,6 +108,7 @@ bool RadialMenu::Prewarm(const Config* cfg, UINT dpi, int budgetMs) {
         const WarmJob& j = warm_[warmPos_++];
         icons_.Get(j.png, j.shell, j.px);
     }
+    if (warmPos_ >= warm_.size() && textW_.empty()) TextWidth(L"Проекты Ag");  // первый замер шрифта долгий
     return warmPos_ >= warm_.size();
 }
 
@@ -124,7 +126,7 @@ void RadialMenu::Show(const Config* cfg, POINT cursor, const RECT& mon, bool lef
     winMode_ = false;
 
     // центр держим так, чтобы второе кольцо и плашки помещались по высоте экрана
-    int margin = (int)(geo_.r4 + 60 * geo_.k);
+    int margin = (int)(geo_.r4 + 92 * geo_.k);
     int y = cursor.y;
     int top = mon.top + margin, bottom = mon.bottom - margin;
     y = top <= bottom ? std::clamp(y, top, bottom) : (mon.top + mon.bottom) / 2;
@@ -192,8 +194,12 @@ void RadialMenu::Start() {
     subItems_.clear();
     subOwned_.clear();
     navStack_.clear();
-    page_ = 0;
-    pageCount_ = 1;
+    rootRot_ = rootRotTo_ = subScroll_ = subScrollTo_ = 0;
+    grab_ = -1;
+    grabSpun_ = false;
+    clickKey_.clear();
+    hoverKey_.clear();
+    project::ForgetInfo();
     query_.clear();
     searchPool_.clear();
     poolBuilt_ = false;
@@ -210,6 +216,15 @@ void RadialMenu::Start() {
     open_ = true;
     closing_ = false;
     altWasDown_ = GetAsyncKeyState(VK_MENU) & 0x8000;
+    if (altWasDown_) {
+        // отпускание Alt больше ничего не открывает и уйдёт окну под меню - а там включит строку меню;
+        // пустое нажатие, пока Alt ещё зажат, это гасит
+        INPUT in[2]{};
+        in[0].type = in[1].type = INPUT_KEYBOARD;
+        in[0].ki.wVk = in[1].ki.wVk = 0xE8;
+        in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(2, in, sizeof(INPUT));
+    }
     tOpen_ = tLast_ = GetTickCount64();
     subSlide_ = 0;
 
@@ -262,11 +277,17 @@ void RadialMenu::Hide() {
     LeaveShellTarget();
     DropThumb();
     dragging_ = false;
+    grab_ = -1;  // закрыли посреди вращения (Esc) - захват мыши больше не нужен
+    grabSpun_ = false;
+    if (GetCapture() == hwnd_) ReleaseCapture();
     ShowWindow(hwnd_, SW_HIDE);
     blurBrush_.reset();
     blurBmp_.reset();
     searchPool_.clear();
     searchPool_.shrink_to_fit();
+    labels_.clear();  // подписи и ширины строк соберутся заново при следующем открытии
+    textW_.clear();
+    labelFit_.clear();
     mem::TrimSoon();  // в покое память не держим
 }
 
@@ -293,12 +314,20 @@ void RadialMenu::Tick() {
 
         bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
         bool mouseDown = GetAsyncKeyState(VK_LBUTTON) & 0x8000;
-        if (altWasDown_ && !alt && !dragging_ && !mouseDown && mode_ != Mode::Search &&
-            (hoverSub_ >= 0 || hoverRoot_ >= 0)) {
-            ActivateHover();  // отпустил Alt над сектором - открыть
+        // кольцо окон работает как Alt+Tab: отпустил Alt над окном - оно впереди;
+        // папки и программы открываются только двойным кликом или Enter
+        if (winMode_ && altWasDown_ && !alt && !dragging_ && !mouseDown && (hoverSub_ >= 0 || hoverRoot_ >= 0)) {
+            ActivateHover();
             if (!open_) return;
         }
         altWasDown_ = alt;
+        if (grab_ >= 0) {
+            if (mouseDown)
+                DragGrab(pt, now);
+            else
+                EndGrab();  // отпускание ушло мимо окна
+            if (!open_ || closing_) return;
+        }
 
         // перетаскивание: подержал файл над папкой - зашли в неё
         if (dragging_) {
@@ -329,7 +358,19 @@ void RadialMenu::Tick() {
     };
     approach(hlRoot_, hoverRoot_);
     approach(hlSub_, HotSub());
-    bool anim = closing_ || now - tOpen_ < fx::Dur(kOpenMs + kStaggerMs * hlRoot_.size() + 200) ||
+    if (grab_ < 0) {  // докрутка к ближайшему сектору и возврат резинки
+        double spin = std::min(1.0, dt * 13);
+        double dr = (rootRotTo_ - rootRot_) * spin, ds = (subScrollTo_ - subScroll_) * spin;
+        if (std::fabs(rootRotTo_ - rootRot_) < 0.002) dr = rootRotTo_ - rootRot_;
+        if (std::fabs(subScrollTo_ - subScroll_) < 0.002) ds = subScrollTo_ - subScroll_;
+        rootRot_ += dr;
+        subScroll_ += ds;
+        if (dr != 0) UpdateSubMid();
+        moved = std::max(moved, std::max(std::fabs(dr), std::fabs(ds)));
+    } else if (grabSpun_) {
+        moved = 1;
+    }
+    bool anim = closing_ || now - hoverT_ < 1100 || now - tOpen_ < fx::Dur(kOpenMs + kStaggerMs * hlRoot_.size() + 200) ||
                 (mode_ != Mode::None && now - tSub_ < fx::Dur(kSubMs + kSubWaveMs * subItems_.size()) + 30);
     static std::wstring lastHint;
     double ha = 0;
@@ -387,19 +428,16 @@ LRESULT RadialMenu::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             if (HitTest(p).dist > Extent() + 10) Close();
             return 0;
         }
-        case WM_LBUTTONUP: {
-            if (!open_ || closing_) return 0;
+        case WM_LBUTTONDOWN: {
+            if (!open_ || closing_ || dragging_) return 0;
             POINT p;
             GetCursorPos(&p);
-            Hit hit = HitTest(p);
-            UpdateHover(hit, GetTickCount64());
-            if (hit.sub >= 0 || hit.root >= 0) {
-                ActivateHover();
-            } else if (hit.dist < geo_.r1) {
-                if (!Back()) Close();  // клик по ступице: назад или закрыть
-            }
+            BeginGrab(p);
             return 0;
         }
+        case WM_LBUTTONUP:
+            if (open_ && !closing_ && grab_ >= 0) EndGrab();
+            return 0;
         case WM_RBUTTONUP:
             if (open_ && !closing_) OnRightClick();
             return 0;

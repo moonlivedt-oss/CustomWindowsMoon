@@ -58,14 +58,60 @@ int MatchScore(const std::wstring& name, const std::wstring& q) {
 
 double RadialMenu::Span() const { return full_ ? 180.0 : kHalfSpan; }
 
+// Окно второго кольца: у края - весь полукруг, у целого кольца - веер вокруг своего сектора.
+double RadialMenu::SubWinFrom() const { return full_ ? subMid_ - kHalfSpan : -Span(); }
+double RadialMenu::SubWinTo() const { return full_ ? subMid_ + kHalfSpan : Span(); }
+
 double RadialMenu::SubStep() const {
     int m = std::max<int>(1, (int)subItems_.size());
-    return m * kSubItemDeg > 2 * Span() ? 2 * Span() / m : kSubItemDeg;
+    double win = SubWinTo() - SubWinFrom();
+    return m * kSubItemDeg <= win ? kSubItemDeg : std::max(kSubMinDeg, win / m);
+}
+
+double RadialMenu::SubMaxScroll() const {
+    double win = SubWinTo() - SubWinFrom(), step = SubStep();
+    return std::max(0.0, subItems_.size() - win / step);
 }
 
 double RadialMenu::SubFrom() const {
-    double total = SubStep() * subItems_.size();
-    return std::clamp(subMid_ - total / 2, -Span(), Span() - total);
+    double step = SubStep(), total = step * subItems_.size(), from = SubWinFrom(), to = SubWinTo();
+    // всё влезло - держимся у своего сектора; не влезло - пункты идут от начала окна и прокручиваются
+    double base = total <= to - from + 1e-6 ? std::clamp(subMid_ - total / 2, from, to - total) : from;
+    return base - subScroll_ * step;
+}
+
+double RadialMenu::RootSlot(int i) const {
+    int n = (int)ring_->size();
+    double p = std::fmod(i - rootRot_, (double)n);
+    return p < 0 ? p + n : p;
+}
+
+int RadialMenu::RootAt(double rel) const {
+    int n = (int)ring_->size();
+    double p = (rel + Span()) / (2 * Span() / n);
+    int i = (int)std::floor(p + rootRot_) % n;
+    return i < 0 ? i + n : i;
+}
+
+void RadialMenu::UpdateSubMid() {
+    if (mode_ != Mode::Root || subParent_ < 0) return;
+    double step = 2 * Span() / ring_->size();
+    subMid_ = -Span() + step * (RootSlot(subParent_) + 0.5);
+    if (full_ && subMid_ > 180) subMid_ -= 360;
+}
+
+void RadialMenu::ScrollSub(double items) {
+    double to = std::clamp(std::round(subScrollTo_ + items), 0.0, SubMaxScroll());
+    if (to == subScrollTo_) return;
+    subScrollTo_ = to;
+    if (cfg_->sounds) Sound::Play(Sound::Hover);
+}
+
+void RadialMenu::EnsureSubVisible(int idx) {
+    double vis = (SubWinTo() - SubWinFrom()) / SubStep();
+    if (idx < subScrollTo_) subScrollTo_ = idx;
+    if (idx + 1 > subScrollTo_ + vis) subScrollTo_ = std::ceil(idx + 1 - vis);
+    subScrollTo_ = std::clamp(subScrollTo_, 0.0, SubMaxScroll());
 }
 
 const std::wstring& RadialMenu::IconPng(const Item& it) const {
@@ -90,7 +136,6 @@ const Item* RadialMenu::HoveredItem() const {
 
 void RadialMenu::SwitchRoot(int root) {
     navStack_.clear();
-    page_ = 0;
     pendingRoot_ = -1;
     const Item& it = (*ring_)[root];
     if (it.HasRing()) {
@@ -111,7 +156,7 @@ void RadialMenu::SwitchRoot(int root) {
 void RadialMenu::RebuildSub() {
     PERF_SCOPE("menu.RebuildSub");
     std::vector<Item> list;
-    int cap = cfg_->maxChildren;
+    constexpr int cap = 400;  // больше пунктов кольцом всё равно не пролистать
     if (mode_ == Mode::Search) {
         subMid_ = 0;
         std::wstring q = Lower(query_), q2 = OtherLayout(q);
@@ -125,12 +170,8 @@ void RadialMenu::RebuildSub() {
         }
         std::stable_sort(found.begin(), found.end(), [](auto& a, auto& b) { return a.first < b.first; });
         for (size_t i = 0; i < found.size() && (int)i < cap; ++i) list.push_back(*found[i].second);
-        pageCount_ = 1;
-        page_ = 0;
         kbSel_ = std::clamp(kbSel_, 0, std::max(0, (int)list.size() - 1));
     } else if (mode_ == Mode::Root && subParent_ >= 0) {
-        double step = 2 * Span() / ring_->size();
-        subMid_ = -Span() + step * (subParent_ + 0.5);
         if (!navStack_.empty()) {
             list = ListFolder(navStack_.back().full, true);
         } else {
@@ -139,30 +180,16 @@ void RadialMenu::RebuildSub() {
             if (root.expand)
                 for (Item& c : ListFolder(root.full, root.files)) list.push_back(std::move(c));
         }
-        // страницы: на каждой cap-1 пунктов и сектор перехода дальше
-        if ((int)list.size() > cap) {
-            int per = cap - 1;
-            pageCount_ = ((int)list.size() + per - 1) / per;
-            page_ = std::clamp(page_, 0, pageCount_ - 1);
-            std::vector<Item> part(list.begin() + page_ * per,
-                                   list.begin() + std::min<size_t>(list.size(), (size_t)(page_ + 1) * per));
-            Item more;
-            more.special = 1;
-            more.name = page_ + 1 < pageCount_ ? L"Ещё…" : L"В начало";
-            more.iconFull = Exists(ExeDir() + L"\\icons\\more.png") ? ExeDir() + L"\\icons\\more.png"
-                                                                    : ExeDir() + L"\\icons\\folder.png";
-            part.push_back(std::move(more));
-            list = std::move(part);
-        } else {
-            pageCount_ = 1;
-            page_ = 0;
-        }
+        if ((int)list.size() > cap) list.resize(cap);
     }
     subOwned_ = std::move(list);
     subItems_.clear();
     for (const Item& c : subOwned_) subItems_.push_back(&c);
     hlSub_.assign(subItems_.size(), 0.0);
     hoverSub_ = -1;
+    subScroll_ = subScrollTo_ = 0;
+    if (mode_ == Mode::Search) subMid_ = 0;
+    UpdateSubMid();
 }
 
 void RadialMenu::Drill(Item folder) {
@@ -174,7 +201,6 @@ void RadialMenu::Drill(Item folder) {
     }
     query_.clear();
     navStack_.push_back(std::move(folder));
-    page_ = 0;
     RebuildSub();
     tSub_ = GetTickCount64();
     subSlide_ = 0;
@@ -194,7 +220,6 @@ bool RadialMenu::Back() {
     }
     if (navStack_.empty()) return false;
     navStack_.pop_back();
-    page_ = 0;
     if (navStack_.empty() && !(*ring_)[subParent_].HasRing()) {
         mode_ = Mode::None;
         subParent_ = -1;
@@ -211,12 +236,8 @@ bool RadialMenu::Back() {
 }
 
 void RadialMenu::TurnPage(int dir) {
-    if (pageCount_ <= 1) return;
-    page_ = (page_ + dir + pageCount_) % pageCount_;
-    RebuildSub();
-    tSub_ = GetTickCount64();
-    subSlide_ = dir;
-    if (cfg_->sounds) Sound::Play(Sound::Hover);
+    double vis = (SubWinTo() - SubWinFrom()) / SubStep();
+    ScrollSub(dir * std::max(1.0, std::floor(vis) - 1));
 }
 
 // Всё, что можно найти набором: секторы, их пункты и папки на два уровня вглубь.

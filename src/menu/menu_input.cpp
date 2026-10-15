@@ -25,28 +25,41 @@
 using namespace Gdiplus;
 using namespace menu_detail;
 
-RadialMenu::Hit RadialMenu::HitTest(POINT s) const {
-    Hit h;
+double RadialMenu::RelAngle(POINT s) const {
     double dx = s.x - origin_.x - center_.x, dy = s.y - origin_.y - center_.y;
-    h.dist = std::hypot(dx, dy);
     double a = std::atan2(dy, dx) * 180.0 / kPi;
     double rel = full_ ? a - 90.0 : left_ ? a : 180.0 - a;
     while (rel > 180) rel -= 360;
     while (rel <= -180) rel += 360;
+    return rel;
+}
 
-    int n = (int)ring_->size();
+RadialMenu::Hit RadialMenu::HitTest(POINT s) const {
+    Hit h;
+    h.dist = std::hypot(s.x - origin_.x - center_.x, s.y - origin_.y - center_.y);
+    double rel = RelAngle(s);
     if (h.dist >= geo_.r1 && h.dist <= geo_.r2 && std::fabs(rel) <= Span()) {
-        double step = 2 * Span() / n;
-        h.root = std::clamp((int)((rel + Span()) / step), 0, n - 1);
+        h.root = RootAt(rel);
     } else if (mode_ != Mode::None && h.dist > geo_.r2 && h.dist <= geo_.r4 + 12) {
+        if (full_) {  // у целого кольца веер второго яруса может переходить через ±180
+            while (rel < subMid_ - 180) rel += 360;
+            while (rel > subMid_ + 180) rel -= 360;
+        }
         int m = (int)subItems_.size();
-        double from = SubFrom(), step = SubStep();
-        if (m > 0 && rel >= from && rel <= from + step * m) h.sub = std::clamp((int)((rel - from) / step), 0, m - 1);
+        if (m > 0 && rel >= SubWinFrom() && rel <= SubWinTo()) {
+            int i = (int)std::floor((rel - SubFrom()) / SubStep());
+            if (i >= 0 && i < m) h.sub = i;
+        }
     }
     return h;
 }
 
+std::wstring RadialMenu::ItemKey(const Item* it) const {
+    return it ? it->full + L"|" + it->name + L"|" + std::to_wstring(it->special) : L"";
+}
+
 void RadialMenu::UpdateHover(const Hit& h, ULONGLONG now) {
+    if (grab_ >= 0 && grabSpun_) return;  // пока кольцо крутят, выбор не прыгает
     int prevRoot = hoverRoot_, prevSub = hoverSub_;
     hoverRoot_ = mode_ == Mode::Search ? -1 : h.root;  // при поиске выбор идёт только по найденному
     hoverSub_ = h.sub;
@@ -67,6 +80,11 @@ void RadialMenu::UpdateHover(const Hit& h, ULONGLONG now) {
         std::wstring key = it ? it->full + it->name : L"";
         if (it && key != lastHoverKey_) Sound::Play(Sound::Hover);
         lastHoverKey_ = key;
+    }
+    std::wstring key = ItemKey(HoveredItem());
+    if (key != hoverKey_) {
+        hoverKey_ = key;
+        hoverT_ = keyT_ = now;
     }
 }
 
@@ -172,8 +190,9 @@ void RadialMenu::OnKey(UINT vk) {
                 int d = (vk == VK_UP || vk == VK_LEFT) ? -1 : 1;
                 int m = (int)subItems_.size();
                 kbSel_ = (kbSel_ + d + m) % m;
+                EnsureSubVisible(kbSel_);
                 if (cfg_->sounds) Sound::Play(Sound::Hover);
-            } else if (pageCount_ > 1) {
+            } else if (SubMaxScroll() > 0) {
                 TurnPage(vk == VK_UP || vk == VK_LEFT ? -1 : 1);
             }
             break;
@@ -196,8 +215,8 @@ void RadialMenu::OnRightClick() {
 }
 
 void RadialMenu::OnWheel(int delta) {
-    if (pageCount_ > 1) {
-        TurnPage(delta < 0 ? 1 : -1);
+    if (mode_ != Mode::None && SubMaxScroll() > 0) {  // не влезло - колесо прокручивает второе кольцо
+        ScrollSub(delta < 0 ? 2 : -2);
         return;
     }
     POINT p;
@@ -207,6 +226,97 @@ void RadialMenu::OnWheel(int delta) {
         Drill(*subItems_[h.sub]);
     else if (delta < 0)
         Back();
+}
+
+// Нажали на кольцо: пока не ясно, клик это или вращение. Решает DragGrab по пройденному пути.
+void RadialMenu::BeginGrab(POINT p) {
+    Hit h = HitTest(p);
+    bool onSub = mode_ != Mode::None && h.dist > geo_.r2 && h.dist <= geo_.r4 + 12;
+    grab_ = winMode_ ? -1 : h.root >= 0 ? 0 : onSub ? 1 : -1;
+    grabSpun_ = false;
+    grabAngle_ = RelAngle(p);
+    grabPath_ = grabVel_ = 0;
+    grabT_ = GetTickCount64();
+    if (grab_ < 0) {
+        OnClick(p);  // ступица, мимо или кольцо окон - обычный клик
+        return;
+    }
+    SetCapture(hwnd_);
+}
+
+void RadialMenu::DragGrab(POINT p, ULONGLONG now) {
+    double rel = RelAngle(p), d = rel - grabAngle_;
+    while (d > 180) d -= 360;
+    while (d <= -180) d += 360;
+    grabAngle_ = rel;
+    double dist = std::hypot(p.x - origin_.x - center_.x, p.y - origin_.y - center_.y);
+    grabPath_ += std::fabs(Rad(d)) * dist;
+    if (!grabSpun_) {
+        if (grabPath_ < kSpinStartPx * geo_.k) return;
+        grabSpun_ = true;
+        clickKey_.clear();  // вращение - не первый клик двойного
+    }
+    double dt = std::max<double>(1, (double)(now - grabT_)), units;
+    grabT_ = now;
+    if (grab_ == 0) {
+        units = -d / (2 * Span() / ring_->size());
+        rootRot_ += units;
+        rootRotTo_ = rootRot_;
+        UpdateSubMid();
+    } else {
+        units = -d / SubStep();
+        // за краями тянется туже, как резинка, потом возвращается
+        if ((subScroll_ < 0 && units < 0) || (subScroll_ > SubMaxScroll() && units > 0)) units *= 0.35;
+        subScroll_ += units;
+        subScrollTo_ = subScroll_;
+    }
+    grabVel_ = grabVel_ * 0.6 + units / dt * 0.4;  // пунктов в мс
+}
+
+void RadialMenu::EndGrab() {
+    int g = grab_;
+    grab_ = -1;
+    if (GetCapture() == hwnd_) ReleaseCapture();
+    POINT p;
+    GetCursorPos(&p);
+    if (!grabSpun_) {
+        OnClick(p);
+        return;
+    }
+    grabSpun_ = false;
+    double fling = std::clamp(grabVel_ * 140, -4.0, 4.0);  // отпустили на ходу - докручивается
+    if (GetTickCount64() - grabT_ > 90) fling = 0;            // остановились перед отпусканием
+    if (g == 0)
+        rootRotTo_ = std::round(rootRot_ + fling);
+    else
+        subScrollTo_ = std::clamp(std::round(subScroll_ + fling), 0.0, SubMaxScroll());
+    UpdateHover(HitTest(p), GetTickCount64());
+}
+
+void RadialMenu::OnClick(POINT p) {
+    ULONGLONG now = GetTickCount64();
+    Hit hit = HitTest(p);
+    UpdateHover(hit, now);
+    if (hit.sub < 0 && hit.root < 0) {
+        if (hit.dist < geo_.r1 && !Back()) Close();  // клик по ступице: назад или закрыть
+        return;
+    }
+    if (winMode_) {  // кольцо окон - как Alt+Tab: хватает одного клика
+        ActivateHover();
+        return;
+    }
+    std::wstring key = ItemKey(HoveredItem());
+    int dx = GetSystemMetrics(SM_CXDOUBLECLK), dy = GetSystemMetrics(SM_CYDOUBLECLK);
+    if (!key.empty() && key == clickKey_ && now - clickT_ <= GetDoubleClickTime() &&
+        std::abs(p.x - clickPt_.x) <= dx && std::abs(p.y - clickPt_.y) <= dy) {
+        clickKey_.clear();
+        ActivateHover();
+        return;
+    }
+    clickKey_ = key;
+    clickT_ = now;
+    clickPt_ = p;
+    hoverT_ = now;  // значок отзывается ещё раз: пункт выбран
 }
 
 void RadialMenu::Activate(const Item& it) {
