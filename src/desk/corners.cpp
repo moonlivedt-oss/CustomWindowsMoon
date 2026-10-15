@@ -516,16 +516,24 @@ void HotCorners::Paint() {
         // пока курсор ждёт - рядом проступает, что сейчас случится: «Кольцо сети», «Показать рабочий стол»
         if (!fired_ && progress_ > 0 && lv <= 0 && cfg_ && corner_ >= 0 && !cfg_->corners[corner_].empty()) {
             std::wstring name = ActionName(cfg_->corners[corner_]);
-            Font f(Family(), 11.5f * k, FontStyleRegular, UnitPixel);
+            Font f(Family(), 12.5f * k, FontStyleBold, UnitPixel);
             StringFormat sf;
             sf.SetAlignment(left ? StringAlignmentNear : StringAlignmentFar);
             sf.SetLineAlignment(StringAlignmentCenter);
             float bw = s * 0.62f, bh = s * 0.14f;
             RectF box(left ? cx + s * 0.30f : cx - s * 0.30f - bw, cy + dy2 * s * 0.42f - bh / 2, bw, bh);
-            RectF sh = box;
-            sh.Offset(0, 1.2f * k);
-            SolidBrush shadow(Color((BYTE)(150 * e), 0, 0, 0)), text(Color((BYTE)(250 * e), 255, 255, 255));
-            g.DrawString(name.c_str(), -1, &f, sh, &sf, &shadow);
+            // тёмная плашка под текстом: на свечении и панели задач иначе не прочитать
+            RectF tb;
+            g.MeasureString(name.c_str(), -1, &f, PointF(0, 0), &tb);
+            float pw = std::min(bw, tb.Width + 14 * k), ph = tb.Height + 4 * k;
+            RectF pill(left ? box.X - 7 * k : box.GetRight() - pw + 7 * k, box.Y + (bh - ph) / 2, pw, ph);
+            GraphicsPath pp;
+            RoundRectPath(pp, pill, ph / 2);
+            SolidBrush pillB(Color((BYTE)(205 * e), 16, 14, 20));
+            g.FillPath(&pillB, &pp);
+            Pen pillE(Color((BYTE)(110 * e), ac.GetR(), ac.GetG(), ac.GetB()), 1.0f * k);
+            g.DrawPath(&pillE, &pp);
+            SolidBrush text(Color((BYTE)(250 * e), 255, 255, 255));
             g.DrawString(name.c_str(), -1, &f, box, &sf, &text);
         }
 
