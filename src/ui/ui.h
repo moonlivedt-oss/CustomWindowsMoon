@@ -92,6 +92,18 @@ public:
 
     // плавность: значение тянется к on (0..1), пока не дотянется - кадры продолжаются
     float Anim(int id, bool on, float speed = 14);
+    // рамка, которая догоняет target пружиной; передний край быстрее заднего - плашка тянется,
+    // как капля. Ключи свои, с id элементов и Anim не пересекаются
+    RectF Glide(int key, const RectF& target);
+    void GlideSnap(int key) { glides_.erase(key); }
+    // круг от точки нажатия внутри r (рамка элемента id), тает за полсекунды
+    void Ripple(int id, const RectF& r, float radius);
+    // рисовать в другой холст (появление страницы); возвращает прежний
+    Gdiplus::Graphics* Redirect(Gdiplus::Graphics* g) {
+        Gdiplus::Graphics* old = g_;
+        g_ = g;
+        return old;
+    }
     // подсказка при наведении: регистрируется в кадре, рисуется DrawTip после задержки
     void Tip(int id, const std::wstring& text);
     void DrawTip(float w, float h);
@@ -144,6 +156,16 @@ private:
     ULONGLONG hotSince_ = 0, lastFrame_ = 0;
     float dt_ = 0;
     std::map<int, float> anims_;
+    struct Spring {
+        float e[4], v[4];  // края лево, верх, право, низ и их скорости
+    };
+    std::map<int, Spring> glides_;
+    struct Wave {
+        POINT p;
+        ULONGLONG t;
+    };
+    std::map<int, Wave> ripples_;      // откуда и когда нажали на элемент
+    std::map<int, ULONGLONG> bursts_;  // когда щёлкнул переключатель
     std::map<int, std::wstring> tips_;
     bool down_ = false, repaint_ = false, suppress_ = false;
     POINT mouse_{-1, -1}, press_{};

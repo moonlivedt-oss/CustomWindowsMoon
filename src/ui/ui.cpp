@@ -2,6 +2,8 @@
 
 #include <commctrl.h>
 
+#include "core/fx.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
@@ -12,6 +14,8 @@ namespace ui {
 
 namespace {
 Color Alpha(Color c, BYTE a) { return Color(a, c.GetR(), c.GetG(), c.GetB()); }
+// свои ключи Anim у элемента рядом с его id: нажатие, наведение, положение ручки
+constexpr int kPressKey = 0x20000000, kHoverKey = 0x30000000, kKnobKey = 0x40000000;
 }  // namespace
 
 // ---------- ввод ----------
@@ -91,6 +95,72 @@ float Ui::Anim(int id, bool on, float speed) {
     return v;
 }
 
+RectF Ui::Glide(int key, const RectF& t) {
+    float target[4] = {t.X, t.Y, t.X + t.Width, t.Y + t.Height};
+    auto it = glides_.find(key);
+    if (it == glides_.end() || fx::Game()) {
+        Spring s{};
+        for (int i = 0; i < 4; ++i) s.e[i] = target[i];
+        glides_[key] = s;
+        return t;
+    }
+    Spring& s = it->second;
+    // куда едет середина: по этой оси передний край жёстче, задний отстаёт и догоняет
+    float dx = (target[0] + target[2]) - (s.e[0] + s.e[2]);
+    float dy = (target[1] + target[3]) - (s.e[1] + s.e[3]);
+    float speed = (float)(180.0 / std::max(1.0, fx::Dur(180)));  // «спокойно» мягче, «живо» резче
+    bool moving = false;
+    float left = dt_;
+    while (left > 0) {  // мелкими шагами: пружина устойчива и при редких кадрах
+        float h = std::min(left, 1 / 240.0f);
+        left -= h;
+        for (int i = 0; i < 4; ++i) {
+            float d = (i % 2 == 0) ? dx : dy;
+            bool front = (i < 2) ? d < 0 : d > 0;
+            float k = (std::fabs(d) < 0.5f ? 300 : front ? 520 : 150) * speed * speed;
+            float c = 2 * 0.72f * std::sqrt(k);
+            float a = k * (target[i] - s.e[i]) - c * s.v[i];
+            s.v[i] += a * h;
+            s.e[i] += s.v[i] * h;
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (std::fabs(target[i] - s.e[i]) > 0.3f || std::fabs(s.v[i]) > 4) { moving = true; }
+    }
+    if (!moving) {
+        for (int i = 0; i < 4; ++i) {
+            s.e[i] = target[i];
+            s.v[i] = 0;
+        }
+    } else {
+        repaint_ = true;
+    }
+    return RectF(s.e[0], s.e[1], std::max(0.0f, s.e[2] - s.e[0]), std::max(0.0f, s.e[3] - s.e[1]));
+}
+
+void Ui::Ripple(int id, const RectF& r, float radius) {
+    auto it = ripples_.find(id);
+    if (it == ripples_.end()) return;
+    float t = (float)((GetTickCount64() - it->second.t) / fx::Dur(560));
+    if (t >= 1) {
+        ripples_.erase(it);
+        return;
+    }
+    repaint_ = true;
+    float px = (float)it->second.p.x, py = (float)it->second.p.y;
+    // до дальнего угла рамки, чтобы круг успел залить её целиком
+    float fx_ = std::max(std::fabs(px - r.X), std::fabs(px - r.X - r.Width));
+    float fy = std::max(std::fabs(py - r.Y), std::fabs(py - r.Y - r.Height));
+    float maxR = std::sqrt(fx_ * fx_ + fy * fy);
+    float e = 1 - (1 - t) * (1 - t) * (1 - t);
+    float rr = std::max(S(6), maxR * e);
+    GraphicsState st = g_->Save();
+    g_->SetClip(Round(r, radius), CombineModeIntersect);
+    SolidBrush b(Color((BYTE)(52 * (1 - t)), 255, 255, 255));
+    g_->FillEllipse(&b, px - rr, py - rr, rr * 2, rr * 2);
+    g_->Restore(st);
+}
+
 void Ui::Tip(int id, const std::wstring& text) {
     if (interactive) tips_[id] = text;
 }
@@ -124,6 +194,10 @@ void Ui::OnDown(int x, int y) {
     hot_ = HitAt(x, y);
     active_ = hot_;
     down_ = true;
+    if (hot_ && interactive) {
+        if (ripples_.size() > 16) ripples_.clear();  // круги элементов, которые больше не рисуются
+        ripples_[hot_] = {press_, GetTickCount64()};
+    }
     if (EditFocused()) DropFocus();
     SetCapture(hwnd_);
     repaint_ = true;
@@ -455,9 +529,12 @@ bool Ui::Button(int id, const RectF& r, const std::wstring& text, Kind kind, con
             border = c_.border;
             break;
     }
+    // нажатая кнопка вдавливается и отпружинивает обратно, от точки нажатия расходится круг
+    float pr = Anim(id + kPressKey, pressed, pressed ? 40 : 14);
     RectF rr = r;
-    if (pressed) rr.Inflate(-S(0.8f), -S(0.8f));
+    rr.Inflate(-r.Width * 0.025f * pr, -r.Height * 0.06f * pr);
     Fill(rr, fill, S(9));
+    Ripple(id, rr, S(9));
     if (border.GetA()) Stroke(rr, border, S(9));
     float iw = icon.empty() ? 0 : S(18);
     float tw = Measure(text, 12.5f, true);
@@ -473,15 +550,55 @@ bool Ui::Button(int id, const RectF& r, const std::wstring& text, Kind kind, con
 
 bool Ui::Toggle(int id, const RectF& r, bool& v) {
     bool clicked = Click(id, r);
-    if (clicked) v = !v;
-    bool hot = Hot(id);
+    if (clicked) {
+        v = !v;
+        bursts_[id] = GetTickCount64();
+    }
+    float hot = Anim(id + kHoverKey, Hot(id), 16);
+    float on = Anim(id + kKnobKey, v, 13);  // ручка едет, цвет дорожки перетекает
     RectF t(r.X, r.Y + (r.Height - S(22)) / 2, S(40), S(22));
-    Fill(t, v ? c_.accent : (hot ? c_.cardHi : c_.field), t.Height / 2);
-    if (!v) Stroke(t, c_.border, t.Height / 2);
+    Color off = MixColor(c_.field, c_.cardHi, hot);
+    Fill(t, MixColor(off, MixColor(c_.accent, Color(255, 255, 255), 0.08f * hot), on), t.Height / 2);
+    if (on < 0.99f) Stroke(t, Alpha(c_.border, (BYTE)(c_.border.GetA() * (1 - on))), t.Height / 2);
     float d = S(16);
-    float kx = v ? t.X + t.Width - d - S(3) : t.X + S(3);
-    SolidBrush knob(v ? c_.onAccent : c_.muted);
-    g_->FillEllipse(&knob, kx, t.Y + (t.Height - d) / 2, d, d);
+    float travel = t.Width - d - S(6);
+    // в пути ручка вытягивается каплей назад, на месте снова круглая
+    float stretch = std::sin(on * 3.14159f) * S(7);
+    float kx = t.X + S(3) + travel * on - (v ? stretch : 0);
+    float ky = t.Y + (t.Height - d) / 2;
+    float cx = t.X + S(3) + travel * on + d / 2, cy = ky + d / 2;
+    if (hot > 0.01f) {  // мягкий ореол вокруг ручки при наведении
+        SolidBrush halo(Alpha(v ? c_.accent : c_.muted, (BYTE)(46 * hot)));
+        float hd = d + S(12) * hot;
+        g_->FillEllipse(&halo, cx - hd / 2, cy - hd / 2, hd, hd);
+    }
+    Fill(RectF(kx, ky, d + stretch, d), MixColor(c_.muted, c_.onAccent, on), d / 2);
+    // щелчок: от ручки расходится кольцо, при включении ещё и разлетаются искры
+    auto it = bursts_.find(id);
+    if (it != bursts_.end()) {
+        float bt = (float)((GetTickCount64() - it->second) / fx::Dur(620));
+        if (bt >= 1) {
+            bursts_.erase(it);
+        } else {
+            repaint_ = true;
+            float e = 1 - (1 - bt) * (1 - bt) * (1 - bt);
+            float fade = 1 - bt;
+            float tx = v ? t.X + t.Width - S(3) - d / 2 : t.X + S(3) + d / 2;  // где ручка остановится
+            float rr = d / 2 + S(15) * e;
+            Pen ring(Alpha(v ? c_.accent : c_.muted, (BYTE)(210 * fade)), S(2.2f) * fade + S(0.4f));
+            g_->DrawEllipse(&ring, tx - rr, cy - rr, rr * 2, rr * 2);
+            if (v) {
+                for (int i = 0; i < 8; ++i) {
+                    float ang = i * 0.785398f + 0.39f;
+                    float dist = d / 2 + S(6) + S(17) * e;
+                    float pd = S(3.2f) * fade + S(0.6f);
+                    SolidBrush sp(Alpha(i % 2 ? c_.gold : c_.accent, (BYTE)(255 * fade)));
+                    g_->FillEllipse(&sp, tx + std::cos(ang) * dist - pd / 2, cy + std::sin(ang) * dist - pd / 2, pd,
+                                    pd);
+                }
+            }
+        }
+    }
     return clicked;
 }
 
@@ -501,9 +618,18 @@ bool Ui::Slider(int id, const RectF& r, int& v, int lo, int hi, int step) {
     float cy = r.Y + r.Height / 2;
     Fill(RectF(x0, cy - S(2), x1 - x0, S(4)), c_.field, S(2));
     Fill(RectF(x0, cy - S(2), (x1 - x0) * t, S(4)), c_.accent, S(2));
-    float d = Hot(id) || active_ == id ? S(16) : S(14);
+    // ручка подрастает при наведении, пока её тянут - вокруг ореол
+    float grow = Anim(id + kKnobKey, Hot(id) || active_ == id, 18);
+    float held = Anim(id + kPressKey, active_ == id && down_, 16);
+    float kx = x0 + (x1 - x0) * t;
+    if (held > 0.01f) {
+        float hd = S(16) + S(14) * held;
+        SolidBrush halo(Alpha(c_.gold, (BYTE)(50 * held)));
+        g_->FillEllipse(&halo, kx - hd / 2, cy - hd / 2, hd, hd);
+    }
+    float d = S(14) + S(3) * grow;
     SolidBrush knob(c_.gold);
-    g_->FillEllipse(&knob, x0 + (x1 - x0) * t - d / 2, cy - d / 2, d, d);
+    g_->FillEllipse(&knob, kx - d / 2, cy - d / 2, d, d);
     return changed;
 }
 
@@ -512,19 +638,25 @@ bool Ui::Segmented(int id, const RectF& r, const std::vector<std::wstring>& item
     Stroke(r, c_.border, S(9));
     bool changed = false;
     float w = (r.Width - S(6)) / items.size();
+    auto item = [&](size_t i) { return RectF(r.X + S(3) + w * i, r.Y + S(3), w, r.Height - S(6)); };
     for (size_t i = 0; i < items.size(); ++i) {
-        RectF ir(r.X + S(3) + w * i, r.Y + S(3), w, r.Height - S(6));
         int iid = id * 16 + (int)i;
-        if (Click(iid, ir) && sel != (int)i) {
+        if (Click(iid, item(i)) && sel != (int)i) {
             sel = (int)i;
             changed = true;
         }
-        bool on = sel == (int)i;
-        if (on)
-            Fill(ir, c_.accent, S(7));
-        else if (Hot(iid))
-            Fill(ir, c_.cardHi, S(7));
-        Text(items[i], ir, on ? c_.onAccent : c_.muted, 12, on, Center);
+        float hov = Anim(iid + kHoverKey, Hot(iid) && sel != (int)i, 18);
+        if (hov > 0.01f) Fill(item(i), Alpha(c_.cardHi, (BYTE)(c_.cardHi.GetA() * hov)), S(7));
+    }
+    // выбранная плашка одна на всех и переезжает к новому пункту
+    if (sel >= 0 && sel < (int)items.size()) {
+        RectF pill = Glide(id, item(sel));
+        Fill(pill, c_.accent, S(7));
+        Ripple(id * 16 + sel, pill, S(7));
+    }
+    for (size_t i = 0; i < items.size(); ++i) {
+        float on = Anim(id * 16 + (int)i + kKnobKey, sel == (int)i, 16);
+        Text(items[i], item(i), MixColor(c_.muted, c_.onAccent, on), 12, on > 0.5f, Center);
     }
     return changed;
 }

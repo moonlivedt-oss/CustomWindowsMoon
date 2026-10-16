@@ -28,7 +28,20 @@ inline constexpr wchar_t kClass[] = L"MoonRadialStudio";
 inline constexpr UINT WM_RUN = WM_APP + 40;
 inline constexpr UINT_PTR kSaveTimer = 1;
 
-enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_TOOLS, PAGE_HOME, PAGE_KEYS, PAGE_STATE, PAGE_AUTO };
+enum Page {
+    PAGE_RINGS,
+    PAGE_THEMES,
+    PAGE_BEHAVIOR,
+    PAGE_DESK,
+    PAGE_SYSTEM,
+    PAGE_STYLE,
+    PAGE_NET,
+    PAGE_TOOLS,
+    PAGE_HOME,
+    PAGE_KEYS,
+    PAGE_STATE,
+    PAGE_AUTO
+};
 enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE };
 
 // идентификаторы элементов: постоянные и диапазоны для списков
@@ -190,32 +203,32 @@ enum Id {
     ID_AUTO_DL_NOW,
     ID_AUTO_POWER,
     ID_AUTO_REPAIR,
-    ID_BACKUP = 7000,      // +i
-    ID_NET_KILL = 8000,    // +i: «Завершить» у прокси-процесса
+    ID_BACKUP = 7000,        // +i
+    ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
     ID_TOOLS_SIZE = 8400,    // +i*2: «Внутрь» и «Открыть» в «Что занимает место»
     ID_TOOLS_JUNK = 8450,    // +i: «Очистить» у кэша
     ID_TOOLS_START = 8500,   // +i: переключатель автозагрузки
     ID_TOOLS_PORT = 8600,    // +i: «Завершить» у порта
     ID_TOOLS_LOCKER = 8700,  // +i: «Завершить» у того, кто держит файл
-    ID_SECTOR = 1000,      // +i
-    ID_CHILD = 2000,       // +j*8 + поле
-    ID_THEME = 3000,       // +i
-    ID_CUSTOM = 3100,      // +цвет
-    ID_CORNER = 3200,      // +угол*4 + действие
-    ID_SYS_CURSOR = 3300,  // +образец цвета
-    ID_GRID_ICON = 4000,   // +i
-    ID_LIB_CAT = 5000,     // +i
-    ID_LIB_ICON = 6000,    // +i
-    ID_MORE_ITEM = 9000,   // +пункт
-    ID_RAIL_BAR = 9500,    // +страница: анимация полоски выбранного раздела
-    ID_RAIL_HOVER = 9600,  // +страница: анимация наведения на раздел
-    ID_SUBTAB = 9700,      // +страница: вкладка внутри группы
-    ID_HOME_TILE = 9800,   // +i: плитка «Обзора» (+50 - её анимация)
-    ID_STATE_PROJ = 10000,  // +i: строка мусора проектов (выбор)
-    ID_STATE_DL = 10100,    // +i: строка Загрузок (выбор)
-    ID_STATE_APP = 10200,   // +i: «Закрыть» у тяжёлой программы
-    ID_STATE_ANIM = 10300,  // +i: появление шкал и полос
+    ID_SECTOR = 1000,        // +i
+    ID_CHILD = 2000,         // +j*8 + поле
+    ID_THEME = 3000,         // +i
+    ID_CUSTOM = 3100,        // +цвет
+    ID_CORNER = 3200,        // +угол*4 + действие
+    ID_SYS_CURSOR = 3300,    // +образец цвета
+    ID_GRID_ICON = 4000,     // +i
+    ID_LIB_CAT = 5000,       // +i
+    ID_LIB_ICON = 6000,      // +i
+    ID_MORE_ITEM = 9000,     // +пункт
+    ID_RAIL_BAR = 9500,      // +страница: анимация полоски выбранного раздела
+    ID_RAIL_HOVER = 9600,    // +страница: анимация наведения на раздел
+    ID_SUBTAB = 9700,        // +страница: вкладка внутри группы
+    ID_HOME_TILE = 9800,     // +i: плитка «Обзора» (+50 - её анимация)
+    ID_STATE_PROJ = 10000,   // +i: строка мусора проектов (выбор)
+    ID_STATE_DL = 10100,     // +i: строка Загрузок (выбор)
+    ID_STATE_APP = 10200,    // +i: «Закрыть» у тяжёлой программы
+    ID_STATE_ANIM = 10300,   // +i: появление шкал и полос
 };
 
 struct Problem {
@@ -345,8 +358,8 @@ private:
     void StylePage(const RectF& r);
     void NetPage(const RectF& r);
     void HomePage(const RectF& r);
-    void StatePage(const RectF& r);  // «Состояние»: шкалы, что освободить, проекты, Загрузки, рост, система
-    void AutoPage(const RectF& r);   // «Автоматика»: переключатели и журнал
+    void StatePage(const RectF& r);    // «Состояние»: шкалы, что освободить, проекты, Загрузки, рост, система
+    void AutoPage(const RectF& r);     // «Автоматика»: переключатели и журнал
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
     void ToolsPage(const RectF& r);
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
@@ -440,6 +453,17 @@ private:
     int childDrag_ = -1, childDragShown_ = -1;
     std::wstring toast_;
     ULONGLONG toastUntil_ = 0, pageAt_ = 0, lastBackup_ = 0;
+    // появление страницы: кадр рисуется в свой холст, карточки выезжают из него по очереди
+    std::vector<RectF> reveals_;
+    HDC revealDC_ = nullptr;
+    HBITMAP revealBmp_ = nullptr;
+    HGDIOBJ revealOld_ = nullptr;
+    int revealW_ = 0, revealH_ = 0;
+    void Reveal(const RectF& r) { reveals_.push_back(r); }  // карточка выезжает отдельно от страницы
+    void RevealComposite(const RectF& body, ULONGLONG since);
+    int tabsGroup_ = -1;  // группа, чьи вкладки рисовались в прошлом кадре
+    int railPop_ = -1;    // значок группы, которую только что выбрали, подпрыгивает
+    ULONGLONG railPopAt_ = 0;
     std::wstring hoverTheme_, hoverThemeNext_;  // примерка темы наведением
     // витрина тем: прежняя тема растворяется в новую
     ThemeInfo heroCur_{}, heroPrev_{};

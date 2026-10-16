@@ -11,6 +11,7 @@
 #include <cmath>
 #include <ctime>
 
+#include "core/fx.h"
 #include "core/mem.h"
 #include "core/files.h"
 #include "core/perf.h"
@@ -43,7 +44,11 @@ struct Group {
     int count;
 };
 const Group kGroups[] = {
-    {L"Обзор", L"rail-home.png", L"hub.png", {{PAGE_STATE, L"Состояние"}, {PAGE_AUTO, L"Автоматика"}, {PAGE_HOME, L"Разделы"}}, 3},
+    {L"Обзор",
+     L"rail-home.png",
+     L"hub.png",
+     {{PAGE_STATE, L"Состояние"}, {PAGE_AUTO, L"Автоматика"}, {PAGE_HOME, L"Разделы"}},
+     3},
     {L"Кольца", L"rail-rings.png", L"apps.png", {{PAGE_RINGS, L"Кольца"}, {PAGE_THEMES, L"Темы"}}, 2},
     {L"Стол",
      L"rail-desk.png",
@@ -74,9 +79,10 @@ void Studio::Paint() {
     painting_ = true;
     PERF_SCOPE("studio.Paint");
     // по одному имени на каждый раздел из enum Page, в том же порядке
-    static const char* kPageScope[] = {
-        "studio.page.rings", "studio.page.themes", "studio.page.behavior", "studio.page.desk", "studio.page.system",
-        "studio.page.style", "studio.page.net",    "studio.page.tools",    "studio.page.home", "studio.page.keys", "studio.page.state", "studio.page.auto"};
+    static const char* kPageScope[] = {"studio.page.rings", "studio.page.themes", "studio.page.behavior",
+                                       "studio.page.desk",  "studio.page.system", "studio.page.style",
+                                       "studio.page.net",   "studio.page.tools",  "studio.page.home",
+                                       "studio.page.keys",  "studio.page.state",  "studio.page.auto"};
     static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_AUTO + 1, "имя замера на каждый раздел");
     perf::Scope pageScope(kPageScope[page_]);
     PAINTSTRUCT ps;
@@ -173,6 +179,36 @@ void Studio::Frame(float w, float h) {
     body.Height -= tabsH;
     childDragShown_ = childDrag_;
     childDrag_ = -1;
+    // смена раздела: первые полсекунды страница рисуется в свой холст, потом собирается из него
+    reveals_.clear();
+    ULONGLONG since = GetTickCount64() - pageAt_;
+    bool revealing = pageAt_ && !fx::Game() && since < (ULONGLONG)fx::Dur(900);
+    std::unique_ptr<Graphics> pg;
+    Graphics* screen = nullptr;
+    if (revealing) {
+        int pw = (int)std::ceil(w), ph = (int)std::ceil(h);
+        if (!revealDC_ || pw != revealW_ || ph != revealH_) {
+            if (revealDC_) {
+                SelectObject(revealDC_, revealOld_);
+                DeleteObject(revealBmp_);
+                DeleteDC(revealDC_);
+            }
+            HDC sdc = GetDC(nullptr);
+            revealDC_ = CreateCompatibleDC(sdc);
+            revealBmp_ = CreateCompatibleBitmap(sdc, pw, ph);
+            ReleaseDC(nullptr, sdc);
+            revealOld_ = SelectObject(revealDC_, revealBmp_);
+            revealW_ = pw;
+            revealH_ = ph;
+        }
+        pg = std::make_unique<Graphics>(revealDC_);
+        pg->SetSmoothingMode(SmoothingModeAntiAlias);
+        pg->SetPixelOffsetMode(PixelOffsetModeHighQuality);
+        pg->SetInterpolationMode(InterpolationModeHighQualityBicubic);
+        pg->SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+        pg->Clear(c.win);
+        screen = ui.Redirect(pg.get());
+    }
     switch (page_) {
         case PAGE_RINGS:
             RingsPage(body);
@@ -211,10 +247,11 @@ void Studio::Frame(float w, float h) {
             AutoPage(body);
             break;
     }
-    // смена раздела: страница проступает за 180 мс
-    float fade = 1 - std::min(1.0f, (GetTickCount64() - pageAt_) / 180.0f);
-    if (fade > 0) {
-        ui.Fill(body, Color((BYTE)(255 * fade * 0.85f), c.win.GetR(), c.win.GetG(), c.win.GetB()));
+    if (revealing) {
+        pg->Flush();
+        ui.Redirect(screen);
+        pg.reset();
+        RevealComposite(body, since);
         ui.Invalidate();
     }
     ui.interactive = ov_ == OV_NONE || ov_ == OV_JOURNAL;  // «Журнал» внизу закрывает сам себя
@@ -229,7 +266,72 @@ void Studio::Frame(float w, float h) {
     ui.DrawTip(w, h);
 }
 
+// Страница уже нарисована в revealDC_. Всё, что не карточки (заголовки), проступает целиком,
+// карточки по очереди сверху вниз выезжают снизу с лёгким перелётом и проявляются.
+void Studio::RevealComposite(const RectF& body, ULONGLONG since) {
+    // вложенные карточки едут вместе с внешней
+    std::vector<RectF> cards;
+    std::vector<RectF> all = reveals_;
+    std::stable_sort(all.begin(), all.end(),
+                     [](const RectF& a, const RectF& b) { return a.Width * a.Height > b.Width * b.Height; });
+    for (const RectF& r : all) {
+        RectF in = r;
+        if (!in.Intersect(body)) continue;
+        bool inner = false;
+        for (const RectF& o : cards)
+            if (o.Contains(r)) inner = true;
+        if (!inner) cards.push_back(r);
+    }
+    std::stable_sort(cards.begin(), cards.end(),
+                     [](const RectF& a, const RectF& b) { return std::fabs(a.Y - b.Y) > 2 ? a.Y < b.Y : a.X < b.X; });
+
+    Graphics& g = ui.G();
+    g.Flush();
+    HDC dc = g.GetHDC();
+    RECT bodyR{(LONG)body.X, (LONG)body.Y, (LONG)std::ceil(body.X + body.Width), (LONG)std::ceil(body.Y + body.Height)};
+    auto blend = [&](const RECT& src, int dy, float a, HRGN clip) {
+        if (a <= 0.004f) return;
+        SelectClipRgn(dc, clip);
+        int sw = src.right - src.left, sh = src.bottom - src.top;
+        if (a >= 0.996f) {
+            BitBlt(dc, src.left, src.top + dy, sw, sh, revealDC_, src.left, src.top, SRCCOPY);
+        } else {
+            BLENDFUNCTION bf{AC_SRC_OVER, 0, (BYTE)(255 * a), 0};
+            GdiAlphaBlend(dc, src.left, src.top + dy, sw, sh, revealDC_, src.left, src.top, sw, sh, bf);
+        }
+    };
+    double t0 = fx::Dur(1);  // доля «скорости»: те же задержки растягиваются вместе с движением
+    // фон и заголовки: всё, кроме карточек
+    HRGN rest = CreateRectRgnIndirect(&bodyR);
+    for (const RectF& r : cards) {
+        HRGN cr = CreateRectRgn((int)r.X - 1, (int)r.Y - 1, (int)std::ceil(r.X + r.Width) + 1,
+                                (int)std::ceil(r.Y + r.Height) + 1);
+        CombineRgn(rest, rest, cr, RGN_DIFF);
+        DeleteObject(cr);
+    }
+    float h = std::min(1.0f, (float)(since / fx::Dur(260)));
+    blend(bodyR, (int)std::lround(ui.S(10) * (1 - h) * (1 - h)), 1 - (1 - h) * (1 - h), rest);
+    DeleteObject(rest);
+    HRGN clip = CreateRectRgnIndirect(&bodyR);
+    for (size_t i = 0; i < cards.size(); ++i) {
+        double delay = 55 * t0 * std::min<size_t>(i, 10);
+        if (since < delay) continue;
+        float t = std::min(1.0f, (float)((since - delay) / fx::Dur(460)));
+        // перелёт: выше места на пару пикселей и обратно
+        float s = 1.70158f * 1.2f, u = t - 1;
+        float back = 1 + (s + 1) * u * u * u + s * u * u;
+        int dy = (int)std::lround(ui.S(26) * (1 - back));
+        const RectF& r = cards[i];
+        RECT src{(LONG)r.X - 2, (LONG)r.Y - 2, (LONG)std::ceil(r.X + r.Width) + 2, (LONG)std::ceil(r.Y + r.Height) + 2};
+        blend(src, dy, std::min(1.0f, t * 1.8f), clip);
+    }
+    SelectClipRgn(dc, nullptr);
+    DeleteObject(clip);
+    g.ReleaseHDC(dc);
+}
+
 void Studio::Card(const RectF& r, bool hi) {
+    Reveal(r);
     const UiColors& c = ui.C();
     ui.Fill(r, hi ? c.cardHi : c.card, ui.S(12));
     ui.Stroke(r, c.border, ui.S(12));
@@ -276,36 +378,56 @@ void Studio::Rail(const RectF& r) {
         return Exists(p) ? p : ExeDir() + L"\\icons\\" + fallback;
     };
     // пять групп вместо десяти разделов; внутри группы - вкладки над страницей (SubTabs)
-    float y = ui.S(72);
+    auto slot = [&](int gi) { return RectF(r.X + ui.S(7), ui.S(72) + gi * ui.S(72), r.Width - ui.S(14), ui.S(66)); };
     for (int gi = 0; gi < kGroupCount; ++gi) {
-        const Group& e = kGroups[gi];
-        RectF b(r.X + ui.S(7), y, r.Width - ui.S(14), ui.S(66));
+        RectF b = slot(gi);
         bool on = GroupOf(page_) == gi;
         if (ui.Click(ID_RAIL + gi, b) && !on) {
             pageAt_ = GetTickCount64();
             renaming_ = -1;
             page_ = groupLast_[gi];
             ui.ResetScroll(ID_PAGE_SCROLL);
+            railPop_ = gi;
+            railPopAt_ = pageAt_;
         }
-        // выбранная группа: фон и полоска акцента у левого края; она вырастает на новой группе и
-        // гаснет на прежней, при наведении на другую видна короткая бледная полоска
-        float sel = ui.Anim(ID_RAIL_BAR + gi, on, 16);
-        float hov = ui.Anim(ID_RAIL_HOVER + gi, !on && ui.Hot(ID_RAIL + gi), 18);
-        if (sel > 0.01f) ui.Fill(b, WithAlpha(c.cardHi, (BYTE)(255 * sel)), ui.S(12));
-        if (hov > 0.01f) ui.Fill(b, WithAlpha(c.card, (BYTE)(255 * hov * (1 - sel))), ui.S(12));
-        float barH = ui.S(34) * sel + ui.S(14) * hov * (1 - sel);
-        if (barH > ui.S(1)) {
-            Color bar = sel > hov ? WithAlpha(c.accent, (BYTE)(255 * std::min(1.0f, sel * 1.4f)))
-                                  : WithAlpha(c.muted, (BYTE)(160 * hov));
-            ui.Fill(RectF(r.X + ui.S(1), b.Y + (b.Height - barH) / 2, ui.S(4), barH), bar, ui.S(2));
+        // при наведении на другую группу - бледный фон и короткая полоска
+        float hov = ui.Anim(ID_RAIL_HOVER + gi, GroupOf(page_) != gi && ui.Hot(ID_RAIL + gi), 18);
+        if (hov > 0.01f) {
+            ui.Fill(b, WithAlpha(c.card, (BYTE)(255 * hov)), ui.S(12));
+            float barH = ui.S(14) * hov;
+            ui.Fill(RectF(r.X + ui.S(1), b.Y + (b.Height - barH) / 2, ui.S(4), barH),
+                    WithAlpha(c.muted, (BYTE)(160 * hov)), ui.S(2));
         }
-        ui.Icon(railIcon(e.own, e.icon), RectF(b.X + (b.Width - ui.S(30)) / 2, b.Y + ui.S(8), ui.S(30), ui.S(30)));
-        ui.Text(e.name, RectF(b.X - ui.S(4), b.Y + ui.S(42), b.Width + ui.S(8), ui.S(18)), on ? c.text : c.muted, 10.5f,
-                on, ui::Center);
+    }
+    // выбранная группа: фон и полоска акцента переезжают к новой группе, растягиваясь в пути
+    RectF selR = ui.Glide(-100, slot(GroupOf(page_)));
+    ui.Fill(selR, c.cardHi, ui.S(12));
+    ui.Ripple(ID_RAIL + GroupOf(page_), selR, ui.S(12));
+    float barH = std::min(selR.Height, ui.S(34) + std::max(0.0f, selR.Height - ui.S(66)));
+    ui.Fill(RectF(r.X + ui.S(1), selR.Y + (selR.Height - barH) / 2, ui.S(4), barH), c.accent, ui.S(2));
+    for (int gi = 0; gi < kGroupCount; ++gi) {
+        const Group& e = kGroups[gi];
+        RectF b = slot(gi);
+        bool on = GroupOf(page_) == gi;
+        // значок привстаёт при наведении, у только что выбранной группы подпрыгивает и качается
+        float lift = ui.Anim(ID_RAIL_HOVER + 50 + gi, ui.Hot(ID_RAIL + gi), 16) * ui.S(3);
+        if (railPop_ == gi) {
+            float t = (float)((GetTickCount64() - railPopAt_) / fx::Dur(700));
+            if (t < 1) {
+                lift += ui.S(10) * std::exp(-4.5f * t) * std::sin(3 * 3.14159f * t);
+                ui.Invalidate();
+            } else {
+                railPop_ = -1;
+            }
+        }
+        float iy = std::round(b.Y + ui.S(8) - lift);
+        ui.Icon(railIcon(e.own, e.icon), RectF(b.X + (b.Width - ui.S(30)) / 2, iy, ui.S(30), ui.S(30)));
+        float tx = ui.Anim(ID_RAIL_BAR + gi, on, 14);
+        ui.Text(e.name, RectF(b.X - ui.S(4), b.Y + ui.S(42), b.Width + ui.S(8), ui.S(18)),
+                MixColor(c.muted, c.text, tx), 10.5f, on, ui::Center);
         std::wstring tip;
         for (int k = 0; k < e.count; ++k) tip += (k ? L", " : L"") + std::wstring(e.pages[k].name);
         if (e.count > 1) ui.Tip(ID_RAIL + gi, tip);
-        y += ui.S(72);
     }
     RectF t(r.X + ui.S(7), r.Height - ui.S(122), r.Width - ui.S(14), ui.S(66));
     if (ui.Click(ID_TOUR_BTN, t)) {
@@ -324,24 +446,35 @@ float Studio::SubTabs(const RectF& body) {
     const Group& g = kGroups[gi];
     if (g.count < 2) return 0;
     const UiColors& c = ui.C();
-    float x = body.X + ui.S(28), y = ui.S(14), h = ui.S(34);
+    float y = ui.S(14), h = ui.S(34);
+    std::vector<RectF> rs;
+    float x = body.X + ui.S(28);
+    int cur = 0;
     for (int k = 0; k < g.count; ++k) {
-        const wchar_t* name = g.pages[k].name;
-        float w = ui.Measure(name, 12.5f, true) + ui.S(30);
-        RectF tr(x, y, w, h);
-        bool on = page_ == g.pages[k].page;
+        float w = ui.Measure(g.pages[k].name, 12.5f, true) + ui.S(30);
+        rs.push_back(RectF(x, y, w, h));
+        if (page_ == g.pages[k].page) cur = k;
+        x += w + ui.S(8);
+    }
+    for (int k = 0; k < g.count; ++k) {
+        bool on = k == cur;
         int id = ID_SUBTAB + g.pages[k].page;
-        if (ui.Click(id, tr) && !on) {
+        if (ui.Click(id, rs[k]) && !on) {
             Page p = g.pages[k].page;
             Defer([this, p] { GoPage(p); });
         }
         float hov = ui.Anim(id + 40, !on && ui.Hot(id), 18);
-        if (on)
-            ui.Fill(tr, c.accent, h / 2);
-        else
-            ui.Fill(tr, WithAlpha(c.cardHi, (BYTE)(90 + 140 * hov)), h / 2);
-        ui.Text(name, tr, on ? c.onAccent : c.muted, 12.5f, on, ui::Center);
-        x += w + ui.S(8);
+        ui.Fill(rs[k], WithAlpha(c.cardHi, (BYTE)(90 + 140 * hov)), h / 2);
+    }
+    // выбранная вкладка - одна плашка, которая перетекает к новой; в другой группе появляется сразу
+    if (tabsGroup_ != gi) ui.GlideSnap(-1 - gi);
+    tabsGroup_ = gi;
+    RectF pill = ui.Glide(-1 - gi, rs[cur]);
+    ui.Fill(pill, c.accent, h / 2);
+    ui.Ripple(ID_SUBTAB + g.pages[cur].page, pill, h / 2);
+    for (int k = 0; k < g.count; ++k) {
+        float on = ui.Anim(ID_SUBTAB + g.pages[k].page + 60, k == cur, 16);
+        ui.Text(g.pages[k].name, rs[k], MixColor(c.muted, c.onAccent, on), 12.5f, on > 0.5f, ui::Center);
     }
     return ui.S(44);
 }
@@ -388,18 +521,92 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         GoTools(tab, L"");
     else
         GoPage((Page)page);
-    Bitmap bmp(w, h, PixelFormat32bppARGB);
+    // кадр в HDC, как в окне: появление страницы смешивает карточки средствами GDI
+    HDC sdc = GetDC(nullptr);
+    HDC mdc = CreateCompatibleDC(sdc);
+    HBITMAP hbm = CreateCompatibleBitmap(sdc, w, h);
+    ReleaseDC(nullptr, sdc);
+    HGDIOBJ oldBm = SelectObject(mdc, hbm);
+    auto grab = [&] {
+        SelectObject(mdc, oldBm);
+        auto b = std::make_unique<Bitmap>(hbm, nullptr);
+        SelectObject(mdc, hbm);
+        return b;
+    };
     ULONGLONG end = GetTickCount64() + ms;
     do {
         MSG m;
         while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
         pageAt_ = 0;  // без проступания страницы
-        Graphics g(&bmp);
+        Graphics g(mdc);
         ui.Begin(g, UiPalette(cfg), k);
         Frame((float)w, (float)h);
         ui.End();
         Sleep(120);
     } while (GetTickCount64() < end);
+    // RADIAL_FILM - проверка движения без мыши: «c x y» щелчок, «m x y» наведение, «w мс» подождать,
+    // «f n мс» снять n кадров через мс; кадры (вдвое меньше) ложатся листом по три в ряд вместо снимка
+    std::unique_ptr<Bitmap> sheet;
+    if (const char* film = getenv("RADIAL_FILM")) {
+        std::vector<std::unique_ptr<Bitmap>> shots;
+        auto frame = [&] {
+            MSG m;
+            while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+            Graphics g(mdc);
+            ui.Begin(g, UiPalette(cfg), k);
+            Frame((float)w, (float)h);
+            ui.End();
+        };
+        auto run = [&](int ms) {
+            ULONGLONG until = GetTickCount64() + ms;
+            do {
+                frame();
+                Sleep(15);
+            } while (GetTickCount64() < until);
+        };
+        std::string script = film;
+        size_t pos = 0;
+        while (pos < script.size()) {
+            size_t semi = script.find(';', pos);
+            std::string cmd = script.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
+            pos = semi == std::string::npos ? script.size() : semi + 1;
+            char op = 0;
+            int a = 0, b = 0;
+            if (sscanf(cmd.c_str(), " %c %d %d", &op, &a, &b) < 1) continue;
+            if (op == 'm') {
+                ui.OnMouseMove(a, b);
+                run(60);
+            } else if (op == 'c') {
+                ui.OnMouseMove(a, b);
+                frame();
+                ui.OnDown(a, b);
+                run(70);
+                ui.OnUp(a, b);
+                frame();
+            } else if (op == 'w') {
+                run(a);
+            } else if (op == 'f') {
+                for (int i = 0; i < a; ++i) {
+                    if (i) run(b);
+                    frame();
+                    auto s = std::make_unique<Bitmap>(w / 2, h / 2, PixelFormat32bppARGB);
+                    Graphics sg(s.get());
+                    sg.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+                    auto full = grab();
+                    sg.DrawImage(full.get(), 0, 0, w / 2, h / 2);
+                    shots.push_back(std::move(s));
+                }
+            }
+        }
+        if (!shots.empty()) {
+            int cols = std::min<int>(3, (int)shots.size()), rows = ((int)shots.size() + cols - 1) / cols;
+            sheet = std::make_unique<Bitmap>(cols * (w / 2 + 6), rows * (h / 2 + 6), PixelFormat32bppARGB);
+            Graphics sg(sheet.get());
+            sg.Clear(Color(255, 40, 40, 40));
+            for (size_t i = 0; i < shots.size(); ++i)
+                sg.DrawImage(shots[i].get(), (int)(i % cols) * (w / 2 + 6), (int)(i / cols) * (h / 2 + 6));
+        }
+    }
     CLSID png{};
     UINT n = 0, size = 0;
     Gdiplus::GetImageEncodersSize(&n, &size);
@@ -408,7 +615,12 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
     Gdiplus::GetImageEncoders(n, size, codecs);
     for (UINT i = 0; i < n; ++i)
         if (!wcscmp(codecs[i].MimeType, L"image/png")) png = codecs[i].Clsid;
-    return bmp.Save(out.c_str(), &png, nullptr) == Gdiplus::Ok ? 0 : 1;
+    auto last = grab();
+    int rc = (sheet ? sheet.get() : last.get())->Save(out.c_str(), &png, nullptr) == Gdiplus::Ok ? 0 : 1;
+    SelectObject(mdc, oldBm);
+    DeleteObject(hbm);
+    DeleteDC(mdc);
+    return rc;
 }
 
 void Studio::Open() {

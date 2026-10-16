@@ -187,6 +187,7 @@ void Studio::ThemeCard(int index, const ThemeInfo& t, const RectF& cr, const Rec
     int id = ID_THEME + index;
     bool on = cfg.theme == t.key;
     RectF vis = Intersect(cr, view);
+    if (vis.Height > 1) Reveal(cr);
     if (vis.Height > 1 && ui.Click(id, vis) && !on) {
         Change();
         cfg.theme = t.key;

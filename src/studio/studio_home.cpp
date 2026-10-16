@@ -101,6 +101,7 @@ void Studio::HomePage(const RectF& r) {
         const Tile& tl = tiles[i];
         RectF tr(col.X + (i % cols) * (tw + gap), y0 + (i / cols) * (th + gap), tw, th);
         int id = ID_HOME_TILE + (int)i;
+        Reveal(tr);
         bool click = ui.Click(id, tr);
         float hov = ui.Anim(id + 50, ui.Hot(id), 16);
         ui.Fill(tr, MixColor(c.card, c.cardHi, hov), ui.S(14));
