@@ -901,7 +901,7 @@ void ShowRing(RadialMenu& menu) {
         std::wstring letter = v.root.substr(0, 2);
         int pct = v.total ? (int)(v.free * 100 / v.total) : 0;
         disks.children.push_back(
-            Act(letter + L" " + tools::Bytes(v.free), L"tools-size.png", L"scan:" + v.root,
+            Act(letter + L" " + tools::Bytes(v.free), L"tools-disk.png", L"scan:" + v.root,
                 L"Свободно " + tools::Bytes(v.free) + L" из " + tools::Bytes(v.total) + L" (" + std::to_wstring(pct) +
                     L"%)" + (v.label.empty() ? L"" : L", «" + v.label + L"»") + L". 2 клика - что занимает место"));
         status += (status.empty() ? L"" : L"   |   ") + letter + L" свободно " + tools::Bytes(v.free);
@@ -912,7 +912,7 @@ void ShowRing(RadialMenu& menu) {
         const tools::Growth& g = scan.growth[i];
         if (g.delta < 200ll * 1024 * 1024) break;
         disks.children.push_back(Act(L"+" + tools::Bytes((ULONGLONG)g.delta) + L" " + Short(g.name, 12),
-                                     L"tools-size.png", L"",
+                                     L"tools-update.png", L"",
                                      g.name + L" выросло за неделю на " + tools::Bytes((ULONGLONG)g.delta) +
                                          L", сейчас " + tools::Bytes(g.now)));
         ++shown;

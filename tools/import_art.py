@@ -83,6 +83,17 @@ SHEETS = {
     ],
 }
 SINGLES = {"app.png": "app", "hub.png": "hub"}
+# Листы, нарисованные строгой сеткой (столбцы, строки): кусок значка (отдельный столбик, стрелка, волна)
+# принадлежит клетке, где лежит его середина. Без сетки - крупнейшие области, мелочь к ближайшей.
+GRIDS = {
+    "sheet-root.png": (3, 2),
+    "sheet-sub.png": (5, 2),
+    "sheet-extra.png": (4, 2),
+    "sheet-studio.png": (3, 2),
+    "sheet-tools.png": (4, 4),
+    "sheet-guard.png": (3, 2),
+    "sheet-net.png": (5, 2),
+}
 
 
 def find(name: str) -> Path | None:
@@ -114,7 +125,9 @@ def key_green(im: Image.Image) -> Image.Image:
     return im
 
 
-def blobs(im: Image.Image, want: int) -> list[tuple[int, int, int, int]]:
+def blobs(
+    im: Image.Image, want: int, grid: tuple[int, int] | None = None
+) -> list[tuple[int, int, int, int]]:
     """Рамки отдельных значков: связные области непрозрачных пикселей на уменьшенной маске."""
     scale = 4
     small = im.getchannel("A").resize((im.width // scale, im.height // scale))
@@ -147,6 +160,17 @@ def blobs(im: Image.Image, want: int) -> list[tuple[int, int, int, int]]:
             boxes.append(
                 (n, (x0 * scale, y0 * scale, (x1 + 1) * scale, (y1 + 1) * scale))
             )
+    if grid:
+        cols, rows = grid
+        cells: dict[int, list[int]] = {}
+        for n, (a0, b0, a1, b1) in boxes:
+            if n < 6:  # пылинки
+                continue
+            cx = min(cols - 1, int((a0 + a1) / 2 * cols / im.width))
+            cy = min(rows - 1, int((b0 + b1) / 2 * rows / im.height))
+            c = cells.setdefault(cy * cols + cx, [a0, b0, a1, b1])
+            c[0], c[1], c[2], c[3] = min(c[0], a0), min(c[1], b0), max(c[2], a1), max(c[3], b1)
+        return [tuple(cells[k]) for k in sorted(cells)]
     # крупнейшие области - значки; мелкие (искры, ноты отдельно от предмета) приклеиваем к ближайшему
     boxes.sort(key=lambda b: -b[0])
     main = [list(b[1]) for b in boxes[:want]]
@@ -205,7 +229,7 @@ def main() -> None:
             print("нет", sheet)
             continue
         im = key_green(Image.open(p))
-        found = blobs(im, len(names))
+        found = blobs(im, len(names), GRIDS.get(sheet))
         if len(found) != len(names):
             print(
                 f"{sheet}: нашлось {len(found)} значков вместо {len(names)}, пропускаю"
@@ -222,7 +246,7 @@ def main() -> None:
         save(im, name)
         if name == "app":
             fit(im).save(
-                ROOT / "src" / "app.ico",
+                ROOT / "src" / "res" / "app.ico",
                 sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)],
             )
             print("ok app.ico (пересобери build.cmd)")
