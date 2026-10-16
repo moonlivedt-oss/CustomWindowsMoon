@@ -322,7 +322,7 @@ bool Run(int& exitCode) {
         std::wstring out = i + 3 < args.size() ? args[i + 3] : ExeDir() + L"\\studio_snap.png";
         int ms = i + 4 < args.size() ? _wtoi(args[i + 4].c_str()) : 2500;
         static Config snapCfg;
-        if (page == 10) {  // «Состояние»: размеры считаются заранее, как в работающей программе
+        if (page == 10 && !getenv("RADIAL_NOPRIME")) {  // RADIAL_NOPRIME - снять, как выглядит подсчёт  // «Состояние»: размеры считаются заранее, как в работающей программе
             snapCfg = LoadOwnConfig();
             toolsui::PrimeForSnapshot(&snapCfg);
         }

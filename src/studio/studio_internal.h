@@ -454,14 +454,16 @@ private:
     std::wstring toast_;
     ULONGLONG toastUntil_ = 0, pageAt_ = 0, lastBackup_ = 0;
     // появление страницы: кадр рисуется в свой холст, карточки выезжают из него по очереди
-    std::vector<RectF> reveals_;
     HDC revealDC_ = nullptr;
     HBITMAP revealBmp_ = nullptr;
     HGDIOBJ revealOld_ = nullptr;
     int revealW_ = 0, revealH_ = 0;
-    void Reveal(const RectF& r) { reveals_.push_back(r); }  // карточка выезжает отдельно от страницы
+    void Reveal(const RectF& r) { ui.MarkCard(r); }  // карточка выезжает отдельно от страницы
     void RevealComposite(const RectF& body, ULONGLONG since);
     int tabsGroup_ = -1;  // группа, чьи вкладки рисовались в прошлом кадре
+    void NetRoute(const RectF& r, bool busy);  // схема ПК - выход - DNS - интернет, по ней бежит проверка
+    bool netWasBusy_ = false;
+    ULONGLONG netDoneAt_ = 0;  // когда пришёл итог проверки: узлы схемы загораются по очереди
     int railPop_ = -1;    // значок группы, которую только что выбрали, подпрыгивает
     ULONGLONG railPopAt_ = 0;
     std::wstring hoverTheme_, hoverThemeNext_;  // примерка темы наведением

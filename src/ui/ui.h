@@ -98,6 +98,20 @@ public:
     void GlideSnap(int key) { glides_.erase(key); }
     // круг от точки нажатия внутри r (рамка элемента id), тает за полсекунды
     void Ripple(int id, const RectF& r, float radius);
+    // ожидание вместо «...»: кадры идут таймером ~30 в секунду (TakeTick), а не подряд, как у Anim
+    void HexSpinner(const RectF& r, Color c);                        // соты: волна бежит по кругу
+    void Shimmer(const RectF& r, float radius, BYTE strength = 34);  // блик проходит слева направо
+    float BounceDots(float x, float cy, Color c, float d);           // три точки волной; ширина
+    void Skeleton(const RectF& r, int rows, float rowH);             // заготовки строк, пока список считается
+    void Tick() { tick_ = true; }
+    bool TakeTick() {
+        bool t = tick_;
+        tick_ = false;
+        return t;
+    }
+    // карточки страницы: при смене раздела выезжают по очереди (список живёт один кадр)
+    void MarkCard(const RectF& r) { cards_.push_back(r); }
+    const std::vector<RectF>& Cards() const { return cards_; }
     // рисовать в другой холст (появление страницы); возвращает прежний
     Gdiplus::Graphics* Redirect(Gdiplus::Graphics* g) {
         Gdiplus::Graphics* old = g_;
@@ -109,8 +123,9 @@ public:
     void DrawTip(float w, float h);
 
     // элементы
+    // busy - дело идёт: вместо многоточия прыгают точки и по кнопке бежит блик
     bool Button(int id, const RectF& r, const std::wstring& text, Kind kind = Kind::Secondary,
-                const std::wstring& icon = L"");
+                const std::wstring& icon = L"", bool busy = false);
     bool Toggle(int id, const RectF& r, bool& v);
     bool Slider(int id, const RectF& r, int& v, int lo, int hi, int step = 1);
     bool Segmented(int id, const RectF& r, const std::vector<std::wstring>& items, int& sel);
@@ -164,6 +179,8 @@ private:
         POINT p;
         ULONGLONG t;
     };
+    std::vector<RectF> cards_;
+    bool tick_ = false;
     std::map<int, Wave> ripples_;      // откуда и когда нажали на элемент
     std::map<int, ULONGLONG> bursts_;  // когда щёлкнул переключатель
     std::map<int, std::wstring> tips_;

@@ -10,6 +10,7 @@
 #include "app/autostart.h"
 #include "app/toolsui.h"
 #include "core/files.h"
+#include "core/fx.h"
 #include "core/text.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -23,6 +24,34 @@ using ui::Kind;
 namespace studio {
 
 namespace {
+
+// Идёт чистка: по полосе бегут косые штрихи, а с неё вверх улетают и тают крупинки мусора.
+void CleanDust(ui::Ui& ui, const RectF& bar, Color a, Color b) {
+    Graphics& g = ui.G();
+    ui.Tick();
+    double t = GetTickCount64() / std::max(1.0, fx::Dur(1000));
+    GraphicsState st = g.Save();
+    g.SetClip(ui.Round(bar, bar.Height / 2), CombineModeIntersect);
+    SolidBrush stripe(Color(40, 255, 255, 255));
+    float step = ui.S(16), shift = (float)std::fmod(t * ui.S(40), step);
+    for (float x = bar.X - bar.Height - step + shift; x < bar.GetRight(); x += step) {
+        PointF q[4] = {{x, bar.GetBottom()}, {x + ui.S(7), bar.GetBottom()}, {x + ui.S(7) + bar.Height, bar.Y},
+                       {x + bar.Height, bar.Y}};
+        g.FillPolygon(&stripe, q, 4);
+    }
+    g.Restore(st);
+    for (int k = 0; k < 18; ++k) {
+        double ph = t * 0.8 + k * 0.618;
+        ph -= std::floor(ph);
+        double lane = k * 0.381966;
+        lane -= std::floor(lane);
+        float px = bar.X + bar.Width * (float)lane + (float)std::sin(ph * 6 + k) * ui.S(4);
+        float py = bar.Y - (float)ph * ui.S(46);
+        float d = ui.S(2.2f) + (k % 3) * ui.S(0.8f);
+        SolidBrush p(WithAlpha(k % 2 ? a : b, (BYTE)(220 * (1 - ph))));
+        g.FillRectangle(&p, px, py, d, d);
+    }
+}
 
 std::wstring Leaf(const std::wstring& p) { return p.substr(p.find_last_of(L'\\') + 1); }
 
@@ -86,7 +115,7 @@ void Studio::StatePage(const RectF& r) {
            L"Всё важное сейчас и что можно сделать в один клик. Подсчёт размеров: " +
                (s.scanning ? std::wstring(L"идёт...") : Ago(s.at)));
     if (ui.Button(ID_STATE_REFRESH, RectF(col.GetRight() - ui.S(132), col.Y + ui.S(4), ui.S(132), ui.S(36)),
-                  s.scanning ? L"Считаю..." : L"Обновить", Kind::Secondary)) {
+                  s.scanning ? L"Считаю" : L"Обновить", Kind::Secondary, L"", s.scanning)) {
         toolsui::Refresh();
         autos::ScanDownloads();
         stateAt_ = statePhysAt_ = 0;
@@ -187,8 +216,18 @@ void Studio::StatePage(const RectF& r) {
         Card(cr);
         ui.Text(L"Можно освободить", RectF(cr.X + ui.S(20), cr.Y + ui.S(16), ui.S(300), ui.S(22)), c.muted, 12);
         float a = appear(s.at != 0);
-        std::wstring big = s.at ? tools::Bytes((ULONGLONG)(total * EaseOut(a))) : L"считаю...";
-        ui.Text(big, RectF(cr.X + ui.S(20), cr.Y + ui.S(36), ui.S(320), ui.S(44)), c.text, 28, true);
+        if (s.at) {
+            ui.Text(tools::Bytes((ULONGLONG)(total * EaseOut(a))),
+                    RectF(cr.X + ui.S(20), cr.Y + ui.S(36), ui.S(320), ui.S(44)), c.text, 28, true);
+        } else {
+            // пока считается: соты крутятся, а цифры перебираются, как на табло
+            ui.HexSpinner(RectF(cr.X + ui.S(18), cr.Y + ui.S(42), ui.S(34), ui.S(34)), c.accent);
+            ULONGLONG k = GetTickCount64() / 70;
+            unsigned hsh = (unsigned)(k * 2654435761u);
+            wchar_t roll[32];
+            swprintf(roll, 32, L"%u,%u ГБ", 1 + (hsh >> 8) % 98, (hsh >> 20) % 10);
+            ui.Text(roll, RectF(cr.X + ui.S(62), cr.Y + ui.S(36), ui.S(320), ui.S(44)), c.faint, 28, true);
+        }
         // полоса из частей
         RectF bar(cr.X + ui.S(20), cr.Y + ui.S(92), cr.Width - ui.S(40), ui.S(14));
         ui.Fill(bar, c.field, bar.Height / 2);
@@ -203,7 +242,10 @@ void Studio::StatePage(const RectF& r) {
                 bx += sw;
             }
             g.Restore(bs);
+        } else if (!s.at) {
+            ui.Shimmer(bar, bar.Height / 2, 40);
         }
+        if (autos::Cleaning() && !fx::Game()) CleanDust(ui, bar, c.accent, c.gold);
         // подписи частей
         float lx = bar.X, ly = bar.GetBottom() + ui.S(12);
         for (const Seg& sg : segs) {
@@ -218,11 +260,12 @@ void Studio::StatePage(const RectF& r) {
         // кнопки справа сверху
         float bx = cr.GetRight() - ui.S(20);
         int lastDays = autos::LastCleanDays();
-        std::wstring cleanLabel = autos::Cleaning() ? L"Чищу..."
+        std::wstring cleanLabel = autos::Cleaning() ? L"Чищу"
                                   : s.at            ? L"Тихая чистка " + tools::Bytes(quick)
                                                     : std::wstring(L"Тихая чистка");
         float bw = ui.Measure(cleanLabel, 12.5f, true) + ui.S(36);
-        if (ui.Button(ID_STATE_CLEAN, RectF(bx - bw, cr.Y + ui.S(20), bw, ui.S(38)), cleanLabel, Kind::Primary) &&
+        if (ui.Button(ID_STATE_CLEAN, RectF(bx - bw, cr.Y + ui.S(20), bw, ui.S(38)), cleanLabel, Kind::Primary, L"",
+                      autos::Cleaning()) &&
             !autos::Cleaning())
             autos::CleanNow();
         ui.Tip(ID_STATE_CLEAN, L"Временные файлы старше суток и кэши npm, pip, uv и других; кэши шейдеров не трогаю." +
@@ -282,7 +325,7 @@ void Studio::StatePage(const RectF& r) {
 
     // ---- мусор проектов и Загрузки ----
     {
-        size_t shown = std::max<size_t>(1, std::min<size_t>(7, std::max(s.projects.size(), dls.size())));
+        size_t shown = std::max<size_t>(s.at ? 1 : 4, std::min<size_t>(7, std::max(s.projects.size(), dls.size())));
         float h = ui.S(64) + rowH * shown + ui.S(60);
         RectF pc(x, y, cw, h), dc(two ? x + cw + gap : x, two ? y : y + h + gap, cw, h);
         if (stateFocus_ == L"downloads" && stateFocusY_ < 0) stateFocusY_ = dc.Y + off - view.Y;
@@ -310,9 +353,11 @@ void Studio::StatePage(const RectF& r) {
             }
             ui.Tip(ID_STATE_PROJ + (int)i, p.kind + L": " + p.path);
         }
-        if (s.projects.empty())
-            ui.Text(s.at ? L"Мусора сборки не нашлось" : L"Ищу в папках из колец...",
-                    RectF(pc.X + ui.S(18), pc.Y + ui.S(64), pc.Width - ui.S(36), ui.S(24)), c.muted, 12);
+        if (s.projects.empty() && s.at)
+            ui.Text(L"Мусора сборки не нашлось", RectF(pc.X + ui.S(18), pc.Y + ui.S(64), pc.Width - ui.S(36), ui.S(24)),
+                    c.muted, 12);
+        else if (s.projects.empty())  // ищет: заготовки строк с бликом
+            ui.Skeleton(RectF(pc.X + ui.S(8), pc.Y + ui.S(60), pc.Width - ui.S(16), rowH * 4), 4, rowH);
         std::vector<tools::ProjectJunk> pick;
         for (const tools::ProjectJunk& p : s.projects)
             if (projSel_.count(p.path)) pick.push_back(p), selBytes += p.bytes;
@@ -513,7 +558,7 @@ void Studio::AutoPage(const RectF& r) {
             b, 1,
             d < 0 ? L"Ещё не было" : L"Была " + Days(d) + L", освободила " + tools::Bytes(autos::LastCleanFreed()));
         if (ui.Button(ID_AUTO_CLEAN_NOW, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
-                      autos::Cleaning() ? L"Чищу..." : L"Почистить сейчас", Kind::Secondary) &&
+                      autos::Cleaning() ? L"Чищу" : L"Почистить сейчас", Kind::Secondary, L"", autos::Cleaning()) &&
             !autos::Cleaning())
             autos::CleanNow();
         cols.Note(

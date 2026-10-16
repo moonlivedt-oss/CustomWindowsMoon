@@ -161,6 +161,99 @@ void Ui::Ripple(int id, const RectF& r, float radius) {
     g_->Restore(st);
 }
 
+namespace {
+// время для ожидания: «спокойно» медленнее, «живо» быстрее
+double LoopT(double periodMs) { return GetTickCount64() / std::max(1.0, fx::Dur(periodMs)); }
+
+void AddHex(GraphicsPath& p, float cx, float cy, float rad) {
+    PointF pts[6];
+    for (int i = 0; i < 6; ++i) {
+        float a = (60.0f * i - 90) * 3.14159265f / 180;
+        pts[i] = PointF(cx + rad * std::cos(a), cy + rad * std::sin(a));
+    }
+    p.AddPolygon(pts, 6);
+}
+}  // namespace
+
+void Ui::HexSpinner(const RectF& r, Color c) {
+    Tick();
+    float side = std::min(r.Width, r.Height);
+    float R = side / 5.6f;  // радиус соты: семь сот укладываются в рамку
+    float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2;
+    double t = LoopT(1100);
+    double turn = t - std::floor(t);
+    for (int i = 0; i < 7; ++i) {
+        float px = cx, py = cy, v;
+        if (i < 6) {
+            float a = (60.0f * i - 60) * 3.14159265f / 180;
+            px += std::cos(a) * R * 1.78f;
+            py += std::sin(a) * R * 1.78f;
+            // волна обходит круг: сота загорается, когда до неё доходит гребень, и медленно гаснет
+            double ph = turn - i / 6.0;
+            ph -= std::floor(ph);
+            v = (float)std::pow(1 - ph, 3.0);
+        } else {
+            v = 0.35f + 0.25f * (float)std::sin(t * 6.2831853 * 0.5);
+        }
+        GraphicsPath hp;
+        AddHex(hp, px, py, R * (0.72f + 0.2f * v));
+        SolidBrush b(MixColor(MixColor(c_.field, c, 0.25f), MixColor(c, Color(255, 255, 255), 0.25f * v), v));
+        g_->FillPath(&b, &hp);
+    }
+}
+
+void Ui::Shimmer(const RectF& r, float radius, BYTE strength) {
+    Tick();
+    double t = LoopT(1500);
+    float ph = (float)(t - std::floor(t));
+    float bw = std::max(S(40), r.Width * 0.35f);
+    float x = r.X - bw + (r.Width + bw * 2) * ph;
+    GraphicsState st = g_->Save();
+    g_->SetClip(Round(r, radius), CombineModeIntersect);
+    // косая полоса: прозрачный край, светлая середина, прозрачный край
+    LinearGradientBrush lb(PointF(x - bw / 2, r.Y), PointF(x + bw / 2, r.Y + bw * 0.2f), Color(0, 255, 255, 255),
+                           Color(0, 255, 255, 255));
+    Color cols[3] = {Color(0, 255, 255, 255), Color(strength, 255, 255, 255), Color(0, 255, 255, 255)};
+    REAL pos[3] = {0, 0.5f, 1};
+    lb.SetInterpolationColors(cols, pos, 3);
+    g_->FillRectangle(&lb, x - bw / 2 - 1, r.Y, bw + 2, r.Height);
+    g_->Restore(st);
+}
+
+float Ui::BounceDots(float x, float cy, Color c, float d) {
+    Tick();
+    double t = LoopT(900);
+    float gap = S(3);
+    for (int i = 0; i < 3; ++i) {
+        double ph = t - i * 0.14;
+        ph -= std::floor(ph);
+        float up = ph < 0.4 ? (float)std::sin(ph / 0.4 * 3.14159265) : 0;  // подскок, потом пауза
+        SolidBrush b(Alpha(c, (BYTE)(150 + 105 * up)));
+        g_->FillEllipse(&b, x + i * (d + gap), cy - d / 2 - up * S(4), d, d);
+    }
+    return d * 3 + gap * 2;
+}
+
+void Ui::Skeleton(const RectF& r, int rows, float rowH) {
+    // ширины «строк» разные, как у настоящего списка; блик бежит только по заготовкам
+    static const float kW[] = {0.62f, 0.48f, 0.7f, 0.4f, 0.56f, 0.66f, 0.44f};
+    GraphicsPath shapes;
+    auto add = [&](const RectF& q, float rad) { shapes.AddPath(Round(q, rad), FALSE); };
+    for (int i = 0; i < rows; ++i) {
+        float y = r.Y + rowH * i + (rowH - S(12)) / 2;
+        RectF box(r.X + S(10), y - S(1), S(16), S(14));
+        add(box, S(4));
+        add(RectF(box.GetRight() + S(12), y, (r.Width - S(140)) * kW[i % 7], S(12)), S(6));
+        add(RectF(r.GetRight() - S(80), y, S(70), S(12)), S(6));
+    }
+    SolidBrush base(MixColor(c_.card, c_.text, 0.07f));
+    g_->FillPath(&base, &shapes);
+    GraphicsState st = g_->Save();
+    g_->SetClip(&shapes, CombineModeIntersect);
+    Shimmer(RectF(r.X, r.Y, r.Width, rowH * rows), 0, 40);
+    g_->Restore(st);
+}
+
 void Ui::Tip(int id, const std::wstring& text) {
     if (interactive) tips_[id] = text;
 }
@@ -282,6 +375,7 @@ void Ui::Begin(Graphics& g, const UiColors& c, double k) {
     c_ = c;
     if (k != k_) SetScale(k);
     hits_.clear();
+    cards_.clear();
     scrollViews_.clear();
     tips_.clear();
     ULONGLONG now = GetTickCount64();
@@ -503,7 +597,7 @@ void Ui::Picture(Bitmap* b, const RectF& r, float radius, bool roundBottom, BYTE
 
 // ---------- элементы ----------
 
-bool Ui::Button(int id, const RectF& r, const std::wstring& text, Kind kind, const std::wstring& icon) {
+bool Ui::Button(int id, const RectF& r, const std::wstring& text, Kind kind, const std::wstring& icon, bool busy) {
     bool clicked = Click(id, r);
     bool pressed = active_ == id && down_;
     float ht = Anim(id, Hot(id));
@@ -538,13 +632,18 @@ bool Ui::Button(int id, const RectF& r, const std::wstring& text, Kind kind, con
     if (border.GetA()) Stroke(rr, border, S(9));
     float iw = icon.empty() ? 0 : S(18);
     float tw = Measure(text, 12.5f, true);
-    float total = iw + (iw && !text.empty() ? S(7) : 0) + tw;
+    float dotsW = busy ? S(4) * 3 + S(3) * 2 + S(6) : 0;
+    float total = iw + (iw && !text.empty() ? S(7) : 0) + tw + dotsW;
     float x = rr.X + (rr.Width - total) / 2;
     if (iw) {
         Icon(icon, RectF(x, rr.Y + (rr.Height - iw) / 2, iw, iw));
         x += iw + S(7);
     }
     Text(text, RectF(x, rr.Y, rr.X + rr.Width - x, rr.Height), fg, 12.5f, true);
+    if (busy) {
+        BounceDots(x + tw + S(6), rr.Y + rr.Height / 2 + S(1), fg, S(4));
+        Shimmer(rr, S(9), kind == Kind::Primary ? 46 : 30);
+    }
     return clicked;
 }
 

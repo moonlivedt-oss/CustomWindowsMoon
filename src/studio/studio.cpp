@@ -15,7 +15,9 @@
 #include "core/mem.h"
 #include "core/files.h"
 #include "core/perf.h"
+#include "app/autos.h"
 #include "app/autostart.h"
+#include "app/toolsui.h"
 #include "core/text.h"
 #include "gfx/accent.h"
 #include "gfx/draw.h"
@@ -130,7 +132,10 @@ void Studio::Paint() {
     BitBlt(dc, 0, 0, w, h, memDC_, 0, 0, SRCCOPY);
     EndPaint(wnd, &ps);
     painting_ = false;
-    if (ui.TakeRepaint() || paintAgain_) InvalidateRect(wnd, nullptr, FALSE);
+    if (ui.TakeRepaint() || paintAgain_)
+        InvalidateRect(wnd, nullptr, FALSE);
+    else if (ui.TakeTick())
+        RepaintIn(33);  // ожидание крутится ~30 кадров в секунду, а не без передышки
     paintAgain_ = false;
 }
 
@@ -183,7 +188,6 @@ void Studio::Frame(float w, float h) {
     childDragShown_ = childDrag_;
     childDrag_ = -1;
     // смена раздела: первые полсекунды страница рисуется в свой холст, потом собирается из него
-    reveals_.clear();
     ULONGLONG since = GetTickCount64() - pageAt_;
     bool revealing = pageAt_ && !fx::Game() && since < (ULONGLONG)fx::Dur(900);
     std::unique_ptr<Graphics> pg;
@@ -275,7 +279,7 @@ void Studio::Frame(float w, float h) {
 void Studio::RevealComposite(const RectF& body, ULONGLONG since) {
     // вложенные карточки едут вместе с внешней
     std::vector<RectF> cards;
-    std::vector<RectF> all = reveals_;
+    std::vector<RectF> all = ui.Cards();
     std::stable_sort(all.begin(), all.end(),
                      [](const RectF& a, const RectF& b) { return a.Width * a.Height > b.Width * b.Height; });
     for (const RectF& r : all) {
@@ -488,9 +492,24 @@ void Studio::StatusBar(const RectF& r) {
     RectF bar = Inset(r, ui.S(12), ui.S(6));
     ui.Fill(bar, c.card, ui.S(10));
     ui.Stroke(bar, c.border, ui.S(10));
-    SolidBrush dot(statusFresh_ ? c.accent : c.faint);
-    float d = ui.S(9);
-    ui.G().FillEllipse(&dot, bar.X + ui.S(14), bar.Y + (bar.Height - d) / 2, d, d);
+    // что-то делается в фоне: вместо точки - три точки по орбите
+    bool working = (netJob_ && !netJob_->done) || (toolsJob_ && !toolsJob_->done) || autos::Cleaning() ||
+                   toolsui::Busy();
+    float d = ui.S(9), dcx = bar.X + ui.S(14) + d / 2, dcy = bar.Y + bar.Height / 2;
+    if (working && !fx::Game()) {
+        ui.Tick();
+        double t = GetTickCount64() / fx::Dur(1000);
+        for (int i = 0; i < 3; ++i) {
+            double a = (t + i / 3.0) * 6.2831853;
+            float s = ui.S(3.4f) + ui.S(1.2f) * (float)std::sin(a * 0.5 + i);
+            SolidBrush o(WithAlpha(c.accent, (BYTE)(140 + 115 * (i == 0))));
+            ui.G().FillEllipse(&o, dcx + (float)std::cos(a) * ui.S(5) - s / 2, dcy + (float)std::sin(a) * ui.S(5) - s / 2,
+                               s, s);
+        }
+    } else {
+        SolidBrush dot(statusFresh_ ? c.accent : c.faint);
+        ui.G().FillEllipse(&dot, dcx - d / 2, dcy - d / 2, d, d);
+    }
     ui.Text(status_, RectF(bar.X + ui.S(32), bar.Y, bar.Width - ui.S(300), bar.Height), c.muted, 12);
     RectF j(bar.X + bar.Width - ui.S(104), bar.Y + ui.S(4), ui.S(98), bar.Height - ui.S(8));
     if (ui.Button(ID_JOURNAL, j, L"Журнал", Kind::Secondary)) ov_ = ov_ == OV_JOURNAL ? OV_NONE : OV_JOURNAL;
