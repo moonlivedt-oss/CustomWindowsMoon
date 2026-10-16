@@ -1,4 +1,5 @@
 #include "app/devcli.h"
+#include "app/autostart.h"
 #include "app/toolsui.h"
 
 #include <windows.h>
@@ -323,6 +324,9 @@ bool Run(int& exitCode) {
         exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
     } else if (Has(args, L"--clean")) {  // очистить кэши и временные файлы, итог в clean_out.txt
         exitCode = Clean();
+    } else if (Has(args, L"--autostart-on")) {  // включить запуск вместе с Windows, как пункт трея
+        SetAutostart(true);
+        exitCode = AutostartOn() ? 0 : 1;
     } else if (Has(args, L"--tools-diag")) {
         exitCode = ToolsDiag();
     } else if (Has(args, L"--net-diag")) {

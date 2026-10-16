@@ -10,7 +10,9 @@ constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Ru
 constexpr wchar_t kApprovedKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
 constexpr wchar_t kRunName[] = L"MoonRadialMenu";
 constexpr wchar_t kTaskFolder[] = L"\\MoonRadial";  // не MoonDesk: ту папку однажды испортил откат антивируса
-constexpr wchar_t kTaskName[] = L"RadialMenuStart";
+// не RadialMenuStart: эту запись 2026-10-16 сломал Kaspersky (файл задачи остался, записи в реестре нет,
+// без прав её не перезаписать и не удалить)
+constexpr wchar_t kTaskName[] = L"RadialMenuLogon";
 
 std::wstring ExePath() {
     wchar_t exe[MAX_PATH];
