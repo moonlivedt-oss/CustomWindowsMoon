@@ -80,7 +80,7 @@ std::vector<Listener> Listeners() {
 std::vector<Locker> WhoLocks(const std::wstring& pathIn) {
     std::vector<Locker> out;
     std::wstring path = Trim(pathIn);
-    if (path.size() > 1 && path.front() == L'"') path = path.substr(1, path.size() - 2);
+    if (path.size() > 1 && path.front() == L'"' && path.back() == L'"') path = path.substr(1, path.size() - 2);
     // для папки - её файлы (не больше 400): Restart Manager спрашивает про файлы
     std::vector<std::wstring> files;
     DWORD a = GetFileAttributesW(path.c_str());
@@ -127,16 +127,26 @@ std::vector<Locker> WhoLocks(const std::wstring& pathIn) {
             for (UINT i = 0; i < have; ++i) out.push_back({info[i].Process.dwProcessId, info[i].strAppName});
     }
     RmEndSession(session);
+    // папку держат и программы, запущенные из неё самой: Restart Manager про них не всегда знает
+    if (a & FILE_ATTRIBUTE_DIRECTORY) {
+        std::wstring prefix = Lower(path);
+        while (!prefix.empty() && prefix.back() == L'\\') prefix.pop_back();
+        prefix += L'\\';
+        for (const auto& [pid, name] : ProcessNames()) {
+            if (pid <= 4) continue;
+            bool known = false;
+            for (const Locker& l : out) known = known || l.pid == pid;
+            if (known) continue;
+            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (!h) continue;
+            wchar_t buf[MAX_PATH];
+            DWORD n = MAX_PATH;
+            if (QueryFullProcessImageNameW(h, 0, buf, &n) && Lower(std::wstring(buf, n)).rfind(prefix, 0) == 0)
+                out.push_back({pid, name});
+            CloseHandle(h);
+        }
+    }
     return out;
-}
-
-bool KillPid(DWORD pid) {
-    if (pid <= 4 || pid == GetCurrentProcessId()) return false;
-    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-    if (!h) return false;
-    bool ok = TerminateProcess(h, 1);
-    CloseHandle(h);
-    return ok;
 }
 
 std::wstring ClipboardPath() {

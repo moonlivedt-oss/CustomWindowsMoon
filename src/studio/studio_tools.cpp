@@ -520,7 +520,7 @@ void Studio::ToolsPage(const RectF& r) {
                         RectF(b.X + ui.S(96), y, b.Width - ui.S(230), lineH), c.muted, 11.5f);
                 if (rowHot(portR) && ui.Button(ID_TOOLS_PORT + (int)i,
                               RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Завершить")) {
-                    bool ok = tools::KillPid(l.pid);
+                    bool ok = tools::KillPid(l.pid, l.process);
                     Toast(ok ? L"Завершён " + l.process : L"Не удалось завершить " + l.process);
                     refresh();
                 }

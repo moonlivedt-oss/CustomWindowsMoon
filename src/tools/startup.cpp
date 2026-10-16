@@ -150,6 +150,9 @@ void ReadTasks(ITaskFolder* folder, std::vector<StartItem>& out, int depth) {
                             BSTR p = nullptr;
                             ex->get_Path(&p);
                             if (p) cmd = p;
+                            // путь в задаче часто записан в кавычках (иногда двойных) - для показа они лишние
+                            while (cmd.size() > 1 && cmd.front() == L'"' && cmd.back() == L'"')
+                                cmd = cmd.substr(1, cmd.size() - 2);
                             SysFreeString(p);
                             ex->Release();
                         }
@@ -168,7 +171,8 @@ void ReadTasks(ITaskFolder* folder, std::vector<StartItem>& out, int depth) {
                 StartItem it;
                 it.name = name ? name : L"";
                 it.command = cmd;
-                it.where = L"Задача при входе";
+                // одинаковые имена в разных папках планировщика (старая и новая) различаются папкой
+                it.where = fp.size() > 1 ? L"Задача при входе (" + fp.substr(1) + L")" : L"Задача при входе";
                 it.kind = TASK;
                 it.key = tpath ? tpath : L"";
                 it.enabled = en != VARIANT_FALSE;

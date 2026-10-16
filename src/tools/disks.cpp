@@ -62,8 +62,12 @@ ULONGLONG DirBytes(const std::wstring& root, int* files, volatile bool* cancel, 
     return sum;
 }
 
+ULONGLONG Stamp(const FILETIME& f) { return ((ULONGLONG)f.dwHighDateTime << 32) | f.dwLowDateTime; }
+
 // Удалить содержимое папки (саму папку оставить); занятые файлы пропускаются.
-ULONGLONG DeleteContents(const std::wstring& root, int* failed) {
+// newer - файлы, созданные или изменённые позже этой отметки (FILETIME), не трогаются: во временной
+// папке их прямо сейчас пишут установщики и распаковщики.
+ULONGLONG DeleteContents(const std::wstring& root, int* failed, ULONGLONG newer = 0, int* kept = nullptr) {
     ULONGLONG freed = 0;
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileExW((root + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr,
@@ -80,9 +84,13 @@ ULONGLONG DeleteContents(const std::wstring& root, int* failed) {
             continue;
         }
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            freed += DeleteContents(p, failed);
+            freed += DeleteContents(p, failed, newer, kept);
             RemoveDirectoryW(p.c_str());  // не пустая (что-то занято) - останется, это нормально
         } else {
+            if (newer && (Stamp(fd.ftLastWriteTime) > newer || Stamp(fd.ftCreationTime) > newer)) {
+                if (kept) ++*kept;
+                continue;
+            }
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
                 SetFileAttributesW(p.c_str(), fd.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
             if (DeleteFileW(p.c_str()))
@@ -119,9 +127,7 @@ std::vector<Volume> Volumes() {
     return out;
 }
 
-bool DiskWarn(const Volume& v) {
-    return v.total && v.free * 10 < v.total && v.free < 20ull * 1024 * 1024 * 1024;
-}
+bool DiskWarn(const Volume& v) { return v.total && v.free * 10 < v.total && v.free < 20ull * 1024 * 1024 * 1024; }
 
 std::vector<Physical> PhysicalDisks() {
     PERF_SCOPE("tools.PhysicalDisks");
@@ -243,23 +249,35 @@ std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* canc
 
 std::vector<Junk> FindJunk(bool sizes) {
     PERF_SCOPE("tools.FindJunk");
-    const wchar_t* list[][2] = {
-        {L"Временные файлы", L"%TEMP%"},
-        {L"Кэш npm", L"%LOCALAPPDATA%\\npm-cache"},
-        {L"Кэш pip", L"%LOCALAPPDATA%\\pip\\Cache"},
-        {L"Кэш Yarn", L"%LOCALAPPDATA%\\Yarn\\Cache"},
-        {L"Кэш Go", L"%LOCALAPPDATA%\\go-build"},
-        {L"Кэш Gradle", L"%USERPROFILE%\\.gradle\\caches"},
-        {L"Архивы Cargo", L"%USERPROFILE%\\.cargo\\registry\\cache"},
-        {L"Кэш шейдеров DirectX", L"%LOCALAPPDATA%\\D3DSCache"},
-        {L"Аварийные дампы", L"%LOCALAPPDATA%\\CrashDumps"},
-        {L"Отчёты об ошибках", L"%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportArchive"},
+    // slow - пересоздаётся дорого (шейдеры собираются заново, первые запуски игр и редактора тормозят):
+    // в «Всё сразу» не входит, только по отдельности
+    struct Entry {
+        const wchar_t *name, *path;
+        bool slow;
+    };
+    static const Entry list[] = {
+        {L"Временные файлы", L"%TEMP%", false},
+        {L"Кэш npm", L"%LOCALAPPDATA%\\npm-cache", false},
+        {L"Кэш pnpm", L"%LOCALAPPDATA%\\pnpm-cache", false},
+        {L"Кэш pip", L"%LOCALAPPDATA%\\pip\\Cache", false},
+        {L"Кэш uv", L"%LOCALAPPDATA%\\uv\\cache", false},
+        {L"Кэш Yarn", L"%LOCALAPPDATA%\\Yarn\\Cache", false},
+        {L"Кэш NuGet", L"%LOCALAPPDATA%\\NuGet\\v3-cache", false},
+        {L"Кэш Go", L"%LOCALAPPDATA%\\go-build", false},
+        {L"Кэш Gradle", L"%USERPROFILE%\\.gradle\\caches", false},
+        {L"Архивы Cargo", L"%USERPROFILE%\\.cargo\\registry\\cache", false},
+        {L"Аварийные дампы", L"%LOCALAPPDATA%\\CrashDumps", false},
+        {L"Отчёты об ошибках", L"%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportArchive", false},
+        {L"Кэш шейдеров DirectX", L"%LOCALAPPDATA%\\D3DSCache", true},
+        {L"Кэш шейдеров NVIDIA", L"%LOCALAPPDATA%\\NVIDIA\\DXCache", true},
+        {L"Кэш Unreal Engine", L"%LOCALAPPDATA%\\UnrealEngine\\Common\\DerivedDataCache", true},
     };
     std::vector<Junk> out;
-    for (auto& e : list) {
+    for (const Entry& e : list) {
         Junk j;
-        j.name = e[0];
-        j.path = Env(e[1]);
+        j.name = e.name;
+        j.slow = e.slow;
+        j.path = Env(e.path);
         if (!IsDir(j.path)) continue;
         if (!sizes) {
             out.push_back(j);
@@ -281,10 +299,18 @@ ULONGLONG CleanJunk(const Junk& j, const Log& log) {
         log(L"Эту папку чистить не буду: её нет в списке кэшей.");
         return 0;
     }
-    int failed = 0;
-    ULONGLONG freed = DeleteContents(j.path, &failed);
+    int failed = 0, kept = 0;
+    ULONGLONG newer = 0;
+    if (_wcsicmp(j.path.c_str(), Env(L"%TEMP%").c_str()) == 0) {  // во временной папке - только старше суток
+        FILETIME now;
+        GetSystemTimeAsFileTime(&now);
+        newer = Stamp(now) - 24ull * 3600 * 10000000;
+    }
+    log(L"Чищу: " + j.name + L"...");
+    ULONGLONG freed = DeleteContents(j.path, &failed, newer, &kept);
     log(j.name + L": освобождено " + Bytes(freed) +
-        (failed ? L", занятых файлов пропущено: " + std::to_wstring(failed) : L""));
+        (failed ? L", занятых файлов пропущено: " + std::to_wstring(failed) : L"") +
+        (kept ? L", свежих (моложе суток) оставлено: " + std::to_wstring(kept) : L""));
     return freed;
 }
 

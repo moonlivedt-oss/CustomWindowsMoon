@@ -61,7 +61,7 @@ struct Physical {
     ULONGLONG size = 0;
     int temp = -1, wear = -1, hours = -1;  // SMART: только с правами (DiskHealth)
 };
-bool DiskWarn(const Volume& v);  // места мало: меньше 10% и меньше 20 ГБ
+bool DiskWarn(const Volume& v);                                 // места мало: меньше 10% и меньше 20 ГБ
 std::vector<Physical> PhysicalDisks();                          // без прав: имя, тип, здоровье
 bool DiskHealth(std::vector<Physical>& disks, const Log& log);  // износ, температура, часы - через задачу с правами
 std::wstring DiskHealthAdminMain();                             // в процессе с правами: строки для журнала
@@ -79,8 +79,10 @@ struct Junk {
     std::wstring name, path;
     ULONGLONG bytes = 0;
     bool admin = false;
+    bool slow = false;  // пересоздаётся дорого (шейдеры): в «Всё сразу» не входит
 };
-std::vector<Junk> FindJunk(bool sizes = true);  // sizes=false - только список, быстро (для кольца)                        // временные файлы и кэши, с размерами
+std::vector<Junk> FindJunk(bool sizes = true);  // sizes=false - только список, быстро (для кольца) // временные файлы и
+                                                // кэши, с размерами
 ULONGLONG CleanJunk(const Junk& j, const Log& log);  // удалить содержимое; сколько освобождено
 
 // ---------------- автозагрузка ----------------
@@ -110,8 +112,25 @@ struct Locker {
     std::wstring name;
 };
 std::vector<Locker> WhoLocks(const std::wstring& path);  // кто держит файл или файлы папки (Restart Manager)
-bool KillPid(DWORD pid);
+// завершить процесс; expect - каким exe он должен быть (номер мог достаться другому)
+bool KillPid(DWORD pid, const std::wstring& expect = L"");
 std::wstring ClipboardPath();  // путь из буфера: скопированный файл или текст-путь
+
+// ---------------- процессы и корзина ----------------
+
+struct HeavyApp {
+    std::wstring name;        // chrome.exe
+    std::vector<DWORD> pids;  // все процессы этой программы
+    ULONGLONG bytes = 0;      // сумма рабочих наборов
+};
+std::vector<HeavyApp> HeavyApps(int count);  // самые тяжёлые программы по памяти; системные не показываются
+struct AppClose {
+    int closed = 0, killed = 0, failed = 0;  // закрылись сами, завершены силой, не далось
+};
+// закрыть программу: главным окнам WM_CLOSE, через waitMs оставшиеся процессы - силой
+AppClose CloseApp(const HeavyApp& app, int waitMs, const Log& log);
+ULONGLONG RecycleBinBytes(ULONGLONG* items = nullptr);
+bool EmptyRecycleBin();
 
 std::wstring DataDir();  // %APPDATA%\MoonDesk\tools
 std::wstring Bytes(ULONGLONG b);

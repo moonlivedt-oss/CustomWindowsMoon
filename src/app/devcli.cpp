@@ -221,6 +221,15 @@ int ToolsDiag() {
     s += nl + L"Кто держит RadialMenu.exe:" + nl;
     for (const tools::Locker& k : tools::WhoLocks(ExeDir() + L"\\RadialMenu.exe"))
         s += L"  " + k.name + L" pid " + std::to_wstring(k.pid) + nl;
+    s += nl + L"Кто держит папку exe:" + nl;
+    for (const tools::Locker& k : tools::WhoLocks(ExeDir()))
+        s += L"  " + k.name + L" pid " + std::to_wstring(k.pid) + nl;
+    s += nl + L"Тяжёлые программы (личная память):" + nl;
+    for (const tools::HeavyApp& a : tools::HeavyApps(10))
+        s += L"  " + a.name + L" " + tools::Bytes(a.bytes) + L", процессов " + std::to_wstring(a.pids.size()) + nl;
+    s += nl + L"Кэши:" + nl;
+    for (const tools::Junk& j : tools::FindJunk(true))
+        s += std::wstring(j.slow ? L"  slow " : L"       ") + j.name + L" " + tools::Bytes(j.bytes) + nl;
     WriteOut(L"tools_out.txt", s);
     return 0;
 }
