@@ -1,8 +1,10 @@
 # Значки Radial Menu, набор 2: «Багровое поле»
 
-Прошлый набор был наклейками: толстая белая обводка, мультяшный глянец, закатная палитра.
-Этот набор - проработанные маленькие предметы из настоящих материалов, как значки инвентаря
-в хорошей игре. Цвета - из темы «Багровое поле», под обои с красными цветами:
+Сейчас в `icons\` лежат значки первого набора (глянцевые наклейки в закатной палитре) и подобранные
+из библиотеки картинки для колец «Сеть» и «Утилиты». Под тему «Багровое поле» они не подходят, а часть
+секторов делит один значок (Проекты, Процессы и Автозагрузка - все с ящиком, у «Защиты» и «Проверки сети»
+один и тот же щит). Этот набор заменяет всё: проработанные маленькие предметы из настоящих материалов,
+как значки инвентаря в хорошей игре.
 
 | цвет | hex | где |
 |---|---|---|
@@ -21,8 +23,19 @@
    пересоберётся. Потом `build.cmd`, если поменялся `app.png`.
 
 Порядок значков в каждом листе важен: скрипт раздаёт имена слева направо, сверху вниз.
-
 Общий хвост стиля повторяется в каждом промпте, чтобы листы вышли одним набором.
+
+| файл | значков | что |
+|---|---|---|
+| `sheet-root.png` | 6 | первое кольцо |
+| `sheet-sub.png` | 10 | второе кольцо, значки проектов |
+| `sheet-extra.png` | 8 | правое кольцо, служебные |
+| `sheet-studio.png` | 6 | группы студии слева |
+| `sheet-tools.png` | 16 | кольцо «Утилиты» |
+| `sheet-guard.png` | 5 | «Защита» |
+| `sheet-net.png` | 10 | кольцо «Сеть» |
+| `app.png`, `hub.png` | 1 + 1 | значок программы, эмблема в центре кольца |
+| `sheet-mascot.png` | 5 | по желанию: маскот тура в новой гамме |
 
 ---
 
@@ -38,11 +51,12 @@ Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces 
 
 ## 2. `sheet-sub.png`: второе кольцо, 10 значков, сетка 5 x 2
 
-C++, Java, Веб, Игры, База данных, Таблица, Файлы, Конкурсы, Портфолио, Папка.
+C++, Java, Веб, Игры, База данных, Таблица, Файлы, Конкурсы, Портфолио, Папка. Они же - бейджи
+проектов в кольце (cpp, web, game, db, files...), поэтому силуэты должны читаться и в 20 пикселях.
 
 ```
 A premium icon sheet of exactly ten finely crafted miniature objects on a fully transparent background, arranged in a strict 5 x 2 grid of equal square cells, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a hexagonal badge of dark graphite metal with a polished silver rim and two small raised crimson plus signs side by side, (2) a small ceramic coffee cup in graphite glaze with a silver rim, three thin curls of steam rising and glowing faint crimson at the tips, (3) a globe of frosted glass with fine silver meridian lines on a slim graphite stand, a crimson glow at its core, (4) a compact game controller in graphite with silver accents and crimson buttons, (5) a database cylinder made of three stacked graphite discs separated by thin glowing crimson seams, silver top cap, (6) a small slate board showing a grid of cells etched in silver, one cell filled with glowing crimson, (7) a neat stack of three thin sheets of frosted glass with folded corners, the top sheet edged in silver, (8) a round medal of dark graphite with a silver rim and a crimson enamel star, hanging from a short crimson ribbon, (9) a closed folder of dark graphite leather with a crimson back panel and a small silver star clasp on the front, (10) a plain closed folder of dark graphite with a crimson back panel and a thin silver edge, the generic folder of the set.
-Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 34 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere; the plus signs on the first badge are simple raised shapes, not letters.
+Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 20 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere; the plus signs on the first badge are simple raised shapes, not letters.
 Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, readable code, labels, programming language logos, brand logos, watermark, signature, background color or scenery, floor, pedestals, plates, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes
 ```
 
@@ -56,27 +70,72 @@ Shared style for every object: premium dark fantasy UI icon set in the spirit of
 Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, readable code, labels, brand logos, watermark, signature, background color or scenery, floor, pedestals, plates, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes
 ```
 
-## 4. `sheet-studio.png`: разделы Radial Studio, 7 значков, сетка 4 x 2 (последняя клетка пустая)
+## 4. `sheet-studio.png`: группы Radial Studio, 6 значков, сетка 3 x 2
 
-Кольца, Темы, Поведение, Стол, Система, Клавиши, Тур. Раньше разделы брали чужие значки
-(«Система» - стопку файлов, «Стол» - наушники), теперь у каждого свой.
+Обзор, Кольца, Стол, Сервис, Настройки, Тур (rail слева). Сейчас группы берут чужие значки
+(Обзор - эмблему, Сервис - ящик утилит, Настройки - редактор).
 
 ```
-A premium icon sheet of exactly seven finely crafted miniature objects on a fully transparent background, arranged in a strict 4 x 2 grid of equal square cells where the last cell of the bottom row stays completely empty, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a half-ring menu of five curved graphite segments fanning out from a small silver hub, the middle segment glowing crimson, (2) a faceted glass prism splitting a beam of white light into a crimson ray and a steel blue ray, (3) a small graphite control panel with two vertical silver sliders and one round toggle glowing crimson, (4) a slim monitor of dark graphite whose bottom right corner glows with a soft crimson light, a tiny silver music note floating beside it, (5) a precise mechanical gear of brushed graphite with a polished silver rim and a glowing crimson core, (6) two blank keyboard keycaps side by side, one graphite with a silver edge and one in crimson enamel, slightly tilted, (7) a small compass of dark graphite with a silver bezel and a crimson needle.
-Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 30 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere; the keycaps are blank.
-Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, symbols on the keycaps, labels, brand logos, watermark, signature, background color or scenery, floor, pedestals, plates, cast shadows on the background, grid lines drawn on the image, frames, an object in the eighth cell, glow spilling far outside the object, objects touching each other, uneven object sizes
+A premium icon sheet of exactly six finely crafted miniature objects on a fully transparent background, arranged in a strict 3 x 2 grid of equal square cells, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a round dashboard gauge of dark graphite with a polished silver bezel, fine engraved tick marks and a glowing crimson needle pointing up and to the right, (2) a half-ring menu of five curved graphite segments fanning out from a small silver hub, the middle segment glowing crimson, (3) a slim monitor of dark graphite on a silver stand whose bottom right corner glows with a cluster of tiny crimson hexagon cells, (4) a graphite open-end wrench lying diagonally across a small frosted glass globe with silver meridian lines, a crimson glow at the globe core, (5) a precise mechanical gear of brushed graphite with a polished silver rim and a glowing crimson core, (6) a small compass of dark graphite with a silver bezel and a crimson needle.
+Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 30 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere.
+Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, labels, brand logos, watermark, signature, background color or scenery, floor, pedestals, plates, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes
 ```
 
-## 5. `app.png`: значок приложения (трей, exe, шапка студии)
+## 5. `sheet-tools.png`: кольцо «Утилиты», 16 значков, сетка 4 x 4
+
+Диски, Здоровье, Очистка, Проекты (мусор сборки), PATH, Порты, Процессы, Подкачка, Фон, Батарея,
+Автозагрузка, Терминал с окружением, Все утилиты, Кто держит, Версии, Дубли. «Очистка» перекликается
+с вихрем в карточке, «Фон» - с тем, что работает без окна.
+
+```
+A premium icon sheet of exactly sixteen finely crafted miniature objects on a fully transparent background, arranged in a strict 4 x 4 grid of equal square cells, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a slim M.2 solid state drive stick with a dark graphite board, polished silver chips and a tiny glowing crimson status light, (2) a small graphite drive block with a glowing crimson heartbeat pulse line running across its face, (3) a swirling vortex of tiny crimson and silver square particles spiralling into a dark graphite ring, (4) an open graphite crate full of small silver building blocks, one block glowing crimson, (5) a silver signpost with three graphite arrow-shaped boards pointing in different directions, the top board crimson, (6) a graphite network socket panel with three ports, a polished silver plug inserted into one of them, a crimson glow around it, (7) a square processor chip of dark graphite with fine silver pins on all sides and a glowing crimson core, (8) a memory module stick with a graphite board, a row of chips and polished silver contacts, one chip glowing crimson, (9) a graphite crescent moon with a small silver gear peeking out from behind it, a faint crimson glow in the gear teeth, (10) an upright graphite battery with a silver cap, its charge level glowing crimson at about two thirds, a small engraved silver lightning bolt, (11) a round power button of graphite with a polished silver rim and a glowing crimson power symbol, (12) a terminal window of dark graphite glass with two thin translucent layers stacked behind it, a crimson prompt chevron, (13) a compact toolbox of brushed graphite with silver latches and a crimson handle, (14) a graphite padlock clamped onto the corner of a frosted glass sheet, a crimson glow in the keyhole, (15) a small graphite tag with a silver eyelet and a raised crimson upward chevron, (16) two identical frosted glass sheets overlapping with a slight offset, the front one edged in crimson, a thin silver link joining their corners.
+Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 34 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere.
+Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, labels, brand logos, watermark, signature, background color or scenery, floor, pedestals, plates, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes, two objects that look alike
+```
+
+## 6. `sheet-guard.png`: «Защита», 5 значков, сетка 3 x 2 (последняя клетка пустая)
+
+Защита (всё в порядке), Защита (есть опасное), Проверить заново, Починить Windows, Точка восстановления.
+Щит той же формы, что в живой сцене проверки: прямые бока, пологая арка сверху, острие снизу.
+
+```
+A premium icon sheet of exactly five finely crafted miniature objects on a fully transparent background, arranged in a strict 3 x 2 grid of equal square cells where the last cell of the bottom row stays completely empty, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a heraldic shield with straight sides, a gently arched top and a pointed bottom, made of dark graphite with a polished silver rim and a crimson enamel check mark inlaid in the center, (2) the same shield shape with a fine crack across it and a small crimson enamel beetle sitting on its face, the rim glowing faint crimson, (3) the same shield shape built from a grid of tiny square graphite tiles, a thin horizontal crimson scan line of light passing across it, (4) a polished silver wrench crossed over a small window frame of four frosted glass panes, a crimson glow behind the panes, (5) a round graphite clock face with a crimson hand, wrapped by a curved polished silver arrow circling counterclockwise around it.
+Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 34 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere.
+Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, labels, brand logos, operating system logos, watermark, signature, background color or scenery, floor, pedestals, plates, cast shadows on the background, grid lines drawn on the image, frames, an object in the sixth cell, glow spilling far outside the object, objects touching each other, uneven object sizes
+```
+
+## 7. `sheet-net.png`: кольцо «Сеть», 10 значков, сетка 5 x 2
+
+Проверить сеть, Починить, Сбросить прокси, Остатки VPN, DNS, Пинг, Роутер, Выход в мир, Обновить адрес,
+Кто в сети.
+
+```
+A premium icon sheet of exactly ten finely crafted miniature objects on a fully transparent background, arranged in a strict 5 x 2 grid of equal square cells, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a small frosted glass globe with silver meridians and a crimson enamel check badge floating in front of it, (2) a polished silver wrench crossing a short graphite network cable whose plug throws a tiny crimson spark, (3) a compact graphite relay box with two silver arrows passing through it, one entering on the left and one leaving on the right, a crimson light on top, (4) a graphite tunnel arch receding into depth with a soft crimson light glowing at its far end, (5) a slim graphite card index with a row of silver tabs, one tab crimson, (6) four rising signal bars of graphite with polished silver tops, the tallest bar glowing crimson, (7) a compact router of dark graphite with two silver antennas and a row of tiny crimson status lights, (8) a frosted glass globe wrapped by a thin silver orbit ring with a small crimson bead travelling on it, (9) two curved polished silver arrows chasing each other in a circle around a small faceted crimson gem, (10) a small graphite processor chip with a silver antenna wave arc rising above it and a glowing crimson core.
+Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 34 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere.
+Avoid: sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, labels, brand logos, watermark, signature, background color or scenery, floor, pedestals, plates, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes, two objects that look alike
+```
+
+## 8. `app.png`: значок приложения (трей, exe, шапка студии)
 
 ```
 A single premium app icon on a fully transparent background, square, centered, filling about 85 percent of the canvas: a round disk of dark brushed graphite metal with a polished silver bevelled rim; on its face a half-ring menu of five curved segments fans out from the left edge like a menu opening from the side of a screen, the segments in frosted dark glass, the middle one glowing deep crimson (#C8323F) from within; at the hub on the left sits a small polished silver circle with a tiny crimson gem; soft cinematic rim light from the upper left with cool steel blue reflections. Large simple shapes and strong contrast between the crimson segment and the dark disk so it reads clearly at 16 pixels. No outline, no sticker border, fully transparent background, no text.
 Avoid: sticker style, white outline, cartoon look, pastel colors, pink, orange, gold, green, letters, numbers, labels, watermark, signature, background color, square frame, thin lines that vanish when small, faces, glow outside the disk
 ```
 
-## 6. `hub.png`: эмблема в центре кольца
+## 9. `hub.png`: эмблема в центре кольца и плитка «Тема»
 
 ```
 A single small premium emblem on a fully transparent background, square, centered, filling about 80 percent of the canvas: a round medallion of dark graphite metal with a polished silver rim; on it, a single stylized crimson flower (a spider lily with thin curved petals) in glowing crimson enamel, a fine silver stem, a few tiny silver petals drifting away to the upper right; soft cinematic rim light from the upper left with cool steel blue reflections, crisp and readable at 50 pixels. No outline, no sticker border, fully transparent background, no text.
 Avoid: sticker style, white outline, cartoon look, pastel colors, pink, orange, gold, green, letters, numbers, labels, watermark, signature, background color, square frame, faces, realistic photo, glow outside the medallion
+```
+
+## 10. `sheet-mascot.png`: по желанию, маскот тура, 5 поз, сетка 5 x 1
+
+Тот же пушистик, что в туре студии и в пустых разделах, только в гамме темы. Если нравится нынешний
+лавандовый - лист можно не делать. Порядок: машет, показывает, удивлён, читает, выглядывает
+(`mascot-wave`, `-point`, `-surprised`, `-read`, `-peek`). Этот лист я подключу сам (переведу в WebP).
+
+```
+A character sheet of exactly five poses of the same small round fluffy blob mascot on a fully transparent background, arranged in a strict 5 x 1 row of equal square cells, each pose centered in its own cell with generous empty space around it, nothing crossing the cell borders. The mascot: a soft round creature the size of a palm with fluffy silver-white fur (#D9DEE6) shaded with cool steel blue (#8FA3BF), big glossy dark eyes with tiny crimson sparkles, small crimson blush on the cheeks, a tiny crimson spider lily petal tucked into its fur like a hair clip, stubby little arms. Poses left to right: (1) happily waving one arm, (2) pointing to the right with one arm, smiling, (3) surprised with wide eyes and a small open mouth, both arms raised, (4) sitting and reading a tiny graphite book with a crimson bookmark, (5) peeking in from the left edge of its cell, only half of the body visible, curious. Polished cute digital painting, soft rim light from the upper left, gentle ambient occlusion, the same character proportions and colors in every pose, no outline, no sticker border. Fully transparent background, no text anywhere.
+Avoid: different characters, sticker style, white die-cut border, purple or lavender fur, pink, orange, green, gold, letters, numbers, labels, watermark, signature, background color or scenery, floor, cast shadows on the background, grid lines drawn on the image, frames, poses touching each other, uneven sizes
 ```

@@ -94,6 +94,7 @@ Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key,
     Item it;
     it.name = name;
     it.iconFull = ExeDir() + L"\\icons\\" + icon;
+    if (!Exists(it.iconFull)) it.iconFull = ExeDir() + L"\\icons\\tools-box.png";  // новый значок ещё не нарисован
     it.special = 3;
     it.path = key;
     it.note = note;
@@ -856,16 +857,16 @@ Item SecurityItem() {
                     L" - это обычно (свои сборки, мелкие программы); странными они становятся по месту и имени"));
     if (!checked)
         item.children.push_back(Act(L"Проверка", L"tools-shield.png", L"", L"Первая проверка подписей идёт в фоне"));
-    item.children.push_back(Act(L"Заново", L"tools-shield.png", L"sec-rescan",
+    item.children.push_back(Act(L"Заново", L"tools-scan.png", L"sec-rescan",
                                 L"Ещё раз проверить запущенное, автозапуск и реестр; итог - карточкой"));
     std::wstring av = tools::AntivirusUi();
     item.children.push_back(Act(av.empty() ? L"Defender" : L"Kaspersky", L"tools-shield.png", L"sec-av",
                                 av.empty() ? L"Открыть «Защиту от вирусов» Windows - там полная и офлайн-проверка"
                                            : L"Открыть Kaspersky - там полная проверка компьютера"));
-    item.children.push_back(Act(L"Снимок", L"tools-shield.png", L"sec-restore",
+    item.children.push_back(Act(L"Снимок", L"tools-snapshot.png", L"sec-restore",
                                 L"Точка восстановления системы - перед драйвером, правками реестра или "
                                 L"«Починить Windows»; нужны права"));
-    item.children.push_back(Act(L"Починить Windows", L"tools-box.png", L"sec-repair",
+    item.children.push_back(Act(L"Починить Windows", L"tools-repair.png", L"sec-repair",
                                 L"Сверить системные файлы (SFC) или восстановить их из Windows Update (DISM); "
                                 L"нужны права - Windows спросит"));
     g_secApps = tools::SecurityApps(g_cfg->securityDir);
@@ -906,7 +907,7 @@ void ShowRing(RadialMenu& menu) {
         status += (status.empty() ? L"" : L"   |   ") + letter + L" свободно " + tools::Bytes(v.free);
     }
     disks.children.push_back(
-        Act(L"Здоровье", L"tools-disk.png", L"health", L"Износ, температура и часы работы SSD; раз в неделю - сам"));
+        Act(L"Здоровье", L"tools-health.png", L"health", L"Износ, температура и часы работы SSD; раз в неделю - сам"));
     for (size_t i = 0, shown = 0; i < scan.growth.size() && shown < 3; ++i) {
         const tools::Growth& g = scan.growth[i];
         if (g.delta < 200ll * 1024 * 1024) break;
@@ -983,7 +984,7 @@ void ShowRing(RadialMenu& menu) {
         projTotal += p.bytes;
         if (p.idleDays >= kIdleDays) idleTotal += p.bytes, ++idleCount;
     }
-    Item projects = Act(L"Проекты", L"tools-box.png", L"",
+    Item projects = Act(L"Проекты", L"tools-projects.png", L"",
                         !sized               ? L"Мусор сборки в проектах; ещё считается"
                         : g_projects.empty() ? L"Мусора сборки в проектах не нашлось"
                                              : L"Мусор сборки в проектах: " + tools::Bytes(projTotal) +
@@ -1088,7 +1089,7 @@ void ShowRing(RadialMenu& menu) {
     // процессы: память и самые тяжёлые программы
     tools::MemoryState mem = tools::Memory();
     g_apps = tools::HeavyApps(8);
-    Item procs = Act(L"Процессы", L"tools-box.png", L"",
+    Item procs = Act(L"Процессы", L"tools-procs.png", L"",
                      L"Свободно " + tools::Bytes(mem.avail) + L" из " + tools::Bytes(mem.total) +
                          L" памяти; ниже - самые тяжёлые программы");
     for (size_t i = 0; i < g_apps.size(); ++i)
@@ -1124,7 +1125,7 @@ void ShowRing(RadialMenu& menu) {
             L"Растёт " + Short(NoExe(g_leakList[i].name), 10), L"tools-bug.png", L"leak:" + std::to_wstring(i),
             L"Память: " + tools::Bytes(g_leakList[i].was) + L" -> " + tools::Bytes(g_leakList[i].now) + L" за " +
                 std::to_wstring(g_leakList[i].minutes) + L" мин, ровно и без остановки. 2 клика - закрыть (спрошу)"));
-    procs.children.push_back(Act(L"Подкачка", L"tools-size.png", L"pagefile",
+    procs.children.push_back(Act(L"Подкачка", L"tools-mem.png", L"pagefile",
                                  L"Выделено " + tools::Bytes(cm.total) + L" из " + tools::Bytes(cm.limit) +
                                      L" (память " + tools::Bytes(cm.phys) + L" + подкачка " +
                                      tools::Bytes(tools::PagefileBytes()) + L"), пик с загрузки " +
@@ -1136,7 +1137,7 @@ void ShowRing(RadialMenu& menu) {
     wchar_t speed[96];
     swprintf(speed, 96, L"сеть за минуту: приём %ls/с, отдача %ls/с", tools::Bytes((ULONGLONG)down).c_str(),
              tools::Bytes((ULONGLONG)up).c_str());
-    Item bg = Act(L"Фон", L"tools-battery.png", L"", std::wstring(L"Что работает без окна и тратит батарею; ") + speed);
+    Item bg = Act(L"Фон", L"tools-bg.png", L"", std::wstring(L"Что работает без окна и тратит батарею; ") + speed);
     if (bat.present && bat.percent >= 0) {
         std::wstring note =
             bat.ac ? (bat.charging ? L"Заряжается" : L"От сети")
@@ -1194,7 +1195,7 @@ void ShowRing(RadialMenu& menu) {
     std::sort(order.begin(), order.end(), [](size_t a, size_t b) { return g_starts[a].memory > g_starts[b].memory; });
     ULONGLONG startMem = 0;
     for (size_t i : order) startMem += g_starts[i].memory;
-    Item starts = Act(L"Автозагрузка", L"tools-box.png", L"",
+    Item starts = Act(L"Автозагрузка", L"tools-start.png", L"",
                       Plural((int)order.size(), L"программа", L"программы", L"программ") + L" при входе, держат " +
                           tools::Bytes(startMem) + L" памяти");
     for (size_t i : order) {

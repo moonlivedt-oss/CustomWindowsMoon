@@ -38,15 +38,48 @@ SHEETS = {
         "editor",
         "more",
     ],
-    # разделы Radial Studio; пока листа нет, студия берёт прежние значки
+    # группы Radial Studio (rail слева); пока листа нет, студия берёт прежние значки
     "sheet-studio.png": [
+        "rail-home",
         "rail-rings",
-        "rail-themes",
-        "rail-behavior",
         "rail-desk",
-        "rail-system",
-        "rail-keys",
+        "rail-tools",
+        "rail-behavior",
         "rail-tour",
+    ],
+    # кольцо «Утилиты»; новых имён (health, projects, procs, mem, bg) нет - кольцо берёт tools-box
+    "sheet-tools.png": [
+        "tools-disk",
+        "tools-health",
+        "tools-clean",
+        "tools-projects",
+        "tools-path",
+        "tools-ports",
+        "tools-procs",
+        "tools-mem",
+        "tools-bg",
+        "tools-battery",
+        "tools-start",
+        "tools-env",
+        "tools-box",
+        "tools-lock",
+        "tools-update",
+        "tools-dup",
+    ],
+    # «Защита» в кольце утилит
+    "sheet-guard.png": ["tools-shield", "tools-bug", "tools-scan", "tools-repair", "tools-snapshot"],
+    # кольцо «Сеть»
+    "sheet-net.png": [
+        "net-check",
+        "net-fix",
+        "net-proxy",
+        "net-tunnel",
+        "net-dns",
+        "net-ping",
+        "net-router",
+        "net-globe",
+        "net-renew",
+        "net-procs",
     ],
 }
 SINGLES = {"app.png": "app", "hub.png": "hub"}
