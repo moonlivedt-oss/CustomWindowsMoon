@@ -174,7 +174,10 @@ void Studio::Frame(float w, float h) {
     ui.interactive = ov_ == OV_NONE;
     Rail(RectF(0, 0, rail, h));
     RectF body(rail, 0, w - rail, h - status);
-    float tabsH = SubTabs(body);  // вкладки группы (Кольца | Темы...) над страницей
+    // вкладки группы (Кольца | Темы...) над страницей рисуются после неё: плашка чуть заходит
+    // на страницу, и появление страницы срезало бы её низ
+    RectF full = body;
+    float tabsH = kGroups[GroupOf(page_)].count < 2 ? 0 : ui.S(44);
     body.Y += tabsH;
     body.Height -= tabsH;
     childDragShown_ = childDrag_;
@@ -254,6 +257,7 @@ void Studio::Frame(float w, float h) {
         RevealComposite(body, since);
         ui.Invalidate();
     }
+    SubTabs(full);
     ui.interactive = ov_ == OV_NONE || ov_ == OV_JOURNAL;  // «Журнал» внизу закрывает сам себя
     StatusBar(RectF(rail, h - status, w - rail, status));
     ui.interactive = ov_ == OV_NONE;
