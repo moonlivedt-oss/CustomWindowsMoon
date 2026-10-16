@@ -17,6 +17,7 @@
 #include "core/config.h"
 #include "core/themes.h"
 #include "ui/ui.h"
+#include "gfx/scene.h"
 
 namespace studio {
 
@@ -469,6 +470,23 @@ private:
     std::map<std::wstring, float> ringShown_;
     std::wstring ringDir_;
     ULONGLONG ringAt_ = 0;
+    // соты места: у каждой своя пружина появления, подъём под курсором и цвет, который перетекает к доле
+    struct HiveCell {
+        float s = 0, vs = 0, lift = 0, x = 0, y = 0;
+        int part = -1;
+        Gdiplus::Color col;
+    };
+    std::vector<HiveCell> hive_;
+    struct HiveGhost {  // соты прошлой папки: разлетаются, а та доля, куда зашли, втягивается в середину
+        float x, y, vx, vy;
+        Gdiplus::Color col;
+        bool in;
+    };
+    std::vector<HiveGhost> hiveGhosts_;
+    ULONGLONG hiveBorn_ = 0, hiveGone_ = 0;
+    int hiveZoom_ = -1;  // доля, в которую зашли
+    scene::CleanScene cleanScene_;  // вихрь очистки: «Состояние» и «Кэши»
+    void CleanSceneIn(const RectF& r);
     void NetRoute(const RectF& r, bool busy);  // схема ПК - выход - DNS - интернет, по ней бежит проверка
     bool netWasBusy_ = false;
     ULONGLONG netDoneAt_ = 0;  // когда пришёл итог проверки: узлы схемы загораются по очереди

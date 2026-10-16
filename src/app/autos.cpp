@@ -8,7 +8,10 @@
 #include "core/files.h"
 #include "core/text.h"
 #include "core/themes.h"
+#include "app/toolsui.h"
 #include "desk/boostcard.h"
+#include "desk/scenecard.h"
+#include "gfx/scene.h"
 
 namespace autos {
 
@@ -65,23 +68,38 @@ void Post(Msg* m) {
 void RunClean(const std::wstring& why, bool silent) {
     if (g_cleaning) return;
     g_cleaning = true;
-    if (!silent) g_card.Show(BoostCard::WORKING, L"Тихая чистка", why, Theme());
+    // что чистить - сразу, размеры - из последнего фонового подсчёта: по ним сцена рисует полоски
+    std::vector<tools::Junk> list;
+    std::vector<tools::Junk> sized = toolsui::Snapshot().junk;
+    std::vector<scene::CleanItem> items;
+    for (tools::Junk& j : tools::FindJunk(false)) {
+        if (j.slow) continue;
+        for (const tools::Junk& s : sized)
+            if (s.path == j.path) j.bytes = s.bytes;
+        items.push_back({j.name, j.bytes});
+        list.push_back(j);
+    }
+    scene::CleanBegin(items);
+    if (!silent) SceneCard::Get().Show(SceneCard::CLEAN, L"Тихая чистка", Theme());
     struct Box {
         std::wstring why;
         bool silent;
+        std::vector<tools::Junk> list;
     };
-    auto* box = new Box{why, silent};
+    auto* box = new Box{why, silent, list};
     HANDLE th = CreateThread(
         nullptr, 0,
         [](void* p) -> DWORD {
             std::unique_ptr<Box> b((Box*)p);
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
             ULONGLONG freed = 0;
-            for (const tools::Junk& j : tools::FindJunk(false))
-                if (!j.slow)
-                    freed += tools::CleanJunk(j, [&](const std::wstring& s) {
-                        if (!b->silent) Post(new Msg{Msg::CLEAN_LOG, s});
-                    });
+            for (size_t i = 0; i < b->list.size(); ++i) {
+                scene::CleanMark(i, 1);
+                ULONGLONG f = tools::CleanJunk(b->list[i], [](const std::wstring&) {});
+                scene::CleanMark(i, 2, f);
+                freed += f;
+            }
+            scene::CleanEnd();
             Post(new Msg{Msg::CLEAN_DONE, b->why, freed, 0, b->silent});
             return 0;
         },
@@ -406,8 +424,7 @@ void Tick() {
 void OnJob(WPARAM, LPARAM lp) {
     std::unique_ptr<Msg> m((Msg*)lp);
     switch (m->kind) {
-        case Msg::CLEAN_LOG:
-            g_card.Show(BoostCard::WORKING, L"Тихая чистка", m->text, Theme());
+        case Msg::CLEAN_LOG:  // ход показывает сцена
             return;
         case Msg::CLEAN_DONE:
             g_cleaning = false;
@@ -415,7 +432,7 @@ void OnJob(WPARAM, LPARAM lp) {
             Put(L"clean_freed", std::to_wstring(m->bytes));
             Note(L"Тихая чистка (" + m->text + L"): освобождено " + tools::Bytes(m->bytes));
             // по расписанию мелочь не показываем - только в журнал
-            if (!m->silent || m->bytes >= 200ull * 1024 * 1024)
+            if (m->silent && m->bytes >= 200ull * 1024 * 1024)  // по просьбе итог уже в сцене
                 g_card.Show(BoostCard::DONE, L"Тихая чистка: " + tools::Bytes(m->bytes),
                             L"Временные файлы старше суток и кэши npm, pip и других; " + m->text +
                                 L". Кэши шейдеров не трогал.",

@@ -55,6 +55,8 @@ void CleanDust(ui::Ui& ui, const RectF& bar, Color a, Color b) {
 
 std::wstring Leaf(const std::wstring& p) { return p.substr(p.find_last_of(L'\\') + 1); }
 
+constexpr int kSceneId = 0x61000001;  // область вихря: щелчок по нему после итога - искры ещё раз
+
 std::wstring Days(int d) {
     if (d <= 0) return L"сегодня";
     if (d == 1) return L"вчера";
@@ -70,6 +72,14 @@ std::wstring Ago(ULONGLONG at) {
 }
 
 }  // namespace
+
+// Вихрь очистки (scene::CleanScene) в рамке r: та же сцена, что в карточке, по общей ленте.
+void Studio::CleanSceneIn(const RectF& r) {
+    const UiColors& c = ui.C();
+    scene::Palette p{c.text, c.muted, c.faint, c.accent, c.accent2, c.gold, c.card};
+    bool click = ui.Click(kSceneId, r);
+    if (cleanScene_.Draw(ui.G(), r, (float)ui.K(), p, ui.Mouse(), click)) ui.Tick();
+}
 
 void Studio::GoState(const std::wstring& focus) {
     stateFocus_ = focus;
@@ -211,7 +221,10 @@ void Studio::StatePage(const RectF& r) {
                                  {L"Корзина", bin, c.faint}};
         ULONGLONG total = 0;
         for (const Seg& sg : segs) total += sg.bytes;
-        float h = ui.S(176);
+        // идёт чистка (или только что кончилась) - карточка вырастает вниз под вихрь
+        float grow = ui.Anim(kSceneId + 1, scene::CleanRecent(), 9);
+        float sceneH = scene::CleanScene::Height(scene::Clean().items.size(), (float)ui.K());
+        float h = ui.S(176) + (sceneH + ui.S(8)) * grow;
         RectF cr(x, y, w, h);
         Card(cr);
         ui.Text(L"Можно освободить", RectF(cr.X + ui.S(20), cr.Y + ui.S(16), ui.S(300), ui.S(22)), c.muted, 12);
@@ -245,7 +258,13 @@ void Studio::StatePage(const RectF& r) {
         } else if (!s.at) {
             ui.Shimmer(bar, bar.Height / 2, 40);
         }
-        if (autos::Cleaning() && !fx::Game()) CleanDust(ui, bar, c.accent, c.gold);
+        if (autos::Cleaning() && !fx::Game() && grow < 0.01f) CleanDust(ui, bar, c.accent, c.gold);
+        if (grow > 0.01f) {
+            GraphicsState cs = g.Save();
+            g.SetClip(cr, CombineModeIntersect);
+            CleanSceneIn(RectF(cr.X + ui.S(20), cr.Y + ui.S(170), cr.Width - ui.S(40), sceneH));
+            g.Restore(cs);
+        }
         // подписи частей
         float lx = bar.X, ly = bar.GetBottom() + ui.S(12);
         for (const Seg& sg : segs) {

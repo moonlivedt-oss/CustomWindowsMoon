@@ -52,5 +52,8 @@ void CleanQuick();  // «Всё сразу»: быстрые кэши и вре�
 void TrimDdc();     // старое из кэша Unreal
 void CleanProjectList(const std::vector<tools::ProjectJunk>& list);
 bool Busy();
+// Для проверки (WM_APP+58): карточка со сценой на выдуманных данных, ничего не удаляет.
+// 0 - очистка, 1 - защита с находками, 2 - защита, всё чисто
+void Demo(int what);
 
 }  // namespace toolsui

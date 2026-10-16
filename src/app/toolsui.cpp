@@ -13,6 +13,8 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "desk/boostcard.h"
+#include "desk/scenecard.h"
+#include "gfx/scene.h"
 #include "menu/menu.h"
 #include "net/net.h"
 #include "tools/tools.h"
@@ -83,6 +85,7 @@ constexpr int kDdcDays = 30, kIdleDays = 60;
 struct JobMsg {
     std::wstring title, text;
     bool done = false, ok = false;
+    bool quiet = false;  // ход и итог показывает сцена, не текстовая карточка
 };
 
 ThemeInfo Theme() { return CurrentTheme(*g_cfg); }
@@ -97,18 +100,20 @@ Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key,
     return it;
 }
 
-void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work) {
+void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work,
+            bool quiet = false) {
     if (g_busy) {
         g_card.Show(BoostCard::DONE, L"Подождите", L"Предыдущее действие ещё идёт.", Theme());
         return;
     }
     g_busy = true;
-    g_card.Show(BoostCard::WORKING, title, L"Начинаю...", Theme());
+    if (!quiet) g_card.Show(BoostCard::WORKING, title, L"Начинаю...", Theme());
     struct Box {
         std::wstring title;
         std::function<bool(const tools::Log&, std::wstring&)> work;
+        bool quiet;
     };
-    auto* box = new Box{title, std::move(work)};
+    auto* box = new Box{title, std::move(work), quiet};
     HANDLE th = CreateThread(
         nullptr, 0,
         [](void* p) -> DWORD {
@@ -117,12 +122,12 @@ void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std
             std::wstring last;
             tools::Log log = [&](const std::wstring& s) {
                 last = s;
-                auto* m = new JobMsg{b->title, s, false, false};
+                auto* m = new JobMsg{b->title, s, false, false, b->quiet};
                 if (!PostMessageW(g_app, WM_TOOLS_JOB, 0, (LPARAM)m)) delete m;
             };
             std::wstring result;
             bool ok = b->work(log, result);
-            auto* m = new JobMsg{b->title, result.empty() ? last : result, true, ok};
+            auto* m = new JobMsg{b->title, result.empty() ? last : result, true, ok, b->quiet};
             if (!PostMessageW(g_app, WM_TOOLS_JOB, 0, (LPARAM)m)) delete m;
             CoUninitialize();
             return 0;
@@ -137,6 +142,31 @@ void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std
 }
 
 std::wstring Short(std::wstring s, size_t n) { return s.size() > n ? s.substr(0, n - 1) + L"…" : s; }
+
+// Очистка с живой сценой: места по одному, лента scene::Clean ведёт вихрь в карточке (и в студии, если открыта).
+void RunClean(const std::wstring& title, const std::vector<tools::Junk>& list) {
+    if (g_busy) return RunJob(title, nullptr);  // скажет «подождите»
+    std::vector<scene::CleanItem> items;
+    for (const tools::Junk& j : list) items.push_back({j.name, j.bytes});
+    scene::CleanBegin(items);
+    SceneCard::Get().Show(SceneCard::CLEAN, title, Theme());
+    RunJob(
+        title,
+        [list](const tools::Log& log, std::wstring& res) {
+            ULONGLONG freed = 0;
+            for (size_t i = 0; i < list.size(); ++i) {
+                scene::CleanMark(i, 1);
+                ULONGLONG f = tools::CleanJunk(list[i], log);
+                scene::CleanMark(i, 2, f);
+                freed += f;
+            }
+            scene::CleanEnd();
+            res = L"Освобождено " + tools::Bytes(freed) + L".";
+            g_scanAt = 0;  // пересчитать размеры
+            return true;
+        },
+        true);
+}
 
 std::wstring NoExe(const std::wstring& s) { return EndsWithI(s, L".exe") ? s.substr(0, s.size() - 4) : s; }
 
@@ -1236,15 +1266,10 @@ void Run(const std::wstring& key) {
         return;
     }
     if (key == L"clean-all") {
-        std::vector<tools::Junk> all = g_junk;
-        return RunJob(L"Очистка", [all](const tools::Log& log, std::wstring& res) {
-            ULONGLONG freed = 0;
-            for (const tools::Junk& j : all)
-                if (!j.slow) freed += tools::CleanJunk(j, log);
-            res = L"Освобождено " + tools::Bytes(freed) + L".";
-            g_scanAt = 0;  // пересчитать размеры
-            return true;
-        });
+        std::vector<tools::Junk> quick;
+        for (const tools::Junk& j : g_junk)
+            if (!j.slow) quick.push_back(j);
+        return RunClean(L"Очистка", quick);
     }
     if (key == L"ddc-trim")
         return RunJob(L"Кэш Unreal", [](const tools::Log& log, std::wstring& res) {
@@ -1272,14 +1297,7 @@ void Run(const std::wstring& key) {
         size_t i = idx(6, g_junk.size());
         if (i == (size_t)-1) return;
         tools::Junk j = g_junk[i];
-        auto go = [j] {
-            RunJob(L"Очистка: " + j.name, [j](const tools::Log& log, std::wstring& res) {
-                ULONGLONG freed = tools::CleanJunk(j, log);
-                res = L"Освобождено " + tools::Bytes(freed) + L".";
-                g_scanAt = 0;
-                return true;
-            });
-        };
+        auto go = [j] { RunClean(L"Очистка: " + j.name, {j}); };
         if (!j.slow) return go();
         Ask(j.name + L": очистить?",
             tools::Bytes(j.bytes) + L". Шейдеры соберутся заново: первые запуски игр и редактора будут медленнее.",
@@ -1652,7 +1670,8 @@ void Run(const std::wstring& key) {
         g_secWarned.clear();  // перепроверка по просьбе - сказать заново
         g_secAsked = true;
         RefreshSecurity();
-        g_card.Show(BoostCard::WORKING, L"Защита", L"Проверяю подписи и автозапуск...", Theme(), 60000);
+        scene::GuardBegin((int)tools::Processes().size());
+        SceneCard::Get().Show(SceneCard::GUARD, L"Защита: проверка", Theme());
         return;
     }
     if (key == L"sec-av") {
@@ -1780,6 +1799,17 @@ void OnJob(WPARAM wp, LPARAM lp) {
         ReleaseSRWLockShared(&g_secLock);
         std::wstring checked = L"Проверено " + Plural(procs, L"программа", L"программы", L"программ") + L" и " +
                                Plural(autos, L"запись", L"записи", L"записей") + L" автозапуска.";
+        if (SceneCard::Get().Visible()) {  // итог - в сцене: чистые слетаются в щит, находки - строками под ним
+            std::vector<scene::GuardFind> finds;
+            AcquireSRWLockShared(&g_secLock);
+            for (const auto* v : {&g_sec.procs, &g_sec.autos, &g_sec.hijacks, &g_sec.tasks, &g_sec.exts, &g_sec.nets})
+                for (const tools::Suspect& s : *v) finds.push_back({s.name, s.why, s.score});
+            ReleaseSRWLockShared(&g_secLock);
+            std::stable_sort(finds.begin(), finds.end(),
+                             [](const scene::GuardFind& a, const scene::GuardFind& b) { return a.score > b.score; });
+            scene::GuardEnd(procs, finds);
+            return;
+        }
         if (!n)
             g_card.Show(BoostCard::DONE, L"Защита: ничего странного", checked, Theme(), 9000, Toast::G_OK);
         else
@@ -1788,6 +1818,10 @@ void OnJob(WPARAM wp, LPARAM lp) {
         return;
     }
     std::unique_ptr<JobMsg> m((JobMsg*)lp);
+    if (m->quiet) {
+        if (m->done) g_busy = false;
+        return;
+    }
     if (!m->done) {
         g_card.Show(BoostCard::WORKING, m->title + L"...", m->text, Theme());
         return;
@@ -1799,6 +1833,8 @@ void OnJob(WPARAM wp, LPARAM lp) {
 
 void Tick() {
     g_card.Tick();
+    SceneCard::Get().Poll();
+    SceneCard::Get().Tick();
     ULONGLONG now = GetTickCount64();
     if (now - g_proactiveAt > 5000) TryProactive();  // отложенное, пока была другая карточка
     // фоновый подсчёт: первый раз через минуту после старта, дальше раз в полчаса
@@ -1862,6 +1898,48 @@ void PrimeForSnapshot(const Config* cfg) {
 }
 
 bool Busy() { return g_busy; }
+
+void Demo(int what) {
+    if (what == 0) {
+        const ULONGLONG GB = 1024ull * 1024 * 1024;
+        scene::CleanBegin({{L"Кэш npm", 7600 * GB / 1000},
+                           {L"Кэш pip", 5 * GB},
+                           {L"TEMP старше суток", 4600 * GB / 1000},
+                           {L"Кэш uv", 900 * GB / 1000}});
+        SceneCard::Get().Show(SceneCard::CLEAN, L"Очистка (проверка)", Theme());
+        HANDLE th = CreateThread(
+            nullptr, 0,
+            [](void*) -> DWORD {
+                scene::CleanFeed f = scene::Clean();
+                for (size_t i = 0; i < f.items.size(); ++i) {
+                    Sleep(200);
+                    scene::CleanMark(i, 1);
+                    Sleep(800);
+                    scene::CleanMark(i, 2, f.items[i].bytes * 97 / 100);
+                }
+                scene::CleanEnd();
+                return 0;
+            },
+            nullptr, 0, nullptr);
+        if (th) CloseHandle(th);
+        return;
+    }
+    scene::GuardBegin((int)tools::Processes().size());
+    SceneCard::Get().Show(SceneCard::GUARD, L"Защита: проверка", Theme());
+    HANDLE th = CreateThread(
+        nullptr, 0,
+        [](void* p) -> DWORD {
+            Sleep(2200);
+            std::vector<scene::GuardFind> finds;
+            if (p)
+                finds = {{L"scvhost.exe", L"имя как у svchost, а лежит в TEMP; без подписи", 7},
+                         {L"wscript.exe", L"запуск скрипта при входе из Run", 4}};
+            scene::GuardEnd(scene::Guard().expect, finds);
+            return 0;
+        },
+        what == 1 ? (void*)1 : nullptr, 0, nullptr);
+    if (th) CloseHandle(th);
+}
 
 void CleanQuick() {
     AcquireSRWLockShared(&g_scanLock);

@@ -24,6 +24,8 @@
 #include "desk/ocr.h"
 #include "desk/startbg.h"
 #include "desk/whreg.h"
+#include "gfx/color.h"
+#include "gfx/scene.h"
 #include "net/net.h"
 #include "studio/studio.h"
 #include "tools/tools.h"
@@ -477,6 +479,112 @@ int WatchSelftest() {
     return fails;
 }
 
+// Выдуманная чистка для снимков студии (RADIAL_SCENE=clean): четыре места по очереди, как настоящая работа.
+DWORD WINAPI FakeClean(void*) {
+    const ULONGLONG GB = 1024ull * 1024 * 1024;
+    std::vector<scene::CleanItem> items = {{L"Кэш npm", 7600 * GB / 1000},
+                                           {L"Кэш pip", 5 * GB},
+                                           {L"TEMP старше суток", 4600 * GB / 1000},
+                                           {L"Кэш uv", 900 * GB / 1000}};
+    Sleep(300);
+    scene::CleanBegin(items);
+    for (size_t i = 0; i < items.size(); ++i) {
+        Sleep(150);
+        scene::CleanMark(i, 1);
+        Sleep(750);
+        scene::CleanMark(i, 2, items[i].bytes * 97 / 100);
+    }
+    scene::CleanEnd();
+    return 0;
+}
+
+// Лист кадров живой сцены на выдуманных данных (как в карточке, 384 dip): --scene-film clean|guard|guard0 out.png.
+// Лента ведётся по времени, как настоящая работа; кадры снимаются в заданные мгновения.
+int SceneFilm(const std::wstring& what, const std::wstring& out) {
+    using namespace Gdiplus;
+    ThemeInfo th = CurrentTheme(LoadOwnConfig());
+    scene::Palette p;
+    p.text = ToColor(th.fg);
+    p.muted = ToColor(th.muted);
+    p.faint = MixColor(p.muted, ToColor(th.bg), 0.45);
+    p.accent = ToColor(th.ac);
+    p.accent2 = ToColor(th.glow);
+    p.gold = ToColor(th.gold);
+    p.card = ToColor(th.panel);
+    bool clean = what == L"clean";
+    const ULONGLONG GB = 1024ull * 1024 * 1024;
+    std::vector<scene::CleanItem> items = {{L"Кэш npm", 7600 * GB / 1000},
+                                           {L"Кэш pip", 5 * GB},
+                                           {L"TEMP старше суток", 4600 * GB / 1000},
+                                           {L"Кэш uv", 900 * GB / 1000}};
+    std::vector<scene::GuardFind> finds;
+    if (what == L"guard")
+        finds = {{L"scvhost.exe", L"имя как у svchost, а лежит в TEMP; без подписи", 7},
+                 {L"wscript.exe", L"запуск скрипта при входе из Run", 4}};
+    std::vector<double> at = clean ? std::vector<double>{0.35, 0.8, 1.3, 1.9, 2.6, 3.4, 4.1, 4.6, 5.2, 6.4}
+                                   : std::vector<double>{0.3, 0.9, 1.6, 2.1, 2.4, 2.8, 3.3, 4.2};
+    float k = 1.25f, W = 352 * k;
+    float H = clean ? scene::CleanScene::Height(items.size(), k) : scene::GuardScene::Height(finds.size(), k);
+    int cols = 2, rows = (int)(at.size() + 1) / 2;
+    int cw = (int)(W + 40 * k), ch = (int)(H + 40 * k);
+    Bitmap sheet(cw * cols, ch * rows, PixelFormat32bppARGB);
+    Graphics sg(&sheet);
+    sg.Clear(ToColor(th.bg));
+    Bitmap frame((int)W, (int)H, PixelFormat32bppARGB);
+    scene::CleanScene cs;
+    scene::GuardScene gsn;
+    if (clean)
+        scene::CleanBegin(items);
+    else
+        scene::GuardBegin(140);
+    ULONGLONG t0 = GetTickCount64();
+    size_t next = 0;
+    bool ended = false;
+    while (next < at.size()) {
+        double t = (GetTickCount64() - t0) / 1000.0;
+        if (clean) {
+            for (size_t i = 0; i < items.size(); ++i) {
+                double s = 0.4 + i * 0.9;
+                if (t > s + 0.75)
+                    scene::CleanMark(i, 2, items[i].bytes * 97 / 100);
+                else if (t > s)
+                    scene::CleanMark(i, 1);
+            }
+            if (!ended && t > 0.4 + items.size() * 0.9) ended = true, scene::CleanEnd();
+        } else if (!ended && t > 1.8) {
+            ended = true;
+            scene::GuardEnd(140, finds);
+        }
+        Graphics g(&frame);
+        g.Clear(ToColor(th.bg));
+        g.SetTextRenderingHint(TextRenderingHintAntiAlias);
+        POINT m{-100, -100};
+        if (clean)
+            cs.Draw(g, RectF(0, 0, W, H), k, p, m, false);
+        else
+            gsn.Draw(g, RectF(0, 0, W, H), k, p, m);
+        if (t >= at[next]) {
+            int x = (int)(next % cols) * cw, y = (int)(next / cols) * ch;
+            sg.DrawImage(&frame, x + 20 * k, y + 28 * k);
+            SolidBrush lb(p.faint);
+            Font f(L"Segoe UI", 11 * k, FontStyleRegular, UnitPixel);
+            wchar_t s[32];
+            swprintf(s, 32, L"%.1f с", at[next]);
+            sg.DrawString(s, -1, &f, PointF(x + 20 * k, y + 6 * k), &lb);
+            ++next;
+        }
+        Sleep(15);
+    }
+    UINT num = 0, size = 0;
+    GetImageEncodersSize(&num, &size);
+    std::vector<BYTE> buf(size);
+    auto* codecs = (ImageCodecInfo*)buf.data();
+    GetImageEncoders(num, size, codecs);
+    for (UINT i = 0; i < num; ++i)
+        if (!wcscmp(codecs[i].MimeType, L"image/png")) return sheet.Save(out.c_str(), &codecs[i].Clsid, nullptr) == Ok ? 0 : 1;
+    return 1;
+}
+
 // Очистка всего, что пересоздаётся быстро (как «Всё сразу» в кольце): кэши шейдеров и Unreal не трогаются.
 int Clean() {
     std::wstring s;
@@ -523,12 +631,19 @@ bool Run(int& exitCode) {
         int tab = i + 2 < args.size() ? _wtoi(args[i + 2].c_str()) : 0;
         std::wstring out = i + 3 < args.size() ? args[i + 3] : ExeDir() + L"\\studio_snap.png";
         int ms = i + 4 < args.size() ? _wtoi(args[i + 4].c_str()) : 2500;
+        if (const char* sc = getenv("RADIAL_SCENE"))
+            if (!strcmp(sc, "clean")) CloseHandle(CreateThread(nullptr, 0, FakeClean, nullptr, 0, nullptr));
         static Config snapCfg;
         if (page == 10 && !getenv("RADIAL_NOPRIME")) {  // RADIAL_NOPRIME - снять, как выглядит подсчёт  // «Состояние»: размеры считаются заранее, как в работающей программе
             snapCfg = LoadOwnConfig();
             toolsui::PrimeForSnapshot(&snapCfg);
         }
         exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
+    } else if (Has(args, L"--scene-film")) {  // --scene-film clean|guard|guard0 out.png: лист кадров живой сцены
+        Gdip gdip;
+        size_t i = std::find(args.begin(), args.end(), L"--scene-film") - args.begin();
+        exitCode = SceneFilm(i + 1 < args.size() ? args[i + 1] : L"clean",
+                             i + 2 < args.size() ? args[i + 2] : ExeDir() + L"\\scene_film.png");
     } else if (Has(args, L"--clean")) {  // очистить кэши и временные файлы, итог в clean_out.txt
         exitCode = Clean();
     } else if (Has(args, L"--autostart-on")) {  // включить запуск вместе с Windows, как пункт трея

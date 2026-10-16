@@ -10,6 +10,7 @@
 #include "core/text.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
+#include "gfx/hex.h"
 #include "net/net.h"
 #include "studio/studio_internal.h"
 #include "studio/studio_layout.h"
@@ -62,23 +63,40 @@ Color SizeColor(const UiColors& c, int i, int n) {
 
 }  // namespace
 
-// Кольцо долей папки. Доли дорастают до своего размера плавно (список растёт по ходу подсчёта),
-// наведённая выдвигается наружу, в середине - что под курсором или итог. hot - строка под курсором
-// в списке справа (её доля подсвечивается); возвращает долю, по которой щёлкнули, или -1.
+// Соты места: улей, разрезанный на доли по кругу, как круговая диаграмма. Доли дорастают плавно (список растёт
+// по ходу подсчёта) - цвет перетекает по сотам; наведённая доля приподнимается, остальные гаснут. Щелчок - зайти
+// внутрь: старые соты разлетаются, доля втягивается в середину, и улей собирается заново. hot - строка под
+// курсором в списке справа (её доля подсвечивается); возвращает долю, по которой щёлкнули, или -1.
 int Studio::SizeRing(const RectF& r, const std::wstring& dir, const std::vector<tools::FolderSize>& sizes,
                      bool scanning, long seen, int& hot) {
     const UiColors& c = ui.C();
     Graphics& g = ui.G();
     float side = std::min(r.Width, r.Height);
     float cx = r.X + side / 2, cy = r.Y + side / 2;
-    float ro = side / 2 - ui.S(8), ri = ro * 0.6f;
+    constexpr int kR = 6;  // радиус улья в сотах; середина (до 2) пустая - там подпись
+    const float s = side / (1.7320508f * (2 * kR + 1) + 0.5f);
+    ULONGLONG now = GetTickCount64();
+    bool game = fx::Game();
     if (dir != ringDir_) {
         ringDir_ = dir;
         ringShown_.clear();
+        hiveGhosts_.clear();
+        if (!game)
+            for (const HiveCell& h : hive_) {
+                if (h.s < 0.05f) continue;
+                bool in = h.part >= 0 && h.part == hiveZoom_;
+                float dx = h.x - cx, dy = h.y - cy, d = std::max(1.0f, std::sqrt(dx * dx + dy * dy));
+                float v = in ? 0 : ui.S(260) + d * 2.5f;
+                hiveGhosts_.push_back({h.x, h.y, dx / d * v, dy / d * v, h.col, in});
+            }
+        hiveGone_ = now;
+        hiveBorn_ = now + (hiveGhosts_.empty() ? 0 : 220);
+        hive_.clear();
+        hiveZoom_ = -1;
     }
-    ULONGLONG now = GetTickCount64();
     float dt = ringAt_ && now - ringAt_ < 200 ? (now - ringAt_) / 1000.0f : 0.016f;
     ringAt_ = now;
+    dt *= (float)(1000.0 / std::max(250.0, fx::Dur(1000)));
     ULONGLONG total = 0;
     for (const tools::FolderSize& f : sizes) total += f.bytes;
     size_t n = std::min(sizes.size(), kRingParts);
@@ -99,50 +117,146 @@ int Studio::SizeRing(const RectF& r, const std::wstring& dir, const std::vector<
             moving = true;
         part[i] = s;
     }
-    if (moving) ui.Tick();
-    // попадание: угол от верха по часовой стрелке
-    RectF box(cx - ro - ui.S(8), cy - ro - ui.S(8), (ro + ui.S(8)) * 2, (ro + ui.S(8)) * 2);
+    // соты: середина и угол от верха по часовой стрелке (по нему - доля, как в круговой диаграмме)
+    struct Spot {
+        float x, y, a;
+        int d;
+    };
+    static std::vector<Spot> spots;  // одинаковы для всех вызовов при том же kR, считаются в единицах соты
+    static std::vector<int> order;
+    if (spots.empty()) {
+        for (int q = -kR; q <= kR; ++q)
+            for (int rr = std::max(-kR, -q - kR); rr <= std::min(kR, -q + kR); ++rr) {
+                int d = std::max({std::abs(q), std::abs(rr), std::abs(q + rr)});
+                if (d <= 2) continue;
+                hex::Cell hc = hex::Center(q, rr, 1);
+                float a = std::fmod((float)std::atan2(hc.y, hc.x) * 57.29578f + 90 + 720, 360.0f);
+                spots.push_back({(float)hc.x, (float)hc.y, a, d});
+            }
+        for (size_t i = 0; i < spots.size(); ++i) order.push_back((int)i);
+        std::sort(order.begin(), order.end(), [](int a, int b) {
+            return spots[a].a != spots[b].a ? spots[a].a < spots[b].a : spots[a].d < spots[b].d;
+        });
+    }
+    if (hive_.size() != spots.size()) {
+        hive_.assign(spots.size(), HiveCell{});
+        for (HiveCell& h : hive_) h.col = c.field;
+    }
+    // какая доля у какой соты: по порядку угла, сколько сот - по размеру доли
+    std::vector<int> partOf(spots.size(), -1);
+    {
+        double acc = 0;
+        size_t k = 0;
+        for (size_t i = 0; i <= n; ++i) {
+            acc += part[i];
+            size_t until = std::min(spots.size(), (size_t)std::lround(acc * spots.size()));
+            for (; k < until; ++k) partOf[order[k]] = (int)i;
+        }
+    }
+    // попадание: ближайшая сота
+    RectF box(cx - side / 2, cy - side / 2, side, side);
     bool click = ui.Click(ID_TOOLS_RING, box);
     POINT m = ui.Mouse();
-    float dx = m.x - cx, dy = m.y - cy, dist = std::sqrt(dx * dx + dy * dy);
-    float ang = std::fmod(std::atan2(dy, dx) * 57.29578f + 90 + 720, 360.0f);
     int under = -1;
-    float start = 0;
-    for (size_t i = 0; i <= n; ++i) {
-        float sw = 360 * part[i];
-        if (ui.Hot(ID_TOOLS_RING) && dist >= ri && dist <= ro + ui.S(8) && ang >= start && ang < start + sw)
-            under = (int)i;
-        start += sw;
-    }
-    if (under >= 0) hot = under < (int)n ? under : -2;
-    // дорожка под кольцом, пока долей ещё нет
-    Pen track(WithAlpha(c.text, 18), ro - ri);
-    float mid = (ro + ri) / 2;
-    g.DrawEllipse(&track, cx - mid, cy - mid, mid * 2, mid * 2);
-    start = -90;
-    for (size_t i = 0; i <= n; ++i) {
-        float sw = 360 * part[i];
-        if (sw < 0.3f) {
-            start += sw;
-            continue;
+    if (ui.Hot(ID_TOOLS_RING))
+        for (size_t i = 0; i < spots.size(); ++i) {
+            float dx = m.x - (cx + spots[i].x * s), dy = m.y - (cy + spots[i].y * s);
+            if (dx * dx + dy * dy < s * s * 0.8f) under = partOf[i];
         }
-        bool on = (int)i == hot || (i == n && hot == -2);
-        float lift = ui.Anim(0x60000000 + (int)i, on, 16);
-        float o = ro + ui.S(7) * lift, gap = std::min(1.4f, sw * 0.3f);
-        // выдвинутая доля чуть отъезжает от центра по своей середине
-        float midA = (start + sw / 2) * 3.14159265f / 180;
-        float ox = std::cos(midA) * ui.S(4) * lift, oy = std::sin(midA) * ui.S(4) * lift;
-        GraphicsPath p;
-        p.AddArc(cx + ox - o, cy + oy - o, o * 2, o * 2, start + gap / 2, sw - gap);
-        p.AddArc(cx + ox - ri, cy + oy - ri, ri * 2, ri * 2, start + sw - gap / 2, -(sw - gap));
-        p.CloseFigure();
-        Color col = i < n ? SizeColor(c, (int)i, (int)n) : c.faint;
-        SolidBrush b(MixColor(col, Color(255, 255, 255), 0.18 * lift));
-        g.FillPath(&b, &p);
-        start += sw;
+    if (under >= 0) hot = under < (int)n ? under : -2;
+    int lit = hot >= 0 ? hot : hot == -2 ? (int)n : -1;
+    // пружины и цвета
+    float born = now > hiveBorn_ ? (now - hiveBorn_) / 1000.0f : -1;
+    if (game) born = 100;
+    float tblend = std::min(1.0f, dt * 9);
+    std::vector<PointF> pts(6);
+    for (size_t i = 0; i < spots.size(); ++i) {
+        HiveCell& h = hive_[i];
+        const Spot& sp = spots[i];
+        float delay = 0.035f * sp.d + sp.a / 360 * 0.22f;
+        float target = born >= delay ? 1.0f : 0.0f;
+        if (game) {
+            h.s = target, h.vs = 0;
+        } else {
+            h.vs += ((target - h.s) * 170 - h.vs * 13) * dt;
+            h.s += h.vs * dt;
+            if (std::fabs(target - h.s) > 0.002f || std::fabs(h.vs) > 0.01f) moving = true;
+        }
+        int pi = partOf[i];
+        Color want;
+        if (pi < 0) {
+            // доли ещё нет: пока считается - по сотам бежит волна от середины
+            float wave = scanning && !game ? 0.5f + 0.5f * std::sin(now / 160.0f - sp.d * 0.9f) : 0;
+            want = MixColor(c.field, c.accent, 0.18 * wave);
+            if (scanning) moving = true;
+        } else {
+            want = pi < (int)n ? SizeColor(c, pi, (int)n) : c.faint;
+        }
+        Color old = h.col;
+        h.col = game ? want : MixColor(h.col, want, tblend);
+        if (old.GetValue() != h.col.GetValue()) moving = true;
+        h.part = pi;
+        float lt = pi >= 0 && pi == lit ? 1.0f : 0.0f;
+        if (std::fabs(lt - h.lift) > 0.005f) {
+            h.lift += (lt - h.lift) * std::min(1.0f, dt * 14);
+            moving = true;
+        } else {
+            h.lift = lt;
+        }
+        // наведённая доля выдвигается от середины по своему направлению
+        float ox = 0, oy = 0;
+        if (h.lift > 0) {
+            float len = std::sqrt(sp.x * sp.x + sp.y * sp.y);
+            ox = sp.x / len * ui.S(4) * h.lift;
+            oy = sp.y / len * ui.S(4) * h.lift;
+        }
+        h.x = cx + sp.x * s + ox;
+        h.y = cy + sp.y * s + oy;
+        float sc = s * 0.9f * h.s * (1 + 0.1f * h.lift);
+        if (sc < 0.3f) continue;
+        Color col = h.col;
+        if (lit >= 0 && pi != lit) col = MixColor(col, c.card, 0.55);
+        if (h.lift > 0) col = MixColor(col, Color(255, 255, 255), 0.16 * h.lift);
+        for (int k = 0; k < 6; ++k) {
+            float a = k * 1.0471976f;
+            pts[k] = PointF(h.x + sc * std::cos(a), h.y + sc * std::sin(a));
+        }
+        SolidBrush b(col);
+        g.FillPolygon(&b, pts.data(), 6);
     }
+    // соты прошлой папки
+    if (!hiveGhosts_.empty()) {
+        float gt = (now - hiveGone_) / 1000.0f;
+        float fade = 1 - std::min(1.0f, gt / 0.45f);
+        if (fade <= 0) {
+            hiveGhosts_.clear();
+        } else {
+            moving = true;
+            for (HiveGhost& gh : hiveGhosts_) {
+                float sc = s * 0.9f;
+                if (gh.in) {  // втягивается в середину и растворяется
+                    gh.x += (cx - gh.x) * std::min(1.0f, dt * 9);
+                    gh.y += (cy - gh.y) * std::min(1.0f, dt * 9);
+                    sc *= fade;
+                } else {
+                    gh.x += gh.vx * dt;
+                    gh.y += gh.vy * dt;
+                    sc *= 0.5f + 0.5f * fade;
+                }
+                for (int k = 0; k < 6; ++k) {
+                    float a = k * 1.0471976f;
+                    pts[k] = PointF(gh.x + sc * std::cos(a), gh.y + sc * std::sin(a));
+                }
+                SolidBrush b(WithAlpha(gh.col, (BYTE)(255 * fade)));
+                g.FillPolygon(&b, pts.data(), 6);
+            }
+        }
+    }
+    if (moving) ui.Tick();
+    if (click && under >= 0 && under < (int)n) hiveZoom_ = under;
     // середина
-    float tw = ri * 1.6f;
+    float ri = s * 1.7320508f * 2.4f;
+    float tw = ri * 1.8f;
     RectF mid1(cx - tw / 2, cy - ui.S(22), tw, ui.S(22)), mid2(cx - tw / 2, cy + ui.S(1), tw, ui.S(20));
     if (hot >= 0 && hot < (int)n) {
         const tools::FolderSize& f = sizes[hot];
@@ -720,7 +834,10 @@ void Studio::ToolsPage(const RectF& r) {
                 bool isDir = f.name.front() != L'(';
                 // вся строка - «зайти внутрь»; размер полоской на всю ширину строки
                 RectF rr(lb.X - ui.S(6), yy, lb.Width - ui.S(110), lineH);
-                if (rowHover(ID_TOOLS_SIZE + (int)i * 2, rr) && isDir && !busy) ToolsScan(f.path);
+                if (rowHover(ID_TOOLS_SIZE + (int)i * 2, rr) && isDir && !busy) {
+                    hiveZoom_ = (int)i;
+                    ToolsScan(f.path);
+                }
                 if (hot == (int)i && !ui.Hot(ID_TOOLS_SIZE + (int)i * 2))  // наведено на долю в кольце
                     ui.Fill(rr, WithAlpha(c.cardHi, 200), ui.S(6));
                 Color mark = SizeColor(c, (int)i, (int)std::min<size_t>(sizes.size(), kRingParts));
@@ -745,12 +862,19 @@ void Studio::ToolsPage(const RectF& r) {
             }
         });
         // кэши
-        wide(L"Кэши и временные файлы", rowsFor(toolsJunk_.size()) + 1.6f, [&](const RectF& b) {
+        // чистка идёт - над списком вихрь, куда осыпаются очищаемые места
+        bool vortex = scene::CleanRecent();
+        float vortexH = vortex ? scene::CleanScene::Height(scene::Clean().items.size(), (float)ui.K()) + ui.S(10) : 0;
+        wide(L"Кэши и временные файлы", rowsFor(toolsJunk_.size()) + 1.6f + vortexH / rowH, [&](const RectF& b) {
             if (toolsJob_ && toolsJob_->done && toolsJob_->hasJunk) {
                 toolsJunk_ = toolsJob_->junk;
                 toolsJob_->hasJunk = false;
             }
             float y = b.Y;
+            if (vortex) {
+                CleanSceneIn(RectF(b.X, y, b.Width, vortexH - ui.S(10)));
+                y += vortexH;
+            }
             for (size_t i = 0; i < toolsJunk_.size(); ++i) {
                 const tools::Junk& j = toolsJunk_[i];
                 ui.Text(j.name, RectF(b.X, y, ui.S(220), lineH), c.text, 12, true);
@@ -766,8 +890,11 @@ void Studio::ToolsPage(const RectF& r) {
                                     .c_str(),
                                 L"Очистка", MB_YESNO | MB_ICONWARNING) == IDYES) {
                     tools::Junk jj = j;
+                    scene::CleanBegin({{jj.name, jj.bytes}});
                     ToolsRun(L"Очистка", [jj](const tools::Log& l, ToolsJob&) {
-                        tools::CleanJunk(jj, l);
+                        scene::CleanMark(0, 1);
+                        scene::CleanMark(0, 2, tools::CleanJunk(jj, l));
+                        scene::CleanEnd();
                         return true;
                     });
                     toolsJunk_.erase(toolsJunk_.begin() + i);

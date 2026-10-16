@@ -592,6 +592,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP + 57:  // для проверки: студия, «Что занимает место» на C: (как клик по шкале диска)
             toolsui::Run(L"scan:C:\\");
             return 0;
+        case WM_APP + 58:  // для проверки: карточки со сценой на выдуманных данных (0 - очистка, 1/2 - защита)
+            toolsui::Demo((int)wp);
+            return 0;
         case WM_APP + 56:  // для проверки: карточка снимка
             g_snip.Demo();
             return 0;

@@ -540,8 +540,10 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
                           nullptr, inst, nullptr);  // не показывается
     ui.Attach(wnd);
     ov_ = OV_NONE;
-    if (page == PAGE_TOOLS)
-        GoTools(tab, L"");
+    if (page == PAGE_TOOLS) {  // RADIAL_SCAN=папка - сразу посчитать, что занимает место (снимок сот)
+        const wchar_t* scan = _wgetenv(L"RADIAL_SCAN");
+        GoTools(tab, scan ? scan : L"");
+    }
     else
         GoPage((Page)page);
     // кадр в HDC, как в окне: появление страницы смешивает карточки средствами GDI
