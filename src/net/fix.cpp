@@ -20,7 +20,8 @@ constexpr wchar_t kTask[] = L"MoonRadial\\RadialMenuNet";
 
 const wchar_t* const kJobKeys[kJobs] = {L"smart",  L"winhttp",     L"routes",       L"ip",         L"vpn",
                                         L"dns-cf", L"dns-google",  L"dns-auto",     L"fw-restore", L"adapter",
-                                        L"deep",   L"disk-health", L"syspath-clean"};
+                                        L"deep",   L"disk-health", L"syspath-clean",
+                                        L"net-top", L"power",      L"restore-point"};
 
 std::wstring JobFile() { return DataDir() + L"\\job.txt"; }
 std::wstring ResultFile() { return DataDir() + L"\\job-result.txt"; }
@@ -355,6 +356,35 @@ bool Job_(Job j, const Log& log) {
         case JOB_SYSPATH_CLEAN:
             tools::CleanSystemPath(log);
             return true;
+        case JOB_NET_TOP:  // строки «@net<TAB>pid<TAB>имя<TAB>приём<TAB>отдача» (байт/с)
+            for (const tools::NetUse& u : tools::NetTopAdminMain(3000))
+                log(L"@net\t" + std::to_wstring(u.pid) + L"\t" + u.name + L"\t" + std::to_wstring(u.down) + L"\t" +
+                    std::to_wstring(u.up));
+            return true;
+        case JOB_POWER:
+            for (const std::wstring& line : Split(tools::PowerRequestsAdminMain(), L'\n'))
+                if (!Trim(line).empty()) log(L"@power\t" + Trim(line));
+            return true;
+        case JOB_RESTORE_POINT: {
+            // сравниваем число точек до и после: Windows молча пропускает, если точка была меньше суток назад
+            std::wstring ps =
+                L"-NoProfile -ExecutionPolicy Bypass -Command \"$b=@(Get-ComputerRestorePoint).Count; "
+                L"try { Checkpoint-Computer -Description 'MoonRadial' -RestorePointType MODIFY_SETTINGS "
+                L"-ErrorAction Stop } catch { 'error: ' + $_.Exception.Message; exit 2 }; "
+                L"$a=@(Get-ComputerRestorePoint).Count; if ($a -gt $b) { 'created' } else { 'skipped' }\"";
+            int code = Exec(L"powershell.exe", ps, &out, 300000);
+            if (out.find(L"created") != std::wstring::npos) {
+                log(L"Точка восстановления создана.");
+                return true;
+            }
+            if (out.find(L"skipped") != std::wstring::npos) {
+                log(L"Windows не создаёт точки чаще раза в сутки - последняя свежая, она и пригодится.");
+                return true;
+            }
+            log(L"Не получилось (код " + std::to_wstring(code) + L"): " + Trim(out) +
+                L". Возможно, на C: выключена «Защита системы».");
+            return false;
+        }
         case JOB_DEEP: {
             int a = Exec(L"netsh.exe", L"winsock reset", &out);
             int b = Exec(L"netsh.exe", L"int ip reset", &out);

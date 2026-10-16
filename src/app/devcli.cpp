@@ -300,6 +300,9 @@ int SecDiag() {
     dump(L"Реестр", r.hijacks);
     dump(L"Процессы", r.procs);
     dump(L"Автозапуск", r.autos);
+    dump((L"Задачи планировщика, проверено " + std::to_wstring(r.tasksChecked)).c_str(), r.tasks);
+    dump((L"Расширения браузеров, проверено " + std::to_wstring(r.extsChecked)).c_str(), r.exts);
+    dump(L"Сеть: hosts, DNS, прокси", r.nets);
     // подписи всего запущенного: что признано подписанным и кем (проверка ложных срабатываний)
     s += nl + L"Подписи запущенных программ:" + nl;
     std::set<std::wstring> seen;
@@ -326,6 +329,152 @@ int SecDiag() {
     s += L"SHA-256 RadialMenu.exe: " + tools::FileSha256(ExeDir() + L"\\RadialMenu.exe") + nl;
     WriteOut(L"sec_out.txt", s);
     return 0;
+}
+
+// Слежка, батарея, память, версии, дубли без окна: отчёт в watch_out.txt (версии и дубли - с --slow)
+int WatchDiag(bool slow) {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const std::wstring nl = L"\r\n";
+    std::wstring s;
+    ULONGLONG t0 = GetTickCount64();
+    std::vector<tools::ProcInfo> ps = tools::Processes();
+    s += L"Процессов этого входа: " + std::to_wstring(ps.size()) + L" за " + std::to_wstring(GetTickCount64() - t0) +
+         L" мс" + nl;
+    tools::ProcHistory hist;
+    hist.Feed(ps, GetTickCount64());
+    Sleep(3000);
+    hist.Feed(tools::Processes(), GetTickCount64());
+    s += nl + L"Процессор за 3 с (все программы):" + nl;
+    for (const tools::ProcHistory::Hog& h : hist.CpuHogs(1, false))
+        s += L"  " + std::to_wstring((int)(h.percent * 10) / 10.0).substr(0, 4) + L"%  " + h.name +
+             (h.window ? L"" : L"  [фон]") + nl;
+    s += nl + L"Хвосты сборки:" + nl;
+    for (const tools::Leftover& l : tools::BuildLeftovers(ps))
+        s += L"  " + l.name + L" pid " + std::to_wstring(l.pid) + L" " + tools::Bytes(l.mem) + L" - " + l.why + nl;
+    tools::CommitInfo c = tools::Commit();
+    s += nl + L"Выделено " + tools::Bytes(c.total) + L" из " + tools::Bytes(c.limit) + L", пик " + tools::Bytes(c.peak) +
+         L", память " + tools::Bytes(c.phys) + L", подкачка ~" + tools::Bytes(tools::PagefileBytes()) + nl;
+    tools::BatteryInfo b = tools::Battery();
+    s += nl + L"Батарея: есть " + std::to_wstring(b.present) + L", сеть " + std::to_wstring(b.ac) + L", заряд " +
+         std::to_wstring(b.percent) + L"%, осталось " + std::to_wstring(b.minutesLeft) + L" мин, паспорт " +
+         std::to_wstring(b.designed) + L" мВт*ч, сейчас " + std::to_wstring(b.full) + L", циклов " +
+         std::to_wstring(b.cycles) + nl;
+    s += L"Будить могут:";
+    for (const std::wstring& w : tools::WakeDevices()) s += L" [" + w + L"]";
+    s += nl;
+    ULONGLONG in0, out0, in1, out1;
+    tools::NetCounters(in0, out0);
+    Sleep(2000);
+    tools::NetCounters(in1, out1);
+    s += L"Сеть (физические адаптеры): приём " + tools::Bytes((in1 - in0) / 2) + L"/с, отдача " +
+         tools::Bytes((out1 - out0) / 2) + L"/с, всего принято " + tools::Bytes(in1) + nl;
+    s += nl + L"Новый автозапуск с прошлого раза:" + nl;
+    for (const tools::StartItem& it : tools::NewStartupItems()) s += L"  " + it.where + L": " + it.name + nl;
+    s += L"Право на задачу с правами: " + std::wstring(net::AdminReady() ? L"есть" : L"нет") + nl;
+    if (slow) {
+        t0 = GetTickCount64();
+        s += nl + L"Версии:" + nl;
+        for (const tools::ToolVersion& v : tools::ToolVersions())
+            s += L"  " + v.name + L" " + v.installed + L" (" + v.path + L")" + (v.newer ? L"  -> " + v.note : L"") + nl;
+        s += L"  за " + std::to_wstring(GetTickCount64() - t0) + L" мс" + nl;
+        t0 = GetTickCount64();
+        volatile long seen = 0;
+        std::vector<tools::DupGroup> d = tools::FindDuplicates(tools::DupRoots(), 20ull * 1024 * 1024, nullptr, &seen);
+        s += nl + L"Дубли от 20 МБ (" + std::to_wstring(seen) + L" файлов просмотрено, " +
+             std::to_wstring(GetTickCount64() - t0) + L" мс):" + nl;
+        for (const tools::DupGroup& g : d) {
+            s += L"  " + tools::Bytes(g.size) + L" x" + std::to_wstring(g.paths.size()) + nl;
+            for (const std::wstring& p : g.paths) s += L"      " + p + nl;
+        }
+    }
+    WriteOut(L"watch_out.txt", s);
+    return 0;
+}
+
+// Самопроверка логики слежки на выдуманных данных: утечка, скачок, фоновый процессор, хвосты сборки.
+// Итог в selftest_out.txt, код выхода - число провалов.
+int WatchSelftest() {
+    std::wstring s;
+    int fails = 0;
+    auto check = [&](bool ok, const std::wstring& what) {
+        s += (ok ? L"ok    " : L"FAIL  ") + what + L"\r\n";
+        fails += !ok;
+    };
+    const ULONGLONG MB = 1024ull * 1024, MIN = 60000;
+    tools::ProcHistory h;
+    // 100: ровная утечка 400 МБ -> 2 ГБ за 80 минут; 200: стоит на 3 ГБ; 300: скачок в конце (загрузка уровня);
+    // 400: процессор 25% одного ядра без окна; 500: с окном и 50%
+    for (int m = 0; m <= 80; ++m) {
+        std::vector<tools::ProcInfo> ps;
+        tools::ProcInfo a;
+        a.pid = 100, a.name = L"leaky.exe", a.created = 1, a.mem = 400 * MB + (ULONGLONG)m * 20 * MB;
+        tools::ProcInfo b = a;
+        b.pid = 200, b.name = L"steady.exe", b.mem = 3000 * MB;
+        tools::ProcInfo c = a;
+        c.pid = 300, c.name = L"jump.exe", c.mem = m < 78 ? 500 * MB + m * 3 * MB : 2500 * MB - (m - 78) * 200 * MB;
+        tools::ProcInfo d = a;
+        d.pid = 400, d.name = L"busy.exe", d.mem = 50 * MB, d.cpu = (ULONGLONG)m * 60 * 10000000ull / 4;
+        tools::ProcInfo e = a;
+        e.pid = 500, e.name = L"game.exe", e.mem = 50 * MB, e.cpu = (ULONGLONG)m * 60 * 10000000ull / 2, e.window = true;
+        ps = {a, b, c, d, e};
+        h.Feed(ps, 1000000 + m * MIN);
+    }
+    std::vector<tools::ProcHistory::Leak> leaks = h.Leaks();
+    check(leaks.size() == 1 && leaks[0].pid == 100, L"утечка найдена только у leaky.exe (найдено " +
+                                                      std::to_wstring(leaks.size()) + L")");
+    if (!leaks.empty())
+        check(leaks[0].minutes >= 55 && leaks[0].minutes <= 90, L"окно сравнения 55-90 минут: " +
+                                                                    std::to_wstring(leaks[0].minutes));
+    check(h.Ready(10) && h.Ready(80), L"история готова");
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    std::vector<tools::ProcHistory::Hog> bg = h.CpuHogs(10, true), all = h.CpuHogs(10, false);
+    double want = 25.0 / si.dwNumberOfProcessors;
+    check(bg.size() == 1 && bg[0].name == L"busy.exe", L"фоновый: только busy.exe");
+    if (!bg.empty())
+        check(bg[0].percent > want * 0.9 && bg[0].percent < want * 1.1,
+              L"доля процессора " + std::to_wstring(bg[0].percent) + L" при ожидаемой " + std::to_wstring(want));
+    check(all.size() == 2 && all[0].name == L"game.exe", L"все: game.exe первым");
+    // процесс пропал - история по нему уходит
+    h.Feed({}, 1000000 + 81 * MIN);
+    check(h.Leaks().empty() && h.CpuHogs(10, false).empty(), L"закрытые процессы забываются");
+
+    // хвосты: воркер Unreal без редактора, сирота-компилятор, node с живым родителем, node с окном
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG now = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime, hour = 36000000000ull;
+    auto P = [&](DWORD pid, DWORD parent, const wchar_t* name, ULONGLONG created, bool win = false) {
+        tools::ProcInfo p;
+        p.pid = pid, p.parent = parent, p.name = name, p.created = created, p.window = win;
+        return p;
+    };
+    std::vector<tools::ProcInfo> ps = {
+        P(10, 1, L"explorer.exe", now - 5 * hour),
+        P(11, 10, L"ShaderCompileWorker.exe", now - hour),
+        P(12, 999, L"cl.exe", now - hour),           // родителя нет
+        P(13, 10, L"node.exe", now - hour),          // родитель жив
+        P(14, 999, L"node.exe", now - hour, true),   // сирота, но с окном
+        P(15, 16, L"clangd.exe", now - hour),        // номер родителя достался более новому процессу
+        P(16, 10, L"notepad.exe", now - 60000000ull),
+        P(17, 999, L"ninja.exe", now - 60000000ull),  // сирота, но работает меньше 10 минут
+    };
+    std::vector<tools::Leftover> t = tools::BuildLeftovers(ps);
+    std::wstring names;
+    for (const tools::Leftover& l : t) names += l.name + L" ";
+    check(t.size() == 3, L"хвостов 3: " + names);
+    ps.push_back(P(18, 10, L"UnrealEditor.exe", now - hour, true));
+    t = tools::BuildLeftovers(ps);
+    names.clear();
+    for (const tools::Leftover& l : t) names += l.name + L" ";
+    check(t.size() == 2 && names.find(L"ShaderCompileWorker") == std::wstring::npos,
+          L"с открытым редактором воркер не хвост: " + names);
+    check(tools::SystemImposter(L"C:\\Users\\x\\AppData\\svchost.exe") &&
+              !tools::SystemImposter(L"C:\\Windows\\System32\\svchost.exe") &&
+              !tools::SystemImposter(L"C:\\Windows\\explorer.exe") &&
+              !tools::SystemImposter(L"D:\\x\\notepad.exe"),
+          L"самозванцы по пути");
+    WriteOut(L"selftest_out.txt", s);
+    return fails;
 }
 
 // Очистка всего, что пересоздаётся быстро (как «Всё сразу» в кольце): кэши шейдеров и Unreal не трогаются.
@@ -389,6 +538,10 @@ bool Run(int& exitCode) {
         exitCode = ToolsDiag();
     } else if (Has(args, L"--sec-diag")) {  // «Защита»: находки и подписи всего запущенного -> sec_out.txt
         exitCode = SecDiag();
+    } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
+        exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--watch-selftest")) {  // логика слежки на выдуманных данных -> selftest_out.txt
+        exitCode = WatchSelftest();
     } else if (Has(args, L"--net-diag")) {
         exitCode = NetDiag();
     } else if (Has(args, L"--lock-apply")) {

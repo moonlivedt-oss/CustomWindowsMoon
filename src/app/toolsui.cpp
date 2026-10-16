@@ -37,6 +37,15 @@ std::vector<tools::Listener> g_ports;
 std::vector<tools::Which> g_which;
 std::vector<tools::ProjectJunk> g_projects;
 std::vector<tools::Conflict> g_conflicts;
+std::vector<tools::Listener> g_oldPorts;  // серверы разработки старше 6 часов
+std::vector<tools::Leftover> g_tails;     // хвосты сборки
+std::vector<tools::ProcHistory::Leak> g_leakList;
+std::vector<tools::ProcHistory::Hog> g_hogs;
+std::vector<std::wstring> g_wake;
+std::vector<tools::ToolVersion> g_vers;
+std::vector<tools::DupGroup> g_dups;  // под g_scanLock: заполняет поток поиска
+ULONGLONG g_dupsAt = 0;
+std::vector<tools::DupGroup> g_dupList;     // что показано в кольце (номера dup:i)
 std::vector<tools::Suspect> g_finds;        // «Защита»: что показано в кольце
 std::vector<tools::StartItem> g_secStarts;  // автозагрузка на момент проверки (номера из Suspect::start)
 std::vector<tools::SecurityApp> g_secApps;
@@ -60,6 +69,7 @@ struct Scan {
     std::vector<tools::Growth> growth;
     ULONGLONG ddcOld = 0;  // кэш Unreal, не открывавшийся 30 дней
     tools::Driver driver;
+    std::vector<tools::ToolVersion> versions;  // раз в неделю отдельно, как драйвер
 };
 SRWLOCK g_scanLock = SRWLOCK_INIT;
 Scan g_scan;
@@ -193,7 +203,8 @@ void RefreshScan() {
             tools::RecordSizes(names, bytes);
             s.growth = tools::WeekGrowth(7);
             AcquireSRWLockExclusive(&g_scanLock);
-            s.driver = g_scan.driver;  // драйвер проверяется раз в неделю отдельно
+            s.driver = g_scan.driver;  // драйвер и версии проверяются отдельно
+            s.versions = g_scan.versions;
             g_scan = std::move(s);
             g_scanAt = GetTickCount64();
             ReleaseSRWLockExclusive(&g_scanLock);
@@ -247,6 +258,7 @@ void OnSecurity() {
     std::vector<tools::Suspect> all = g_sec.hijacks;
     all.insert(all.end(), g_sec.procs.begin(), g_sec.procs.end());
     all.insert(all.end(), g_sec.autos.begin(), g_sec.autos.end());
+    for (const auto* v : {&g_sec.tasks, &g_sec.exts, &g_sec.nets}) all.insert(all.end(), v->begin(), v->end());
     ReleaseSRWLockShared(&g_secLock);
     for (const tools::Suspect& s : all) {
         if (s.score < kDangerScore || !g_secWarned.insert(FindKey(s)).second) continue;
@@ -277,6 +289,157 @@ void Ask(const std::wstring& title, const std::wstring& sub, const std::wstring&
     g_card.Show(BoostCard::OFFER, title, sub, Theme(), hold, glyph);
 }
 
+// ---------------- слежка раз в минуту ----------------
+// Свой поток: снимок процессов копится в истории (утечки, фоновый процессор), трафик физических адаптеров,
+// выделенная память, раз в 5 минут - новый автозапуск. Карточки показывает основной поток, по одной и не в игре.
+
+SRWLOCK g_watchLock = SRWLOCK_INIT;
+tools::ProcHistory g_hist;
+std::vector<tools::ProcInfo> g_procs;  // последний снимок
+std::vector<tools::ProcHistory::Leak> g_leaks;
+std::vector<tools::StartItem> g_newStarts;  // ждут вопроса
+std::vector<std::wstring> g_wakeCache;      // кто будит: powercfg раз в полчаса, не при открытии кольца
+tools::CommitInfo g_commit;
+double g_netDown = 0, g_netUp = 0;  // байт/с за последнюю минуту
+HANDLE g_watchStop = nullptr, g_watchThread = nullptr;
+constexpr UINT kWatchTag = 0x5F;  // wParam у WM_TOOLS_JOB: новый снимок слежки
+
+bool g_game = false, g_dev = false;
+ULONGLONG g_devEnded = 0;  // когда закрылся Unreal: через 2 минуты - смотреть хвосты
+std::set<std::wstring> g_leakWarned;
+ULONGLONG g_commitWarned = 0, g_proactiveAt = 0;
+
+DWORD WINAPI WatchLoop(void*) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0;
+    int n = 0;
+    do {
+        std::vector<tools::ProcInfo> ps = tools::Processes();
+        ULONGLONG in = 0, out = 0, now = GetTickCount64();
+        tools::NetCounters(in, out);
+        tools::CommitInfo c = tools::Commit();
+        std::vector<tools::StartItem> fresh;
+        if (n % 5 == 0) fresh = tools::NewStartupItems();
+        std::vector<std::wstring> wake;
+        bool wakeNew = n % 30 == 0;
+        if (wakeNew) wake = tools::WakeDevices();
+        AcquireSRWLockExclusive(&g_watchLock);
+        g_hist.Feed(ps, now);
+        g_procs = std::move(ps);
+        g_leaks = g_hist.Leaks();
+        g_commit = c;
+        if (lastAt && in >= lastIn && out >= lastOut && now > lastAt) {
+            double dt = (now - lastAt) / 1000.0;
+            g_netDown = (in - lastIn) / dt;
+            g_netUp = (out - lastOut) / dt;
+        }
+        g_newStarts.insert(g_newStarts.end(), fresh.begin(), fresh.end());
+        if (wakeNew) g_wakeCache = std::move(wake);
+        ReleaseSRWLockExclusive(&g_watchLock);
+        lastIn = in, lastOut = out, lastAt = now;
+        PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
+        ++n;
+    } while (WaitForSingleObject(g_watchStop, 60000) == WAIT_TIMEOUT);
+    CoUninitialize();
+    return 0;
+}
+
+// программа целиком (все процессы с этим именем) - для мягкого закрытия, как в секторе «Процессы»
+tools::HeavyApp AppByName(const std::wstring& name) {
+    tools::HeavyApp a;
+    a.name = name;
+    AcquireSRWLockShared(&g_watchLock);
+    for (const tools::ProcInfo& p : g_procs)
+        if (_wcsicmp(p.name.c_str(), name.c_str()) == 0) a.pids.push_back(p.pid), a.bytes += p.mem;
+    ReleaseSRWLockShared(&g_watchLock);
+    return a;
+}
+
+void KillLeftovers(const std::vector<tools::Leftover>& tails) {
+    RunJob(L"Хвосты сборки", [tails](const tools::Log&, std::wstring& res) {
+        int ok = 0;
+        ULONGLONG freed = 0;
+        for (const tools::Leftover& t : tails)
+            if (tools::KillPid(t.pid, t.name)) ++ok, freed += t.mem;
+        res = L"Завершено " + std::to_wstring(ok) + L" из " + std::to_wstring(tails.size()) + L", освободилось " +
+              tools::Bytes(freed) + L" памяти.";
+        return ok > 0;
+    });
+}
+
+void OpenPagefile() {
+    ShellExecuteW(nullptr, L"open", L"SystemPropertiesPerformance.exe", nullptr, nullptr, SW_SHOWNORMAL);
+    g_card.Show(BoostCard::DONE, L"Файл подкачки",
+                L"Вкладка «Дополнительно», «Виртуальная память» - «Изменить». Для 16 ГБ памяти и Unreal: размер "
+                L"по выбору системы или вручную 16-24 ГБ на SSD. Нужны права, применится после перезагрузки.",
+                Theme(), 30000, Toast::G_INFO);
+}
+
+// По одной карточке: новый автозапуск, утечка, память на пределе, хвосты Unreal. Не в игре и не поверх другой.
+void TryProactive() {
+    ULONGLONG now = GetTickCount64();
+    if (g_game || g_busy || g_card.Visible() || now - g_proactiveAt < 5000) return;
+    AcquireSRWLockExclusive(&g_watchLock);
+    bool haveStart = !g_newStarts.empty();
+    tools::StartItem st = haveStart ? g_newStarts.front() : tools::StartItem{};
+    if (haveStart) g_newStarts.erase(g_newStarts.begin());
+    std::vector<tools::ProcHistory::Leak> leaks = g_leaks;
+    tools::CommitInfo c = g_commit;
+    std::vector<tools::ProcInfo> procs = g_dev || !g_devEnded ? std::vector<tools::ProcInfo>{} : g_procs;
+    ReleaseSRWLockExclusive(&g_watchLock);
+    g_proactiveAt = now;
+    if (haveStart) {
+        Ask(
+            L"Новое в автозапуске: " + st.name,
+            st.where + L": " + Short(st.command, 120) + L". Будет запускаться при каждом входе.", L"Оставить",
+            st.canToggle ? L"Выключить" : L"Понятно", nullptr,
+            [st] {
+                if (!st.canToggle) return;
+                std::wstring msg;
+                bool ok = tools::SetStartup(st, false, [&](const std::wstring& t) { msg = t; });
+                g_card.Show(BoostCard::DONE, ok ? L"Автозагрузка" : L"Не получилось", msg, Theme());
+            },
+            40000, Toast::G_INFO);
+        return;
+    }
+    for (const tools::ProcHistory::Leak& l : leaks) {
+        std::wstring key = std::to_wstring(l.pid) + L"|" + Lower(l.name);
+        if (!g_leakWarned.insert(key).second) continue;
+        std::wstring name = l.name;
+        Ask(
+            L"Растёт память: " + NoExe(l.name),
+            L"Было " + tools::Bytes(l.was) + L" " + std::to_wstring(l.minutes) + L" мин назад, сейчас " +
+                tools::Bytes(l.now) + L", и рост не останавливается. Похоже на утечку - помогает перезапуск.",
+            L"Закрыть", L"Не сейчас", [name] { CloseHeavy(AppByName(name)); }, nullptr, 40000, Toast::G_WARN);
+        return;
+    }
+    if (c.limit && c.total * 100 >= c.limit * 90 && (!g_commitWarned || now - g_commitWarned > 6 * 3600 * 1000ull)) {
+        g_commitWarned = now;
+        Ask(
+            L"Память на пределе",
+            L"Занято " + tools::Bytes(c.total) + L" из " + tools::Bytes(c.limit) + L" (память и подкачка " +
+                tools::Bytes(tools::PagefileBytes()) +
+                L"). Дальше программы начнут падать, Unreal - при сборке шейдеров.",
+            L"Что закрыть", L"Подкачка", [] { MemoryOffer(L"память на пределе", {}, true); }, [] { OpenPagefile(); },
+            40000, Toast::G_WARN);
+        return;
+    }
+    if (g_devEnded && now - g_devEnded > 2 * 60 * 1000) {
+        g_devEnded = 0;
+        std::vector<tools::Leftover> tails;
+        ULONGLONG mem = 0;
+        for (const tools::Leftover& t : tools::BuildLeftovers(procs))
+            if (t.why.find(L"Unreal") != std::wstring::npos) tails.push_back(t), mem += t.mem;
+        if (tails.empty()) return;
+        Ask(
+            L"Unreal закрыт, а его процессы остались",
+            Plural((int)tails.size(), L"процесс", L"процесса", L"процессов") + L" (" + tails[0].name +
+                (tails.size() > 1 ? L" и другие" : L"") + L") держат " + tools::Bytes(mem) + L" памяти.",
+            L"Завершить", L"Оставить", [tails] { KillLeftovers(tails); }, nullptr, 30000, Toast::G_INFO);
+    }
+}
+
 // ---------------- раз в неделю: рост, здоровье SSD, драйвер ----------------
 // weekly.tsv: что<TAB>день последней проверки
 
@@ -300,6 +463,8 @@ void SetDay(const std::wstring& what, int day) {
 struct WeeklyMsg {
     std::wstring growth, health;
     tools::Driver driver;
+    std::vector<tools::ToolVersion> versions;
+    bool versionsChecked = false;
 };
 constexpr UINT kWeeklyTag = 0x57;  // wParam у WM_TOOLS_JOB: итог недельной проверки
 
@@ -307,13 +472,13 @@ void Weekly() {
     if (g_weeklyRunning) return;
     int today = Today();
     bool growth = today - LastDay(L"growth") >= 7, health = today - LastDay(L"health") >= 7,
-         driver = today - LastDay(L"driver") >= 3;
-    if (!growth && !health && !driver) return;
+         driver = today - LastDay(L"driver") >= 3, versions = today - LastDay(L"versions") >= 7;
+    if (!growth && !health && !driver && !versions) return;
     g_weeklyRunning = true;
     struct Want {
-        bool growth, health, driver;
+        bool growth, health, driver, versions;
     };
-    auto* w = new Want{growth, health, driver};
+    auto* w = new Want{growth, health, driver, versions};
     HANDLE th = CreateThread(
         nullptr, 0,
         [](void* p) -> DWORD {
@@ -342,6 +507,11 @@ void Weekly() {
                 m->driver = tools::NvidiaDriver();
                 if (m->driver.ok) SetDay(L"driver", today);
             }
+            if (want->versions) {
+                m->versions = tools::ToolVersions();
+                m->versionsChecked = true;
+                if (!m->versions.empty()) SetDay(L"versions", today);
+            }
             CoUninitialize();
             if (!PostMessageW(g_app, WM_TOOLS_JOB, kWeeklyTag, (LPARAM)m)) delete m;
             g_weeklyRunning = false;
@@ -361,6 +531,17 @@ void OnWeekly(WeeklyMsg* m) {
         AcquireSRWLockExclusive(&g_scanLock);
         g_scan.driver = m->driver;
         ReleaseSRWLockExclusive(&g_scanLock);
+    }
+    std::wstring fresh, freshKey;  // что вышло новее; про один и тот же набор - один раз
+    if (m->versionsChecked) {
+        AcquireSRWLockExclusive(&g_scanLock);
+        g_scan.versions = m->versions;
+        ReleaseSRWLockExclusive(&g_scanLock);
+        for (const tools::ToolVersion& v : m->versions)
+            if (v.newer) {
+                fresh += (fresh.empty() ? L"" : L"; ") + v.name + L": " + v.note;
+                freshKey += v.name + v.latest;
+            }
     }
     if (g_busy) return;
     // по одной карточке за раз: важнее здоровье диска, потом драйвер, потом рост
@@ -383,6 +564,12 @@ void OnWeekly(WeeklyMsg* m) {
                                   SW_SHOWNORMAL);
             },
             nullptr, 30000, Toast::G_INFO);
+    } else if (!fresh.empty() &&
+               LastDay(L"versions-said-" + std::to_wstring(std::hash<std::wstring>{}(freshKey))) == 0) {
+        SetDay(L"versions-said-" + std::to_wstring(std::hash<std::wstring>{}(freshKey)), Today());
+        g_card.Show(BoostCard::DONE, L"Вышли обновления",
+                    fresh + L". Ничего не ставлю сам; ссылки - в кольце «Утилиты», «PATH».", Theme(), 25000,
+                    Toast::G_INFO);
     } else if (!m->growth.empty()) {
         g_card.Show(BoostCard::DONE, L"За неделю выросло", m->growth + L". Почистить - кольцо «Утилиты».", Theme(),
                     14000, Toast::G_INFO);
@@ -441,6 +628,15 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
     g_diskCheck = GetTickCount64() - 9 * 60 * 1000;  // первая проверка места - через минуту после старта
     g_started = GetTickCount64();
     g_weeklyCheck = g_started;
+    g_watchStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    g_watchThread = CreateThread(nullptr, 0, WatchLoop, nullptr, 0, nullptr);
+}
+
+void OnModes(bool game, bool dev) {
+    if (g_dev && !dev) g_devEnded = GetTickCount64();  // Unreal закрыт: через пару минут - не остались ли воркеры
+    if (dev) g_devEnded = 0;
+    g_game = game;
+    g_dev = dev;
 }
 
 namespace {
@@ -525,6 +721,55 @@ void SecurityAction(const tools::Suspect& s) {
             30000, Toast::G_WARN);
         return;
     }
+    if (s.kind == tools::FIND_TASK) {
+        std::wstring task = s.where, path = s.path;
+        Ask(
+            Level(s.score) + L"задача " + s.name, s.why + L". Запускает: " + Short(s.parent, 140),
+            file ? L"VirusTotal" : L"Понятно", L"Выключить",
+            [path, file] {
+                if (file) OpenVirusTotal(path);
+            },
+            [task] {
+                std::wstring msg;
+                bool ok = tools::SetTaskEnabled(task, false, [&](const std::wstring& t) { msg = t; });
+                g_card.Show(BoostCard::DONE, ok ? L"Задача выключена" : L"Не получилось", msg, Theme());
+            },
+            30000, Toast::G_WARN);
+        return;
+    }
+    if (s.kind == tools::FIND_EXT) {
+        std::wstring dir = s.path;
+        Ask(
+            Level(s.score) + L"расширение " + s.name,
+            s.where + L": " + s.why + L". Убрать - на странице расширений браузера (меню - Расширения).",
+            L"Показать папку", L"Понятно",
+            [dir] { ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }, nullptr, 30000,
+            Toast::G_WARN);
+        return;
+    }
+    if (s.kind == tools::FIND_NET) {
+        bool hosts = s.name.rfind(L"hosts", 0) == 0, dns = s.name.rfind(L"DNS", 0) == 0;
+        std::wstring where = s.where;
+        Ask(
+            Level(s.score) + s.name,
+            s.why + (hosts ? L". Править hosts можно только с правами (Блокнот от администратора)."
+                     : dns ? L". Вернуть автоматический DNS: свойства адаптера - IPv4."
+                           : L". Выключить: Параметры - Сеть - Прокси."),
+            hosts ? L"Папка hosts"
+            : dns ? L"Адаптеры"
+                  : L"Прокси",
+            L"Понятно",
+            [hosts, dns, where] {
+                if (hosts)
+                    ShellExecuteW(nullptr, nullptr, L"explorer.exe", (L"/select,\"" + where + L"\"").c_str(), nullptr,
+                                  SW_SHOWNORMAL);
+                else
+                    ShellExecuteW(nullptr, L"open", dns ? L"ncpa.cpl" : L"ms-settings:network-proxy", nullptr, nullptr,
+                                  SW_SHOWNORMAL);
+            },
+            nullptr, 30000, Toast::G_WARN);
+        return;
+    }
     // находка в реестре: исправляется с правами, сам не трогаю
     std::wstring where = s.where;
     Ask(
@@ -552,6 +797,7 @@ Item SecurityItem() {
     g_finds.insert(g_finds.end(), sec.hijacks.begin(), sec.hijacks.end());
     g_finds.insert(g_finds.end(), sec.procs.begin(), sec.procs.end());
     g_finds.insert(g_finds.end(), sec.autos.begin(), sec.autos.end());
+    for (const auto* v : {&sec.tasks, &sec.nets, &sec.exts}) g_finds.insert(g_finds.end(), v->begin(), v->end());
     g_secStarts = sec.starts;
     int danger = 0;
     for (const tools::Suspect& s : g_finds) danger += s.score >= kDangerScore;
@@ -566,7 +812,9 @@ Item SecurityItem() {
                              : L"Странного: " + std::to_wstring(g_finds.size()) + L". " + checkedNote);
     for (size_t i = 0; i < g_finds.size() && i < 12; ++i) {
         const tools::Suspect& s = g_finds[i];
-        std::wstring what = s.pid ? L"процесс" : s.start >= 0 ? L"автозапуск" : L"реестр";
+        static const wchar_t* kWhat[] = {
+            L"процесс", L"автозапуск", L"реестр", L"задача планировщика", L"расширение браузера", L"сеть"};
+        std::wstring what = kWhat[s.kind];
         item.children.push_back(
             Act(Short(NoExe(s.name), 14), L"tools-bug.png", L"sec-find:" + std::to_wstring(i),
                 Level(s.score) + what + L". " + s.why + L". " + Short(s.path, 90) + L". 2 клика - что с этим сделать"));
@@ -584,6 +832,9 @@ Item SecurityItem() {
     item.children.push_back(Act(av.empty() ? L"Defender" : L"Kaspersky", L"tools-shield.png", L"sec-av",
                                 av.empty() ? L"Открыть «Защиту от вирусов» Windows - там полная и офлайн-проверка"
                                            : L"Открыть Kaspersky - там полная проверка компьютера"));
+    item.children.push_back(Act(L"Снимок", L"tools-shield.png", L"sec-restore",
+                                L"Точка восстановления системы - перед драйвером, правками реестра или "
+                                L"«Починить Windows»; нужны права"));
     item.children.push_back(Act(L"Починить Windows", L"tools-box.png", L"sec-repair",
                                 L"Сверить системные файлы (SFC) или восстановить их из Windows Update (DISM); "
                                 L"нужны права - Windows спросит"));
@@ -674,6 +925,25 @@ void ShowRing(RadialMenu& menu) {
         clean.children.push_back(
             Act(L"Корзина " + tools::Bytes(bin), L"tools-clean.png", L"bin",
                 Plural((int)binItems, L"объект", L"объекта", L"объектов") + L". Очистить насовсем (спрошу ещё раз)"));
+    AcquireSRWLockShared(&g_scanLock);
+    std::vector<tools::DupGroup> dups = g_dups;
+    bool dupsKnown = g_dupsAt != 0;
+    ReleaseSRWLockShared(&g_scanLock);
+    for (size_t i = 0; i < dups.size() && i < 6; ++i) {
+        const tools::DupGroup& g = dups[i];
+        ULONGLONG extra = g.size * (g.paths.size() - 1);
+        clean.children.push_back(
+            Act(L"Копии " + Short(Leaf(g.paths[0]), 10) + L" " + tools::Bytes(extra), L"tools-dup.png",
+                L"dup:" + std::to_wstring(i),
+                Plural((int)g.paths.size(), L"одинаковый файл", L"одинаковых файла", L"одинаковых файлов") + L" по " +
+                    tools::Bytes(g.size) + L". Останется " + g.paths[0] + L". 2 клика - копии в Корзину (спрошу)"));
+    }
+    clean.children.push_back(
+        Act(L"Дубли", L"tools-dup.png", L"dup-scan",
+            std::wstring(dupsKnown ? (dups.empty() ? L"Дублей от 20 МБ не было. " : L"Искал недавно. ") : L"") +
+                L"Одинаковые файлы от 20 МБ в Загрузках, на Рабочем столе, в Документах, Видео, Изображениях и "
+                L"Музыке. Папки проектов и библиотеки ассетов не трогаю"));
+    g_dupList = dups;
     ring.push_back(clean);
 
     // проекты: пересобираемый мусор (node_modules, Intermediate, target, .venv, build)
@@ -737,6 +1007,20 @@ void ShowRing(RadialMenu& menu) {
                         L". 2 клика - показать в Проводнике"));
             g_which.push_back(w);
         }
+    g_vers.clear();
+    std::wstring installed;
+    for (const tools::ToolVersion& v : scan.versions) {
+        if (!v.installed.empty()) installed += (installed.empty() ? L"" : L", ") + v.name + L" " + v.installed;
+        if (!v.newer) continue;
+        path.children.push_back(Act(v.name + L" " + v.latest, L"tools-update.png",
+                                    L"ver:" + std::to_wstring(g_vers.size()),
+                                    v.note + L". Установлен " + (v.installed.empty() ? L"?" : v.installed) + L" (" +
+                                        v.path + L"). 2 клика - откуда обновить"));
+        g_vers.push_back(v);
+    }
+    path.children.push_back(Act(L"Версии", L"tools-update.png", L"ver-check",
+                                (scan.versions.empty() ? std::wstring(L"Ещё не проверялось. ") : installed + L". ") +
+                                    L"Проверить сейчас, что вышло новее (раз в неделю - само)"));
     path.children.push_back(Act(L"Добавить", L"tools-path.png", L"path-add",
                                 L"Добавить в PATH папку из буфера (скопируй её в Проводнике)"));
     ring.push_back(path);
@@ -746,17 +1030,27 @@ void ShowRing(RadialMenu& menu) {
     std::vector<tools::Listener> ls = tools::Listeners();
     tools::ListenerProjects(ls);
     Item ports = Act(L"Порты", L"tools-ports.png", L"", L"Кто занял порты разработки и из какого проекта");
+    g_oldPorts.clear();
     for (const tools::Listener& l : ls)
         if (l.dev && g_ports.size() < 12) {
             std::wstring who = l.project.empty() ? NoExe(l.process) : Leaf(l.project);
+            int age = tools::ProcessMinutes(l.pid);
+            // сервер разработки, забытый с прошлого раза: работает дольше 6 часов
+            if (age >= 360 && !tools::ProtectedExe(l.process)) g_oldPorts.push_back(l);
             ports.children.push_back(
                 Act(std::to_wstring(l.port) + L" " + Short(who, 14), L"tools-ports.png",
                     L"port:" + std::to_wstring(g_ports.size()),
                     std::wstring(l.udp ? L"UDP " : L"TCP ") + std::to_wstring(l.port) + L", " + l.process + L" (PID " +
                         std::to_wstring(l.pid) + L")" + (l.project.empty() ? L"" : L", проект " + l.project) +
-                        (l.command.empty() ? L"" : L": " + l.command) + L". 2 клика - открыть или завершить"));
+                        (l.command.empty() ? L"" : L": " + l.command) +
+                        (age >= 60 ? L", работает " + std::to_wstring(age / 60) + L" ч" : std::wstring()) +
+                        L". 2 клика - открыть или завершить"));
             g_ports.push_back(l);
         }
+    if (!g_oldPorts.empty())
+        ports.children.push_back(Act(L"Старые " + std::to_wstring(g_oldPorts.size()), L"tools-clean.png", L"ports-old",
+                                     L"Серверы разработки, работающие дольше 6 часов - скорее всего забытые с прошлого "
+                                     L"раза. 2 клика - завершить (спрошу)"));
     if (ports.children.empty())
         ports.children.push_back(Act(L"Свободно", L"tools-ports.png", L"studio:3", L"Порты разработки никто не занял"));
     ring.push_back(ports);
@@ -773,7 +1067,93 @@ void ShowRing(RadialMenu& menu) {
                                      Plural((int)g_apps[i].pids.size(), L"процесс", L"процесса", L"процессов") +
                                          L", память " + tools::Bytes(g_apps[i].bytes) +
                                          L". 2 клика - закрыть (спрошу)"));
+    AcquireSRWLockShared(&g_watchLock);
+    std::vector<tools::ProcInfo> snap = g_procs;
+    g_leakList = g_leaks;
+    tools::CommitInfo cm = g_commit;
+    bool hogsReady = g_hist.Ready(10);
+    std::vector<tools::ProcHistory::Hog> hogs = g_hist.CpuHogs(10, true);
+    double down = g_netDown, up = g_netUp;
+    ReleaseSRWLockShared(&g_watchLock);
+    if (snap.empty()) snap = tools::Processes();  // слежка ещё не успела
+    if (!cm.limit) cm = tools::Commit();
+    g_tails = tools::BuildLeftovers(snap);
+    if (!g_tails.empty()) {
+        ULONGLONG tm = 0;
+        std::wstring names;
+        for (const tools::Leftover& t : g_tails) {
+            tm += t.mem;
+            if (names.size() < 90) names += (names.empty() ? L"" : L", ") + NoExe(t.name);
+        }
+        procs.children.push_back(Act(L"Хвосты " + std::to_wstring(g_tails.size()), L"tools-clean.png", L"tails",
+                                     L"Остались после сборки: " + names + L"; держат " + tools::Bytes(tm) +
+                                         L". 2 клика - завершить все (спрошу)"));
+    }
+    for (size_t i = 0; i < g_leakList.size() && i < 3; ++i)
+        procs.children.push_back(Act(
+            L"Растёт " + Short(NoExe(g_leakList[i].name), 10), L"tools-bug.png", L"leak:" + std::to_wstring(i),
+            L"Память: " + tools::Bytes(g_leakList[i].was) + L" -> " + tools::Bytes(g_leakList[i].now) + L" за " +
+                std::to_wstring(g_leakList[i].minutes) + L" мин, ровно и без остановки. 2 клика - закрыть (спрошу)"));
+    procs.children.push_back(Act(L"Подкачка", L"tools-size.png", L"pagefile",
+                                 L"Выделено " + tools::Bytes(cm.total) + L" из " + tools::Bytes(cm.limit) +
+                                     L" (память " + tools::Bytes(cm.phys) + L" + подкачка " +
+                                     tools::Bytes(tools::PagefileBytes()) + L"), пик с загрузки " +
+                                     tools::Bytes(cm.peak) + L". 2 клика - настройки подкачки"));
     ring.push_back(procs);
+
+    // фон: батарея, кто ест процессор без окна, кто качает, что мешает сну
+    tools::BatteryInfo bat = tools::Battery();
+    wchar_t speed[96];
+    swprintf(speed, 96, L"сеть за минуту: приём %ls/с, отдача %ls/с", tools::Bytes((ULONGLONG)down).c_str(),
+             tools::Bytes((ULONGLONG)up).c_str());
+    Item bg = Act(L"Фон", L"tools-battery.png", L"", std::wstring(L"Что работает без окна и тратит батарею; ") + speed);
+    if (bat.present && bat.percent >= 0) {
+        std::wstring note =
+            bat.ac ? (bat.charging ? L"Заряжается" : L"От сети")
+                   : L"От батареи" + (bat.minutesLeft > 0 ? L", осталось " + std::to_wstring(bat.minutesLeft / 60) +
+                                                                L" ч " + std::to_wstring(bat.minutesLeft % 60) + L" мин"
+                                                          : std::wstring());
+        if (bat.designed && bat.full)
+            note += L". Держит " + std::to_wstring(bat.full / 1000) + L"." + std::to_wstring(bat.full % 1000 / 100) +
+                    L" из " + std::to_wstring(bat.designed / 1000) + L" Вт*ч по паспорту, износ " +
+                    std::to_wstring(bat.full >= bat.designed ? 0 : (int)(100 - bat.full * 100 / bat.designed)) + L"%";
+        if (bat.cycles > 0) note += L", циклов " + std::to_wstring(bat.cycles);
+        bg.children.push_back(Act(L"Батарея " + std::to_wstring(bat.percent) + L"%", L"tools-battery.png", L"", note));
+    }
+    g_hogs.clear();
+    for (const tools::ProcHistory::Hog& h : hogs)
+        if (h.percent >= 1.0 && g_hogs.size() < 6) g_hogs.push_back(h);
+    for (size_t i = 0; i < g_hogs.size(); ++i) {
+        wchar_t pct[16];
+        swprintf(pct, 16, L"%.1f%%", g_hogs[i].percent);
+        bg.children.push_back(Act(Short(NoExe(g_hogs[i].name), 10) + L" " + pct, L"tools-box.png",
+                                  L"hog:" + std::to_wstring(i),
+                                  std::wstring(L"В среднем ") + pct + L" всего процессора за 10 минут, без окна; " +
+                                      Plural((int)g_hogs[i].pids.size(), L"процесс", L"процесса", L"процессов") +
+                                      L", память " + tools::Bytes(g_hogs[i].mem) + L". 2 клика - закрыть (спрошу)"));
+    }
+    if (!hogsReady)
+        bg.children.push_back(Act(L"Собираю", L"tools-box.png", L"",
+                                  L"Процессор в фоне считается за 10 минут, история копится с запуска RadialMenu"));
+    else if (g_hogs.empty())
+        bg.children.push_back(Act(L"Тихо", L"tools-box.png", L"",
+                                  L"За 10 минут ни одна программа без окна не съела больше 1% процессора"));
+    bg.children.push_back(Act(L"Кто качает", L"tools-ports.png", L"net-top",
+                              std::wstring(L"Трафик по программам за 3 секунды (TCP; QUIC браузеров не видно). ") +
+                                  speed + (net::AdminReady() ? L"" : L". Нужна задача с правами (спрошу)")));
+    bg.children.push_back(Act(L"Мешает сну", L"tools-battery.png", L"power",
+                              std::wstring(L"Кто не даёт уснуть или выключить экран и кто будит по таймеру") +
+                                  (net::AdminReady() ? L"" : L". Нужна задача с правами (спрошу)")));
+    AcquireSRWLockShared(&g_watchLock);
+    g_wake = g_wakeCache;
+    ReleaseSRWLockShared(&g_watchLock);
+    if (!g_wake.empty()) {
+        std::wstring list;
+        for (const std::wstring& w : g_wake) list += (list.empty() ? L"" : L", ") + w;
+        bg.children.push_back(Act(L"Будят " + std::to_wstring(g_wake.size()), L"tools-battery.png", L"wake",
+                                  L"Могут разбудить из сна: " + list + L". 2 клика - Диспетчер устройств"));
+    }
+    ring.push_back(bg);
 
     // автозагрузка: что включено и сколько памяти держит
     g_starts = tools::StartupItems();
@@ -1068,6 +1448,202 @@ void Run(const std::wstring& key) {
             });
         return;
     }
+    if (key == L"tails") {
+        if (g_tails.empty()) return;
+        std::vector<tools::Leftover> tails = g_tails;
+        ULONGLONG mem = 0;
+        for (const tools::Leftover& t : tails) mem += t.mem;
+        Ask(L"Завершить хвосты сборки?",
+            Plural((int)tails.size(), L"процесс", L"процесса", L"процессов") + L", " + tools::Bytes(mem) + L": " +
+                tails[0].name + L" - " + tails[0].why + (tails.size() > 1 ? L" и другие." : L"."),
+            L"Завершить", L"Не надо", [tails] { KillLeftovers(tails); });
+        return;
+    }
+    if (key.rfind(L"leak:", 0) == 0 || key.rfind(L"hog:", 0) == 0) {
+        bool leak = key[0] == L'l';
+        size_t i = leak ? idx(5, g_leakList.size()) : idx(4, g_hogs.size());
+        if (i == (size_t)-1) return;
+        std::wstring name = leak ? g_leakList[i].name : g_hogs[i].name;
+        tools::HeavyApp a = AppByName(name);
+        if (a.pids.empty() || tools::ProtectedExe(name)) {
+            g_card.Show(BoostCard::DONE, NoExe(name),
+                        tools::ProtectedExe(name) ? L"Это системное - не закрываю." : L"Уже закрыта.", Theme());
+            return;
+        }
+        Ask(L"Закрыть " + NoExe(name) + L"?",
+            Plural((int)a.pids.size(), L"процесс", L"процесса", L"процессов") + L", " + tools::Bytes(a.bytes) +
+                L". Сначала попрошу закрыться (окна сохранят своё), через 5 с - силой.",
+            L"Закрыть", L"Не надо", [a] { CloseHeavy(a); });
+        return;
+    }
+    if (key == L"pagefile") return OpenPagefile();
+    if (key == L"ports-old") {
+        std::vector<tools::Listener> old = g_oldPorts;
+        if (old.empty()) return;
+        std::wstring list;
+        for (const tools::Listener& l : old)
+            if (list.size() < 100)
+                list += (list.empty() ? L"" : L", ") + std::to_wstring(l.port) + L" " + NoExe(l.process);
+        Ask(L"Завершить старые серверы?", list + L". Работают дольше 6 часов.", L"Завершить", L"Не надо", [old] {
+            RunJob(L"Старые серверы", [old](const tools::Log&, std::wstring& res) {
+                int ok = 0;
+                for (const tools::Listener& l : old) ok += tools::KillPid(l.pid, l.process);
+                res = L"Завершено " + std::to_wstring(ok) + L" из " + std::to_wstring(old.size()) + L".";
+                return ok > 0;
+            });
+        });
+        return;
+    }
+    if (key == L"net-top" || key == L"power") {
+        bool top = key == L"net-top";
+        if (!net::AdminReady()) {
+            Ask(top ? L"Кто качает: нужны права" : L"Что мешает сну: нужны права",
+                L"Это Windows отдаёт только с правами администратора. Один раз создам задачу (Windows спросит), "
+                L"дальше - без вопросов; задача умеет только свой короткий список действий.",
+                L"Создать", L"Не надо", [] {
+                    RunJob(L"Задача с правами", [](const tools::Log&, std::wstring& res) {
+                        bool ok = net::SetupAdmin();
+                        res = ok ? L"Готово. Выбери пункт ещё раз." : L"Не создалась (отказ в окне Windows?).";
+                        return ok;
+                    });
+                });
+            return;
+        }
+        RunJob(top ? L"Кто качает" : L"Мешает сну", [top](const tools::Log& log, std::wstring& res) {
+            std::vector<std::wstring> lines;
+            bool ok = net::RunAdmin(top ? net::JOB_NET_TOP : net::JOB_POWER, [&](const std::wstring& s) {
+                if (!s.empty() && s[0] == L'@')
+                    lines.push_back(s);
+                else
+                    log(s);
+            });
+            if (top) {
+                for (size_t i = 0; i < lines.size() && i < 4; ++i) {
+                    std::vector<std::wstring> f = Split(lines[i], L'\t');
+                    if (f.size() < 5) continue;
+                    res += (res.empty() ? L"" : L"; ") + NoExe(f[2]) + L" приём " +
+                           tools::Bytes(_wcstoui64(f[3].c_str(), nullptr, 10)) + L"/с, отдача " +
+                           tools::Bytes(_wcstoui64(f[4].c_str(), nullptr, 10)) + L"/с";
+                }
+                if (res.empty()) res = L"Сейчас почти ничего не качается (по TCP; QUIC браузеров не видно).";
+            } else {
+                for (const std::wstring& l : lines) res += (res.empty() ? L"" : L"; ") + l.substr(l.find(L'\t') + 1);
+                if (res.empty()) res = L"Ничего не держит компьютер без сна и не будит по таймеру.";
+            }
+            return ok;
+        });
+        return;
+    }
+    if (key == L"wake") {
+        ShellExecuteW(nullptr, L"open", L"devmgmt.msc", nullptr, nullptr, SW_SHOWNORMAL);
+        g_card.Show(BoostCard::DONE, L"Кто будит",
+                    L"Свойства устройства - «Управление электропитанием» - снять «Разрешить выводить компьютер из "
+                    L"ждущего режима». Мышь и клавиатуру обычно оставляют.",
+                    Theme(), 20000, Toast::G_INFO);
+        return;
+    }
+    if (key.rfind(L"ver:", 0) == 0) {
+        size_t i = idx(4, g_vers.size());
+        if (i == (size_t)-1) return;
+        const tools::ToolVersion& v = g_vers[i];
+        if (v.name == L"MSYS2") {
+            CopyText(L"pacman -Syu");
+            ShellExecuteW(nullptr, L"open", L"D:\\msys64\\ucrt64.exe", nullptr, L"D:\\msys64", SW_SHOWNORMAL);
+            g_card.Show(BoostCard::DONE, L"MSYS2: " + v.latest + L" обновлений",
+                        L"Команда pacman -Syu в буфере - вставь в окно MSYS2. Если попросит перезапуск, закрой окно "
+                        L"и выполни её ещё раз.",
+                        Theme(), 20000, Toast::G_INFO);
+            return;
+        }
+        const wchar_t* url = v.name == L"Python"  ? L"https://www.python.org/downloads/windows/"
+                             : v.name == L"Node"  ? L"https://nodejs.org/en/download"
+                             : v.name == L"CMake" ? L"https://cmake.org/download/"
+                                                  : L"https://git-scm.com/downloads/win";
+        ShellExecuteW(nullptr, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
+        return;
+    }
+    if (key == L"ver-check")
+        return RunJob(L"Версии", [](const tools::Log& log, std::wstring& res) {
+            log(L"Спрашиваю python.org, nodejs, GitHub и MSYS2 (до минуты)...");
+            std::vector<tools::ToolVersion> v = tools::ToolVersions();
+            AcquireSRWLockExclusive(&g_scanLock);
+            g_scan.versions = v;
+            ReleaseSRWLockExclusive(&g_scanLock);
+            if (!v.empty()) SetDay(L"versions", Today());
+            for (const tools::ToolVersion& t : v)
+                if (t.newer) res += (res.empty() ? L"" : L"; ") + t.name + L": " + t.note;
+            if (res.empty()) res = L"Всё свежее.";
+            return !v.empty();
+        });
+    if (key == L"dup-scan")
+        return RunJob(L"Дубли", [](const tools::Log& log, std::wstring& res) {
+            log(L"Ищу одинаковые файлы от 20 МБ...");
+            std::vector<tools::DupGroup> d = tools::FindDuplicates(tools::DupRoots(), 20ull * 1024 * 1024);
+            ULONGLONG extra = 0;
+            for (const tools::DupGroup& g : d) extra += g.size * (g.paths.size() - 1);
+            AcquireSRWLockExclusive(&g_scanLock);
+            g_dups = d;
+            g_dupsAt = GetTickCount64();
+            ReleaseSRWLockExclusive(&g_scanLock);
+            res = d.empty() ? L"Дублей от 20 МБ нет."
+                            : L"Найдено " + Plural((int)d.size(), L"группа", L"группы", L"групп") + L", лишнего " +
+                                  tools::Bytes(extra) + L". Они - в «Очистке».";
+            return true;
+        });
+    if (key.rfind(L"dup:", 0) == 0) {
+        size_t i = idx(4, g_dupList.size());
+        if (i == (size_t)-1) return;
+        tools::DupGroup g = g_dupList[i];
+        std::vector<std::wstring> copies(g.paths.begin() + 1, g.paths.end());
+        std::wstring list;
+        for (const std::wstring& c : copies)
+            if (list.size() < 140) list += (list.empty() ? L"" : L", ") + c;
+        Ask(
+            L"Убрать копии " + Leaf(g.paths[0]) + L"?",
+            L"Останется " + g.paths[0] + L". В Корзину: " + list + L". Перед этим сверю SHA-256.", L"В Корзину",
+            L"Показать",
+            [g, copies] {
+                RunJob(L"Дубли", [g, copies](const tools::Log& log, std::wstring& res) {
+                    int n = tools::RecycleDuplicates(g.paths[0], copies, log);
+                    res = n ? L"В Корзине: " + std::to_wstring(n) + L", освободится " +
+                                  tools::Bytes(g.size * (ULONGLONG)n) + L" после её очистки."
+                            : L"Ничего не убрано: файлы изменились или уже не копии.";
+                    AcquireSRWLockExclusive(&g_scanLock);
+                    g_dups.erase(std::remove_if(g_dups.begin(), g_dups.end(),
+                                                [&](const tools::DupGroup& x) { return x.hash == g.hash; }),
+                                 g_dups.end());
+                    ReleaseSRWLockExclusive(&g_scanLock);
+                    return n > 0;
+                });
+            },
+            [g] {
+                ShellExecuteW(nullptr, nullptr, L"explorer.exe", (L"/select,\"" + g.paths[0] + L"\"").c_str(), nullptr,
+                              SW_SHOWNORMAL);
+            });
+        return;
+    }
+    if (key == L"sec-restore") {
+        if (net::AdminReady())
+            return RunJob(L"Точка восстановления", [](const tools::Log& log, std::wstring&) {
+                log(L"Создаю (до пары минут)...");
+                return net::RunAdmin(net::JOB_RESTORE_POINT, log, 300000);
+            });
+        Ask(L"Создать точку восстановления?",
+            L"Снимок системных файлов и реестра: если обновление драйвера или правка реестра что-то сломает, можно "
+            L"будет откатиться. Нужны права - Windows спросит.",
+            L"Создать", L"Не надо", [] {
+                const wchar_t* ps =
+                    L"-NoProfile -ExecutionPolicy Bypass -Command \"Write-Host 'Создаю точку восстановления...'; "
+                    L"try { Checkpoint-Computer -Description 'MoonRadial' -RestorePointType MODIFY_SETTINGS "
+                    L"-ErrorAction Stop; Write-Host 'Готово (если точка уже была меньше суток назад, Windows "
+                    L"новую не создаёт).' } catch { Write-Host ('Не получилось: ' + $_.Exception.Message) }; "
+                    L"Read-Host 'Enter - закрыть'\"";
+                if ((INT_PTR)ShellExecuteW(nullptr, L"runas", L"powershell.exe", ps, nullptr, SW_SHOWNORMAL) <= 32)
+                    g_card.Show(BoostCard::DONE, L"Не запустилось", L"Без прав администратора точку не создать.",
+                                Theme(), 0, Toast::G_WARN);
+            });
+        return;
+    }
     if (key == L"sec-rescan") {
         if (g_secRunning) {
             g_card.Show(BoostCard::DONE, L"Защита: уже проверяю", L"Итог придёт карточкой.", Theme(), 0, Toast::G_INFO);
@@ -1193,11 +1769,13 @@ void OnJob(WPARAM wp, LPARAM lp) {
         OnWeekly(m.get());
         return;
     }
+    if (wp == kWatchTag) return TryProactive();
     if (wp == kSecTag) {
         if (!g_secAsked) return OnSecurity();
         g_secAsked = false;
         AcquireSRWLockShared(&g_secLock);
-        size_t n = g_sec.procs.size() + g_sec.autos.size() + g_sec.hijacks.size();
+        size_t n = g_sec.procs.size() + g_sec.autos.size() + g_sec.hijacks.size() + g_sec.tasks.size() +
+                   g_sec.exts.size() + g_sec.nets.size();
         int procs = g_sec.processes, autos = g_sec.autoruns;
         ReleaseSRWLockShared(&g_secLock);
         std::wstring checked = L"Проверено " + Plural(procs, L"программа", L"программы", L"программ") + L" и " +
@@ -1222,6 +1800,7 @@ void OnJob(WPARAM wp, LPARAM lp) {
 void Tick() {
     g_card.Tick();
     ULONGLONG now = GetTickCount64();
+    if (now - g_proactiveAt > 5000) TryProactive();  // отложенное, пока была другая карточка
     // фоновый подсчёт: первый раз через минуту после старта, дальше раз в полчаса
     if (now - g_started > 60000 && (!g_scanAt || now - g_scanAt > 30 * 60 * 1000)) RefreshScan();
     // «Защита»: первый раз через 3 минуты после старта (подписи считаются долго), дальше раз в полчаса
@@ -1254,7 +1833,11 @@ void Tick() {
     }
 }
 
-void Shutdown() { g_card.Destroy(); }
+void Shutdown() {
+    if (g_watchStop) SetEvent(g_watchStop);
+    if (g_watchThread) WaitForSingleObject(g_watchThread, 3000), CloseHandle(g_watchThread);
+    g_card.Destroy();
+}
 
 State Snapshot() {
     State s;

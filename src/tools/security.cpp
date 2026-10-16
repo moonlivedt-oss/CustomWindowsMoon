@@ -3,10 +3,10 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <bcrypt.h>
 #include <iphlpapi.h>
 #include <mscat.h>
 #include <softpub.h>
+#include <taskschd.h>
 #include <tlhelp32.h>
 #include <wintrust.h>
 
@@ -307,6 +307,7 @@ DWORD RegDword(HKEY root, const wchar_t* key, const wchar_t* name, REGSAM view =
 Suspect RegFinding(const std::wstring& name, const std::wstring& where, const std::wstring& value, int score,
                    const std::wstring& why) {
     Suspect s;
+    s.kind = FIND_REG;
     s.name = name;
     s.where = where;
     s.path = value;
@@ -391,8 +392,9 @@ std::wstring ScriptLaunch(const std::wstring& cmd) {
     auto has = [&](const wchar_t* s) { return l.find(s) != std::wstring::npos; };
     if (has(L"mshta")) return L"запускает mshta (HTML-приложение)";
     if (has(L"wscript") || has(L"cscript")) return L"запускает скрипт Windows Script Host";
-    if ((has(L"powershell") || has(L"pwsh")) && (has(L" -enc") || has(L" -e ") || has(L"frombase64") ||
-                                                 has(L"hidden") || has(L"downloadstring") || has(L"iex")))
+    if ((has(L"powershell") || has(L"pwsh")) &&
+        (has(L" -enc") || has(L" -e ") || has(L"frombase64") || has(L"hidden") || has(L"downloadstring") ||
+         has(L"iex ") || has(L"iex(")))
         return L"скрытый или закодированный PowerShell";
     if (has(L"regsvr32") && (has(L"/i:http") || has(L"scrobj"))) return L"regsvr32 грузит скрипт из сети";
     if (has(L"rundll32") && (has(L"\\appdata\\") || has(L"\\temp\\") || has(L"javascript:")))
@@ -402,7 +404,399 @@ std::wstring ScriptLaunch(const std::wstring& cmd) {
     return L"";
 }
 
+// Первое слово командной строки как файл: «"C:\x y\a.exe" -k» -> C:\x y\a.exe, «wscript.exe» - по PATH.
+std::wstring ExeOfCommand(const std::wstring& raw) {
+    std::wstring c = Trim(Expand(raw)), exe;
+    if (c.empty()) return L"";
+    if (c[0] == L'"') {
+        size_t e = c.find(L'"', 1);
+        exe = c.substr(1, e == std::wstring::npos ? std::wstring::npos : e - 1);
+    } else {
+        std::wstring l = Lower(c);
+        size_t e = l.find(L".exe");
+        exe = e != std::wstring::npos ? c.substr(0, e + 4) : c.substr(0, c.find(L' '));
+    }
+    if (!exe.empty() && exe.find(L'\\') == std::wstring::npos) {
+        wchar_t found[MAX_PATH];
+        if (SearchPathW(nullptr, exe.c_str(), L".exe", MAX_PATH, found, nullptr)) exe = found;
+    }
+    return exe;
+}
+
+// ---------------- задачи планировщика ----------------
+
+VARIANT Var(LONG i) {
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_I4;
+    v.lVal = i;
+    return v;
+}
+
+struct Bstr {
+    BSTR b = nullptr;
+    Bstr() = default;
+    explicit Bstr(const wchar_t* s) : b(SysAllocString(s)) {}
+    Bstr(const Bstr&) = delete;
+    Bstr& operator=(const Bstr&) = delete;
+    ~Bstr() { SysFreeString(b); }
+    std::wstring str() const { return b ? std::wstring(b, SysStringLen(b)) : L""; }
+};
+
+void WalkTasks(ITaskFolder* folder, std::vector<Suspect>& out, int& checked, const std::wstring& ownDir) {
+    IRegisteredTaskCollection* tasks = nullptr;
+    if (SUCCEEDED(folder->GetTasks(TASK_ENUM_HIDDEN, &tasks))) {
+        LONG n = 0;
+        tasks->get_Count(&n);
+        for (LONG i = 1; i <= n; ++i) {
+            IRegisteredTask* t = nullptr;
+            if (FAILED(tasks->get_Item(Var(i), &t))) continue;
+            VARIANT_BOOL on = VARIANT_FALSE;
+            t->get_Enabled(&on);
+            Bstr path;
+            t->get_Path(&path.b);
+            ITaskDefinition* def = nullptr;
+            if (on && SUCCEEDED(t->get_Definition(&def))) {
+                IActionCollection* acts = nullptr;
+                if (SUCCEEDED(def->get_Actions(&acts))) {
+                    LONG na = 0;
+                    acts->get_Count(&na);
+                    for (LONG a = 1; a <= na; ++a) {
+                        IAction* act = nullptr;
+                        if (FAILED(acts->get_Item(a, &act))) continue;
+                        IExecAction* ex = nullptr;
+                        if (SUCCEEDED(act->QueryInterface(IID_IExecAction, (void**)&ex))) {
+                            Bstr prog, args;
+                            ex->get_Path(&prog.b);
+                            ex->get_Arguments(&args.b);
+                            ++checked;
+                            Suspect s;
+                            s.kind = FIND_TASK;
+                            s.where = path.str();
+                            s.name = LeafOf(s.where);
+                            std::wstring raw = prog.str();
+                            std::wstring cmd =
+                                (raw.find(L' ') != std::wstring::npos && raw[0] != L'"' ? L"\"" + raw + L"\"" : raw) +
+                                L" " + args.str();
+                            s.path = ExeOfCommand(cmd);
+                            std::wstring script = ScriptLaunch(cmd);
+                            if (!script.empty()) Flag(s, 4, script);
+                            if (!s.path.empty() && Lower(Dir(s.path)) != ownDir) JudgeFile(s);
+                            if (s.sign == SIGN_NOFILE && s.score <= 1) s.score = 0;  // мёртвая задача - не опасна
+                            s.parent = Trim(cmd);                                    // для карточки: полная команда
+                            if (s.score >= kSuspectScore) out.push_back(s);
+                            ex->Release();
+                        }
+                        act->Release();
+                    }
+                    acts->Release();
+                }
+                def->Release();
+            }
+            t->Release();
+        }
+        tasks->Release();
+    }
+    ITaskFolderCollection* subs = nullptr;
+    if (SUCCEEDED(folder->GetFolders(0, &subs))) {
+        LONG n = 0;
+        subs->get_Count(&n);
+        for (LONG i = 1; i <= n; ++i) {
+            ITaskFolder* f = nullptr;
+            if (SUCCEEDED(subs->get_Item(Var(i), &f))) {
+                WalkTasks(f, out, checked, ownDir);
+                f->Release();
+            }
+        }
+        subs->Release();
+    }
+}
+
+ITaskService* TaskService() {
+    ITaskService* svc = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&svc)))
+        return nullptr;
+    if (FAILED(svc->Connect(VARIANT{}, VARIANT{}, VARIANT{}, VARIANT{}))) {
+        svc->Release();
+        return nullptr;
+    }
+    return svc;
+}
+
+void CheckTasks(std::vector<Suspect>& out, int& checked, const std::wstring& ownDir) {
+    ITaskService* svc = TaskService();
+    if (!svc) return;
+    ITaskFolder* root = nullptr;
+    if (SUCCEEDED(svc->GetFolder(Bstr(L"\\").b, &root))) {
+        WalkTasks(root, out, checked, ownDir);
+        root->Release();
+    }
+    svc->Release();
+}
+
+// ---------------- расширения браузеров ----------------
+
+std::string ReadSmall(const std::wstring& path) {
+    std::string s;
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return s;
+    char chunk[16384];
+    DWORD got = 0;
+    while (s.size() < 4 * 1024 * 1024 && ReadFile(f, chunk, sizeof(chunk), &got, nullptr) && got) s.append(chunk, got);
+    CloseHandle(f);
+    return s;
+}
+
+// Строковое поле JSON верхнего уровня (без полного разбора: для manifest.json хватает)
+std::wstring JsonStr(const std::string& js, const char* key) {
+    std::string k = std::string("\"") + key + "\"";
+    for (size_t a = js.find(k); a != std::string::npos; a = js.find(k, a + 1)) {
+        size_t c = js.find_first_not_of(" \t\r\n", a + k.size());
+        if (c == std::string::npos || js[c] != ':') continue;
+        size_t q = js.find_first_not_of(" \t\r\n", c + 1);
+        if (q == std::string::npos || js[q] != '"') return L"";
+        std::string v;
+        for (size_t i = q + 1; i < js.size() && js[i] != '"'; ++i)
+            v += js[i] == '\\' && i + 1 < js.size() ? js[++i] : js[i];
+        return Widen(v);
+    }
+    return L"";
+}
+
+// «__MSG_appName__» -> строка из _locales/<язык>/messages.json
+std::wstring ExtName(const std::wstring& dir, const std::string& manifest) {
+    std::wstring name = JsonStr(manifest, "name");
+    if (name.rfind(L"__MSG_", 0) != 0) return name;
+    std::string key = Narrow(name.substr(6, name.size() >= 8 ? name.size() - 8 : 0));
+    std::wstring loc = JsonStr(manifest, "default_locale");
+    for (const std::wstring& l : {std::wstring(L"ru"), loc, std::wstring(L"en")}) {
+        if (l.empty()) continue;
+        std::string msgs = ReadSmall(dir + L"\\_locales\\" + l + L"\\messages.json");
+        if (msgs.empty()) continue;
+        for (const std::string& k : {key, std::string(Narrow(Lower(Widen(key))))}) {
+            size_t a = msgs.find("\"" + k + "\"");
+            if (a == std::string::npos) continue;
+            std::wstring m = JsonStr(msgs.substr(a), "message");
+            if (!m.empty()) return m;
+        }
+    }
+    return name;
+}
+
+void CheckExtensions(std::vector<Suspect>& out, int& checked) {
+    struct Browser {
+        const wchar_t *name, *dir, *store;
+    };
+    static const Browser kBrowsers[] = {
+        {L"Chrome", L"%LOCALAPPDATA%\\Google\\Chrome\\User Data", L"clients2.google.com"},
+        {L"Edge", L"%LOCALAPPDATA%\\Microsoft\\Edge\\User Data", L"edge.microsoft.com"},
+        {L"Brave", L"%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data", L"clients2.google.com"},
+        {L"Яндекс", L"%LOCALAPPDATA%\\Yandex\\YandexBrowser\\User Data", L"yandex"},
+    };
+    auto dirs = [](const std::wstring& d) {
+        std::vector<std::wstring> out;
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((d + L"\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) return out;
+        do
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != L'.')
+                out.push_back(fd.cFileName);
+        while (FindNextFileW(h, &fd));
+        FindClose(h);
+        return out;
+    };
+    for (const Browser& b : kBrowsers) {
+        std::wstring root = Expand(b.dir);
+        for (const std::wstring& profile : dirs(root)) {
+            if (profile != L"Default" && profile.rfind(L"Profile ", 0) != 0) continue;
+            std::wstring ext = root + L"\\" + profile + L"\\Extensions";
+            for (const std::wstring& id : dirs(ext)) {
+                if (id == L"Temp") continue;
+                std::vector<std::wstring> vers = dirs(ext + L"\\" + id);
+                if (vers.empty()) continue;
+                std::sort(vers.begin(), vers.end());
+                std::wstring dir = ext + L"\\" + id + L"\\" + vers.back();
+                std::string man = ReadSmall(dir + L"\\manifest.json");
+                if (man.empty()) continue;
+                ++checked;
+                Suspect s;
+                s.kind = FIND_EXT;
+                s.name = ExtName(dir, man);
+                s.path = dir;
+                s.where = std::wstring(b.name) + (profile == L"Default" ? L"" : L", " + profile);
+                std::wstring upd = Lower(JsonStr(man, "update_url"));
+                if (upd.empty())
+                    Flag(s, 3, L"поставлено не из магазина (нет адреса обновлений)");
+                else if (upd.find(b.store) == std::wstring::npos && upd.find(L"google.com") == std::wstring::npos &&
+                         upd.find(L"microsoft.com") == std::wstring::npos)
+                    Flag(s, 4, L"обновляется не из магазина: " + upd);
+                if (s.score && man.find("<all_urls>") != std::string::npos) Flag(s, 1, L"читает и меняет все сайты");
+                if (s.score >= kSuspectScore) out.push_back(s);
+            }
+        }
+    }
+}
+
+// ---------------- hosts, DNS, прокси ----------------
+
+bool PrivateIp(const std::wstring& ip) {
+    unsigned a = 0, b = 0;
+    if (swscanf(ip.c_str(), L"%u.%u", &a, &b) != 2) return ip == L"::1" || Lower(ip).rfind(L"fe80", 0) == 0;
+    return a == 10 || a == 127 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) ||
+           (a == 100 && b >= 64 && b <= 127) || (a == 169 && b == 254) || a == 0;
+}
+
+void CheckNetwork(std::vector<Suspect>& out) {
+    // hosts: подмена адресов антивирусов, обновлений, банков и входа в аккаунты - признак заражения;
+    // свои записи (Docker, локальные имена) - нормально
+    static const wchar_t* kGuarded[] = {L"kaspersky",
+                                        L"virustotal",
+                                        L"eset",
+                                        L"drweb",
+                                        L"avast",
+                                        L"malwarebytes",
+                                        L"windowsupdate",
+                                        L"update.microsoft",
+                                        L"download.microsoft",
+                                        L"login.live.com",
+                                        L"login.microsoftonline",
+                                        L"accounts.google",
+                                        L"sberbank",
+                                        L"tinkoff",
+                                        L"tbank",
+                                        L"paypal",
+                                        L"steamcommunity",
+                                        L"steampowered",
+                                        L"github.com",
+                                        L"vk.com",
+                                        L"gosuslugi"};
+    std::wstring hostsPath = Expand(L"%SystemRoot%\\System32\\drivers\\etc\\hosts");
+    for (const std::wstring& raw : Split(Widen(ReadSmall(hostsPath)), L'\n')) {
+        std::wstring line = Trim(raw.substr(0, raw.find(L'#')));
+        if (line.empty()) continue;
+        std::vector<std::wstring> parts;
+        for (const std::wstring& p : Split(line, L' '))
+            for (const std::wstring& q : Split(p, L'\t'))
+                if (!q.empty()) parts.push_back(q);
+        if (parts.size() < 2) continue;
+        for (size_t i = 1; i < parts.size(); ++i) {
+            std::wstring host = Lower(parts[i]);
+            bool guarded = false;
+            for (const wchar_t* g : kGuarded) guarded |= host.find(g) != std::wstring::npos;
+            bool local = host.find(L'.') == std::wstring::npos || EndsWithI(host, L".local") ||
+                         EndsWithI(host, L".internal") || EndsWithI(host, L".test") || EndsWithI(host, L".localhost") ||
+                         EndsWithI(host, L".lan");
+            Suspect s;
+            s.kind = FIND_NET;
+            s.name = L"hosts: " + host;
+            s.where = hostsPath;
+            s.path = parts[0] + L" " + host;
+            if (guarded)
+                Flag(s, 6,
+                     (parts[0] == L"0.0.0.0" || parts[0] == L"127.0.0.1" ? L"hosts блокирует "
+                                                                         : L"hosts подменяет адрес ") +
+                         host + L" (" + parts[0] + L")");
+            else if (!local && !PrivateIp(parts[0]))
+                Flag(s, 3, L"hosts направляет " + host + L" на " + parts[0]);
+            if (s.score >= kSuspectScore) out.push_back(s);
+        }
+    }
+    // DNS, заданный вручную на адаптере: известные публичные и свои (роутер, туннель) - нормально
+    static const wchar_t* kKnownDns[] = {L"1.1.1.1",   L"1.0.0.1",         L"8.8.8.8",        L"8.8.4.4",
+                                         L"9.9.9.9",   L"149.112.112.112", L"208.67.222.222", L"208.67.220.220",
+                                         L"77.88.8.8", L"77.88.8.1",       L"94.140.14.14",   L"94.140.15.15",
+                                         L"76.76.2.0", L"76.76.10.0"};
+    std::map<std::wstring, std::wstring> names;  // {guid} -> имя адаптера
+    ULONG size = 0;
+    GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, nullptr, &size);
+    std::vector<BYTE> buf(size + 1024);
+    size = (ULONG)buf.size();
+    if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr,
+                             (IP_ADAPTER_ADDRESSES*)buf.data(), &size) == NO_ERROR)
+        for (auto* a = (IP_ADAPTER_ADDRESSES*)buf.data(); a; a = a->Next)
+            names[Lower(Widen(a->AdapterName))] = a->FriendlyName;
+    const wchar_t* ifKey = L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces";
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, ifKey, 0, KEY_READ, &k) == ERROR_SUCCESS) {
+        wchar_t sub[128];
+        for (DWORD i = 0;; ++i) {
+            DWORD n = 128;
+            if (RegEnumKeyExW(k, i, sub, &n, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+            auto it = names.find(Lower(sub));
+            if (it == names.end()) continue;  // адаптера уже нет
+            std::wstring ns = RegStr(HKEY_LOCAL_MACHINE, (std::wstring(ifKey) + L"\\" + sub).c_str(), L"NameServer");
+            for (const std::wstring& part : Split(ns, L',')) {
+                for (const std::wstring& ip : Split(part, L' ')) {
+                    if (ip.empty() || PrivateIp(ip)) continue;
+                    bool known = false;
+                    for (const wchar_t* d : kKnownDns) known |= ip == d;
+                    if (known) continue;
+                    Suspect s;
+                    s.kind = FIND_NET;
+                    s.name = L"DNS " + ip;
+                    s.where = it->second;
+                    s.path = ip;
+                    Flag(s, 3, L"на адаптере «" + it->second + L"» вручную задан незнакомый DNS " + ip);
+                    out.push_back(s);
+                }
+            }
+        }
+        RegCloseKey(k);
+    }
+    // системный прокси и PAC на чужой сервер (свой - 127.0.0.1, как у Happ в режиме прокси)
+    const wchar_t* inet = L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    std::wstring proxy = Lower(RegStr(HKEY_CURRENT_USER, inet, L"ProxyServer"));
+    if (RegDword(HKEY_CURRENT_USER, inet, L"ProxyEnable") && !proxy.empty() &&
+        proxy.find(L"127.0.0.1") == std::wstring::npos && proxy.find(L"localhost") == std::wstring::npos) {
+        Suspect s;
+        s.kind = FIND_NET;
+        s.name = L"Прокси";
+        s.where = L"HKCU\\" + std::wstring(inet);
+        s.path = proxy;
+        Flag(s, 3, L"весь трафик идёт через прокси " + proxy);
+        out.push_back(s);
+    }
+    std::wstring pac = Lower(RegStr(HKEY_CURRENT_USER, inet, L"AutoConfigURL"));
+    if (!pac.empty() && pac.find(L"127.0.0.1") == std::wstring::npos && pac.find(L"localhost") == std::wstring::npos) {
+        Suspect s;
+        s.kind = FIND_NET;
+        s.name = L"PAC-скрипт";
+        s.where = L"HKCU\\" + std::wstring(inet);
+        s.path = pac;
+        Flag(s, 4, L"адреса сайтов решает скрипт " + pac);
+        out.push_back(s);
+    }
+}
+
 }  // namespace
+
+bool SetTaskEnabled(const std::wstring& taskPath, bool on, const Log& log) {
+    ITaskService* svc = TaskService();
+    if (!svc) {
+        log(L"Планировщик заданий недоступен.");
+        return false;
+    }
+    size_t cut = taskPath.find_last_of(L'\\');
+    std::wstring folder = cut == 0 || cut == std::wstring::npos ? L"\\" : taskPath.substr(0, cut);
+    std::wstring name = cut == std::wstring::npos ? taskPath : taskPath.substr(cut + 1);
+    ITaskFolder* f = nullptr;
+    IRegisteredTask* t = nullptr;
+    HRESULT hr = svc->GetFolder(Bstr(folder.c_str()).b, &f);
+    if (SUCCEEDED(hr)) hr = f->GetTask(Bstr(name.c_str()).b, &t);
+    if (SUCCEEDED(hr)) hr = t->put_Enabled(on ? VARIANT_TRUE : VARIANT_FALSE);
+    if (t) t->Release();
+    if (f) f->Release();
+    svc->Release();
+    if (SUCCEEDED(hr)) {
+        log(std::wstring(L"Задача «") + name +
+            (on ? L"» включена." : L"» выключена. Включить обратно - в Планировщике заданий."));
+        return true;
+    }
+    log(hr == E_ACCESSDENIED ? L"Это задача системы или другого пользователя: выключить можно только с правами."
+                             : L"Выключить не получилось.");
+    return false;
+}
 
 SignState CheckSign(const std::wstring& path, std::wstring* signer) {
     WIN32_FILE_ATTRIBUTE_DATA fa;
@@ -491,6 +885,7 @@ SecurityScan ScanSecurity() {
         Suspect s;
         s.name = it.name;
         s.where = it.where;
+        s.kind = FIND_AUTO;
         s.start = (int)i;
         s.path = Expand(StartExe(it));
         if (!s.path.empty() && s.path.find(L'\\') == std::wstring::npos) {  // «wscript.exe» - ищется как Windows
@@ -509,34 +904,14 @@ SecurityScan ScanSecurity() {
     auto byScore = [](const Suspect& a, const Suspect& b) { return a.score > b.score; };
     std::stable_sort(r.procs.begin(), r.procs.end(), byScore);
     std::stable_sort(r.autos.begin(), r.autos.end(), byScore);
+    CheckTasks(r.tasks, r.tasksChecked, ownDir);
+    CheckExtensions(r.exts, r.extsChecked);
+    CheckNetwork(r.nets);
     std::stable_sort(r.hijacks.begin(), r.hijacks.end(), byScore);
+    std::stable_sort(r.tasks.begin(), r.tasks.end(), byScore);
+    std::stable_sort(r.exts.begin(), r.exts.end(), byScore);
+    std::stable_sort(r.nets.begin(), r.nets.end(), byScore);
     return r;
-}
-
-std::wstring FileSha256(const std::wstring& path) {
-    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                           OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (f == INVALID_HANDLE_VALUE) return L"";
-    std::wstring out;
-    BCRYPT_ALG_HANDLE alg = nullptr;
-    BCRYPT_HASH_HANDLE hh = nullptr;
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
-        BCryptCreateHash(alg, &hh, nullptr, 0, nullptr, 0, 0) == 0) {
-        std::vector<BYTE> buf(1 << 20);
-        DWORD got = 0;
-        bool ok = true;
-        while (ok && ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got)
-            ok = BCryptHashData(hh, buf.data(), got, 0) == 0;
-        BYTE hash[32];
-        if (ok && BCryptFinishHash(hh, hash, 32, 0) == 0) {
-            wchar_t hx[3];
-            for (BYTE b : hash) swprintf(hx, 3, L"%02x", b), out += hx;
-        }
-    }
-    if (hh) BCryptDestroyHash(hh);
-    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
-    CloseHandle(f);
-    return out;
 }
 
 std::wstring AntivirusUi() {

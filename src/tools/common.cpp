@@ -1,6 +1,7 @@
 // Общее для RadialMenu.exe и RadialTools.exe: размеры, список кэшей, мусор проектов, кэш Unreal.
 // Здесь только чтение: удаляет и завершает отдельный RadialTools.exe (src/act).
 #include <windows.h>
+#include <bcrypt.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 
@@ -153,6 +154,32 @@ bool SystemImposter(const std::wstring& fullPath) {
     std::wstring leaf = Lower(fullPath.substr(fullPath.find_last_of(L'\\') + 1));
     const std::vector<std::wstring>& n = SystemExeNames();
     return std::find(n.begin(), n.end(), leaf) != n.end() && !InWindowsDir(fullPath);
+}
+
+std::wstring FileSha256(const std::wstring& path) {
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return L"";
+    std::wstring out;
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    BCRYPT_HASH_HANDLE hh = nullptr;
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
+        BCryptCreateHash(alg, &hh, nullptr, 0, nullptr, 0, 0) == 0) {
+        std::vector<BYTE> buf(1 << 20);
+        DWORD got = 0;
+        bool ok = true;
+        while (ok && ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got)
+            ok = BCryptHashData(hh, buf.data(), got, 0) == 0;
+        BYTE hash[32];
+        if (ok && BCryptFinishHash(hh, hash, 32, 0) == 0) {
+            wchar_t hx[3];
+            for (BYTE b : hash) swprintf(hx, 3, L"%02x", b), out += hx;
+        }
+    }
+    if (hh) BCryptDestroyHash(hh);
+    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+    CloseHandle(f);
+    return out;
 }
 
 // ---------------- кэши ----------------

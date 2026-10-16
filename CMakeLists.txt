@@ -14,7 +14,7 @@ list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/act/")  # src/act - отдель�
 add_executable(RadialMenu WIN32 ${RADIAL_SOURCES} src/res/app.rc)
 target_include_directories(RadialMenu PRIVATE src)
 target_compile_definitions(RadialMenu PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
-target_link_libraries(RadialMenu PRIVATE gdiplus shcore shlwapi shell32 ole32 oleaut32 wtsapi32 user32 gdi32 comctl32 comdlg32 uxtheme windowscodecs winmm uuid dwmapi version propsys winhttp dxva2 wbemuuid oleacc taskschd iphlpapi ws2_32 wininet rstrtmgr wintrust crypt32 bcrypt)
+target_link_libraries(RadialMenu PRIVATE gdiplus shcore shlwapi shell32 ole32 oleaut32 wtsapi32 user32 gdi32 comctl32 comdlg32 uxtheme windowscodecs winmm uuid dwmapi version propsys winhttp dxva2 wbemuuid oleacc taskschd iphlpapi ws2_32 wininet rstrtmgr wintrust crypt32 bcrypt setupapi)
 
 option(RADIAL_STRIP "убрать символы из exe (OFF - для разбора падений по адресу)" ON)
 if(MINGW)
@@ -31,7 +31,7 @@ set_target_properties(RadialMenu PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_OU
 add_executable(RadialTools src/act/act.cpp src/core/text.cpp src/tools/common.cpp)
 target_include_directories(RadialTools PRIVATE src)
 target_compile_definitions(RadialTools PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
-target_link_libraries(RadialTools PRIVATE shlwapi shell32 ole32 user32)
+target_link_libraries(RadialTools PRIVATE shlwapi shell32 ole32 user32 bcrypt)
 if(MINGW)
   target_link_options(RadialTools PRIVATE -municode -static -s)
 endif()

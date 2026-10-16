@@ -2,6 +2,7 @@
 // Утилиты: PATH и переменные окружения, диски, автозагрузка, порты и кто держит файл.
 // Всё блокирующее зовётся из рабочих потоков; правки без прав - сразу, с правами - через задачу сети.
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -226,7 +227,9 @@ enum SignState { SIGN_NOFILE, SIGN_OK, SIGN_NONE, SIGN_UNTRUSTED, SIGN_BAD };
 SignState CheckSign(const std::wstring& path, std::wstring* signer = nullptr);  // кэш по пути, размеру и времени
 
 constexpr int kSuspectScore = 3;  // с какого счёта показывать; 6 и выше - «опасно»
+enum FindKind { FIND_PROC, FIND_AUTO, FIND_REG, FIND_TASK, FIND_EXT, FIND_NET };
 struct Suspect {
+    FindKind kind = FIND_PROC;
     DWORD pid = 0;          // процесс; 0 - запись автозапуска или реестра
     std::wstring name;      // svchost.exe, имя записи автозапуска, «Shell»
     std::wstring path;      // файл (для реестра - значение)
@@ -241,12 +244,17 @@ struct Suspect {
 };
 struct SecurityScan {
     std::vector<Suspect> procs, autos, hijacks;  // по убыванию счёта
+    std::vector<Suspect> tasks;                  // задачи планировщика (where - путь задачи)
+    std::vector<Suspect> exts;                   // расширения Chrome/Edge не из магазина (path - папка)
+    std::vector<Suspect> nets;                   // hosts и DNS
+    int tasksChecked = 0, extsChecked = 0;
     std::vector<StartItem> starts;               // вся автозагрузка на момент проверки
     int processes = 0, autoruns = 0;             // сколько проверено
     int unsignedCount = 0;                       // запущенных программ без подписи (разных файлов)
 };
 SecurityScan ScanSecurity();  // секунды при первом разе (подписи), потом из кэша; из рабочего потока
-std::wstring FileSha256(const std::wstring& path);  // для поиска на VirusTotal: файл никуда не отправляется
+std::wstring FileSha256(const std::wstring& path);  // в common.cpp: VirusTotal по хэшу, сверка дубликатов
+bool SetTaskEnabled(const std::wstring& taskPath, bool on, const Log& log);  // своя задача; чужая - нужны права
 std::wstring AntivirusUi();  // avpui.exe Касперского, пусто - нет
 struct SecurityApp {
     std::wstring name, exe;
@@ -257,6 +265,110 @@ const std::vector<std::wstring>& SystemExeNames();  // svchost.exe, lsass.exe...
 bool InWindowsDir(const std::wstring& path);         // файл прямо в Windows, System32, SysWOW64 (или их wbem)
 // Имя системного процесса, но файл не в папке Windows: такой не защищён от завершения.
 bool SystemImposter(const std::wstring& fullPath);
+
+// ---------------- слежка: процессы, память, батарея, сеть ----------------
+// Раз в минуту из фонового потока: снимок процессов копится в ProcHistory, по нему - утечки и фоновый процессор.
+
+struct ProcInfo {
+    DWORD pid = 0, parent = 0;
+    std::wstring name, path;
+    ULONGLONG created = 0;  // время создания (FILETIME): номер процесса мог достаться новому
+    ULONGLONG mem = 0;      // личная память
+    ULONGLONG cpu = 0;      // процессорное время, 100 нс
+    bool window = false;    // есть видимое окно верхнего уровня
+};
+std::vector<ProcInfo> Processes();  // этого входа (службы и чужие сеансы без прав не видны)
+int ProcessMinutes(DWORD pid);      // сколько минут работает процесс, -1 - не узнать
+ULONGLONG PrivateBytes(HANDLE h);  // личная память процесса, как столбец «Память» в Диспетчере задач
+// запустить консольную программу без окна и забрать вывод (UTF-8 или кодировка консоли); код выхода, -1 - не запустилась
+int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs);
+
+class ProcHistory {
+public:
+    void Feed(const std::vector<ProcInfo>& ps, ULONGLONG tick);  // tick - GetTickCount64
+    struct Leak {
+        DWORD pid = 0;
+        std::wstring name, path;
+        ULONGLONG was = 0, now = 0;  // личная память час назад и сейчас
+        int minutes = 0;             // за сколько выросло
+    };
+    std::vector<Leak> Leaks() const;  // выросли вдвое за час (и больше чем на 700 МБ), рост ровный, не скачок
+    struct Hog {
+        std::wstring name, path;
+        std::vector<DWORD> pids;
+        double percent = 0;  // средняя доля всего процессора
+        bool window = false;
+        ULONGLONG mem = 0;
+    };
+    std::vector<Hog> CpuHogs(int minutes, bool backgroundOnly) const;  // по программам, самые прожорливые первыми
+    bool Ready(int minutes) const;  // история уже покрывает столько минут
+
+private:
+    struct Sample {
+        ULONGLONG tick, mem, cpu;
+    };
+    struct Track {
+        ProcInfo last;
+        std::vector<Sample> samples;  // раз в минуту, не дольше трёх часов
+    };
+    std::map<std::pair<DWORD, ULONGLONG>, Track> tracks_;  // по номеру и времени создания
+    ULONGLONG first_ = 0, lastTick_ = 0;
+};
+
+// Хвосты сборки: воркеры Unreal без открытого редактора; компиляторы, node и clangd, чей родитель уже закрыт.
+struct Leftover {
+    DWORD pid = 0;
+    std::wstring name, why;
+    ULONGLONG mem = 0;
+    int minutes = 0;
+};
+std::vector<Leftover> BuildLeftovers(const std::vector<ProcInfo>& ps);
+
+struct CommitInfo {
+    ULONGLONG total = 0, limit = 0, peak = 0, phys = 0;  // выделено, предел (память + подкачка), пик с загрузки
+};
+CommitInfo Commit();
+ULONGLONG PagefileBytes();  // размер файлов подкачки сейчас
+
+struct BatteryInfo {
+    bool present = false, ac = true, charging = false;
+    int percent = -1, minutesLeft = -1, cycles = -1;
+    ULONGLONG designed = 0, full = 0;  // мВт·ч: по паспорту и полный заряд сейчас
+};
+BatteryInfo Battery();                    // через драйвер батареи, без прав
+std::vector<std::wstring> WakeDevices();  // кто может разбудить: powercfg /devicequery wake_armed
+
+void NetCounters(ULONGLONG& in, ULONGLONG& out);  // байты через физические адаптеры (без туннелей и Hyper-V)
+struct NetUse {
+    DWORD pid = 0;
+    std::wstring name;
+    ULONGLONG down = 0, up = 0;  // байт/с
+};
+std::vector<NetUse> NetTopAdminMain(int ms);  // в процессе с правами: TCP по процессам за ms (EStats)
+std::wstring PowerRequestsAdminMain();        // в процессе с правами: powercfg /requests и /waketimers
+
+// Новый автозапуск с прошлой проверки (autostart.tsv): первый раз только запоминает, о каждой записи - один раз.
+std::vector<StartItem> NewStartupItems();
+
+// ---------------- версии инструментов ----------------
+struct ToolVersion {
+    std::wstring name, path, installed, latest;
+    std::wstring note;  // «вышла 3.15», «12 пакетов MSYS2»
+    bool newer = false;
+};
+std::vector<ToolVersion> ToolVersions();  // по сети, секунды: python, node, cmake, git, пакеты MSYS2
+
+// ---------------- дубликаты ----------------
+struct DupGroup {
+    ULONGLONG size = 0;
+    std::wstring hash;
+    std::vector<std::wstring> paths;  // paths[0] - самый старый, он остаётся
+};
+std::vector<std::wstring> DupRoots();  // Загрузки, Рабочий стол, Документы, Видео, Изображения, Музыка
+std::vector<DupGroup> FindDuplicates(const std::vector<std::wstring>& roots, ULONGLONG minBytes,
+                                     volatile bool* cancel = nullptr, volatile long* progress = nullptr);
+// копии - в Корзину через RadialTools.exe: он сам сверит размер и SHA-256 с оставляемым файлом
+int RecycleDuplicates(const std::wstring& keep, const std::vector<std::wstring>& copies, const Log& log);
 
 // ---------------- PATH: конфликты и терминал ----------------
 

@@ -380,6 +380,7 @@ void BoostAfterGame() {
 void OnDevMode(bool on) {
     UpdateTrayTip();
     autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
+    toolsui::OnModes(g_game.On(), on);
     if (on && g_cfg.devBoost && !g_game.On()) OfferBoost(false, L"для " + g_dev.Reason());
     if (!on) OfferRestore();
     if (g_cfg.hexGlass && !g_game.On())
@@ -393,6 +394,7 @@ void OnGameMode(bool on) {
     g_frame.Suspend(on);
     llmouse::Suspend(on);  // перехват мыши снят: каждое движение мыши не ходит через нас
     autos::OnModes(on, g_dev.On());  // питание: в игре - производительность
+    toolsui::OnModes(on, g_dev.On());
     UpdateTrayTip();
     // Boost: во время игры таймер и приоритеты, при запуске - предложить освободить память
     netui::Game(on, g_game.GamePids(), g_game.Reason());  // сеть в игре: туннель и пинг до сервера

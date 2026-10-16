@@ -131,6 +131,18 @@ int RecycleDownloads(const std::vector<std::wstring>& paths, const Log& log) {
     return moved;
 }
 
+int RecycleDuplicates(const std::wstring& keep, const std::vector<std::wstring>& copies, const Log& log) {
+    int moved = 0;
+    for (size_t i = 0; i < copies.size(); i += 30) {
+        std::wstring args = L"recycle-dup " + Quote(keep);
+        for (size_t j = i; j < copies.size() && j < i + 30; ++j) args += L" " + Quote(copies[j]);
+        std::map<std::wstring, std::wstring> r;
+        RunTools(args, log, &r);
+        moved += _wtoi(r[L"moved"].c_str());
+    }
+    return moved;
+}
+
 bool EmptyRecycleBin() {
     std::map<std::wstring, std::wstring> r;
     RunTools(L"empty-bin", nullptr, &r);

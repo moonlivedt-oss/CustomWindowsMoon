@@ -25,6 +25,8 @@ struct MemEx2 {
     ULONG64 SharedCommitUsage;
 };
 
+}  // namespace
+
 // Личная память процесса, как столбец «Память» в Диспетчере задач: общие библиотеки не считаются
 // по разу на каждый процесс (у браузера их десятки, сумма рабочих наборов врёт в разы).
 ULONGLONG PrivateBytes(HANDLE h) {
@@ -34,8 +36,6 @@ ULONGLONG PrivateBytes(HANDLE h) {
     PROCESS_MEMORY_COUNTERS pmc{sizeof(pmc)};
     return K32GetProcessMemoryInfo(h, &pmc, sizeof(pmc)) ? pmc.WorkingSetSize : 0;
 }
-
-}  // namespace
 
 std::vector<HeavyApp> HeavyApps(int count) {
     std::map<std::wstring, HeavyApp> byName;

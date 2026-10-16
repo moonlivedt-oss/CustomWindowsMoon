@@ -8,6 +8,7 @@
 //   kill <pid> [exe]          завершить процесс (exe - проверить, что номер не достался другому)
 //   close <exe> <мс>          закрыть программу: окнам WM_CLOSE, оставшиеся процессы - силой
 //   empty-bin                 очистить корзину
+//   recycle-dup <оставить> <копии>  копии в Корзину, если размер и SHA-256 совпадают с оставляемым
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
@@ -244,6 +245,46 @@ int Close(const std::wstring& exe, int waitMs) {
 }
 
 // В Корзину (вернуть можно), только файлы прямо в Загрузках.
+// Дубликаты: каждую копию сверяем с оставляемым файлом заново - список мог устареть, пока кольцо было открыто.
+int RecycleDup(const std::wstring& keep, const std::vector<std::wstring>& copies) {
+    WIN32_FILE_ATTRIBUTE_DATA ka;
+    std::wstring keepHash;
+    if (!GetFileAttributesExW(keep.c_str(), GetFileExInfoStandard, &ka) ||
+        (ka.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (keepHash = tools::FileSha256(keep)).empty()) {
+        Out(L"Оставляемого файла нет - ничего не трогаю: " + keep);
+        Out(L"@moved=0");
+        return 1;
+    }
+    std::wstring list;
+    int ok = 0;
+    for (const std::wstring& p : copies) {
+        WIN32_FILE_ATTRIBUTE_DATA a;
+        if (_wcsicmp(p.c_str(), keep.c_str()) == 0 || !GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &a) ||
+            (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || a.nFileSizeHigh != ka.nFileSizeHigh ||
+            a.nFileSizeLow != ka.nFileSizeLow || tools::FileSha256(p) != keepHash) {
+            Out(L"Пропускаю (уже не копия): " + p);
+            continue;
+        }
+        list += p;
+        list.push_back(L'\0');
+        ++ok;
+    }
+    if (!ok) {
+        Out(L"@moved=0");
+        return 1;
+    }
+    list.push_back(L'\0');
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = FO_DELETE;
+    op.pFrom = list.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int rc = SHFileOperationW(&op);
+    if (rc != 0 || op.fAnyOperationsAborted) ok = 0;
+    Out(rc == 0 ? L"В Корзине: " + std::to_wstring(ok) : L"Корзина не приняла файлы (код " + std::to_wstring(rc) + L")");
+    Out(L"@moved=" + std::to_wstring(ok));
+    return ok ? 0 : 1;
+}
+
 int Recycle(const std::vector<std::wstring>& paths) {
     std::wstring dl = Lower(tools::DownloadsDir());
     std::wstring list;  // двойной ноль в конце - формат SHFileOperation
@@ -295,6 +336,8 @@ int wmain(int argc, wchar_t** argv) {
     if (cmd == L"kill" && a.size() >= 2) return Kill((DWORD)_wtoi(a[1].c_str()), a.size() >= 3 ? a[2] : L"");
     if (cmd == L"close" && a.size() >= 3) return Close(a[1], _wtoi(a[2].c_str()));
     if (cmd == L"recycle" && a.size() >= 2) return Recycle(std::vector<std::wstring>(a.begin() + 1, a.end()));
+    if (cmd == L"recycle-dup" && a.size() >= 3)
+        return RecycleDup(a[1], std::vector<std::wstring>(a.begin() + 2, a.end()));
     if (cmd == L"empty-bin") {
         bool ok =
             SUCCEEDED(SHEmptyRecycleBinW(nullptr, nullptr, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND));
