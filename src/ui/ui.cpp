@@ -807,7 +807,10 @@ bool Ui::Segmented(int id, const RectF& r, const std::vector<std::wstring>& item
     }
     // выбранная плашка одна на всех и переезжает к новому пункту
     if (sel >= 0 && sel < (int)items.size()) {
-        RectF pill = Glide(id, item(sel));
+        // пружина - внутри самого переключателя: страницу прокрутили или карточка выехала - плашка едет
+        // вместе с ним, а не догоняет его через весь экран, растягиваясь
+        RectF to = item(sel), rel = Glide(id, RectF(to.X - r.X, to.Y - r.Y, to.Width, to.Height));
+        RectF pill(r.X + rel.X, r.Y + rel.Y, rel.Width, rel.Height);
         Fill(pill, c_.accent, S(7));
         Ripple(id * 16 + sel, pill, S(7));
     }

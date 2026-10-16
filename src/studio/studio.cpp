@@ -631,7 +631,7 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
                 run(a);
             } else if (op == 'r') {  // «r делта»: колесо над серединой окна (120 - щелчок вверх, -120 - вниз)
                 ui.OnWheel(w / 2, h / 2, a);
-                run(400);
+                run(40);
             } else if (op == 'f') {
                 for (int i = 0; i < a; ++i) {
                     if (i) run(b);

@@ -216,8 +216,8 @@ void Studio::DeskPage(const RectF& r) {
         PointF p = cornerPt(showCorner);
         aim = PointF(p.X + (showCorner % 2 ? -ui.S(3) : ui.S(3)), p.Y + (showCorner < 2 ? ui.S(3) : -ui.S(3)));
     }
-    RectF cur = ui.Glide(-300, RectF(aim.X, aim.Y, 0, 0));
-    float px = cur.X, py = cur.Y;
+    RectF cur = ui.Glide(-300, RectF(aim.X - scr.X, aim.Y - scr.Y, 0, 0));  // внутри экрана: прокрутка не тянет
+    float px = scr.X + cur.X, py = scr.Y + cur.Y;
     ULONGLONG now = GetTickCount64();
     bool arrived = showCorner >= 0 && std::fabs(px - aim.X) + std::fabs(py - aim.Y) < ui.S(2);
     if (arrived && !fx::Game()) {
