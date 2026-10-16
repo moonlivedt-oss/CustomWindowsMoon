@@ -233,7 +233,8 @@ void Run(const std::wstring& key) {
             std::vector<net::DnsResult> r = net::TestDns();
             std::wstring route;
             if (net::RouteTo(L"1.1.1.1", &route) && !r.empty() && net::Faked(r.back().ms)) {
-                res = L"Туннель " + route + L" отвечает на DNS сам - замер не покажет разницы. Выключи туннель и замерь снова.";
+                res = L"Туннель " + route +
+                      L" отвечает на DNS сам - замер не покажет разницы. Выключи туннель и замерь снова.";
                 return false;
             }
             for (size_t i = 0; i < r.size() && i < 3; ++i)
@@ -315,13 +316,14 @@ void OnEvent(LPARAM lp) {
         case net::Event::UP:
             if (!g_downShown) return;
             g_downShown = false;
-            if (!g_busy) g_card.Show(BoostCard::DONE, L"Интернет вернулся", e->text, t, 5000);
+            if (!g_busy) g_card.Show(BoostCard::DONE, L"Интернет вернулся", e->text, t, 5000, Toast::G_OK);
             return;
         case net::Event::EXIT:
-            if (g_cfg->netExit && !g_busy) g_card.Show(BoostCard::DONE, L"Выход сменился", e->text, t, 7000);
+            if (g_cfg->netExit && !g_busy)
+                g_card.Show(BoostCard::DONE, L"Выход сменился", e->text, t, 7000, Toast::G_NET);
             return;
         case net::Event::GAME:
-            if (e->worth && !g_busy) g_card.Show(BoostCard::DONE, L"Сеть в игре", e->text, t, 15000);
+            if (e->worth && !g_busy) g_card.Show(BoostCard::DONE, L"Сеть в игре", e->text, t, 15000, Toast::G_NET);
             return;
     }
 }

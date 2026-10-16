@@ -8,47 +8,43 @@
 #include <objidl.h>
 #include <gdiplus.h>
 
-#include "core/themes.h"
+#include "desk/toast.h"
 
 struct Config;
 
 // Карточка после снимка области (Win+Shift+S или горячий угол): справа снизу выезжает превью
-// с кнопками «Сохранить» и «Текст». «Текст» распознаёт снимок встроенным OCR Windows
-// и кладёт текст в буфер обмена. Снимок замечается по буферу обмена: картинку туда
-// положил «Ножницы» (ScreenClippingHost / SnippingTool).
-class SnipCard {
+// с кнопками «Сохранить» и «Текст»; клик по превью открывает снимок. «Текст» распознаёт снимок встроенным OCR
+// Windows и кладёт текст в буфер обмена. Снимок замечается по буферу обмена: картинку туда
+// положил «Ножницы» (ScreenClippingHost / SnippingTool). Стопка и движение - в Toast.
+class SnipCard : public Toast {
 public:
     void Create(HINSTANCE inst);
     void Apply(const Config& cfg);
-    void Tick();  // из общего опроса раз в 20 мс
     void Destroy();
+    void Demo();  // для проверки: карточка со снимком кусочка экрана, как после «Ножниц»
 
 private:
-    enum Hit { H_NONE, H_PREVIEW, H_SAVE, H_TEXT, H_CLOSE, H_BODY, kHits };
+    enum { H_PREVIEW = H_USER, H_SAVE, H_TEXT };
 
-    static LRESULT CALLBACK Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp);
-    LRESULT Handle(UINT msg, WPARAM wp, LPARAM lp);
+    bool Message(UINT msg, WPARAM wp, LPARAM lp) override;
     void OnClipboard();
     void Show();
-    void Render();
-    Gdiplus::RectF Rect(Hit h) const;
-    Hit HitAt(POINT p) const;
     void Save(bool thenOpen);
     std::wstring SaveFolder() const;
 
-    HWND wnd_ = nullptr;
+    float BodyHeight(Gdiplus::Graphics& g) override;
+    void Paint(Gdiplus::Graphics& g, const Gdiplus::RectF& body) override;
+    int HitContent(const Gdiplus::PointF& p) const override;
+    void Click(int id) override;
+    bool Busy() const override { return busy_; }
+    Gdiplus::RectF R(int id) const;
+
     bool enabled_ = true;
-    ThemeInfo theme_{};
     std::unique_ptr<Gdiplus::Bitmap> shot_, thumb_;
     std::vector<uint8_t> png_;
     int shotW_ = 0, shotH_ = 0;
+    float pw_ = 150, ph_ = 104;  // превью, dip
     std::wstring status_, savedPath_;
     bool busy_ = false, statusGood_ = true;
-    bool open_ = false, tracking_ = false;
-    float slide_ = 0, hover_[kHits] = {};
-    Hit hot_ = H_NONE, down_ = H_NONE;
-    ULONGLONG until_ = 0;
-    double k_ = 1;
-    RECT work_{};
-    bool dirty_ = false;
+    ULONGLONG busySince_ = 0;
 };

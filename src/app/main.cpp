@@ -553,6 +553,18 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             netui::OnEvent((LPARAM)e);
             return 0;
         }
+        case WM_APP + 55: {  // для проверки: стопка карточек - смена выхода и итог Boost
+            auto* e = new net::Event;
+            e->kind = net::Event::EXIT;
+            e->text = L"Великобритания -> Германия (185.12.4.7)";
+            netui::OnEvent((LPARAM)e);
+            g_boostCard.Show(BoostCard::DONE, L"Освобождено 1.4 ГБ", L"Закрыто 3 программы, вернуть - после игры.",
+                             CurrentTheme(g_cfg));
+            return 0;
+        }
+        case WM_APP + 56:  // для проверки: карточка снимка
+            g_snip.Demo();
+            return 0;
         case WM_POWERBROADCAST:
             if (wp == PBT_POWERSETTINGCHANGE) {
                 auto* s = reinterpret_cast<POWERBROADCAST_SETTING*>(lp);
