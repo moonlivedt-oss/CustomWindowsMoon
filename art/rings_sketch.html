@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кольца: наброски</title>
+<style>
+:root{--bg:#0b0c10;--card:#12141c;--card2:#1c1f2a;--card3:#232733;--text:#eef0f5;--muted:#9aa3b4;--faint:#5b6272;--acc:#c8323f;--acc2:#8fa3bf;--pale:#d9dee6;--warn:#e0a14a;--ok:#78cda0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif;padding:28px 16px 60px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:24px;margin:0 0 4px}
+h3{font-size:18px;margin:34px 0 6px}
+.lead{color:var(--muted);margin:0 0 22px;max-width:920px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(540px,1fr));gap:18px}
+@media(max-width:600px){.grid{grid-template-columns:1fr}}
+.dir{background:var(--card);border:1px solid #232634;border-radius:14px;padding:16px 16px 14px}
+.dir h2{margin:0;font-size:17px;display:flex;gap:10px;align-items:baseline}
+.dir h2 b{color:var(--acc);font-size:13px}
+.dir h2 span{margin-left:auto;font-size:12px;font-weight:400;color:var(--faint)}
+.dir p{margin:4px 0 8px;color:var(--muted)}
+.dir ul{margin:0 0 10px;padding-left:18px;color:var(--muted);font-size:13px}
+.dir li b{color:var(--text);font-weight:600}
+.bar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.btn{background:var(--card2);color:var(--muted);border:1px solid #2a2e3c;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.btn:hover{color:var(--text)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.stage{position:relative;height:360px;border-radius:10px;background:#0f1016;overflow:hidden;user-select:none}
+.foot{margin-top:28px;color:var(--muted);max-width:920px}
+.foot b{color:var(--text)}
+/* карточки секторов */
+.sc{position:absolute;left:0;top:0;height:46px;border-radius:10px;background:var(--card2);border:1px solid #262a37;display:flex;align-items:center;gap:10px;padding:0 10px;cursor:grab;will-change:transform}
+.sc img{width:30px;height:30px;object-fit:contain;flex:none;pointer-events:none}
+.sc .nm{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc .sub{white-space:nowrap;font-size:11px;color:var(--faint);display:flex;gap:6px;align-items:center}
+.chip{font-size:10.5px;padding:0 6px;border-radius:5px;background:rgba(200,50,63,.18);color:#d0888f;font-weight:600}
+.sc.sel{border-color:var(--acc);background:#2a2230}
+.sc.drag{cursor:grabbing;box-shadow:0 10px 24px rgba(0,0,0,.55);z-index:5}
+.sc.broken{border-color:rgba(224,161,74,.55)}
+.sc.broken .sub{color:var(--warn)}
+.sc .peek{margin-left:auto;display:flex}
+.sc .peek img{width:18px;height:18px;margin-left:-6px;opacity:.85;filter:drop-shadow(0 1px 2px #000)}
+.crack{position:absolute;inset:0;pointer-events:none}
+.find{margin-left:auto;font-size:11px;padding:3px 8px;border-radius:6px;background:rgba(224,161,74,.18);color:var(--warn);cursor:pointer;border:0;font-weight:600}
+.lane{position:absolute;top:8px;bottom:8px;border-radius:10px;border:1px dashed transparent;transition:border-color .2s,background .2s}
+.lane.hot{border-color:rgba(143,163,191,.45);background:rgba(143,163,191,.05)}
+.lane .t{position:absolute;left:10px;top:6px;font-size:12px;color:var(--faint)}
+.toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:var(--card3);border-radius:8px;padding:5px 12px;font-size:12px;color:var(--text);opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
+.toast.on{opacity:1}
+.hint{position:absolute;right:12px;bottom:10px;font-size:11px;color:var(--faint)}
+/* стопки */
+.ghostcard{position:absolute;height:46px;border-radius:10px;background:#1a1d28;border:1px solid #30354a}
+.mini{position:absolute;width:86px;height:40px;border-radius:9px;background:var(--card3);border:1px solid #2c3140;display:flex;align-items:center;gap:6px;padding:0 7px;font-size:11.5px;font-weight:600;cursor:grab;will-change:transform;white-space:nowrap;overflow:hidden}
+.mini img{width:22px;height:22px;flex:none;pointer-events:none}
+/* полка */
+.tile{position:absolute;width:76px;height:82px;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:grab;will-change:transform;transform-style:preserve-3d}
+.tile .face{position:absolute;inset:0;border-radius:14px;background:var(--card2);border:1px solid #262a37}
+.tile img{position:relative;width:40px;height:40px;object-fit:contain;pointer-events:none}
+.tile .nm{position:relative;font-size:11px;font-weight:600;max-width:70px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile.sel .face{border-color:var(--acc);background:#2a2230}
+.shelf{position:absolute;left:12px;right:12px;height:3px;border-radius:2px;background:linear-gradient(90deg,transparent,rgba(143,163,191,.35),transparent)}
+.drawer{position:absolute;left:12px;right:12px;border-radius:12px;background:var(--card2);border:1px solid #2a2e3c;overflow:hidden;transition:height .35s cubic-bezier(.2,.9,.3,1.2),opacity .25s}
+.drawer .row{display:flex;gap:10px;align-items:center;padding:8px 12px 0;font-size:12px;color:var(--muted)}
+.drawer .fld{flex:1;background:#14161e;border:1px solid #2a2e3c;border-radius:7px;padding:5px 8px;color:var(--text);font-size:12px}
+/* путь */
+.path{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:34px}
+.seg{padding:4px 9px;border-radius:7px;background:var(--card3);font-size:12.5px;transform:translateY(8px);opacity:0;transition:transform .3s cubic-bezier(.2,.9,.3,1.4),opacity .25s,background .25s,color .25s}
+.seg.in{transform:none;opacity:1}
+.seg.ok{background:rgba(120,205,160,.14);color:#a6e1c1}
+.seg.bad{background:rgba(224,161,74,.18);color:var(--warn)}
+.sep{color:var(--faint);font-size:12px}
+input.inp{width:100%;background:#14161e;border:1px solid #2a2e3c;border-radius:8px;padding:8px 10px;color:var(--text);font:13px "Segoe UI",sans-serif;outline:none}
+input.inp:focus{border-color:var(--acc2)}
+.sugg{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.sugg button{background:rgba(143,163,191,.12);color:var(--acc2);border:0;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer}
+/* поток второго кольца */
+.flow{position:relative;height:250px;border-radius:10px;background:#14161e;border:1px solid #232634;overflow:hidden}
+.pc{position:absolute;left:0;top:0;height:28px;border-radius:7px;background:var(--card3);border:1px solid #2c3140;padding:0 9px 0 7px;display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap;cursor:pointer;will-change:transform}
+.pc img{width:16px;height:16px}
+.pc.file{background:#1a1d27;color:var(--muted);border-style:dashed}
+.pc.pin{border-color:var(--acc)}
+.pc.pin::after{content:"";width:6px;height:6px;border-radius:3px;background:var(--acc);margin-left:2px}
+.pc.over{opacity:.35}
+.capline{position:absolute;left:10px;right:10px;border-top:1px dashed rgba(200,50,63,.6)}
+.caplab{position:absolute;right:12px;font-size:11px;color:#d0888f}
+/* значок */
+.drop{position:absolute;width:104px;height:104px;border-radius:22px;border:2px dashed #2f3443;display:flex;align-items:center;justify-content:center;transition:border-color .2s,box-shadow .2s,background .2s}
+.drop.hot{border-color:var(--acc2);box-shadow:0 0 0 6px rgba(143,163,191,.08);background:rgba(143,163,191,.05)}
+.lib{position:absolute;width:44px;height:44px;border-radius:11px;background:var(--card2);display:flex;align-items:center;justify-content:center;cursor:grab;will-change:transform}
+.lib img{width:30px;height:30px;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Кольца: наброски раздела</h1>
+<p class="lead">Сейчас раздел - список секторов слева и три вкладки справа. Ниже три направления для списка (как держать оба края, группы и порядок) и три улучшения правой части, общие для любого варианта. Значки - настоящие из icons/, состав - твой radial.cfg. Живого превью кольца здесь нет: от него ты отказался. Всё тянется мышью; «Ещё раз» - сначала.</p>
+
+<div class="grid" id="dirs"></div>
+
+<h3>Правая часть: общее для любого варианта</h3>
+<p class="lead">Три вкладки сектора остаются, но каждая оживает: путь проверяется на глазах, второе кольцо наполняется содержимым папки, значок притягивается к месту.</p>
+<div class="grid" id="parts"></div>
+
+<h3>Ещё идеи: жесты вместо меню</h3>
+<p class="lead">Сейчас переименовать, перенести, удалить и отменить - пункты меню по ПКМ. Здесь то же самое руками: каждое действие видно, и каждое можно вернуть.</p>
+<div class="grid" id="more"></div>
+
+<p class="foot"><b>Как это ляжет в программу:</b> карточки, пружины и перетаскивание - тот же ui.Glide и пружины gfx/scene, что в живых сценах; дорожки и стопки - обычные рамки GDI+, значки - IconCache. Кадры только пока что-то едет; в игровом режиме сразу итог. Перетащить папку из Проводника можно в любом варианте - карточка влетает в то место списка, куда её отпустили. Выбери направление для списка (или смешай: например, дорожки + стопки для групп), что взять справа и какие жесты из «Ещё идей» - реализуем в новой сессии. Удаление в корзину и лента правок держатся на уже существующей отмене студии.</p>
+</div>
+<script>
+const IC=n=>'../icons/'+n+'.png';
+const LEFT=[
+ {name:'Проекты',icon:'projects',kind:'папка',sub:'18 внутри'},
+ {name:'Код',icon:'code',kind:'группа',sub:'4 пункта',kids:[['C++','cpp'],['java','java'],['web','web'],['game','game']]},
+ {name:'Учёба',icon:'study',kind:'группа',sub:'3 пункта',kids:[['БД','db'],['МТ','table'],['file2','files']],broken:true},
+ {name:'Карьера',icon:'career',kind:'группа',sub:'2 пункта',kids:[['Конкурсы','contests'],['Портфолио','portfolio']]}];
+const RIGHT=[
+ {name:'Программы',icon:'apps',kind:'папка',sub:'12 внутри'},
+ {name:'Музыка',icon:'music',kind:'папка',sub:'40 внутри'},
+ {name:'Загрузки',icon:'downloads',kind:'папка',sub:'файлы тоже'},
+ {name:'Рабочий стол',icon:'desktop',kind:'папка',sub:'26 внутри'},
+ {name:'Корзина',icon:'recycle',kind:'ссылка',sub:'shell:RecycleBin'}];
+const clone=a=>JSON.parse(JSON.stringify(a));
+function spring(o,dt,k=170,d=20){o.vx+=((o.tx-o.x)*k-o.vx*d)*dt;o.vy+=((o.ty-o.y)*k-o.vy*d)*dt;o.x+=o.vx*dt;o.y+=o.vy*dt}
+function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!==undefined)e.innerHTML=html;return e}
+function toast(stage,s){let t=stage.querySelector('.toast');if(!t){t=el('div','toast');stage.appendChild(t)}t.textContent=s;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),1800)}
+function pos(stage,e){const r=stage.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top]}
+function cardHTML(s){
+  const peek=s.kids&&!s.broken?'<div class="peek">'+s.kids.slice(0,3).map(k=>'<img src="'+IC(k[1])+'">').join('')+'</div>':'';
+  const find=s.broken?'<button class="find">найти</button>':'';
+  return '<img src="'+IC(s.icon)+'"><div style="min-width:0"><div class="nm">'+s.name+'</div><div class="sub"><span class="chip">'+s.kind+'</span>'+(s.broken?'путь пропал':s.sub)+'</div></div>'+peek+find}
+
+// ---------- 1. Две дорожки ----------
+function D_lanes(stage){
+  const W=stage.clientWidth,H=stage.clientHeight,lw=(W-36)/2,lx=[12,24+lw];
+  const lanes=[0,1].map(i=>{const l=el('div','lane');l.style.left=lx[i]+'px';l.style.width=lw+'px';l.innerHTML='<div class="t">'+(i?'Правый край':'Левый край')+'</div>';stage.appendChild(l);return l});
+  const cards=[];
+  [LEFT,RIGHT].forEach((arr,side)=>clone(arr).forEach((s,i)=>{const e=el('div','sc',cardHTML(s));e.style.width=(lw-16)+'px';stage.appendChild(e);
+    const c={s,e,side,x:lx[side]+8,y:34+i*54,vx:0,vy:0,tx:0,ty:0,crack:0};cards.push(c);hook(c)}));
+  let drag=null,gx=0,gy=0,sel=cards[0];sel.e.classList.add('sel');
+  function order(side){return cards.filter(c=>c.side===side&&c!==drag).sort((a,b)=>a.y-b.y)}
+  function layout(){[0,1].forEach(side=>{const o=order(side);let slot=0;
+      const ins=drag&&drag.dside===side?Math.max(0,Math.min(o.length,Math.round((drag.y-34)/54))):-1;
+      o.forEach(c=>{if(slot===ins)slot++;c.tx=lx[side]+8;c.ty=34+slot*54;slot++})})}
+  function hook(c){c.e.addEventListener('pointerdown',ev=>{if(ev.target.classList.contains('find')){heal(c);return}
+      const[px,py]=pos(stage,ev);drag=c;gx=px-c.x;gy=py-c.y;c.e.classList.add('drag');c.e.setPointerCapture(ev.pointerId);
+      sel.e.classList.remove('sel');sel=c;c.e.classList.add('sel')});
+    c.e.addEventListener('pointermove',ev=>{if(drag!==c)return;const[px,py]=pos(stage,ev);c.x=px-gx;c.y=py-gy;c.vx=c.vy=0;
+      c.dside=px<lx[1]-6?0:1;lanes.forEach((l,i)=>l.classList.toggle('hot',i===c.dside&&i!==c.side))});
+    c.e.addEventListener('pointerup',()=>{if(drag!==c)return;const to=c.dside===undefined?c.side:c.dside;
+      if(to!==c.side)toast(stage,'«'+c.s.name+'» - на '+(to?'правый':'левый')+' край');
+      const o=cards.filter(q=>q.side===to&&q!==c).sort((a,b)=>a.y-b.y);const ins=Math.max(0,Math.min(o.length,Math.round((c.y-34)/54)));
+      c.side=to;drag=null;c.e.classList.remove('drag');lanes.forEach(l=>l.classList.remove('hot'));
+      o.splice(ins,0,c);o.forEach((q,i)=>q.y=q===c?c.y:q.y);c.y=34+ins*54-1;c.dside=undefined})}
+  // пропавший путь: трещина, «найти» - карточка срастается искрами
+  function heal(c){c.s.broken=false;c.e.innerHTML=cardHTML(c.s);c.e.classList.remove('broken');c.vx=-60;toast(stage,'Нашёл: D:\\Desktop\\Учёба (переехала)');c.pulse=1}
+  cards.forEach(c=>{if(c.s.broken){c.e.classList.add('broken');const sv=document.createElementNS('http://www.w3.org/2000/svg','svg');sv.setAttribute('class','crack');sv.innerHTML='<path d="M60 0 L70 18 L64 26 L76 46" stroke="rgba(224,161,74,.7)" fill="none" stroke-width="1.4"/>';c.e.appendChild(sv)}});
+  const add=document.createElement('button');add.className='btn';add.textContent='Принести папку из Проводника';add.style.cssText='position:absolute;right:12px;bottom:10px';
+  stage.appendChild(add);
+  add.onclick=()=>{const s={name:'Конкурсы 2026',icon:'contests',kind:'папка',sub:'новая, 5 внутри'};const e=el('div','sc',cardHTML(s));e.style.width=(lw-16)+'px';stage.appendChild(e);
+    const c={s,e,side:0,x:W+20,y:-40,vx:-900,vy:300,tx:0,ty:0};cards.push(c);hook(c);c.y=999;toast(stage,'Влетела в левый край, в конец')};
+  let shake=0;
+  return{update(dt,t){layout();cards.forEach(c=>{if(c!==drag)spring(c,dt,c.s.broken?140:170,c.s.broken?14:20);
+      let sx=0;if(c.s.broken)sx=Math.sin(t*30)*(Math.sin(t*1.3)>.92?2.5:0);
+      c.e.style.transform='translate('+(c.x+sx)+'px,'+c.y+'px)'+(c===drag?' rotate(-1.5deg) scale(1.03)':'')})}}
+}
+
+// ---------- 2. Стопки ----------
+function D_stacks(stage){
+  const W=stage.clientWidth,lw=Math.min(300,W*.5);
+  const cards=clone(LEFT).map((s,i)=>({s,x:12,y:20+i*58,vx:0,vy:0,tx:12,ty:20+i*58}));
+  let open=-1,minis=[],drag=null,gx=0,gy=0;
+  cards.forEach(c=>{c.g=[];if(c.s.kids)for(let k=0;k<2;k++){const g=el('div','ghostcard');g.style.width=(lw-24)+'px';stage.appendChild(g);c.g.push(g)}
+    c.e=el('div','sc',cardHTML(Object.assign({},c.s,{broken:false})));c.e.style.width=(lw-24)+'px';stage.appendChild(c.e);
+    c.e.addEventListener('click',()=>{if(!c.s.kids)return;fan(cards.indexOf(c))})});
+  function fan(i){minis.forEach(m=>m.e.remove());minis=[];if(open===i){open=-1;return}open=i;const c=cards[i];
+    c.s.kids.forEach((k,j)=>{const e=el('div','mini','<img src="'+IC(k[1])+'">'+k[0]);stage.appendChild(e);
+      const m={k,e,x:c.x+lw-110,y:c.y+3,vx:0,vy:0,tx:lw+8+j*94,ty:c.y+3,from:i};minis.push(m);
+      e.addEventListener('pointerdown',ev=>{const[px,py]=pos(stage,ev);drag=m;gx=px-m.x;gy=py-m.y;e.setPointerCapture(ev.pointerId);e.style.zIndex=6});
+      e.addEventListener('pointermove',ev=>{if(drag!==m)return;const[px,py]=pos(stage,ev);m.x=px-gx;m.y=py-gy;m.vx=m.vy=0});
+      e.addEventListener('pointerup',()=>{if(drag!==m)return;drag=null;e.style.zIndex='';
+        if(m.x<lw-40){// выдернули в список - отдельный сектор
+          const src=cards[m.from];src.s.kids=src.s.kids.filter(q=>q!==m.k);src.s.sub=src.s.kids.length+' пункта';src.e.innerHTML=cardHTML(Object.assign({},src.s,{broken:false}));
+          const at=Math.max(0,Math.min(cards.length,Math.round((m.y-20)/58)));const s={name:m.k[0],icon:m.k[1],kind:'папка',sub:'был в «'+src.s.name+'»'};
+          const ne=el('div','sc',cardHTML(s));ne.style.width=(lw-24)+'px';stage.appendChild(ne);
+          const nc={s,e:ne,g:[],x:m.x,y:m.y,vx:0,vy:0,tx:12,ty:0};cards.splice(at,0,nc);ne.addEventListener('click',()=>{});
+          m.e.remove();minis=minis.filter(q=>q!==m);toast(stage,'«'+m.k[0]+'» теперь отдельный сектор');
+          if(!src.s.kids.length){src.s.kind='папка';src.g.forEach(g=>g.remove());src.g=[]}}
+        })});}
+  return{update(dt,t){cards.forEach((c,i)=>{c.tx=12;c.ty=20+i*58;spring(c,dt);
+      const lift=open===i?-2:0;c.e.style.transform='translate('+c.x+'px,'+(c.y+lift)+'px)';
+      c.g.forEach((g,k)=>{const sp=open===i?0:(k+1)*4;g.style.transform='translate('+(c.x+sp)+'px,'+(c.y+sp)+'px)';g.style.zIndex=0;g.style.opacity=open===i?0:1-k*.35});
+      c.e.style.zIndex=1});
+    minis.forEach((m,j)=>{const c=cards[m.from];if(!c)return;const per=Math.max(1,Math.floor((W-lw-16)/94));m.ty=c.y+3+Math.floor(j/per)*46;m.tx=lw+8+(j%per)*94;if(m!==drag)spring(m,dt,190,17);
+      m.e.style.transform='translate('+m.x+'px,'+m.y+'px)'+(m===drag?' scale(1.06)':'')})},
+    init(){const h=el('div','hint','щёлкни по группе - веер; вытащи пункт влево - станет сектором');stage.appendChild(h)}}
+}
+
+// ---------- 3. Полка значков ----------
+function D_shelf(stage){
+  const W=stage.clientWidth,rows=[clone(LEFT),clone(RIGHT)],tiles=[];let sel=null,drag=null,gx=0,gy=0,mx=-999,my=-999;
+  const top=[40,190],shelfY=t=>t+88;
+  [0,1].forEach(r=>{const s=el('div','shelf');s.style.top=shelfY(top[r])+'px';stage.appendChild(s);
+    const lab=el('div','hint',r?'правый край':'левый край');lab.style.cssText='position:absolute;left:14px;top:'+(top[r]-22)+'px';stage.appendChild(lab)});
+  rows.forEach((arr,r)=>arr.forEach((s,i)=>{const e=el('div','tile','<div class="face"></div><img src="'+IC(s.icon)+'"><div class="nm">'+s.name+'</div>');stage.appendChild(e);
+    const t={s,e,row:r,x:14+i*86,y:top[r],vx:0,vy:0,tx:0,ty:0,rx:0,ry:0,sc:1};tiles.push(t);
+    e.addEventListener('pointerdown',ev=>{const[px,py]=pos(stage,ev);drag=t;t.moved=0;gx=px-t.x;gy=py-t.y;e.setPointerCapture(ev.pointerId);e.style.zIndex=6});
+    e.addEventListener('pointermove',ev=>{if(drag!==t)return;const[px,py]=pos(stage,ev);t.moved+=Math.abs(px-gx-t.x)+Math.abs(py-gy-t.y);t.x=px-gx;t.y=py-gy;t.vx=t.vy=0});
+    e.addEventListener('pointerup',()=>{if(drag!==t)return;drag=null;e.style.zIndex='';
+      if(t.moved<6){select(t);return}
+      const r2=t.y+40<(top[0]+top[1])/2+40?0:1;const o=tiles.filter(q=>q.row===r2&&q!==t).sort((a,b)=>a.x-b.x);const ins=Math.max(0,Math.min(o.length,Math.round((t.x-14)/86)));
+      if(r2!==t.row)toast(stage,'«'+t.s.name+'» - на '+(r2?'правый':'левый')+' край');t.row=r2;o.splice(ins,0,t);o.forEach((q,i)=>q.ord=i)})}));
+  const dr=el('div','drawer');dr.style.height='0px';dr.style.opacity=0;stage.appendChild(dr);
+  function select(t){tiles.forEach(q=>q.e.classList.remove('sel'));if(sel===t){sel=null;dr.style.height='0px';dr.style.opacity=0;return}
+    sel=t;t.e.classList.add('sel');t.pop=1;
+    dr.innerHTML='<div class="row">Подпись<div class="fld">'+t.s.name+'</div>Путь<div class="fld">'+(t.s.kind==='группа'?'(группа: '+t.s.kids.length+' пункта)':'D:\\Desktop\\'+t.s.name)+'</div></div><div class="row" style="padding-bottom:10px">'+(t.s.kids?t.s.kids.map(k=>'<span class="chip" style="background:rgba(143,163,191,.14);color:#c4d0e0">'+k[0]+'</span>').join(' '):'<span class="chip">'+t.s.kind+'</span> '+t.s.sub)+'</div>';
+    dr.style.top=(shelfY(top[t.row])+10)+'px';dr.style.height='76px';dr.style.opacity=1}
+  stage.addEventListener('pointermove',ev=>{[mx,my]=pos(stage,ev)});stage.addEventListener('pointerleave',()=>{mx=my=-999});
+  tiles.forEach(t=>t.ord=rows[t.row].indexOf(t.s));
+  return{update(dt,t){[0,1].forEach(r=>{tiles.filter(q=>q.row===r).sort((a,b)=>a.ord-b.ord).forEach((q,i)=>{q.ord=i;
+        // полка как док: ближние к курсору значки чуть крупнее
+        const cx=14+i*86+38,near=Math.abs(my-(top[r]+40))<60?Math.max(0,1-Math.abs(mx-cx)/150):0;
+        q.tx=14+i*86;q.ty=top[r]-near*8+(sel&&sel.row===0&&r===1?60:0);q.sc+=((1+near*.14)-q.sc)*Math.min(1,dt*12)})});
+      tiles.forEach(q=>{if(q!==drag)spring(q,dt,180,18);
+        const hov=Math.abs(mx-(q.x+38))<38&&Math.abs(my-(q.y+41))<41&&!drag;q.rx+=((hov?(my-(q.y+41))/-4:0)-q.rx)*Math.min(1,dt*10);q.ry+=((hov?(mx-(q.x+38))/4:0)-q.ry)*Math.min(1,dt*10);
+        q.pop=Math.max(0,(q.pop||0)-dt*2.5);
+        q.e.style.transform='translate('+q.x+'px,'+q.y+'px) perspective(400px) rotateX('+q.rx+'deg) rotateY('+q.ry+'deg) scale('+(q.sc+(q.pop||0)*.12+(q===drag?.08:0))+')'});
+      if(sel)dr.style.top=(shelfY(top[sel.row])+(sel.row===1?60:0)+10)+'px'},
+    init(){const h=el('div','hint','наведи - полка тянется к курсору; щелчок - ящик с полями; тяни - порядок и край');stage.appendChild(h)}}
+}
+
+// ---------- справа: путь ----------
+const FS=new Set(['D:','D:\\Desktop','D:\\Desktop\\Код','D:\\Desktop\\Код\\C++','D:\\Desktop\\Учёба','D:\\Desktop\\Учёба\\BD','D:\\Desktop\\components','D:\\Desktop\\components\\RadialMenu','D:\\Desktop\\music','D:\\Desktop\\Портфолио']);
+function P_path(stage){
+  stage.style.height='250px';stage.style.padding='16px';
+  stage.innerHTML='<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Путь</div><input class="inp" value="D:\\Desktop\\Учеба\\BD"><div class="path" style="margin-top:12px"></div><div class="sugg"></div><div style="position:absolute;left:16px;bottom:14px;display:flex;gap:6px"><button class="btn">Папка…</button><button class="btn">Напечатать заново</button></div>';
+  const inp=stage.querySelector('input'),path=stage.querySelector('.path'),sugg=stage.querySelector('.sugg'),[pick,retype]=stage.querySelectorAll('.btn');
+  function render(){const parts=inp.value.split('\\').filter(Boolean);path.innerHTML='';sugg.innerHTML='';let acc='',bad=-1;
+    parts.forEach((p,i)=>{acc+=(i?'\\':'')+p;const ok=FS.has(acc);if(!ok&&bad<0)bad=i;
+      if(i)path.appendChild(el('span','sep','\\'));const s=el('span','seg'+(bad>=0&&i>=bad?' bad':' ok'),p);path.appendChild(s);setTimeout(()=>s.classList.add('in'),40+i*70)});
+    if(bad>=0){const base=parts.slice(0,bad).join('\\');const near=[...FS].filter(f=>f.startsWith(base+'\\')&&f.split('\\').length===bad+1);
+      sugg.appendChild(el('span','sep','похоже на: '));near.forEach(n=>{const b=el('button','',n.split('\\').pop());b.onclick=()=>{inp.value=n+(parts.length>bad+1?'\\'+parts.slice(bad+1).join('\\'):'');render()};sugg.appendChild(b)})}
+    else if(parts.length)sugg.appendChild(el('span','sep','папка есть: 18 внутри - второе кольцо можно собрать'))}
+  inp.oninput=render;render();
+  function type(s){let i=0;inp.value='';clearInterval(stage._t);stage._t=setInterval(()=>{inp.value=s.slice(0,++i);render();if(i>=s.length)clearInterval(stage._t)},45)}
+  pick.onclick=()=>type('D:\\Desktop\\components\\RadialMenu');retype.onclick=()=>type('D:\\Desktop\\Учеба\\BD');
+  return{update(){}}
+}
+
+// ---------- справа: второе кольцо наполняется ----------
+function P_flow(stage){
+  stage.style.height='300px';stage.style.padding='12px';
+  stage.innerHTML='<div class="bar"><button class="btn pri">Второе кольцо из папки</button><button class="btn">И обычные файлы</button><button class="btn">Сбросить</button></div><div class="flow"></div>';
+  const flow=stage.querySelector('.flow'),[on,files,reset]=stage.querySelectorAll('.btn');const FW=flow.clientWidth,CAP=12;
+  const DIRS=['RadialMenu','GraphicsGeneration','NetworkDoctor','VSCodeLauncher','AutoTranslator','ContestReminder','vscode-bg','cpp-docs-panel','moon-core','image','training-site','Les','TestMenuMoon','LessonReader','space_risk','Волна','scripts','notes'];
+  const FILES=['README.md','todo.txt','plan.png','build.cmd'];
+  let chips=[];
+  function add(name,file,delay){const e=el('div','pc'+(file?' file':''),'<img src="'+IC(file?'files':'folder')+'">'+name);flow.appendChild(e);
+    const c={name,file,e,x:20+Math.random()*(FW-140),y:-40-delay*30,vx:0,vy:0,tx:0,ty:0,pin:false,w:0,wait:delay*.06};chips.push(c);
+    e.onclick=()=>{c.pin=!c.pin;e.classList.toggle('pin',c.pin)}}
+  on.onclick=()=>{if(chips.some(c=>!c.file))return;DIRS.forEach((d,i)=>add(d,false,i));chips[0].pin=chips[1].pin=true;chips[0].e.classList.add('pin');chips[1].e.classList.add('pin')};
+  files.onclick=()=>{if(chips.some(c=>c.file))return;FILES.forEach((f,i)=>add(f,true,i))};
+  reset.onclick=()=>{chips.forEach(c=>c.e.remove());chips=[]};
+  const cap=el('div','capline'),lab=el('div','caplab');flow.appendChild(cap);flow.appendChild(lab);
+  setTimeout(()=>on.click(),300);
+  return{update(dt,t){// раскладка: закреплённые первыми, потом папки, потом файлы; строки по ширине
+      const ord=chips.slice().sort((a,b)=>(b.pin-a.pin)||(a.file-b.file));let x=10,y=10,n=0,capY=-1;
+      ord.forEach(c=>{c.w=c.e.offsetWidth;if(x+c.w>FW-10){x=10;y+=36}c.tx=x;c.ty=y;x+=c.w+6;n++;c.e.classList.toggle('over',n>CAP);if(n===CAP+1&&capY<0)capY=y-4});
+      chips.forEach(c=>{if(c.wait>0){c.wait-=dt;return}c.vy+=0;spring(c,dt,120,13);c.e.style.transform='translate('+c.x+'px,'+c.y+'px)'});
+      const over=chips.length-CAP;cap.style.display='none';lab.style.display=over>0?'':'none';
+      ord.forEach((c,i)=>c.e.style.boxShadow=i===CAP?'-4px 0 0 -1px #c8323f':'');
+      if(over>0){lab.style.top='';lab.style.bottom='8px';lab.textContent='за красной чертой не влезет сразу: ещё '+over+', кольцо крутится колесом'}}}
+}
+
+// ---------- справа: значок притягивается ----------
+function P_icon(stage){
+  stage.style.height='300px';
+  const names=['projects','code','study','career','apps','music','downloads','desktop','recycle','cpp','java','web','game','db','table','portfolio','contests','terminal'];
+  const drop=el('div','drop');drop.style.left='24px';drop.style.top='24px';stage.appendChild(drop);
+  const cur=el('img');cur.src=IC('projects');cur.style.cssText='width:64px;height:64px;position:absolute;left:44px;top:44px;transition:transform .35s cubic-bezier(.2,.9,.3,1.5)';stage.appendChild(cur);
+  const cap=el('div','hint','значок сектора «Проекты»');cap.style.cssText='position:absolute;left:146px;top:34px;font-size:13px;color:var(--text)';stage.appendChild(cap);
+  const cap2=el('div','hint','перетащи значок из библиотеки на квадрат: рядом его притянет; файл из Проводника - так же');cap2.style.cssText='position:absolute;left:146px;top:58px;max-width:340px';stage.appendChild(cap2);
+  const libs=names.map((n,i)=>{const e=el('div','lib','<img src="'+IC(n)+'">');stage.appendChild(e);const per=Math.max(4,Math.floor((stage.clientWidth-40)/52)),bx=24+(i%per)*52,by=160+Math.floor(i/per)*54;
+    const o={n,e,x:bx,y:by,bx,by,vx:0,vy:0,tx:bx,ty:by,s:1};
+    e.addEventListener('pointerdown',ev=>{const[px,py]=pos(stage,ev);drag=o;gx=px-o.x;gy=py-o.y;e.setPointerCapture(ev.pointerId);e.style.zIndex=6});
+    e.addEventListener('pointermove',ev=>{if(drag!==o)return;const[px,py]=pos(stage,ev);o.x=px-gx;o.y=py-gy;o.vx=o.vy=0});
+    e.addEventListener('pointerup',()=>{if(drag!==o)return;drag=null;e.style.zIndex='';const d=Math.hypot(o.x+22-76,o.y+22-76);
+      if(d<90){cur.style.transform='scale(.2)';setTimeout(()=>{cur.src=IC(o.n);cur.style.transform='scale(1.12)';setTimeout(()=>cur.style.transform='scale(1)',180)},160);toast(stage,'Значок поменян')}
+      o.tx=o.bx;o.ty=o.by});return o});
+  let drag=null,gx=0,gy=0,mx=-999,my=-999;
+  stage.addEventListener('pointermove',ev=>{[mx,my]=pos(stage,ev)});stage.addEventListener('pointerleave',()=>{mx=my=-999});
+  return{update(dt){let hot=false;libs.forEach(o=>{if(o===drag){const d=Math.hypot(o.x+22-76,o.y+22-76);hot=d<90;
+        if(d<90){o.x+=(54-o.x)*Math.min(1,dt*(1-d/90)*14);o.y+=(54-o.y)*Math.min(1,dt*(1-d/90)*14)}}else spring(o,dt,160,16);
+      // библиотека как док: ближние к курсору крупнее
+      const near=drag?0:Math.max(0,1-Math.hypot(mx-(o.bx+22),my-(o.by+22))/90);o.s+=((1+near*.35)-o.s)*Math.min(1,dt*12);
+      o.e.style.transform='translate('+o.x+'px,'+o.y+'px) scale('+(o===drag?1.15:o.s)+')';o.e.style.zIndex=o===drag?6:Math.round(near*5)});
+    drop.classList.toggle('hot',hot)}}
+}
+
+const D=[
+ ['Две дорожки','оба края сразу','Левый и правый край видны рядом, секторы - карточки на дорожках.',
+  ['<b>Перенос на другой край</b> - просто перетащить карточку на соседнюю дорожку (сейчас - пункт меню)','<b>Порядок</b> - тянешь, соседи расступаются пружиной','<b>Пропавший путь</b> - карточка с трещиной подрагивает, «найти» - срастается; папка из Проводника влетает в нужное место'],D_lanes],
+ ['Стопки групп','группы наглядно','Группа - стопка карточек; щелчок раскрывает её веером.',
+  ['<b>Веер</b> - пункты группы выезжают вбок, видно состав без перехода во вкладку','<b>Вытащить пункт</b> влево - он становится отдельным сектором (как «теперь отдельный сектор» сейчас)','<b>Обычные секторы</b> - одиночные карточки, стопка видна только у групп'],D_stacks],
+ ['Полка значков','крупные значки','Секторы - плитки на двух полках, как док: значок главнее подписи.',
+  ['<b>Полка тянется к курсору</b>: ближние плитки крупнее, плитка под курсором наклоняется','<b>Щелчок</b> - под полкой выезжает ящик с подписью, путём и составом группы','<b>Перетащить</b> по полке - порядок, на другую полку - другой край'],D_shelf],
+];
+const PARTS=[
+ ['Путь проверяется на глазах','вкладка «Основное»','Путь разбирается на звенья: какие есть - зелёные, где оборвался - жёлтое, рядом подсказка похожей папки.',['<b>Учеба</b> вместо <b>Учёба</b> - видно сразу, щелчок по подсказке чинит'],P_path],
+ ['Второе кольцо наполняется','вкладка «Второе кольцо»','Содержимое папки сыплется пунктами; закреплённые - впереди, красная черта - сколько влезет сразу.',['<b>Щелчок по пункту</b> - закрепить первым; «И обычные файлы» досыпает файлы (они с пунктирной рамкой)'],P_flow],
+ ['Значок притягивается','вкладка «Значок»','Библиотека как док, квадрат значка притягивает перетаскиваемый.',['<b>Рядом с квадратом</b> значок затягивает сам, старый растворяется, новый подпрыгивает'],P_icon],
+];
+
+// ---------- ещё: из карточки в заголовок ----------
+function M_morph(stage){
+  const W=stage.clientWidth,lw=Math.min(190,W*.38),px=lw+28;
+  const list=clone(LEFT).concat(clone(RIGHT).slice(0,2));
+  const panel=el('div','');panel.style.cssText='position:absolute;left:'+(px-10)+'px;top:8px;right:8px;bottom:8px;border-radius:10px;background:#12141c';stage.appendChild(panel);
+  const cards=list.map((s,i)=>{const e=el('div','sc',cardHTML(Object.assign({},s,{broken:false})));e.style.width=(lw-8)+'px';e.style.transform='translate(8px,'+(10+i*52)+'px)';stage.appendChild(e);return{s,e,y:10+i*52}});
+  let head=null,rows=[];
+  function pick(c){cards.forEach(q=>q.e.classList.toggle('sel',q===c));
+    if(head){const old=head;old.o.tx=old.o.x;old.o.ty=old.o.y+14;old.fade=true;setTimeout(()=>old.e.remove(),300)}
+    rows.forEach(r=>r.remove());rows=[];
+    // копия карточки взлетает в заголовок и растёт
+    const e=el('div','sc',cardHTML(Object.assign({},c.s,{broken:false})));e.style.width=Math.min(360,(W-px-24)/1.45)+'px';e.style.transformOrigin='0 0';e.style.zIndex=4;e.style.background='transparent';e.style.borderColor='transparent';stage.appendChild(e);
+    head={e,o:{x:8,y:c.y,vx:0,vy:0,tx:px,ty:14},s:1,ts:1.45,fade:false};
+    const lines=c.s.kids?c.s.kids.map(k=>['пункт',k[0],k[1]]):[['путь','D:\\Desktop\\'+c.s.name,'folder'],['второе кольцо',c.s.sub,'files'],['значок',c.s.icon+'.png',c.s.icon]];
+    lines.forEach((l,i)=>{const r=el('div','');r.style.cssText='position:absolute;left:'+px+'px;right:20px;top:'+(96+i*44)+'px;height:36px;border-radius:8px;background:#1a1d27;display:flex;align-items:center;gap:10px;padding:0 10px;font-size:12px;opacity:0;transform:translateY(14px);transition:opacity .3s '+(.15+i*.07)+'s,transform .45s cubic-bezier(.2,.9,.3,1.4) '+(.15+i*.07)+'s';
+      r.innerHTML='<img src="'+IC(l[2])+'" style="width:20px;height:20px"><span style="color:var(--faint);width:94px">'+l[0]+'</span><span>'+l[1]+'</span>';stage.appendChild(r);rows.push(r);requestAnimationFrame(()=>requestAnimationFrame(()=>{r.style.opacity=1;r.style.transform='none'}))})}
+  cards.forEach(c=>c.e.addEventListener('click',()=>pick(c)));
+  setTimeout(()=>pick(cards[1]),400);
+  return{update(dt){if(!head)return;spring(head.o,dt,150,19);head.s+=(head.ts-head.s)*Math.min(1,dt*9);
+      head.e.style.transform='translate('+head.o.x+'px,'+head.o.y+'px) scale('+head.s+')';head.e.style.opacity=head.fade?0:1;head.e.style.transition='opacity .25s'},
+    init(){const h=el('div','hint','щёлкни по сектору - карточка становится заголовком');stage.appendChild(h)}}
+}
+
+// ---------- ещё: склеить в группу ----------
+function M_merge(stage){
+  const W=stage.clientWidth,cw=Math.min(300,W-24);
+  const items=clone(RIGHT).map((s,i)=>({s,x:12,y:12+i*54,vx:0,vy:0,tx:12,ty:0}));
+  let drag=null,gx=0,gy=0,target=null;
+  function mk(c){c.e=el('div','sc',cardHTML(c.s));c.e.style.width=cw+'px';stage.appendChild(c.e);
+    c.e.addEventListener('pointerdown',ev=>{const[px,py]=pos(stage,ev);drag=c;gx=px-c.x;gy=py-c.y;c.e.setPointerCapture(ev.pointerId);c.e.classList.add('drag')});
+    c.e.addEventListener('pointermove',ev=>{if(drag!==c)return;const[px,py]=pos(stage,ev);c.x=px-gx;c.y=py-gy;c.vx=c.vy=0;
+      target=items.find(q=>q!==c&&Math.abs(q.y-c.y)<26&&Math.abs(q.x-c.x)<cw*.6)||null;items.forEach(q=>q.e.style.boxShadow=q===target?'0 0 0 2px rgba(143,163,191,.6),0 0 22px rgba(143,163,191,.25)':'')});
+    c.e.addEventListener('pointerup',()=>{if(drag!==c)return;drag=null;c.e.classList.remove('drag');
+      if(target){const t=target;target=null;t.e.style.boxShadow='';merge(t,c)}})}
+  function merge(t,c){// обе карточки сжимаются в одну стопку, имя печатается само
+    const kids=(t.s.kids||[[t.s.name,t.s.icon]]).concat(c.s.kids||[[c.s.name,c.s.icon]]);
+    c.e.style.transition='transform .25s,opacity .25s';c.e.style.opacity=0;items.splice(items.indexOf(c),1);setTimeout(()=>c.e.remove(),260);
+    t.s={name:'',icon:'hub',kind:'группа',sub:kids.length+' пункта',kids};t.e.innerHTML=cardHTML(t.s);t.pop=1;
+    if(!t.g){t.g=[0,1].map(()=>{const g=el('div','ghostcard');g.style.width=cw+'px';stage.insertBefore(g,t.e);return g})}
+    let n=0;const name='Новая группа';clearInterval(t.typ);t.typ=setInterval(()=>{t.s.name=name.slice(0,++n);t.e.querySelector('.nm').textContent=t.s.name+(n<name.length?'|':'');if(n>=name.length)clearInterval(t.typ)},55);
+    toast(stage,'Группа из '+kids.length+': переименуй, как удобно')}
+  items.forEach(mk);
+  return{update(dt){items.forEach((c,i)=>{c.tx=12;c.ty=12+i*54;if(c!==drag)spring(c,dt);c.pop=Math.max(0,(c.pop||0)-dt*2.2);
+      const sc=1+Math.sin((1-c.pop)*Math.PI)*c.pop*.08;c.e.style.transform='translate('+c.x+'px,'+c.y+'px) scale('+sc+')'+(c===drag?' rotate(-1.5deg)':'');
+      if(c.g)c.g.forEach((g,k)=>{g.style.transform='translate('+(c.x+(k+1)*4)+'px,'+(c.y+(k+1)*4)+'px)';g.style.opacity=1-k*.35})})},
+    init(){const h=el('div','hint','брось карточку на другую - получится группа');stage.appendChild(h)}}
+}
+
+// ---------- ещё: удалить жестом ----------
+function M_bin(stage){
+  const W=stage.clientWidth,H=stage.clientHeight,cw=Math.min(300,W-120);
+  const cv=el('canvas');cv.width=W*devicePixelRatio;cv.height=H*devicePixelRatio;cv.style.cssText='position:absolute;inset:0;width:'+W+'px;height:'+H+'px;pointer-events:none;z-index:7';stage.appendChild(cv);
+  const g=cv.getContext('2d');g.scale(devicePixelRatio,devicePixelRatio);
+  const bin=el('div','');bin.innerHTML='<img src="'+IC('recycle')+'" style="width:56px;height:56px">';bin.style.cssText='position:absolute;right:22px;bottom:30px;width:72px;height:72px;border-radius:18px;display:flex;align-items:center;justify-content:center;transition:transform .2s,background .2s';stage.appendChild(bin);
+  const items=clone(LEFT).map((s,i)=>({s,x:12,y:12+i*54,vx:0,vy:0,tx:12,ty:0}));
+  let drag=null,gx=0,gy=0,parts=[],gone=null,undoBtn=null;const BX=W-58,BY=H-66;
+  function mk(c){c.e=el('div','sc',cardHTML(Object.assign({},c.s,{broken:false})));c.e.style.width=cw+'px';stage.appendChild(c.e);
+    c.e.addEventListener('pointerdown',ev=>{const[px,py]=pos(stage,ev);drag=c;gx=px-c.x;gy=py-c.y;c.e.setPointerCapture(ev.pointerId);c.e.classList.add('drag')});
+    c.e.addEventListener('pointermove',ev=>{if(drag!==c)return;const[px,py]=pos(stage,ev);c.x=px-gx;c.y=py-gy;c.vx=c.vy=0;const near=Math.hypot(px-BX,py-BY)<70;
+      bin.style.transform=near?'scale(1.18) rotate(-6deg)':'';bin.style.background=near?'rgba(200,50,63,.15)':''});
+    c.e.addEventListener('pointerup',ev=>{if(drag!==c)return;drag=null;c.e.classList.remove('drag');const[px,py]=pos(stage,ev);bin.style.transform='';bin.style.background='';
+      if(Math.hypot(px-BX,py-BY)<70)crumble(c)})}
+  // карточка осыпается квадратиками, их затягивает в корзину; «Вернуть» - собираются обратно
+  function crumble(c){const i=items.indexOf(c);items.splice(i,1);c.e.style.visibility='hidden';gone={c,i};parts=[];
+    const cols=['#c8323f','#d9dee6','#8fa3bf','#2a2e3c','#1c1f2a'];
+    for(let k=0;k<90;k++){const ox=Math.random()*cw,oy=Math.random()*46;parts.push({hx:c.x+ox,hy:c.y+oy,x:c.x+ox,y:c.y+oy,vx:(Math.random()-.5)*160,vy:-Math.random()*160,col:cols[k%5],d:Math.random()*.25,back:false})}
+    bin.style.transform='scale(1.25)';setTimeout(()=>bin.style.transform='',220);
+    if(undoBtn)undoBtn.remove();undoBtn=el('button','btn','Вернуть «'+c.s.name+'»');undoBtn.style.cssText='position:absolute;left:12px;bottom:10px;z-index:8';stage.appendChild(undoBtn);
+    undoBtn.onclick=()=>{undoBtn.remove();undoBtn=null;parts.forEach(p=>{p.back=true;p.x=BX+(Math.random()-.5)*20;p.y=BY;p.vx=(Math.random()-.5)*300;p.vy=-200-Math.random()*200});
+      setTimeout(()=>{items.splice(Math.min(gone.i,items.length),0,gone.c);gone.c.x=12;gone.c.y=12+gone.i*54;gone.c.e.style.visibility='';parts=[]},700)}}
+  items.forEach(mk);
+  return{update(dt,t){items.forEach((c,i)=>{c.tx=12;c.ty=12+i*54;if(c!==drag)spring(c,dt);c.e.style.transform='translate('+c.x+'px,'+c.y+'px)'+(c===drag?' rotate(2deg) scale(.97)':'')});
+      g.clearRect(0,0,W,H);parts.forEach(p=>{if(p.d>0){p.d-=dt;g.fillStyle=p.col;g.fillRect(p.x,p.y,3,3);return}
+        const tx=p.back?p.hx:BX,ty=p.back?p.hy:BY;p.vx+=((tx-p.x)*(p.back?60:14)-p.vx*(p.back?9:2.5))*dt;p.vy+=((ty-p.y)*(p.back?60:14)-p.vy*(p.back?9:2.5))*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
+        const a=p.back?1:Math.min(1,Math.hypot(p.x-BX,p.y-BY)/40);g.globalAlpha=a;g.fillStyle=p.col;g.fillRect(p.x,p.y,3,3);g.globalAlpha=1})},
+    init(){const h=el('div','hint','брось сектор в корзину - рассыплется; «Вернуть» - соберётся');h.style.right='110px';stage.appendChild(h)}}
+}
+
+// ---------- ещё: лента правок ----------
+function M_tape(stage){
+  const W=stage.clientWidth,H=stage.clientHeight,lw=(W-36)/2,lx=[12,24+lw];
+  // состояния после каждой правки: [имя, значок, край]
+  const base=[['Проекты','projects',0],['Код','code',0],['Учёба','study',0],['Карьера','career',0],['Программы','apps',1],['Музыка','music',1],['Загрузки','downloads',1]];
+  const edits=[['было так',s=>s],['«Код» - на правый край',s=>s.map(x=>x[0]==='Код'?[x[0],x[1],1]:x)],['новый сектор «Конкурсы»',s=>s.concat([['Конкурсы','contests',0]])],
+    ['«Учёба» -> «Учёба 2 курс»',s=>s.map(x=>x[0]==='Учёба'?['Учёба 2 курс',x[1],x[2]]:x)],['«Загрузки» удалён',s=>s.filter(x=>x[0]!=='Загрузки')],['«Музыка» наверх',s=>{const m=s.find(x=>x[0]==='Музыка');return [m].concat(s.filter(x=>x!==m))}]];
+  const states=[];let st=base;edits.forEach(e=>{st=e[1](st.map(x=>x.slice()));states.push(st)});
+  const cards={};let at=states.length-1,knob={x:0,vx:0,tx:0,y:0,vy:0,ty:0},dragK=false;
+  const tw=W-60,ty=H-38,dotX=i=>30+tw*i/(states.length-1);
+  const line=el('div','');line.style.cssText='position:absolute;left:30px;width:'+tw+'px;top:'+ty+'px;height:2px;background:#2a2e3c';stage.appendChild(line);
+  const dots=states.map((s,i)=>{const d=el('div','');d.style.cssText='position:absolute;width:10px;height:10px;border-radius:5px;background:#5b6272;left:'+(dotX(i)-5)+'px;top:'+(ty-4)+'px';stage.appendChild(d);return d});
+  const kn=el('div','');kn.style.cssText='position:absolute;left:0;top:0;width:18px;height:18px;border-radius:9px;background:var(--acc);box-shadow:0 0 0 5px rgba(200,50,63,.2);cursor:grab;z-index:6';stage.appendChild(kn);
+  const lab=el('div','');lab.style.cssText='position:absolute;top:'+(ty-30)+'px;font-size:12px;color:var(--text);white-space:nowrap;transform:translateX(-50%)';stage.appendChild(lab);
+  knob.x=knob.tx=dotX(at);
+  kn.addEventListener('pointerdown',ev=>{dragK=true;kn.setPointerCapture(ev.pointerId)});
+  kn.addEventListener('pointermove',ev=>{if(!dragK)return;const[px]=pos(stage,ev);knob.x=Math.max(30,Math.min(30+tw,px));knob.vx=0;at=Math.round((knob.x-30)/tw*(states.length-1))});
+  kn.addEventListener('pointerup',()=>{dragK=false});
+  dots.forEach((d,i)=>{d.style.cursor='pointer';d.onclick=()=>{at=i}});
+  return{update(dt){knob.tx=dotX(at);if(!dragK)spring(knob,dt,200,22);kn.style.transform='translate('+(knob.x-9)+'px,'+(ty-8)+'px)';
+      dots.forEach((d,i)=>d.style.background=i<=at?'#c8323f':'#5b6272');lab.style.left=Math.max(80,Math.min(W-80,dotX(at)))+'px';lab.textContent=edits[at][0];
+      const s=states[at],seen={};const rows=[0,0];
+      s.forEach(x=>{const key=x[1];seen[key]=1;let c=cards[key];
+        if(!c){const e=el('div','sc','<img src="'+IC(x[1])+'"><div class="nm"></div>');e.style.width=(lw-8)+'px';e.style.height='38px';stage.appendChild(e);c=cards[key]={e,x:lx[x[2]]+4,y:-50,vx:0,vy:0,tx:0,ty:0,a:0}}
+        c.e.querySelector('.nm').textContent=x[0];c.tx=lx[x[2]]+4;c.ty=10+rows[x[2]]++*44;c.on=1});
+      Object.keys(cards).forEach(k=>{const c=cards[k];if(!seen[k]){c.on=0}c.a+=((c.on?1:0)-c.a)*Math.min(1,dt*10);spring(c,dt,180,20);
+        c.e.style.opacity=c.a;c.e.style.transform='translate('+c.x+'px,'+c.y+'px) scale('+(.9+.1*c.a)+')';c.e.style.pointerEvents=c.on?'':'none';c.on=0})},
+    init(){const h=el('div','hint','тяни красную точку назад - правки откатываются на глазах');h.style.bottom='auto';h.style.top='6px';stage.appendChild(h)}}
+}
+const MORE=[
+ ['Карточка становится заголовком','переход к сектору','Выбрал сектор - его карточка взлетает и растёт в заголовок справа, поля выезжают за ней по очереди.',['<b>Не мигание, а перелёт</b>: видно, откуда пришёл заголовок'],M_morph],
+ ['Склеить в группу','новая группа жестом','Брось одну карточку на другую - они слипаются в стопку «Новая группа», имя печатается само.',['<b>Ореол</b> у карточки под курсором: «отпусти - будет группа»'],M_merge],
+ ['Удалить в корзину','удаление жестом','Сектор бросают в корзину - он рассыпается квадратиками и затягивается внутрь; «Вернуть» собирает его на прежнем месте.',['<b>Частицы те же</b>, что в вихре очистки: одна система в программе'],M_bin],
+ ['Лента правок','отмена на глазах','Правки - точки на ленте; тянешь точку назад - карточки разъезжаются, как было, вперёд - снова как стало.',['<b>Вместо «Отменить»</b> по одной: видно, что именно откатится'],M_tape],
+];
+
+const stages=[];
+function mount(list,host){list.forEach((d,i)=>{const box=el('div','dir');
+  box.innerHTML='<h2><b>'+(host==='dirs'?i+1:String.fromCharCode((host==='more'?1075:1072)+i))+'</b>'+d[0]+'<span>'+d[1]+'</span></h2><p>'+d[2]+'</p><ul>'+d[3].map(s=>'<li>'+s+'</li>').join('')+'</ul><div class="bar"><button class="btn">Ещё раз</button></div><div class="stage"></div>';
+  document.getElementById(host).appendChild(box);const st={box,make:d[4]};stages.push(st);
+  const restart=()=>{const old=box.querySelector('.stage');const ns=el('div','stage');old.replaceWith(ns);st.stage=ns;st.w=ns.clientWidth;st.scene=st.make(ns);if(st.scene.init)st.scene.init()};
+  box.querySelector('.bar .btn').onclick=restart;st.restart=restart;restart()})}
+mount(D,'dirs');mount(PARTS,'parts');mount(MORE,'more');
+let last=performance.now(),T=0;
+function frame(now){const dt=Math.min(.033,(now-last)/1000);last=now;T+=dt;stages.forEach(s=>{if(s.stage&&s.stage.clientWidth!==s.w)s.restart();s.scene&&s.scene.update(dt,T)});requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

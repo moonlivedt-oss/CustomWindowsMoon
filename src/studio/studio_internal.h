@@ -214,6 +214,11 @@ enum Id {
     ID_LIVE_BATTERY,
     ID_LIVE_VERS,
     ID_TOOLS_VER_CHECK,
+    ID_LANE_BIN,    // «Кольца»: корзина под дорожками
+    ID_TAPE,        // лента правок
+    ID_ICON_DOCK,   // сетка значков-дока (наведение)
+    ID_FLOW_FILL,   // «Наполнить из папки»
+    ID_FLOW_FILES,  // «И обычные файлы»
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -240,6 +245,34 @@ enum Id {
     ID_STATE_DL = 10100,     // +i: строка Загрузок (выбор)
     ID_STATE_APP = 10200,    // +i: «Закрыть» у тяжёлой программы
     ID_STATE_ANIM = 10300,   // +i: появление шкал и полос
+    ID_PATH_SUGG = 10400,    // +i: подсказка похожей папки под путём
+    ID_LANE_FIND = 10500,    // +край*100 + i: «найти» на карточке с пропавшим путём
+    ID_LANE_MINI = 10700,    // +j: пункт раскрытой стопки
+    ID_FLOW = 10800,         // +n: плашка второго кольца (щелчок - закрепить)
+    ID_LANE_ANIM = 11000,    // +край*100 + i: раскрытие стопки
+};
+
+// Пружина раздела «Кольца» (studio_lanes.cpp): карточка, пункт веера, плашка второго кольца, значок дока.
+// Координаты - в своей рамке (дорожек, потока, сетки): при прокрутке рамка едет целиком, пружина не тянется.
+struct Mover {
+    float x = 0, y = 0, vx = 0, vy = 0;
+    float a = 1;      // видимость
+    float pop = 0;    // подпрыгнуть: 1 - только что, тает
+    float crack = 0;  // трещина пропавшего пути
+    float s = 1;      // масштаб (док значков)
+    float wait = 0;   // задержка перед стартом, с
+    float pull = 0;   // притяжение к квадрату значка
+    int ring = -1, idx = -1;  // где стоял в прошлом кадре
+    bool live = false;
+};
+struct Crumb {  // крошка рассыпавшейся карточки
+    float x, y, vx, vy, hx, hy, delay;
+    BYTE col;
+};
+struct Sink {  // карточка, которая слиплась с другой: сжимается и тонет в ней
+    Item it;
+    std::wstring into;
+    float x, y, t;
 };
 
 struct Problem {
@@ -364,6 +397,27 @@ private:
     void RingsPage(const RectF& r);
     void SectorList(const RectF& r);
     void SectorMain(const RectF& r);
+    // живой раздел «Кольца» (studio_lanes.cpp, studio_ringparts.cpp)
+    void LaneTick();
+    void LaneCard(const Item& it, int L, int i, const RectF& r, const std::wstring& name, float hot, bool on,
+                  int prob, float crack, bool smooth);
+    void LaneCrumble(int L, int i);
+    void CrumbsDraw();
+    void MorphGhost();
+    void Tape(const RectF& r);
+    bool DropOnLanes(POINT pt, const std::vector<std::wstring>& paths);
+    bool LaneTarget(int& lane, int& at) const { lane = laneHot_, at = laneIns_; return laneHot_ >= 0; }
+    struct Arrival {
+        float dy = 0, veil = 0;
+    };
+    Arrival Arrive(int n);
+    void BlockIn(int n);
+    void BlockOut(const RectF& r);
+    void IconDrawn(const std::wstring& file, const std::wstring& shell, const RectF& r, float alpha = 1);
+    void IconSwap(const std::wstring& oldFile);
+    float PathChain(float x, float y, float w);
+    float RingFlow(const RectF& view, float x, float y, float w);
+    float IconDock(const RectF& view, float x, float y, float w);
     void TabBasic(const RectF& view, float y, float& bottom);
     void TabRing(const RectF& view, float y, float& bottom);
     void TabIcon(const RectF& view, float y, float& bottom);
@@ -469,6 +523,29 @@ private:
     ULONGLONG boostReadAt_ = 0;
     bool savePending_ = false;
     std::vector<Config> undo_, redo_;
+    std::vector<std::wstring> undoWhat_, redoWhat_;  // что сделала каждая правка: подписи ленты правок
+    bool tapeQuiet_ = false;
+    std::wstring toastBtn_ = L"Отменить";
+    // раздел «Кольца» живой
+    std::map<std::wstring, Mover> laneCards_, laneMinis_, laneHints_, flowChips_, dockTiles_;
+    std::vector<Crumb> crumbs_;
+    std::vector<Sink> sinks_;
+    bool crumbsBack_ = false, overBin_ = false;
+    double clock_ = 0, crumbsAt_ = -10, binPopAt_ = -10, morphAt_ = -10, arriveAt_ = -10, typingAt_ = -10;
+    double chainAt_ = -10, chainCheck_ = -10, flowAt_ = -10, iconSwapAt_ = -10;
+    ULONGLONG clockAt_ = 0;
+    float ldt_ = 0.016f, laneContentH_ = 0, lanePitch_ = 0, laneCardW_ = 0, laneCardH_ = 0;
+    std::wstring binKey_, pressKey_, openStack_, mergeKey_, lastShown_, chainKey_, flowKey_, iconOld_;
+    RectF binRect_, lanesView_, laneRect_[2], morphFrom_, headIcon_, headTitle_;
+    Gdiplus::PointF lanesOrg_, grab_;
+    std::vector<float> laneSlotY_[2];
+    int laneHot_ = -1, laneIns_ = -1, typingRing_ = -1, typingIdx_ = -1, dockDrag_ = -1;
+    int lastDragL_ = -1, lastDragI_ = -1, lastDragJ_ = -1;  // кого тянули в прошлом кадре: в кадре отпускания
+    Mover tapeKnob_;
+    Arrival arr_;
+    bool arrWas_ = true;
+    std::vector<std::wstring> chainParts_, chainSugg_;
+    int chainBad_ = -1;
     int renaming_ = -1;  // сектор, который переименовывают прямо в списке
     bool renameFocus_ = false, renameActive_ = false, focusPath_ = false, moreAtMouse_ = false;
     RectF sideRect_[2], listView_;

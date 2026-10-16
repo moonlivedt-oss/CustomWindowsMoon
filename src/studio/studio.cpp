@@ -806,11 +806,15 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             Item* it = Sel();
             if (page_ == PAGE_RINGS && tab_ == 2 && it && IsImageFile(paths[0]) &&
                 iconTile_.Contains((REAL)pt.x, (REAL)pt.y)) {
+                std::wstring old = IconFile(*it);
                 Change();
                 it->icon = ShortPath(paths[0]);
                 Resolve(*it);
                 Log(L"Значок заменён");
                 Save();
+                IconSwap(old);
+            } else if (page_ == PAGE_RINGS && DropOnLanes(pt, paths)) {
+                // папка влетела в то место дорожки, куда её отпустили
             } else {
                 bool asChildren = page_ == PAGE_RINGS && tab_ == 1 && it;
                 page_ = PAGE_RINGS;

@@ -89,6 +89,10 @@ public:
     float MeasureWrapped(const std::wstring& s, float size, bool bold, float width);
     void Icon(const std::wstring& file, const RectF& r, const std::wstring& shellPath = L"");
     Gdiplus::Bitmap* IconBitmap(const std::wstring& shellPath, int px) { return icons_.Get(L"", shellPath, px); }
+    // значок из файла или системный, готовый размер px - для рисования с масштабом и поворотом
+    Gdiplus::Bitmap* IconBitmap(const std::wstring& file, const std::wstring& shellPath, int px) {
+        return icons_.Get(file, shellPath, px);
+    }
     // alpha < 255 - картинка полупрозрачная (растворение одной в другую)
     void Picture(Gdiplus::Bitmap* b, const RectF& r, float radius, bool roundBottom = true, BYTE alpha = 255);
     Gdiplus::GraphicsPath* Round(const RectF& r, float radius, bool top = true, bool bottom = true);

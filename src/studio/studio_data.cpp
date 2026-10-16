@@ -34,8 +34,13 @@ Item* Studio::Sel() {
 
 void Studio::PushUndo() {
     redo_.clear();
+    redoWhat_.clear();
     undo_.push_back(cfg);
-    if (undo_.size() > 60) undo_.erase(undo_.begin());
+    undoWhat_.push_back(L"");  // подпись для ленты правок допишет следующий Log
+    if (undo_.size() > 60) {
+        undo_.erase(undo_.begin());
+        undoWhat_.erase(undoWhat_.begin());
+    }
 }
 
 void Studio::Change() {
@@ -47,6 +52,7 @@ void Studio::Change() {
 void Studio::FieldEdit(int fid) {
     if (editingField_ != fid) {
         PushUndo();
+        undoWhat_.back() = L"правка текста";
         editingField_ = fid;
     }
     savePending_ = true;
@@ -76,13 +82,15 @@ void Studio::Undo() {
     redo_.push_back(cfg);
     cfg = undo_.back();
     undo_.pop_back();
+    redoWhat_.push_back(undoWhat_.empty() ? L"" : undoWhat_.back());
+    if (!undoWhat_.empty()) undoWhat_.pop_back();
     editingField_ = 0;
     toastUntil_ = 0;
     for (auto* r : {&cfg.left, &cfg.right})
         for (Item& it : *r) Resolve(it);
     sel_ = std::clamp(sel_, 0, std::max(0, (int)Ring(ring_).size() - 1));
     ApplyAccent();
-    Log(L"Последнее изменение отменено");
+    if (!tapeQuiet_) Log(L"Последнее изменение отменено");
     Save();
 }
 
@@ -91,12 +99,14 @@ void Studio::Redo() {
     undo_.push_back(cfg);
     cfg = redo_.back();
     redo_.pop_back();
+    undoWhat_.push_back(redoWhat_.empty() ? L"" : redoWhat_.back());
+    if (!redoWhat_.empty()) redoWhat_.pop_back();
     editingField_ = 0;
     for (auto* r : {&cfg.left, &cfg.right})
         for (Item& it : *r) Resolve(it);
     sel_ = std::clamp(sel_, 0, std::max(0, (int)Ring(ring_).size() - 1));
     ApplyAccent();
-    Log(L"Изменение возвращено");
+    if (!tapeQuiet_) Log(L"Изменение возвращено");
     Save();
 }
 
@@ -130,9 +140,11 @@ void Studio::SectorOp(int op) {
         ++sel_;
         Log(L"Сектор «" + name + L"» продублирован");
     } else if (op == OP_DELETE) {
+        LaneCrumble(ring_, sel_);  // карточка осыпается в корзину; «Вернуть» соберёт её обратно
         ring.erase(ring.begin() + sel_);
         sel_ = std::clamp(sel_, 0, std::max(0, (int)ring.size() - 1));
         Toast(L"Сектор «" + name + L"» удалён");
+        toastBtn_ = L"Вернуть";
     }
     Save();
 }
@@ -188,6 +200,7 @@ void Studio::Log(const std::wstring& s) {
     localtime_s(&lt, &now);
     swprintf(t, 16, L"%02d:%02d", lt.tm_hour, lt.tm_min);
     log_.push_back({t, s});
+    if (!undoWhat_.empty() && undoWhat_.back().empty()) undoWhat_.back() = s;
     if (log_.size() > 200) log_.erase(log_.begin());
     status_ = s;
     statusFresh_ = true;

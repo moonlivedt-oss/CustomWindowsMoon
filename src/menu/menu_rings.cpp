@@ -178,7 +178,12 @@ void RadialMenu::RebuildSub() {
             const Item& root = (*ring_)[subParent_];
             list = root.children;
             if (root.expand)
-                for (Item& c : ListFolder(root.full, root.files)) list.push_back(std::move(c));
+                for (Item& c : ListFolder(root.full, root.files)) {
+                    bool pinned = false;  // закреплённое в студии уже стоит первым среди своих пунктов
+                    for (const Item& o : root.children)
+                        if (!o.full.empty() && _wcsicmp(o.full.c_str(), c.full.c_str()) == 0) pinned = true;
+                    if (!pinned) list.push_back(std::move(c));
+                }
         }
         if ((int)list.size() > cap) list.resize(cap);
     }

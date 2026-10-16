@@ -29,6 +29,7 @@ namespace studio {
 // Уведомление внизу с кнопкой «Отменить»: держится 5 секунд.
 void Studio::Toast(const std::wstring& s) {
     toast_ = s;
+    toastBtn_ = L"Отменить";
     toastUntil_ = GetTickCount64() + 5000;
     SetTimer(wnd, kToastTimer, 5050, nullptr);
     Log(s);
@@ -39,10 +40,14 @@ void Studio::DrawToast(float w, float h) {
     const UiColors& c = ui.C();
     float tw = std::min(w - ui.S(200), ui.Measure(toast_, 12.5f) + ui.S(160));
     RectF r((w + ui.S(78) - tw) / 2, h - ui.S(48) - ui.S(62), tw, ui.S(48));
+    if (page_ == PAGE_RINGS && laneRect_[1].Width > 0) {  // в «Кольцах» - над правой частью, корзина видна
+        float left = laneRect_[1].X + laneRect_[1].Width + ui.S(30);
+        r.X = std::max(left, left + (w - left - tw) / 2);
+    }
     ui.Fill(r, MixColor(c.cardHi, c.accent, 0.08f), ui.S(14));
     ui.Stroke(r, c.accent, ui.S(14), ui.S(1.5f));
     ui.Text(toast_, RectF(r.X + ui.S(18), r.Y, r.Width - ui.S(150), r.Height), c.text, 12.5f);
-    if (ui.Button(ID_TOAST_UNDO, RectF(r.X + r.Width - ui.S(128), r.Y + ui.S(8), ui.S(116), ui.S(32)), L"Отменить",
+    if (ui.Button(ID_TOAST_UNDO, RectF(r.X + r.Width - ui.S(128), r.Y + ui.S(8), ui.S(116), ui.S(32)), toastBtn_,
                   Kind::Primary))
         Undo();
 }
@@ -57,7 +62,8 @@ void Studio::TourOverlay(float w, float h) {
         const wchar_t* text;
     } steps[] = {
         {L"mascot-wave.webp", L"Привет! Это Radial Studio",
-         L"Здесь настраивается всё: кольца у краёв экрана, углы, сеть, утилиты. Начни с «Обзора» - там главное плитками."},
+         L"Здесь настраивается всё: кольца у краёв экрана, углы, сеть, утилиты. Начни с «Обзора» - там главное "
+         L"плитками."},
         {L"mascot-point.webp", L"Пять групп",
          L"Слева группы: Обзор, Кольца, Стол, Сервис, Настройки. Внутри группы - вкладки сверху: например, «Сеть» и "
          L"«Утилиты» в «Сервисе»."},
@@ -142,11 +148,14 @@ void Studio::JournalOverlay(float w, float h) {
     float boff = ui.Scroll(ID_BACKUP - 1, bv, list.size() * bh);
     st = ui.G().Save();
     ui.G().SetClip(bv);
-    if (list.empty()) ui.Text(L"Появятся после первого изменения", Inset(RectF(bv.X, bv.Y, bv.Width, bh), ui.S(8), 0), c.faint, 12);
+    if (list.empty())
+        ui.Text(L"Появятся после первого изменения", Inset(RectF(bv.X, bv.Y, bv.Width, bh), ui.S(8), 0), c.faint, 12);
     for (int i = 0; i < (int)list.size(); ++i) {
         RectF ir(bv.X, bv.Y + i * bh - boff, bv.Width, bh - ui.S(4));
         // radial-2026-10-14_11-09-26.cfg -> 2026-10-14 11:09
-        std::wstring d = list[i].size() >= 23 ? list[i].substr(7, 10) + L"  " + list[i].substr(18, 2) + L":" + list[i].substr(21, 2) : list[i];
+        std::wstring d = list[i].size() >= 23
+                             ? list[i].substr(7, 10) + L"  " + list[i].substr(18, 2) + L":" + list[i].substr(21, 2)
+                             : list[i];
         ui.Text(d, RectF(ir.X + ui.S(8), ir.Y, ir.Width, ir.Height), c.text, 12);
         RectF btn(ir.X + ir.Width - ui.S(110), ir.Y + ui.S(3), ui.S(104), ir.Height - ui.S(6));
         if (Intersect(btn, bv).Height > btn.Height - 1 && ui.Button(ID_BACKUP + i, btn, L"Вернуть")) {
@@ -266,12 +275,13 @@ void Studio::MoreOverlay() {
         int op;
         const wchar_t* name;
         const wchar_t* key;
-    } items[] = {{OP_RENAME, L"Переименовать", L"F2"},         {OP_UP, L"Выше", L"Alt+\u2191"},
-                 {OP_DOWN, L"Ниже", L"Alt+\u2193"},            {OP_OTHER_SIDE, L"На другой край", L""},
-                 {OP_DUPLICATE, L"Дублировать", L"Ctrl+D"},    {OP_DELETE, L"Удалить", L"Delete"}};
+    } items[] = {{OP_RENAME, L"Переименовать", L"F2"},      {OP_UP, L"Выше", L"Alt+\u2191"},
+                 {OP_DOWN, L"Ниже", L"Alt+\u2193"},         {OP_OTHER_SIDE, L"На другой край", L""},
+                 {OP_DUPLICATE, L"Дублировать", L"Ctrl+D"}, {OP_DELETE, L"Удалить", L"Delete"}};
     const int n = 6;
     float iw = ui.S(240), ih = ui.S(38);
-    RectF p(moreAnchor_.X + moreAnchor_.Width - iw, moreAnchor_.Y + moreAnchor_.Height + ui.S(6), iw, ih * n + ui.S(12));
+    RectF p(moreAnchor_.X + moreAnchor_.Width - iw, moreAnchor_.Y + moreAnchor_.Height + ui.S(6), iw,
+            ih * n + ui.S(12));
     if (moreAtMouse_) p = RectF(moreAnchor_.X, moreAnchor_.Y, iw, ih * n + ui.S(12));
     RECT rc;
     GetClientRect(wnd, &rc);

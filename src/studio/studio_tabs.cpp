@@ -15,7 +15,9 @@
 #include "core/perf.h"
 #include "app/autostart.h"
 #include "core/text.h"
+#include "core/fx.h"
 #include "gfx/accent.h"
+#include "gfx/color.h"
 #include "gfx/draw.h"
 #include "gfx/icons.h"
 #include "studio/studio.h"
@@ -34,6 +36,7 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
     float lw = ui.S(118), fh = ui.S(38);
     int r = ring_, i = sel_;
 
+    BlockIn(0);
     ui.Text(L"Подпись", RectF(x, y, lw, fh), c.muted, 12.5f);
     FieldOrText(
         ID_NAME, RectF(x + lw, y, w - lw, fh), view, it->name,
@@ -42,8 +45,11 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
             Ring(r)[i].name = s;
         },
         L"Как сектор будет подписан в кольце");
+    BlockOut(RectF(x, y, w, fh));
     y += fh + ui.S(12);
 
+    float pathY = y;
+    BlockIn(1);
     ui.Text(L"Путь", RectF(x, y, lw, fh), c.muted, 12.5f);
     float bw = ui.S(92);
     FieldOrText(
@@ -87,7 +93,8 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
             Resolve(t);
             Save();
         });
-    y += fh + ui.S(12);
+    y += fh + ui.S(10);
+    y += PathChain(x + lw, y, w - lw);
 
     for (const Problem& p : problems_) {
         if (p.ring != ring_ || p.i != sel_ || p.j != -1) continue;
@@ -101,7 +108,10 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
         y += b.Height + ui.S(12);
         break;
     }
+    BlockOut(RectF(x, pathY, w, y - pathY));
 
+    float toggleY = y;
+    BlockIn(2);
     if (isSector) {
         bool ex = it->expand, fl = it->files;
         if (ui.Toggle(ID_EXPAND, RectF(x + lw, y, ui.S(44), ui.S(30)), ex)) {
@@ -122,9 +132,11 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
             y += ui.S(38);
         }
     }
+    BlockOut(RectF(x, toggleY, w, y - toggleY));
     y += ui.S(8);
 
     // карточки с цифрами
+    BlockIn(3);
     FolderStats fs = Stats(*it);
     int count = (int)it->children.size() + (it->expand ? fs.total : 0);
     bool spins = count > 12;  // у края в полукруг влезает около 12 пунктов, дальше кольцо прокручивается
@@ -143,9 +155,11 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
         ui.Text(cards[k2].v, RectF(cr.X + ui.S(16), cr.Y + ui.S(10), cr.Width, ui.S(34)), cards[k2].col, 22, true);
         ui.Text(cards[k2].l, RectF(cr.X + ui.S(16), cr.Y + ui.S(44), cr.Width - ui.S(20), ui.S(20)), c.muted, 11.5f);
     }
+    BlockOut(RectF(x, y, w, ui.S(78)));
     y += ui.S(92);
 
     // что умеет сектор
+    BlockIn(4);
     RectF tip(x, y, w, ui.S(150));
     Card(tip);
     ui.Text(L"Что умеет сектор", RectF(tip.X + ui.S(16), tip.Y + ui.S(12), tip.Width, ui.S(24)), c.text, 14, true);
@@ -165,6 +179,7 @@ void Studio::TabBasic(const RectF& view, float y, float& bottom) {
     }
     ui.Text(L"А если в меню бросить на сектор файл, он переедет в эту папку.",
             RectF(tip.X + ui.S(16), tip.Y + tip.Height - ui.S(30), tip.Width - ui.S(32), ui.S(22)), c.faint, 11.5f);
+    BlockOut(tip);
     y += tip.Height;
     bottom = y;
 }
@@ -191,9 +206,15 @@ void Studio::TabRing(const RectF& view, float y, float& bottom) {
         bottom = y + ui.S(300);
         return;
     }
-    if (!ch.empty())
-        ui.Text(L"Свои пункты идут первыми. Тяни за точки слева, чтобы поменять порядок.", RectF(x, y, w, ui.S(22)),
-                c.muted, 12);
+    float flowY = y;
+    BlockIn(0);
+    y += RingFlow(view, x, y, w);
+    BlockOut(RectF(x, flowY, w, y - flowY));
+    BlockIn(1);
+    float ownY = y;
+    ui.Text(ch.empty() ? L"Своих пунктов нет: щелчок по плашке из папки закрепит её первой."
+                       : L"Свои пункты идут первыми. Тяни за точки слева, чтобы поменять порядок.",
+            RectF(x, y, w, ui.S(22)), c.muted, 12);
     y += ui.S(30);
     float rowH = ui.S(56);
     int dragFrom = -1;
@@ -257,7 +278,8 @@ void Studio::TabRing(const RectF& view, float y, float& bottom) {
     }
     childDrag_ = dragFrom;
     POINT mm = ui.Mouse();
-    bool toList = listView_.Contains((REAL)mm.x, (REAL)mm.y);
+    int laneTo = -1, laneAt = -1;
+    bool toList = LaneTarget(laneTo, laneAt);
     if (dragFrom >= 0 && !toList) {
         int at = std::clamp((int)std::floor((ui.Mouse().y - listY + rowH / 2) / rowH), 0, (int)ch.size());
         ui.Fill(RectF(x + ui.S(6), listY + at * rowH - ui.S(6), w - ui.S(12), ui.S(3)), c.gold, ui.S(2));
@@ -265,14 +287,13 @@ void Studio::TabRing(const RectF& view, float y, float& bottom) {
     for (int j = 0; j < (int)ch.size(); ++j) {
         if (!ui.Released(ID_CHILD + j * 8)) continue;
         if (toList && std::abs(mm.y - ui.PressPt().y) + std::abs(mm.x - ui.PressPt().x) > ui.S(6)) {
-            // пункт брошен в список секторов: становится сектором
-            int to =
-                std::clamp((int)std::floor((mm.y - listView_.Y + listOff_) / itemH_ + 0.5f), 0, (int)Ring(r).size());
+            // пункт брошен на дорожку: становится сектором там, куда отпустили
+            int to = std::clamp(laneAt, 0, (int)Ring(laneTo).size());
             Change();
             Item moving = ch[j];
             ch.erase(ch.begin() + j);
-            Ring(r).insert(Ring(r).begin() + to, moving);
-            if (to <= sel_) ++sel_;
+            Ring(laneTo).insert(Ring(laneTo).begin() + to, moving);
+            if (laneTo == r && to <= sel_) ++sel_;
             Toast(L"«" + moving.name + L"» теперь отдельный сектор");
             Save();
             break;
@@ -295,35 +316,7 @@ void Studio::TabRing(const RectF& view, float y, float& bottom) {
         Save();
     }
     y += ui.S(54);
-    if (it->expand) {
-        const auto& list = Listing(*it);
-        RectF card(x, y, w, ui.S(40));
-        ui.Text(L"Из папки добавятся сами (" + std::to_wstring(list.size()) + L"):", RectF(x, y, w, ui.S(24)), c.muted,
-                12);
-        y += ui.S(30);
-        float cx = x, cy = y;
-        int shown = 0;
-        for (const Item& li : list) {
-            float cw = ui.Measure(li.name, 11.5f) + ui.S(40);
-            if (cx + cw > x + w) {
-                cx = x;
-                cy += ui.S(36);
-                if (cy > y + ui.S(36) * 3) break;
-            }
-            RectF chip(cx, cy, cw, ui.S(30));
-            ui.Fill(chip, c.card, ui.S(8));
-            ui.Stroke(chip, c.border, ui.S(8));
-            ui.Icon(IconFile(li), RectF(chip.X + ui.S(6), chip.Y + ui.S(5), ui.S(20), ui.S(20)), li.full);
-            ui.Text(li.name, RectF(chip.X + ui.S(30), chip.Y, cw - ui.S(34), chip.Height), c.text, 11.5f);
-            cx += cw + ui.S(8);
-            ++shown;
-        }
-        if (shown < (int)list.size())
-            ui.Text(L"и ещё " + std::to_wstring(list.size() - shown), RectF(x, cy + ui.S(36), w, ui.S(22)), c.faint,
-                    11.5f);
-        y = cy + ui.S(64);
-        (void)card;
-    }
+    BlockOut(RectF(x, ownY, w, y - ownY));
     bottom = y;
 }
 
@@ -333,10 +326,35 @@ void Studio::TabIcon(const RectF& view, float y, float& bottom) {
     float x = view.X + ui.S(4), w = view.Width - ui.S(8);
     int r = ring_, i = sel_;
     float t = ui.S(140);
+    BlockIn(0);
     iconTile_ = RectF(x, y, t, t);
-    ui.Fill(iconTile_, c.card, ui.S(18));
-    ui.Stroke(iconTile_, c.accent, ui.S(18), ui.S(1.5f), true);
-    ui.Icon(IconFile(*it), Inset(iconTile_, ui.S(26), ui.S(26)), it->full);
+    // тянут значок из сетки к квадрату - квадрат загорается
+    bool pulling = false;
+    POINT pm = ui.Mouse();
+    for (int k = 0; k < (int)programIcons_.size(); ++k)
+        if (ui.Dragging(ID_GRID_ICON + k))
+            pulling = std::hypot(pm.x - (iconTile_.X + t / 2), pm.y - (iconTile_.Y + t / 2)) < ui.S(150);
+    float hotA = ui.Anim(ID_ICON_DOCK + 1, pulling, 12);
+    ui.Fill(iconTile_, MixColor(c.card, c.accent2, 0.08f * hotA), ui.S(18));
+    if (hotA > 0.01f)
+        ui.Stroke(RectF(iconTile_.X - ui.S(5), iconTile_.Y - ui.S(5), t + ui.S(10), t + ui.S(10)),
+                  WithAlpha(c.accent2, (BYTE)(40 * hotA)), ui.S(22), ui.S(6));
+    ui.Stroke(iconTile_, MixColor(c.accent, c.accent2, hotA), ui.S(18), ui.S(1.5f + hotA), true);
+    // смена значка: старый растворяется, новый подпрыгивает
+    RectF ic = Inset(iconTile_, ui.S(26), ui.S(26));
+    float sw = fx::Game() ? 1.0f : (float)(clock_ - iconSwapAt_);
+    auto scaled = [&](float s) {
+        return RectF(ic.X + ic.Width * (1 - s) / 2, ic.Y + ic.Height * (1 - s) / 2, ic.Width * s, ic.Height * s);
+    };
+    if (sw < 0.16f) {
+        IconDrawn(iconOld_, it->full, scaled(1 - 0.8f * sw / 0.16f), 1 - sw / 0.16f);
+        ui.Invalidate();
+    } else if (sw < 0.6f) {
+        IconDrawn(IconFile(*it), it->full, scaled(0.2f + 0.8f * (float)EaseOutBack((sw - 0.16f) / 0.44f, 2.2)));
+        ui.Invalidate();
+    } else {
+        ui.Icon(IconFile(*it), ic, it->full);
+    }
     float bx = x + t + ui.S(22);
     ui.Text(L"Значок сектора", RectF(bx, y + ui.S(2), w, ui.S(26)), c.text, 15, true);
     ui.Text(L"Перетащи картинку из Проводника на квадрат или выбери ниже.", RectF(bx, y + ui.S(30), w - t, ui.S(22)),
@@ -400,48 +418,23 @@ void Studio::TabIcon(const RectF& view, float y, float& bottom) {
         libCat_ = -1;
     }
     if (ui.Button(ID_ICON_SYS, RectF(bx + ui.S(276), by, ui.S(150), ui.S(36)), L"Системный", Kind::Ghost)) {
+        std::wstring old = IconFile(*it);
         Change();
         it->icon.clear();
         Resolve(*it);
         Save();
+        IconSwap(old);
     }
+    BlockOut(RectF(x, y, w, t));
     y += t + ui.S(28);
 
+    BlockIn(1);
+    float dockY = y;
     ui.Text(L"Значки программы", RectF(x, y, w, ui.S(24)), c.text, 14, true);
+    ui.Text(L"щелчок или тяни к квадрату", RectF(x, y, w, ui.S(24)), c.faint, 11.5f, false, ui::Right);
     y += ui.S(34);
-    if (programIcons_.empty()) {  // папка значков не меняется, пока открыта студия
-        WIN32_FIND_DATAW fd;
-        HANDLE h = FindFirstFileW((ExeDir() + L"\\icons\\*.png").c_str(), &fd);
-        if (h != INVALID_HANDLE_VALUE) {
-            do {
-                std::wstring n = fd.cFileName;
-                if (n != L"app.png" && n != L"hub.png") programIcons_.push_back(n);
-            } while (FindNextFileW(h, &fd));
-            FindClose(h);
-        }
-        std::sort(programIcons_.begin(), programIcons_.end());
-    }
-    const std::vector<std::wstring>& files = programIcons_;
-    float tile = ui.S(64), gap = ui.S(10);
-    int cols = std::max(1, (int)((w + gap) / (tile + gap)));
-    for (int k2 = 0; k2 < (int)files.size(); ++k2) {
-        RectF tr(x + (k2 % cols) * (tile + gap), y + (k2 / cols) * (tile + gap), tile, tile);
-        RectF vis = Intersect(tr, view);
-        int id = ID_GRID_ICON + k2;
-        std::wstring rel = L"icons/" + files[k2];
-        bool on = _wcsicmp(it->icon.c_str(), rel.c_str()) == 0 ||
-                  _wcsicmp(it->icon.c_str(), (L"icons\\" + files[k2]).c_str()) == 0;
-        if (vis.Height > 1 && ui.Click(id, vis)) {
-            Change();
-            it->icon = rel;
-            Resolve(*it);
-            Save();
-        }
-        ui.Fill(tr, on ? c.cardHi : ui.Hot(id) ? c.cardHi : c.card, ui.S(12));
-        if (on) ui.Stroke(tr, c.accent, ui.S(12), ui.S(2));
-        ui.Icon(ExeDir() + L"\\icons\\" + files[k2], Inset(tr, ui.S(10), ui.S(10)));
-    }
-    y += ((int)files.size() + cols - 1) / cols * (tile + gap);
+    y += IconDock(view, x, y, w);
+    BlockOut(RectF(x, dockY, w, y - dockY));
     bottom = y;
 }
 
