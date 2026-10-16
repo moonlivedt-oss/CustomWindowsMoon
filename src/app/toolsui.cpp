@@ -376,6 +376,35 @@ DWORD WINAPI WatchLoop(void*) {
     return 0;
 }
 
+}  // namespace
+
+Watched Watch() {
+    Watched w;
+    AcquireSRWLockShared(&g_watchLock);
+    w.leaks = g_leaks;
+    w.hogs = g_hist.CpuHogs(10, true);
+    w.hogsReady = g_hist.Ready(10);
+    w.commit = g_commit;
+    ReleaseSRWLockShared(&g_watchLock);
+    if (!w.commit.limit) w.commit = tools::Commit();
+    return w;
+}
+
+std::vector<tools::ToolVersion> Versions() {
+    AcquireSRWLockShared(&g_scanLock);
+    std::vector<tools::ToolVersion> v = g_scan.versions;
+    ReleaseSRWLockShared(&g_scanLock);
+    return v;
+}
+
+void SetVersions(const std::vector<tools::ToolVersion>& v) {
+    AcquireSRWLockExclusive(&g_scanLock);
+    g_scan.versions = v;
+    ReleaseSRWLockExclusive(&g_scanLock);
+}
+
+namespace {
+
 // программа целиком (все процессы с этим именем) - для мягкого закрытия, как в секторе «Процессы»
 tools::HeavyApp AppByName(const std::wstring& name) {
     tools::HeavyApp a;
@@ -1130,6 +1159,8 @@ void ShowRing(RadialMenu& menu) {
                                      L" (память " + tools::Bytes(cm.phys) + L" + подкачка " +
                                      tools::Bytes(tools::PagefileBytes()) + L"), пик с загрузки " +
                                      tools::Bytes(cm.peak) + L". 2 клика - настройки подкачки"));
+    procs.children.push_back(Act(L"Колба", L"tools-mem.png", L"studio:4",
+                                 L"Память колбой в студии: слои программ, утечки, перелив в подкачку; щелчок по слою - закрыть"));
     ring.push_back(procs);
 
     // фон: батарея, кто ест процессор без окна, кто качает, что мешает сну
@@ -1184,6 +1215,8 @@ void ShowRing(RadialMenu& menu) {
         bg.children.push_back(Act(L"Будят " + std::to_wstring(g_wake.size()), L"tools-battery.png", L"wake",
                                   L"Могут разбудить из сна: " + list + L". 2 клика - Диспетчер устройств"));
     }
+    bg.children.push_back(Act(L"Провода", L"tools-battery.png", L"studio:4",
+                              L"Батарея в студии: ветки к фоновым программам, рубильник - закрыть, «сядет в» сдвигается"));
     ring.push_back(bg);
 
     // автозагрузка: что включено и сколько памяти держит

@@ -16,7 +16,7 @@ namespace toolsui {
 
 inline constexpr UINT WM_TOOLS_JOB = WM_APP + 63;  // ход действия: lParam - строка журнала или итог
 
-// openStudio(page): 0 - PATH, 1 - диски, 2 - автозагрузка, 3 - порты; scan - что сразу просканировать
+// openStudio(page): 0 - PATH, 1 - диски, 2 - автозагрузка, 3 - порты, 4 - процессы (колба, батарея), 5 - версии; scan - что сразу просканировать
 void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
           std::function<void(int page, const std::wstring& scan)> openStudio);
 void ShowRing(RadialMenu& menu);
@@ -46,6 +46,16 @@ struct State {
     bool scanning = false;  // считается прямо сейчас
 };
 State Snapshot();
+// Для живых сцен студии (колба, батарея, табло версий): что знает слежка и последняя проверка версий.
+struct Watched {
+    std::vector<tools::ProcHistory::Leak> leaks;
+    std::vector<tools::ProcHistory::Hog> hogs;  // фон без окна за 10 минут, самые прожорливые первыми
+    bool hogsReady = false;                     // история уже покрывает 10 минут
+    tools::CommitInfo commit;
+};
+Watched Watch();
+std::vector<tools::ToolVersion> Versions();  // пусто - ещё не проверялось
+void SetVersions(const std::vector<tools::ToolVersion>& v);  // проверили из студии - кольцу тоже
 void Refresh();  // пересчитать сейчас
 void PrimeForSnapshot(const Config* cfg);  // для --studio-snap: посчитать сразу и дождаться
 void CleanQuick();  // «Всё сразу»: быстрые кэши и временные файлы

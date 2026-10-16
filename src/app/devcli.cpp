@@ -377,7 +377,8 @@ int WatchDiag(bool slow) {
         t0 = GetTickCount64();
         s += nl + L"Версии:" + nl;
         for (const tools::ToolVersion& v : tools::ToolVersions())
-            s += L"  " + v.name + L" " + v.installed + L" (" + v.path + L")" + (v.newer ? L"  -> " + v.note : L"") + nl;
+            s += L"  " + v.name + L" " + v.installed + L" (" + v.path + L")" + (v.newer ? L"  -> " + v.note : L"") +
+                 (v.train.empty() ? L"" : L"  поезд " + std::to_wstring(v.train.size())) + (v.eol.empty() ? L"" : L"  " + v.eol) + nl;
         s += L"  за " + std::to_wstring(GetTickCount64() - t0) + L" мс" + nl;
         t0 = GetTickCount64();
         volatile long seen = 0;

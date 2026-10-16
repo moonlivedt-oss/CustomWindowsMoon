@@ -147,6 +147,26 @@ bool PhysicalAdapter(Adapter& out) {
     return found;
 }
 
+std::wstring Gateway(std::wstring* adapter) {
+    Adapter a;
+    if (!PhysicalAdapter(a)) return L"";
+    std::wstring ip;
+    MIB_IPFORWARD_TABLE2* t = nullptr;
+    if (GetIpForwardTable2(AF_INET, &t) == NO_ERROR && t) {
+        for (ULONG i = 0; i < t->NumEntries && ip.empty(); ++i) {
+            const MIB_IPFORWARD_ROW2& r = t->Table[i];
+            if (r.DestinationPrefix.PrefixLength != 0 || r.InterfaceIndex != a.index) continue;
+            const BYTE* b = (const BYTE*)&r.NextHop.Ipv4.sin_addr;
+            if (!b[0]) continue;
+            ip = std::to_wstring(b[0]) + L"." + std::to_wstring(b[1]) + L"." + std::to_wstring(b[2]) + L"." +
+                 std::to_wstring(b[3]);
+        }
+        FreeMibTable(t);
+    }
+    if (adapter) *adapter = a.name;
+    return ip;
+}
+
 std::vector<FwRule> FirewallBlocks(bool* readOk) {
     PERF_SCOPE("net.FirewallBlocks");
     ComScope com;

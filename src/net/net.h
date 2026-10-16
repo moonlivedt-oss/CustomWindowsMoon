@@ -76,6 +76,8 @@ inline bool Faked(int ms) { return ms >= 0 && ms <= 2; }  // ответ «за 0
 // через какой адаптер Windows отправит пакет до этого адреса; true - это туннель
 bool RouteTo(const std::wstring& ip, std::wstring* adapter);
 bool VpnName(const std::wstring& nameOrDesc);  // похоже на VPN или туннель
+// шлюз физического адаптера (роутер): адрес IPv4 и имя адаптера; пусто - не нашёлся
+std::wstring Gateway(std::wstring* adapter = nullptr);
 
 struct ProxyProc {
     DWORD pid = 0;

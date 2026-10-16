@@ -320,7 +320,7 @@ void Studio::ToolsScan(const std::wstring& dir) {
 }
 
 void Studio::GoTools(int tab, const std::wstring& scan) {
-    toolsTab_ = std::clamp(tab, 0, 3);
+    toolsTab_ = std::clamp(tab, 0, 5);
     toolsAt_ = 0;
     GoPage(PAGE_TOOLS);
     if (!scan.empty()) ToolsScan(scan);
@@ -331,9 +331,10 @@ void Studio::ToolsPage(const RectF& r) {
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Утилиты",
            L"PATH и переменные, диски, автозагрузка, порты. Быстрые действия - в кольце утилит на углу.");
-    RectF tabs(Column(in, ui.S(900)).X, in.Y + ui.S(58), std::min(in.Width, ui.S(520)), ui.S(38));
+    RectF tabs(Column(in, ui.S(900)).X, in.Y + ui.S(58), std::min(in.Width, ui.S(720)), ui.S(38));
     int tab = toolsTab_;
-    if (ui.Segmented(ID_TOOLS_TAB, tabs, {L"PATH", L"Диски", L"Автозагрузка", L"Порты"}, tab)) {
+    if (ui.Segmented(ID_TOOLS_TAB, tabs, {L"PATH", L"Диски", L"Автозагрузка", L"Порты", L"Процессы", L"Версии"},
+                     tab)) {
         toolsTab_ = tab;
         toolsAt_ = 0;
         ui.ResetScroll(ID_PAGE_SCROLL);
@@ -390,8 +391,12 @@ void Studio::ToolsPage(const RectF& r) {
             }
         } else if (toolsTab_ == 2) {
             toolsStarts_ = tools::StartupItems();
-        } else {
+            tools::StartupWeight(toolsStarts_);  // вес для дорожки входа: кто сколько держит
+        } else if (toolsTab_ == 3) {
             toolsPorts_ = tools::Listeners();
+            tools::ListenerProjects(toolsPorts_);  // у кабеля подпись - проект, который занял порт
+        } else if (toolsTab_ == 5 && versions_.empty()) {
+            versions_ = toolsui::Versions();
         }
     }
     auto log = [&]() -> std::wstring {
@@ -917,6 +922,8 @@ void Studio::ToolsPage(const RectF& r) {
                 note(b, (y + ui.S(48) - b.Y) / rowH, log(), c.muted);
         });
     } else if (toolsTab_ == 2) {  // ---------------- автозагрузка ----------------
+        float sh = scene::StartScene::Height((float)ui.K());
+        wide(L"Дорожка входа", sh / rowH, [&](const RectF& b) { StartLive(RectF(b.X, b.Y, b.Width, sh)); });
         wide(L"Запускается вместе с Windows", rowsFor(toolsStarts_.size()) * 1.5f + 0.8f, [&](const RectF& b) {
             float y = b.Y;
             for (size_t i = 0; i < toolsStarts_.size(); ++i) {
@@ -946,7 +953,20 @@ void Studio::ToolsPage(const RectF& r) {
                  L"можно обратно.",
                  c.muted);
         });
-    } else {  // ---------------- порты ----------------
+    } else if (toolsTab_ == 3) {  // ---------------- порты ----------------
+        size_t cables = 0;
+        for (const tools::Listener& l : toolsPorts_)
+            if (Cable(l)) ++cables;
+        if (getenv("RADIAL_DEMO")) cables = 5;
+        float ph = scene::PortsScene::Height(std::min<size_t>(cables, 8), (float)ui.K());
+        wide(L"Порты разработки", ph / rowH, [&](const RectF& b) {
+            if (!cables && !getenv("RADIAL_DEMO")) {
+                ui.EmptyState(ID_LIVE_PORTS, RectF(b.X, b.Y, b.Width, ph),
+                              L"Порты разработки свободны: ни один сервер проекта сейчас не слушает");
+                return;
+            }
+            PortsLive(RectF(b.X, b.Y, b.Width, ph));
+        });
         wide(L"Кто слушает порты", rowsFor(std::min<size_t>(toolsPorts_.size(), 40)), [&](const RectF& b) {
             float y = b.Y;
             for (size_t i = 0; i < toolsPorts_.size() && i < 40; ++i) {
@@ -999,6 +1019,40 @@ void Studio::ToolsPage(const RectF& r) {
                 }
                 y += lineH;
             }
+        });
+    }
+
+    if (toolsTab_ == 4) {  // ---------------- процессы: колба памяти и батарея ----------------
+        float fh = scene::FlaskScene::Height((float)ui.K());
+        wide(L"Память: колба", fh / rowH, [&](const RectF& b) { FlaskLive(flaskScene_, ID_LIVE_FLASK, RectF(b.X, b.Y, b.Width, fh)); });
+        float bh = scene::BatteryScene::Height((float)ui.K());
+        wide(L"Фон: куда уходит заряд", bh / rowH, [&](const RectF& b) { BatteryLive(RectF(b.X, b.Y, b.Width, bh)); });
+    } else if (toolsTab_ == 5) {  // ---------------- версии ----------------
+        if (versionsBusy_ && toolsJob_ && toolsJob_->done) {
+            versionsBusy_ = false;
+            versions_ = toolsui::Versions();
+        }
+        size_t n = getenv("RADIAL_DEMO") ? 5 : versions_.size();
+        float vh = scene::VersScene::Height(n, (float)ui.K());
+        wide(L"Версии инструментов", (vh + ui.S(52)) / rowH, [&](const RectF& b) {
+            if (ui.Button(ID_TOOLS_VER_CHECK, RectF(b.X, b.Y, ui.S(200), ui.S(36)),
+                          versionsBusy_ ? L"Проверяю" : L"Проверить сейчас", Kind::Secondary, L"", versionsBusy_) &&
+                !busy) {
+                versionsBusy_ = true;
+                ToolsRun(L"Версии", [](const tools::Log& l, ToolsJob&) {
+                    l(L"Спрашиваю endoflife.date, GitHub и MSYS2...");
+                    std::vector<tools::ToolVersion> v = tools::ToolVersions();
+                    if (!v.empty()) toolsui::SetVersions(v);
+                    return !v.empty();
+                });
+            }
+            ui.Text(L"python, node, cmake, git - что найдётся первым в PATH против вышедшего; раз в неделю само",
+                    RectF(b.X + ui.S(214), b.Y, b.Width - ui.S(214), ui.S(36)), c.faint, 11);
+            RectF vr(b.X, b.Y + ui.S(52), b.Width, vh);
+            if (!n)
+                ui.EmptyState(ID_LIVE_VERS, vr, L"Ещё не проверялось: нажми «Проверить сейчас» (около 20 секунд)");
+            else
+                VersLive(vr);
         });
     }
 

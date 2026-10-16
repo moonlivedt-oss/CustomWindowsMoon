@@ -83,94 +83,6 @@ void Studio::NetCheck() {
     });
 }
 
-// Четыре узла на линии. Пока идёт проверка, по линии бегает пакет со шлейфом, а узел вспыхивает
-// кольцом, когда пакет его проходит. Пришёл итог - узлы по очереди загораются зелёным или цветом
-// беды, линия за ними заливается; дальше картинка стоит и кадров не просит.
-void Studio::NetRoute(const RectF& r, bool busy) {
-    const UiColors& c = ui.C();
-    Graphics& g = ui.G();
-    const net::Report* rep = netReport_ && !busy ? netReport_.get() : nullptr;
-    Color good(255, 120, 205, 160);
-    struct Node {
-        std::wstring name, sub;
-        int state;  // -1 неизвестно, 0 плохо, 1 хорошо
-    };
-    std::vector<Node> nodes = {{L"Этот ПК", L"", 1}, {L"Выход", L"", -1}, {L"DNS", L"", -1}, {L"Интернет", L"", -1}};
-    if (rep) {
-        nodes[1] = {rep->viaTunnel ? L"Туннель" : rep->proxy.on ? L"Прокси" : L"Роутер", rep->route, rep->tcp ? 1 : 0};
-        nodes[2].state = rep->dns ? 1 : 0;
-        nodes[3] = {L"Интернет", rep->country.empty() ? L"" : net::CountryName(rep->country), rep->https ? 1 : 0};
-        if (rep->pingMs >= 0) nodes[3].sub += (nodes[3].sub.empty() ? L"" : L", ") + std::to_wstring(rep->pingMs) + L" мс";
-    }
-    int n = (int)nodes.size();
-    float cy = r.Y + ui.S(16), d = ui.S(18);
-    float x0 = r.X + ui.S(30), x1 = r.GetRight() - ui.S(30);
-    auto nx = [&](int i) { return x0 + (x1 - x0) * i / (n - 1); };
-    ULONGLONG now = GetTickCount64();
-    float done = rep && netDoneAt_ ? (float)((now - netDoneAt_) / fx::Dur(900)) : rep ? 9.0f : 0.0f;
-    if (rep && done < 1.4f) ui.Tick();
-    // линия: серая основа, после итога - заливка цветом звеньев слева направо
-    Pen base(WithAlpha(c.text, 30), ui.S(3));
-    base.SetStartCap(LineCapRound);
-    base.SetEndCap(LineCapRound);
-    g.DrawLine(&base, x0, cy, x1, cy);
-    if (rep) {
-        float fill = std::clamp(done, 0.0f, 1.0f);
-        for (int i = 0; i + 1 < n; ++i) {
-            float a = (float)i / (n - 1), bnd = (float)(i + 1) / (n - 1);
-            if (fill <= a) break;
-            float e = std::min(fill, bnd);
-            bool ok = nodes[i].state > 0 && nodes[i + 1].state > 0;
-            Pen seg(ok ? WithAlpha(good, 200) : WithAlpha(c.warn, 200), ui.S(3));
-            g.DrawLine(&seg, x0 + (x1 - x0) * a, cy, x0 + (x1 - x0) * e, cy);
-        }
-    }
-    // пакет: точка со шлейфом пробегает линию и возвращается к началу
-    float packet = -1;
-    if (busy && !fx::Game()) {
-        ui.Tick();
-        double t = now / fx::Dur(1300);
-        packet = (float)(t - std::floor(t));
-        for (int k = 5; k >= 0; --k) {
-            float p = packet - k * 0.025f;
-            if (p < 0) continue;
-            float px = x0 + (x1 - x0) * p, s = ui.S(9) - k * ui.S(1.2f);
-            SolidBrush b(WithAlpha(MixColor(c.accent, Color(255, 255, 255), 0.3f), (BYTE)(255 - k * 40)));
-            g.FillEllipse(&b, px - s / 2, cy - s / 2, s, s);
-        }
-    }
-    for (int i = 0; i < n; ++i) {
-        float x = nx(i), pos = (float)i / (n - 1);
-        Color col = nodes[i].state < 0 ? c.muted : nodes[i].state ? good : c.warn;
-        // после итога узел появляется, когда до него дошла заливка: подскок размера
-        float pop = 1;
-        if (rep) {
-            float t = std::clamp((done - pos) * 3.0f, 0.0f, 1.0f);
-            float s = 2.2f, u = t - 1;
-            pop = t <= 0 ? 0.6f : 1 + (s + 1) * u * u * u + s * u * u;
-            if (t <= 0) col = c.muted;
-        }
-        // кольцо-вспышка, когда пакет проходит узел
-        if (packet >= 0) {
-            float dist = packet - pos;
-            if (dist >= 0 && dist < 0.22f) {
-                float k = dist / 0.22f, rr = d / 2 + ui.S(12) * k;
-                Pen ring(WithAlpha(c.accent, (BYTE)(200 * (1 - k))), ui.S(2));
-                g.DrawEllipse(&ring, x - rr, cy - rr, rr * 2, rr * 2);
-            }
-        }
-        float dd = d * pop;
-        SolidBrush halo(WithAlpha(col, 40));
-        g.FillEllipse(&halo, x - dd / 2 - ui.S(4), cy - dd / 2 - ui.S(4), dd + ui.S(8), dd + ui.S(8));
-        SolidBrush core(MixColor(c.card, col, nodes[i].state < 0 && !busy ? 0.4f : 0.85f));
-        g.FillEllipse(&core, x - dd / 2, cy - dd / 2, dd, dd);
-        float tw = ui.S(120);
-        ui.Text(nodes[i].name, RectF(x - tw / 2, cy + ui.S(14), tw, ui.S(18)), c.text, 11.5f, true, ui::Center);
-        if (!nodes[i].sub.empty())
-            ui.Text(nodes[i].sub, RectF(x - tw / 2, cy + ui.S(31), tw, ui.S(16)), c.faint, 10.5f, false, ui::Center);
-    }
-}
-
 void Studio::NetPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
@@ -207,13 +119,15 @@ void Studio::NetPage(const RectF& r) {
     // --- состояние ---
     if (netWasBusy_ && !busy) netDoneAt_ = GetTickCount64();
     netWasBusy_ = busy;
-    card(L"Состояние", 4.6f, [&](const RectF& b) {
+    // маршрут - живая сцена: пакеты по звеньям, обрыв и сварка (studio_live.cpp)
+    float routeH = scene::RouteScene::Height((float)ui.K()), routeGrow = (routeH - ui.S(64)) / rowH;
+    cols.Wide(L"Состояние", 4.6f + routeGrow, [&](const RectF& b) {
         std::wstring head = netReport_ && !busy ? net::Summary(*netReport_) : L"Проверяю";
         Color hc = !netReport_ || busy ? c.muted : netReport_->Online() ? Color(255, 120, 205, 160) : c.warn;
         ui.Text(head, RectF(b.X, b.Y, b.Width, ui.S(30)), hc, 13.5f, true);
         if (!netReport_ || busy) ui.BounceDots(b.X + ui.Measure(head, 13.5f, true) + ui.S(6), b.Y + ui.S(17), hc, ui.S(4));
-        NetRoute(RectF(b.X, b.Y + ui.S(34), b.Width, ui.S(64)), busy);
-        float by = b.Y + ui.S(110);
+        RouteLive(RectF(b.X, b.Y + ui.S(34), b.Width, routeH), busy);
+        float by = b.Y + ui.S(46) + routeH;
         float bw = ui.S(170);
         if (ui.Button(ID_NET_CHECK, RectF(b.X, by, bw, ui.S(36)), busy ? L"Проверяю" : L"Проверить", Kind::Secondary,
                       L"", busy) &&
@@ -236,9 +150,9 @@ void Studio::NetPage(const RectF& r) {
                 });
         }
         if (netReport_ && netReport_->fix != net::FIX_NONE)
-            note(b, 3.2f, L"Совет: " + netReport_->fixLabel + L". " + netReport_->fixReason, c.text);
+            note(b, 3.2f + routeGrow, L"Совет: " + netReport_->fixLabel + L". " + netReport_->fixReason, c.text);
         else if (netReport_)
-            note(b, 3.2f, L"Всё в порядке, чинить нечего.", c.muted);
+            note(b, 3.2f + routeGrow, L"Всё в порядке, чинить нечего.", c.muted);
     });
 
     // --- что нашла проверка ---

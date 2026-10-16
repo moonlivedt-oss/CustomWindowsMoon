@@ -7,6 +7,7 @@
 #include <batclass.h>
 #include <iphlpapi.h>
 #include <netioapi.h>
+#include <pdh.h>
 #include <psapi.h>
 #include <setupapi.h>
 #include <tcpestats.h>
@@ -292,6 +293,22 @@ CommitInfo Commit() {
 ULONGLONG PagefileBytes() {
     CommitInfo c = Commit();
     return c.limit > c.phys ? c.limit - c.phys : 0;
+}
+
+// Сколько файла подкачки занято на деле: счётчик «Файл подкачки, % использования» (PDH, без прав).
+ULONGLONG PagefileUsed() {
+    PDH_HQUERY q = nullptr;
+    PDH_HCOUNTER c = nullptr;
+    ULONGLONG used = 0;
+    if (PdhOpenQueryW(nullptr, 0, &q) != ERROR_SUCCESS) return 0;
+    if (PdhAddEnglishCounterW(q, L"\\Paging File(_Total)\\% Usage", 0, &c) == ERROR_SUCCESS &&
+        PdhCollectQueryData(q) == ERROR_SUCCESS) {
+        PDH_FMT_COUNTERVALUE v;
+        if (PdhGetFormattedCounterValue(c, PDH_FMT_DOUBLE, nullptr, &v) == ERROR_SUCCESS && v.CStatus == ERROR_SUCCESS)
+            used = (ULONGLONG)(PagefileBytes() * std::clamp(v.doubleValue, 0.0, 100.0) / 100);
+    }
+    PdhCloseQuery(q);
+    return used;
 }
 
 // ---------------- батарея ----------------

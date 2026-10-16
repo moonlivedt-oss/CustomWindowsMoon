@@ -71,6 +71,8 @@ public:
     POINT Mouse() const { return mouse_; }
     POINT PressPt() const { return press_; }
     bool Dragging(int id) const;  // нажали на id и уже тянут
+    // живая сцена под курсором: каждое движение мыши над id - новый кадр (наведение, перетаскивание)
+    void Track(int id) { track_.push_back(id); }
     float Scroll(int id, const RectF& view, float content);
     void ScrollTo(int id, float v) { scroll_[id] = v; }  // плавно прокрутить (Scroll ограничит границами)
     void ResetScroll(int id) {
@@ -86,6 +88,7 @@ public:
     float Measure(const std::wstring& s, float size, bool bold = false);
     float MeasureWrapped(const std::wstring& s, float size, bool bold, float width);
     void Icon(const std::wstring& file, const RectF& r, const std::wstring& shellPath = L"");
+    Gdiplus::Bitmap* IconBitmap(const std::wstring& shellPath, int px) { return icons_.Get(L"", shellPath, px); }
     // alpha < 255 - картинка полупрозрачная (растворение одной в другую)
     void Picture(Gdiplus::Bitmap* b, const RectF& r, float radius, bool roundBottom = true, BYTE alpha = 255);
     Gdiplus::GraphicsPath* Round(const RectF& r, float radius, bool top = true, bool bottom = true);
@@ -167,6 +170,7 @@ private:
     UiColors c_{};
     double k_ = 1;
     std::vector<Hit> hits_, prevHits_;
+    std::vector<int> track_, prevTrack_;
     std::map<int, float> scroll_, scrollShown_;  // куда прокрутить и где страница сейчас
     std::vector<std::pair<int, RectF>> scrollViews_, prevScrollViews_;
     int hot_ = 0, active_ = 0, clicked_ = 0, released_ = 0, rdown_ = 0, rclicked_ = 0, dbl_ = 0;

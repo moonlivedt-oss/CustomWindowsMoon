@@ -69,6 +69,31 @@ std::vector<Listener> Listeners() {
     Collect<MIB_TCPTABLE_OWNER_PID, MIB_TCPROW_OWNER_PID>(AF_INET, false, seen, out, names);
     Collect<MIB_TCP6TABLE_OWNER_PID, MIB_TCP6ROW_OWNER_PID>(AF_INET6, false, seen, out, names);
     Collect<MIB_UDPTABLE_OWNER_PID, MIB_UDPROW_OWNER_PID>(AF_INET, true, seen, out, names);
+    // соединения на слушающих портах: сколько клиентов сейчас у сервера
+    std::map<std::pair<int, DWORD>, int> conns;
+    for (ULONG fam : {(ULONG)AF_INET, (ULONG)AF_INET6}) {
+        ULONG size = 0;
+        GetExtendedTcpTable(nullptr, &size, FALSE, fam, TCP_TABLE_OWNER_PID_CONNECTIONS, 0);
+        std::vector<BYTE> buf(size + 4096);
+        size = (ULONG)buf.size();
+        if (GetExtendedTcpTable(buf.data(), &size, FALSE, fam, TCP_TABLE_OWNER_PID_CONNECTIONS, 0) != NO_ERROR) continue;
+        if (fam == AF_INET) {
+            auto* t = (MIB_TCPTABLE_OWNER_PID*)buf.data();
+            for (DWORD i = 0; i < t->dwNumEntries; ++i)
+                if (t->table[i].dwState == MIB_TCP_STATE_ESTAB)
+                    conns[{ntohs((u_short)t->table[i].dwLocalPort), t->table[i].dwOwningPid}]++;
+        } else {
+            auto* t = (MIB_TCP6TABLE_OWNER_PID*)buf.data();
+            for (DWORD i = 0; i < t->dwNumEntries; ++i)
+                if (t->table[i].dwState == MIB_TCP_STATE_ESTAB)
+                    conns[{ntohs((u_short)t->table[i].dwLocalPort), t->table[i].dwOwningPid}]++;
+        }
+    }
+    for (Listener& l : out)
+        if (!l.udp) {
+            auto it = conns.find({l.port, l.pid});
+            if (it != conns.end()) l.conns = it->second;
+        }
     std::sort(out.begin(), out.end(), [](const Listener& a, const Listener& b) {
         if (a.dev != b.dev) return a.dev;
         if (a.udp != b.udp) return !a.udp;

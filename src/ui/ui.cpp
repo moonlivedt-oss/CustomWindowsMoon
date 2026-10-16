@@ -33,7 +33,7 @@ void Ui::OnMouseMove(int x, int y) {
         hotSince_ = GetTickCount64();
         hotChanged_ = true;
     }
-    if (h != hot_ || (down_ && active_)) {
+    if (h != hot_ || (down_ && active_) || (h && std::find(prevTrack_.begin(), prevTrack_.end(), h) != prevTrack_.end())) {
         hot_ = h;
         repaint_ = true;
     }
@@ -452,6 +452,8 @@ void Ui::End() {
             ShowWindow(e.hwnd, SW_HIDE);
         }
     prevHits_ = hits_;
+    prevTrack_.swap(track_);
+    track_.clear();
     prevScrollViews_ = scrollViews_;
     int h = HitAt(mouse_.x, mouse_.y);
     if (h != hot_) {

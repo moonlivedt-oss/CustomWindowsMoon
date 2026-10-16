@@ -18,6 +18,7 @@
 #include "core/themes.h"
 #include "ui/ui.h"
 #include "gfx/scene.h"
+#include "app/toolsui.h"
 
 namespace studio {
 
@@ -205,6 +206,14 @@ enum Id {
     ID_AUTO_DL_NOW,
     ID_AUTO_POWER,
     ID_AUTO_REPAIR,
+    ID_LIVE_ROUTE,   // живые сцены (studio_live.cpp): маршрут сети
+    ID_LIVE_PORTS,   // кабели портов
+    ID_LIVE_START,   // дорожка входа
+    ID_LIVE_FLASK,   // колба во вкладке «Процессы»
+    ID_LIVE_FLASK2,  // колба на «Состоянии»
+    ID_LIVE_BATTERY,
+    ID_LIVE_VERS,
+    ID_TOOLS_VER_CHECK,
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -285,6 +294,17 @@ struct ToolsJob {
     std::wstring title;
     std::function<bool(const tools::Log&, ToolsJob&)> work;
     HWND wnd = nullptr;
+};
+
+// Замеры звеньев маршрута для живой сцены сети: свой поток, пока раздел «Сеть» на экране.
+struct NetSampler {
+    SRWLOCK lock = SRWLOCK_INIT;
+    std::vector<std::vector<float>> hist;  // ПК-роутер, роутер-выход, выход-DNS, DNS-интернет; мс, -1 - нет замера
+    std::wstring gateway, adapter, country;
+    bool tunnel = false, gwDown = false, httpDown = false;
+    int gen = 0;
+    volatile ULONGLONG seen = 0;  // когда страница последний раз смотрела; давно - поток выходит
+    volatile bool running = false;
 };
 
 void Preview(int what);     // studio.h: EditorPreview
@@ -410,6 +430,7 @@ private:
         std::vector<tools::Physical> disks;
     };
     std::shared_ptr<PhysJob> physJob_;
+    ULONGLONG busyDue_ = 0;  // когда сработает таймер следующего кадра (RepaintIn)
     bool painting_ = false, paintAgain_ = false;  // кадр уже рисуется (вложенный WM_PAINT из COM)
     std::set<std::wstring> projSel_, dlSel_;
     std::wstring stateFocus_;
@@ -487,9 +508,34 @@ private:
     int hiveZoom_ = -1;  // доля, в которую зашли
     scene::CleanScene cleanScene_;  // вихрь очистки: «Состояние» и «Кэши»
     void CleanSceneIn(const RectF& r);
-    void NetRoute(const RectF& r, bool busy);  // схема ПК - выход - DNS - интернет, по ней бежит проверка
     bool netWasBusy_ = false;
     ULONGLONG netDoneAt_ = 0;  // когда пришёл итог проверки: узлы схемы загораются по очереди
+    // живые сцены части 2 (studio_live.cpp): сеть, порты, автозагрузка, память, батарея, версии
+    scene::RouteScene routeScene_;
+    scene::PortsScene portsScene_;
+    scene::StartScene startScene_;
+    scene::FlaskScene flaskScene_, flaskState_;  // во вкладке «Процессы» и на «Состоянии» - у каждой своя жидкость
+    scene::BatteryScene batScene_;
+    scene::VersScene versScene_;
+    std::shared_ptr<NetSampler> sampler_;
+    std::vector<tools::ToolVersion> versions_;
+    bool versionsBusy_ = false;
+    ULONGLONG liveAt_ = 0;  // данные колбы и батареи - не чаще раза в 3 с
+    tools::MemoryState liveMem_;
+    std::vector<tools::HeavyApp> liveApps_;
+    tools::BatteryInfo liveBat_;
+    toolsui::Watched liveWatch_;
+    scene::Palette ScenePalette();
+    scene::Input SceneInput(int id, const RectF& r);
+    void RouteLive(const RectF& r, bool busy);
+    void PortsLive(const RectF& r);
+    void StartLive(const RectF& r);
+    void FlaskLive(scene::FlaskScene& s, int id, const RectF& r);
+    void BatteryLive(const RectF& r);
+    void VersLive(const RectF& r);
+    void LiveData();
+    static bool Cable(const tools::Listener& l);  // порт в кабелях: сервер проекта или прокси-клиент
+    static float RouteH(float k) { return scene::RouteScene::Height(k); }
     int railPop_ = -1;    // значок группы, которую только что выбрали, подпрыгивает
     ULONGLONG railPopAt_ = 0;
     std::wstring hoverTheme_, hoverThemeNext_;  // примерка темы наведением

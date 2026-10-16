@@ -179,6 +179,7 @@ struct Listener {
     std::wstring project;  // папка проекта по командной строке процесса (где
                            // package.json, Cargo.toml...)
     std::wstring command;  // командная строка, коротко
+    int conns = 0;         // TCP-соединений на этом порту сейчас (для живой сцены: ток по кабелю)
 };
 std::vector<Listener> Listeners();                 // кто слушает порты
 void ListenerProjects(std::vector<Listener>& ls);  // заполнить project и command
@@ -329,6 +330,7 @@ struct CommitInfo {
 };
 CommitInfo Commit();
 ULONGLONG PagefileBytes();  // размер файлов подкачки сейчас
+ULONGLONG PagefileUsed();   // сколько в них занято на деле (счётчик PDH)
 
 struct BatteryInfo {
     bool present = false, ac = true, charging = false;
@@ -355,6 +357,8 @@ struct ToolVersion {
     std::wstring name, path, installed, latest;
     std::wstring note;  // «вышла 3.15», «12 пакетов MSYS2»
     bool newer = false;
+    std::vector<std::wstring> train;  // ветки от своей до последней («3.10», «3.11»...), пусто - не знаем
+    std::wstring eol;                 // своя ветка без поддержки скоро или уже: «поддержка до 10.2026»
 };
 std::vector<ToolVersion> ToolVersions();  // по сети, секунды: python, node, cmake, git, пакеты MSYS2
 

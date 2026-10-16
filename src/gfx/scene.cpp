@@ -24,8 +24,6 @@ SRWLOCK g_lock = SRWLOCK_INIT;
 CleanFeed g_clean;
 GuardFeed g_guard;
 
-float Rnd(float a, float b) { return a + (b - a) * (float)(rand() % 10000) / 10000.0f; }
-
 float SegDist(float px, float py, float ax, float ay, float bx, float by) {
     float dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
     float t = l > 0 ? std::clamp(((px - ax) * dx + (py - ay) * dy) / l, 0.0f, 1.0f) : 0;
@@ -60,6 +58,63 @@ Font* FontOf(float px, bool bold) {
 }
 
 }  // namespace
+
+float Rnd(float a, float b) { return a + (b - a) * (float)(rand() % 10000) / 10000.0f; }
+
+Color Pale(const Palette& p) { return MixColor(p.text, p.accent2, 0.22); }
+
+Color Deep(const Palette& p) { return MixColor(p.card, Color(255, 0, 0, 0), 0.35); }
+
+namespace {
+void RoundPath(GraphicsPath& path, const RectF& r, float rad) {
+    rad = std::min({rad, r.Width / 2, r.Height / 2});
+    if (rad <= 0.5f) {
+        path.AddRectangle(r);
+        return;
+    }
+    float d = rad * 2;
+    path.AddArc(r.X, r.Y, d, d, 180, 90);
+    path.AddArc(r.X + r.Width - d, r.Y, d, d, 270, 90);
+    path.AddArc(r.X + r.Width - d, r.Y + r.Height - d, d, d, 0, 90);
+    path.AddArc(r.X, r.Y + r.Height - d, d, d, 90, 90);
+    path.CloseFigure();
+}
+}  // namespace
+
+void FillRound(Graphics& g, const RectF& r, float radius, Color c) {
+    GraphicsPath path;
+    RoundPath(path, r, radius);
+    SolidBrush b(c);
+    g.FillPath(&b, &path);
+}
+
+void StrokeRound(Graphics& g, const RectF& r, float radius, Color c, float width) {
+    GraphicsPath path;
+    RoundPath(path, r, radius);
+    Pen pen(c, width);
+    g.DrawPath(&pen, &path);
+}
+
+float Live::Step(const RectF& r, float k, const Input& in) {
+    ULONGLONG now = GetTickCount64();
+    float dt = last_ && now - last_ < 200 ? (now - last_) / 1000.0f : 0.016f;
+    last_ = now;
+    dt *= (float)(1000.0 / std::max(250.0, fx::Dur(1000)));  // «спокойно» / «живо»
+    dt = std::min(dt, 0.04f);  // пружины явные: на длинном шаге раскачиваются и улетают
+    t_ += dt;
+    game_ = fx::Game();
+    r_ = r;
+    k_ = k;
+    mx_ = in.m.x - r.X;
+    my_ = in.m.y - r.Y;
+    over_ = mx_ >= 0 && my_ >= 0 && mx_ <= r.Width && my_ <= r.Height;
+    pressed_ = in.down && !down_ && over_;
+    released_ = !in.down && down_;
+    if (pressed_) px_ = mx_, py_ = my_;
+    click_ = released_ && std::fabs(mx_ - px_) + std::fabs(my_ - py_) < 8 * k;
+    down_ = in.down && (down_ || pressed_);
+    return dt;
+}
 
 // ---------------- частицы ----------------
 
@@ -96,6 +151,15 @@ void Label(Graphics& g, const std::wstring& s, const RectF& r, Color c, float px
     sf.SetAlignment(align == 1 ? StringAlignmentCenter : align == 2 ? StringAlignmentFar : StringAlignmentNear);
     SolidBrush b(c);
     g.DrawString(s.c_str(), (INT)s.size(), FontOf(px, bold), r, &sf, &b);
+}
+
+float Measure(Graphics& g, const std::wstring& s, float px, bool bold) {
+    if (s.empty()) return 0;
+    RectF out;
+    StringFormat sf(StringFormat::GenericTypographic());
+    sf.SetFormatFlags(StringFormatFlagsNoWrap | StringFormatFlagsMeasureTrailingSpaces);
+    g.MeasureString(s.c_str(), (INT)s.size(), FontOf(px, bold), PointF(0, 0), &sf, &out);
+    return out.Width;
 }
 
 float Ease(float t) {

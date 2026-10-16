@@ -140,6 +140,10 @@ void Studio::Paint() {
 }
 
 void Studio::RepaintIn(UINT ms) {
+    // раньше всех просивших: колба просит кадр через 3 с, а ход очистки на той же странице - через 250 мс
+    ULONGLONG now = GetTickCount64(), due = now + ms;
+    if (busyDue_ > now && busyDue_ <= due) return;
+    busyDue_ = due;
     if (wnd) SetTimer(wnd, kBusyTimer, ms, nullptr);
 }
 
@@ -569,11 +573,16 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         ui.End();
         Sleep(120);
     } while (GetTickCount64() < end);
-    // RADIAL_FILM - проверка движения без мыши: «c x y» щелчок, «m x y» наведение, «d/u x y» нажать/отпустить, «w мс» подождать,
+    // RADIAL_FILM - проверка движения без мыши: «c x y» щелчок, «m x y» наведение, «d/u x y» нажать/отпустить, «w мс» подождать, «r д» колесо,
     // «f n мс» снять n кадров через мс; кадры (вдвое меньше) ложатся листом по три в ряд вместо снимка
     std::unique_ptr<Bitmap> sheet;
     if (const char* film = getenv("RADIAL_FILM")) {
         std::vector<std::unique_ptr<Bitmap>> shots;
+        RectF crop;
+        if (const char* c = getenv("RADIAL_FILM_CROP")) {  // «x y ширина высота»
+            float v[4] = {};
+            if (sscanf(c, "%f %f %f %f", &v[0], &v[1], &v[2], &v[3]) == 4) crop = RectF(v[0], v[1], v[2], v[3]);
+        }
         auto frame = [&] {
             MSG m;
             while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
@@ -620,26 +629,39 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
                 run(40);
             } else if (op == 'w') {
                 run(a);
+            } else if (op == 'r') {  // «r делта»: колесо над серединой окна (120 - щелчок вверх, -120 - вниз)
+                ui.OnWheel(w / 2, h / 2, a);
+                run(400);
             } else if (op == 'f') {
                 for (int i = 0; i < a; ++i) {
                     if (i) run(b);
                     frame();
+                    auto full = grab();
+                    if (crop.Width > 0) {  // RADIAL_FILM_CROP - кусок кадра один к одному, мелочь видно
+                        auto s = std::make_unique<Bitmap>((int)crop.Width, (int)crop.Height, PixelFormat32bppARGB);
+                        Graphics sg(s.get());
+                        sg.DrawImage(full.get(), RectF(0, 0, crop.Width, crop.Height), crop.X, crop.Y, crop.Width,
+                                     crop.Height, UnitPixel);
+                        shots.push_back(std::move(s));
+                        continue;
+                    }
                     auto s = std::make_unique<Bitmap>(w / 2, h / 2, PixelFormat32bppARGB);
                     Graphics sg(s.get());
                     sg.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-                    auto full = grab();
                     sg.DrawImage(full.get(), 0, 0, w / 2, h / 2);
                     shots.push_back(std::move(s));
                 }
             }
         }
         if (!shots.empty()) {
-            int cols = std::min<int>(3, (int)shots.size()), rows = ((int)shots.size() + cols - 1) / cols;
-            sheet = std::make_unique<Bitmap>(cols * (w / 2 + 6), rows * (h / 2 + 6), PixelFormat32bppARGB);
+            int fw = (int)shots[0]->GetWidth(), fh = (int)shots[0]->GetHeight();
+            int perRow = crop.Width > 0 ? std::max(1, 1300 / fw) : 3;
+            int cols = std::min<int>(perRow, (int)shots.size()), rows = ((int)shots.size() + cols - 1) / cols;
+            sheet = std::make_unique<Bitmap>(cols * (fw + 6), rows * (fh + 6), PixelFormat32bppARGB);
             Graphics sg(sheet.get());
             sg.Clear(Color(255, 40, 40, 40));
             for (size_t i = 0; i < shots.size(); ++i)
-                sg.DrawImage(shots[i].get(), (int)(i % cols) * (w / 2 + 6), (int)(i / cols) * (h / 2 + 6));
+                sg.DrawImage(shots[i].get(), (int)(i % cols) * (fw + 6), (int)(i / cols) * (fh + 6));
         }
     }
     CLSID png{};
@@ -756,6 +778,7 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_TIMER:
             if (wp == kSaveTimer) Save();
             if (wp == kTipTimer || wp == kToastTimer || wp == kBusyTimer) {
+                if (wp == kBusyTimer) busyDue_ = 0;
                 KillTimer(wnd, wp);
                 InvalidateRect(wnd, nullptr, FALSE);
             }

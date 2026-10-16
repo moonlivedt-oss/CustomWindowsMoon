@@ -66,6 +66,7 @@ std::wstring Field(const std::string& obj, const char* key) {  // "key":"value" 
 // endoflife.date: массив циклов, новые первыми
 struct Cycle {
     std::wstring cycle, latest, lts;  // lts - дата начала LTS или пусто
+    std::wstring eol;                 // дата конца поддержки или пусто
 };
 std::vector<Cycle> Cycles(const wchar_t* product) {
     std::vector<Cycle> out;
@@ -74,7 +75,7 @@ std::vector<Cycle> Cycles(const wchar_t* product) {
         size_t b = js.find('}', a);
         if (b == std::string::npos) break;
         std::string obj = js.substr(a, b - a + 1);
-        Cycle c{Field(obj, "cycle"), Field(obj, "latest"), Field(obj, "lts")};
+        Cycle c{Field(obj, "cycle"), Field(obj, "latest"), Field(obj, "lts"), Field(obj, "eol")};
         if (!c.cycle.empty() && !c.latest.empty()) out.push_back(c);
         a = b;
     }
@@ -93,6 +94,35 @@ std::wstring Today() {
     wchar_t b[16];
     swprintf(b, 16, L"%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
     return b;
+}
+
+// Поезд релизов: ветки от своей до последней по возрастанию (циклы endoflife.date приходят новыми первыми).
+std::vector<std::wstring> Train(const std::vector<Cycle>& cs, const std::wstring& mine, const std::wstring& last) {
+    std::vector<std::wstring> t;
+    for (auto it = cs.rbegin(); it != cs.rend(); ++it)
+        if (Compare(it->cycle, mine) >= 0 && Compare(it->cycle, last) <= 0) t.push_back(it->cycle);
+    return t;
+}
+
+// Ветки по номерам: 3.28 -> 3.31 даёт 3.28, 3.29, 3.30, 3.31 (только внутри одной старшей версии).
+std::vector<std::wstring> MinorTrain(const std::wstring& from, const std::wstring& to) {
+    std::vector<int> a = Parts(MajorMinor(from)), b = Parts(MajorMinor(to));
+    std::vector<std::wstring> t;
+    if (a.size() < 2 || b.size() < 2 || a[0] != b[0] || b[1] < a[1] || b[1] - a[1] > 12) return t;
+    for (int m = a[1]; m <= b[1]; ++m) t.push_back(std::to_wstring(a[0]) + L"." + std::to_wstring(m));
+    return t;
+}
+
+// «поддержка до 10.2026», если конец поддержки своей ветки ближе года (или прошёл)
+std::wstring Eol(const std::vector<Cycle>& cs, const std::wstring& mine) {
+    for (const Cycle& c : cs) {
+        if (c.cycle != mine || c.eol.size() < 7) continue;
+        std::wstring today = Today(), soon = std::to_wstring(_wtoi(today.substr(0, 4).c_str()) + 1) + today.substr(4);
+        if (c.eol > soon) return L"";
+        std::wstring mmyyyy = c.eol.substr(5, 2) + L"." + c.eol.substr(0, 4);
+        return c.eol < today ? L"без поддержки с " + mmyyyy : L"поддержка до " + mmyyyy;
+    }
+    return L"";
 }
 
 }  // namespace
@@ -115,6 +145,8 @@ std::vector<ToolVersion> ToolVersions() {
                 if (t.latest.empty()) t.latest = cs[0].latest;
                 t.newer = true;
             }
+            t.train = Train(cs, MajorMinor(t.installed), cs[0].cycle);
+            t.eol = Eol(cs, MajorMinor(t.installed));
         }
         out.push_back(t);
     }
@@ -132,9 +164,11 @@ std::vector<ToolVersion> ToolVersions() {
                     t.note += (t.note.empty() ? L"" : L", ") + std::wstring(L"LTS ") + c.latest;
                     if (t.latest.empty()) t.latest = c.latest;
                     t.newer = true;
+                    t.train = Train(cs, major, c.cycle);
                 }
                 break;
             }
+        if (!major.empty()) t.eol = Eol(cs, major);
         out.push_back(t);
     }
     // CMake и Git: последний релиз на GitHub
@@ -154,7 +188,10 @@ std::vector<ToolVersion> ToolVersions() {
             if (a.size() > 3) latest = a[0] + L"." + a[1] + L"." + a[2];
             if (b.size() > 3) inst = b[0] + L"." + b[1] + L"." + b[2];
             t.installed = inst;
-            if (Compare(latest, inst) > 0) t.latest = latest, t.note = L"вышла " + latest, t.newer = true;
+            if (Compare(latest, inst) > 0) {
+                t.latest = latest, t.note = L"вышла " + latest, t.newer = true;
+                t.train = MinorTrain(inst, latest);
+            }
         }
         out.push_back(t);
     }

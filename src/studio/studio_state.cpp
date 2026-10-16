@@ -35,7 +35,9 @@ void CleanDust(ui::Ui& ui, const RectF& bar, Color a, Color b) {
     SolidBrush stripe(Color(40, 255, 255, 255));
     float step = ui.S(16), shift = (float)std::fmod(t * ui.S(40), step);
     for (float x = bar.X - bar.Height - step + shift; x < bar.GetRight(); x += step) {
-        PointF q[4] = {{x, bar.GetBottom()}, {x + ui.S(7), bar.GetBottom()}, {x + ui.S(7) + bar.Height, bar.Y},
+        PointF q[4] = {{x, bar.GetBottom()},
+                       {x + ui.S(7), bar.GetBottom()},
+                       {x + ui.S(7) + bar.Height, bar.Y},
                        {x + bar.Height, bar.Y}};
         g.FillPolygon(&stripe, q, 4);
     }
@@ -304,6 +306,18 @@ void Studio::StatePage(const RectF& r) {
         y += h + gap;
     }
 
+    // ---- память: колба (живая сцена, как во вкладке «Процессы» утилит) ----
+    {
+        float fh = scene::FlaskScene::Height((float)ui.K());
+        RectF cr(x, y, w, fh + ui.S(48));
+        Card(cr);
+        ui.Text(L"Память: кто сколько занимает", RectF(cr.X + ui.S(20), cr.Y + ui.S(14), ui.S(400), ui.S(22)), c.muted,
+                12);
+        float fw = std::min(cr.Width - ui.S(40), ui.S(760));
+        FlaskLive(flaskState_, ID_LIVE_FLASK2, RectF(cr.X + ui.S(20), cr.Y + ui.S(40), fw, fh));
+        y += cr.Height + gap;
+    }
+
     bool two = w > ui.S(840);
     float cw = two ? (w - gap) / 2 : w;
     float rowH = ui.S(38);
@@ -344,7 +358,10 @@ void Studio::StatePage(const RectF& r) {
 
     // ---- мусор проектов и Загрузки ----
     {
-        size_t shown = std::max<size_t>(!s.at ? 4 : s.projects.empty() || dls.empty() ? 3 : 1, std::min<size_t>(7, std::max(s.projects.size(), dls.size())));
+        size_t shown = std::max<size_t>(!s.at                               ? 4
+                                        : s.projects.empty() || dls.empty() ? 3
+                                                                            : 1,
+                                        std::min<size_t>(7, std::max(s.projects.size(), dls.size())));
         float h = ui.S(64) + rowH * shown + ui.S(60);
         RectF pc(x, y, cw, h), dc(two ? x + cw + gap : x, two ? y : y + h + gap, cw, h);
         if (stateFocus_ == L"downloads" && stateFocusY_ < 0) stateFocusY_ = dc.Y + off - view.Y;
