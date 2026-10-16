@@ -143,7 +143,7 @@ std::wstring KnownFolder(REFKNOWNFOLDERID id) {
 
 // Фоновый подсчёт: кэши, кэш Unreal, мусор проектов, конфликты PATH; заодно - снимок размеров для «роста».
 void RefreshScan() {
-    if (g_scanRunning) return;
+    if (g_scanRunning || !g_cfg) return;  // студия в режиме снимка: утилиты не запущены
     g_scanRunning = true;
     auto* roots = new std::vector<std::wstring>(g_roots.empty() ? ProjectRoots(*g_cfg) : g_roots);
     HANDLE th = CreateThread(
@@ -973,5 +973,50 @@ void Tick() {
 }
 
 void Shutdown() { g_card.Destroy(); }
+
+State Snapshot() {
+    State s;
+    AcquireSRWLockShared(&g_scanLock);
+    s.junk = g_scan.junk;
+    s.projects = g_scan.projects;
+    s.growth = g_scan.growth;
+    s.ddcOld = g_scan.ddcOld;
+    s.driver = g_scan.driver;
+    s.at = g_scanAt;
+    ReleaseSRWLockShared(&g_scanLock);
+    s.scanning = g_scanRunning;
+    return s;
+}
+
+void Refresh() { RefreshScan(); }
+
+void PrimeForSnapshot(const Config* cfg) {
+    if (!g_cfg) g_cfg = cfg;
+    RefreshScan();
+    for (int i = 0; i < 1200 && g_scanRunning; ++i) Sleep(100);
+}
+
+bool Busy() { return g_busy; }
+
+void CleanQuick() {
+    AcquireSRWLockShared(&g_scanLock);
+    g_junk = g_scan.junk.empty() ? tools::FindJunk(false) : g_scan.junk;
+    ReleaseSRWLockShared(&g_scanLock);
+    Run(L"clean-all");
+}
+
+void TrimDdc() { Run(L"ddc-trim"); }
+
+void CleanProjectList(const std::vector<tools::ProjectJunk>& list) {
+    if (list.empty()) return;
+    RunJob(L"Мусор проектов", [list](const tools::Log& log, std::wstring& res) {
+        std::vector<std::wstring> paths;
+        for (const tools::ProjectJunk& p : list) paths.push_back(p.path);
+        ULONGLONG freed = tools::CleanProjects(paths, log);
+        res = L"Освобождено " + tools::Bytes(freed) + L".";
+        g_scanAt = 0;
+        return freed > 0;
+    });
+}
 
 }  // namespace toolsui

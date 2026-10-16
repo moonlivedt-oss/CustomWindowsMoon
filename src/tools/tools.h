@@ -106,6 +106,24 @@ std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots,
 bool IsProjectJunk(const std::wstring& path,
                    std::wstring* kind = nullptr);  // проверка признаков перед удалением
 
+// Разбор Загрузок: старые установщики, распакованные архивы, копии «(1)», недокачанное.
+struct DownloadJunk {
+    std::wstring path, name, why;  // why: «установщик», «уже распакован», «копия», «недокачанный», «торрент-файл»
+    ULONGLONG bytes = 0;
+    int days = 0;  // сколько дней лежит
+};
+std::wstring DownloadsDir();
+std::vector<DownloadJunk> FindDownloadJunk(int days);  // установщики и архивы - старше days дней
+// в Корзину (можно вернуть) через RadialTools.exe; только файлы из корня Загрузок
+int RecycleDownloads(const std::vector<std::wstring>& paths, const Log& log);
+
+// Режим питания Windows 11 (ползунок «Режим питания»): экономия, сбалансированный, производительность.
+enum PowerMode { POWER_SAVER, POWER_BALANCED, POWER_BEST, POWER_UNKNOWN };
+PowerMode GetPowerMode();
+bool SetPowerMode(PowerMode m);
+bool OnBattery();
+const wchar_t* PowerModeName(PowerMode m);
+
 // Рост папок: снимок размеров раз в сутки (sizes.tsv), сравнение с неделей
 // назад.
 struct Growth {

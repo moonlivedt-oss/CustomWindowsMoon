@@ -72,6 +72,7 @@ public:
     POINT PressPt() const { return press_; }
     bool Dragging(int id) const;  // нажали на id и уже тянут
     float Scroll(int id, const RectF& view, float content);
+    void ScrollTo(int id, float v) { scroll_[id] = v; }  // плавно прокрутить (Scroll ограничит границами)
     void ResetScroll(int id) {
         scroll_[id] = 0;
         scrollShown_[id] = 0;

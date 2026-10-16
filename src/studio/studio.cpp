@@ -43,7 +43,7 @@ struct Group {
     int count;
 };
 const Group kGroups[] = {
-    {L"Обзор", L"rail-home.png", L"hub.png", {{PAGE_HOME, L"Обзор"}}, 1},
+    {L"Обзор", L"rail-home.png", L"hub.png", {{PAGE_STATE, L"Состояние"}, {PAGE_AUTO, L"Автоматика"}, {PAGE_HOME, L"Разделы"}}, 3},
     {L"Кольца", L"rail-rings.png", L"apps.png", {{PAGE_RINGS, L"Кольца"}, {PAGE_THEMES, L"Темы"}}, 2},
     {L"Стол",
      L"rail-desk.png",
@@ -68,8 +68,8 @@ void Studio::Paint() {
     // по одному имени на каждый раздел из enum Page, в том же порядке
     static const char* kPageScope[] = {
         "studio.page.rings", "studio.page.themes", "studio.page.behavior", "studio.page.desk", "studio.page.system",
-        "studio.page.style", "studio.page.net",    "studio.page.tools",    "studio.page.home", "studio.page.keys"};
-    static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_KEYS + 1, "имя замера на каждый раздел");
+        "studio.page.style", "studio.page.net",    "studio.page.tools",    "studio.page.home", "studio.page.keys", "studio.page.state", "studio.page.auto"};
+    static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_AUTO + 1, "имя замера на каждый раздел");
     perf::Scope pageScope(kPageScope[page_]);
     PAINTSTRUCT ps;
     HDC dc = BeginPaint(wnd, &ps);
@@ -160,6 +160,12 @@ void Studio::Frame(float w, float h) {
             break;
         case PAGE_KEYS:
             KeysPage(body);
+            break;
+        case PAGE_STATE:
+            StatePage(body);
+            break;
+        case PAGE_AUTO:
+            AutoPage(body);
             break;
     }
     // смена раздела: страница проступает за 180 мс
@@ -649,6 +655,10 @@ void EditorGoNet() {
 
 void EditorGoTools(int tab, const std::wstring& scan) {
     if (g_st) g_st->GoTools(tab, scan);
+}
+
+void EditorGoState(const std::wstring& focus) {
+    if (g_st) g_st->GoState(focus);
 }
 
 void SetEditorPreview(std::function<void(int)> f) { studio::g_preview = std::move(f); }

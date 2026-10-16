@@ -234,6 +234,41 @@ int Close(const std::wstring& exe, int waitMs) {
     return closed + killed ? 0 : 1;
 }
 
+// В Корзину (вернуть можно), только файлы прямо в Загрузках.
+int Recycle(const std::vector<std::wstring>& paths) {
+    std::wstring dl = Lower(tools::DownloadsDir());
+    std::wstring list;  // двойной ноль в конце - формат SHFileOperation
+    int ok = 0;
+    for (const std::wstring& p : paths) {
+        std::wstring l = Lower(p);
+        DWORD a = GetFileAttributesW(p.c_str());
+        size_t cut = l.find_last_of(L'\\');
+        if (dl.empty() || cut == std::wstring::npos || l.substr(0, cut) != dl || a == INVALID_FILE_ATTRIBUTES ||
+            (a & FILE_ATTRIBUTE_DIRECTORY)) {
+            Out(L"Пропускаю (не файл из Загрузок): " + p);
+            continue;
+        }
+        list += p;
+        list.push_back(L'\0');
+        ++ok;
+    }
+    if (!ok) {
+        Out(L"@moved=0");
+        return 1;
+    }
+    list.push_back(L'\0');
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = FO_DELETE;
+    op.pFrom = list.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int rc = SHFileOperationW(&op);
+    if (rc != 0 || op.fAnyOperationsAborted) ok = 0;
+    Out(rc == 0 ? L"В Корзине: " + std::to_wstring(ok) + L" файлов"
+                : L"Корзина не приняла файлы (код " + std::to_wstring(rc) + L")");
+    Out(L"@moved=" + std::to_wstring(ok));
+    return rc == 0 ? 0 : 1;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -250,6 +285,7 @@ int wmain(int argc, wchar_t** argv) {
     if (cmd == L"projects" && a.size() >= 2) return Projects(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"kill" && a.size() >= 2) return Kill((DWORD)_wtoi(a[1].c_str()), a.size() >= 3 ? a[2] : L"");
     if (cmd == L"close" && a.size() >= 3) return Close(a[1], _wtoi(a[2].c_str()));
+    if (cmd == L"recycle" && a.size() >= 2) return Recycle(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"empty-bin") {
         bool ok =
             SUCCEEDED(SHEmptyRecycleBinW(nullptr, nullptr, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND));

@@ -133,6 +133,16 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.netExit = ParseBool(val);
             else if (key == L"net_game")
                 cfg.netGame = ParseBool(val);
+            else if (key == L"auto_clean")
+                cfg.autoClean = ParseBool(val);
+            else if (key == L"auto_downloads")
+                cfg.autoDownloads = ParseBool(val);
+            else if (key == L"downloads_days")
+                cfg.downloadsDays = std::clamp(_wtoi(val.c_str()), 3, 180);
+            else if (key == L"auto_power")
+                cfg.autoPower = ParseBool(val);
+            else if (key == L"auto_repair")
+                cfg.autoRepair = ParseBool(val);
             else if (key == L"tools_disk_warn")
                 cfg.toolsDiskWarn = ParseBool(val);
             else if (key == L"net_interval")
@@ -359,6 +369,13 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"net_interval = " << c.netInterval << L"\n";
     o << L"# утилиты: карточка, когда на диске мало места\n";
     o << L"tools_disk_warn = " << (c.toolsDiskWarn ? 1 : 0) << L"\n";
+    o << L"# автоматика: тихая чистка, разбор Загрузок (с вопросом, старше downloads_days), режим питания,\n";
+    o << L"# самовосстановление автозапуска и настроек\n";
+    o << L"auto_clean = " << (c.autoClean ? 1 : 0) << L"\n";
+    o << L"auto_downloads = " << (c.autoDownloads ? 1 : 0) << L"\n";
+    o << L"downloads_days = " << c.downloadsDays << L"\n";
+    o << L"auto_power = " << (c.autoPower ? 1 : 0) << L"\n";
+    o << L"auto_repair = " << (c.autoRepair ? 1 : 0) << L"\n";
     o << L"# сотовое стекло в углах, кольце, свечении заряда и волне игрового режима\n";
     o << L"hex_glass = " << (c.hexGlass ? 1 : 0) << L"\n";
     o << L"# портал при входе после включения и после сна / выключения экрана из угла\n";

@@ -118,6 +118,19 @@ AppClose CloseApp(const HeavyApp& app, int waitMs, const Log& log) {
     return c;
 }
 
+int RecycleDownloads(const std::vector<std::wstring>& paths, const Log& log) {
+    int moved = 0;
+    // строка команды не бесконечна: по 40 файлов за раз
+    for (size_t i = 0; i < paths.size(); i += 40) {
+        std::wstring args = L"recycle";
+        for (size_t j = i; j < paths.size() && j < i + 40; ++j) args += L" " + Quote(paths[j]);
+        std::map<std::wstring, std::wstring> r;
+        RunTools(args, log, &r);
+        moved += _wtoi(r[L"moved"].c_str());
+    }
+    return moved;
+}
+
 bool EmptyRecycleBin() {
     std::map<std::wstring, std::wstring> r;
     RunTools(L"empty-bin", nullptr, &r);

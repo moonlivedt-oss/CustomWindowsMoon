@@ -28,7 +28,7 @@ inline constexpr wchar_t kClass[] = L"MoonRadialStudio";
 inline constexpr UINT WM_RUN = WM_APP + 40;
 inline constexpr UINT_PTR kSaveTimer = 1;
 
-enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_TOOLS, PAGE_HOME, PAGE_KEYS };
+enum Page { PAGE_RINGS, PAGE_THEMES, PAGE_BEHAVIOR, PAGE_DESK, PAGE_SYSTEM, PAGE_STYLE, PAGE_NET, PAGE_TOOLS, PAGE_HOME, PAGE_KEYS, PAGE_STATE, PAGE_AUTO };
 enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE };
 
 // идентификаторы элементов: постоянные и диапазоны для списков
@@ -173,6 +173,23 @@ enum Id {
     ID_TOOLS_LOCK,
     ID_TOOLS_LOCK_CLIP,
     ID_TOOLS_SYS_TOGGLE,
+    ID_STATE_REFRESH,
+    ID_STATE_CLEAN,
+    ID_STATE_DDC,
+    ID_STATE_PROJ_DEL,
+    ID_STATE_PROJ_IDLE,
+    ID_STATE_DL_DEL,
+    ID_STATE_DL_ALL,
+    ID_STATE_DRIVER,
+    ID_STATE_AUTOSTART,
+    ID_STATE_GO_AUTO,
+    ID_AUTO_CLEAN,
+    ID_AUTO_CLEAN_NOW,
+    ID_AUTO_DL,
+    ID_AUTO_DL_DAYS,
+    ID_AUTO_DL_NOW,
+    ID_AUTO_POWER,
+    ID_AUTO_REPAIR,
     ID_BACKUP = 7000,      // +i
     ID_NET_KILL = 8000,    // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -195,6 +212,10 @@ enum Id {
     ID_RAIL_HOVER = 9600,  // +страница: анимация наведения на раздел
     ID_SUBTAB = 9700,      // +страница: вкладка внутри группы
     ID_HOME_TILE = 9800,   // +i: плитка «Обзора» (+50 - её анимация)
+    ID_STATE_PROJ = 10000,  // +i: строка мусора проектов (выбор)
+    ID_STATE_DL = 10100,    // +i: строка Загрузок (выбор)
+    ID_STATE_APP = 10200,   // +i: «Закрыть» у тяжёлой программы
+    ID_STATE_ANIM = 10300,  // +i: появление шкал и полос
 };
 
 struct Problem {
@@ -320,6 +341,8 @@ private:
     void StylePage(const RectF& r);
     void NetPage(const RectF& r);
     void HomePage(const RectF& r);
+    void StatePage(const RectF& r);  // «Состояние»: шкалы, что освободить, проекты, Загрузки, рост, система
+    void AutoPage(const RectF& r);   // «Автоматика»: переключатели и журнал
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
     void ToolsPage(const RectF& r);
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
@@ -347,14 +370,24 @@ public:
     int Snapshot(int page, int tab, const std::wstring& out, int ms);
     void GoPage(Page p);
     void GoTools(int tab, const std::wstring& scan);
+    void GoState(const std::wstring& focus);
 
 private:
-    Page page_ = PAGE_HOME;
-    Page groupLast_[5] = {PAGE_HOME, PAGE_RINGS, PAGE_DESK, PAGE_NET, PAGE_BEHAVIOR};  // последняя вкладка группы
+    Page page_ = PAGE_STATE;
+    Page groupLast_[5] = {PAGE_STATE, PAGE_RINGS, PAGE_DESK, PAGE_NET, PAGE_BEHAVIOR};  // последняя вкладка группы
     ULONGLONG homeAt_ = 0;
     std::vector<tools::Volume> homeVols_;
     int homePathBad_ = 0;
     bool homeAuto_ = false;
+    // «Состояние»: живые данные (не чаще раза в 3 с), выбор строк, к какой карточке прокрутить
+    ULONGLONG stateAt_ = 0, statePhysAt_ = 0;
+    std::vector<tools::Volume> stateVols_;
+    tools::MemoryState stateMem_;
+    std::vector<tools::HeavyApp> stateApps_;
+    std::vector<tools::Physical> statePhys_;
+    std::set<std::wstring> projSel_, dlSel_;
+    std::wstring stateFocus_;
+    float stateFocusY_ = -1;
     Overlay ov_ = OV_NONE;
     int ring_ = 0, sel_ = 0, tab_ = 0, tourStep_ = 0;
     int editingField_ = 0;

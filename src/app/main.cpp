@@ -13,6 +13,7 @@
 #include "app/autostart.h"
 #include "app/devcli.h"
 #include "app/netui.h"
+#include "app/autos.h"
 #include "app/toolsui.h"
 #include "core/mem.h"
 #include "core/config.h"
@@ -82,7 +83,7 @@ BoostCard g_boostCard;
 std::vector<boost::Group> g_boostGroups;  // что предложили закрыть
 std::vector<std::wstring> g_boostClosed;  // что закрыли - вернуть после игры
 bool g_boostBusy = false;
-HPOWERNOTIFY g_displayNotify = nullptr;
+HPOWERNOTIFY g_displayNotify = nullptr, g_acdcNotify = nullptr;
 int g_cfgCheck = 0;
 Config g_cfg;
 std::wstring g_cfgPath;
@@ -174,6 +175,7 @@ void Poll() {
     g_boostCard.Tick();
     netui::Tick();
     toolsui::Tick();
+    autos::Tick();
     if (!alt) {
         g_armed = true;
         return;
@@ -377,6 +379,7 @@ void BoostAfterGame() {
 // Режим разработки включился или выключился: обои и память, красота и перехват мыши не трогаются.
 void OnDevMode(bool on) {
     UpdateTrayTip();
+    autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
     if (on && g_cfg.devBoost && !g_game.On()) OfferBoost(false, L"для " + g_dev.Reason());
     if (!on) OfferRestore();
     if (g_cfg.hexGlass && !g_game.On())
@@ -389,6 +392,7 @@ void OnGameMode(bool on) {
     fx::SetGame(on);
     g_frame.Suspend(on);
     llmouse::Suspend(on);  // перехват мыши снят: каждое движение мыши не ходит через нас
+    autos::OnModes(on, g_dev.On());  // питание: в игре - производительность
     UpdateTrayTip();
     // Boost: во время игры таймер и приоритеты, при запуске - предложить освободить память
     netui::Game(on, g_game.GamePids(), g_game.Reason());  // сеть в игре: туннель и пинг до сервера
@@ -550,6 +554,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case toolsui::WM_TOOLS_JOB:
             toolsui::OnJob(wp, lp);
             return 0;
+        case autos::WM_AUTO_JOB:
+            autos::OnJob(wp, lp);
+            return 0;
         case WM_APP + 54:  // для проверки: кольцо утилит у курсора
             corners::Run(L"tools");
             return 0;
@@ -588,18 +595,22 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 auto* s = reinterpret_cast<POWERBROADCAST_SETTING*>(lp);
                 if (s && IsEqualGUID(s->PowerSetting, GUID_CONSOLE_DISPLAY_STATE) && s->DataLength >= 4)
                     g_reveal.OnDisplay(*reinterpret_cast<DWORD*>(s->Data) == 1);
+                if (s && IsEqualGUID(s->PowerSetting, GUID_ACDC_POWER_SOURCE)) autos::OnPower();
             } else {
                 g_reveal.OnPower(wp);
+                if (wp == PBT_APMPOWERSTATUSCHANGE) autos::OnPower();  // зарядку подключили или отключили
                 if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) netui::Wake();
             }
             return TRUE;
         case WM_DESTROY:
             WTSUnRegisterSessionNotification(h);
             if (g_displayNotify) UnregisterPowerSettingNotification(g_displayNotify);
+            if (g_acdcNotify) UnregisterPowerSettingNotification(g_acdcNotify);
             g_wave.Destroy();
             g_boostCard.Destroy();
             netui::Shutdown();
             toolsui::Shutdown();
+            autos::Shutdown();
             boost::GameTweaks(boost::Load(BoostDir()), false);
             g_frame.Destroy();
             g_dev.Shutdown();
@@ -710,6 +721,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     corners::SetLock([] { g_reveal.LockWithCurtain(); });
     corners::SetScreenOff([] { return g_reveal.ScreenOff(); });
     g_displayNotify = RegisterPowerSettingNotification(g_wnd, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
+    // зарядку подключили или отключили - режим питания (автоматика)
+    g_acdcNotify = RegisterPowerSettingNotification(g_wnd, &GUID_ACDC_POWER_SOURCE, DEVICE_NOTIFY_WINDOW_HANDLE);
     g_wave.Create(inst);
     g_boostCard.Create(inst);
     corners::SetBoost([] { OfferBoost(true); });
@@ -724,6 +737,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     toolsui::Init(inst, g_wnd, &g_cfg, &g_boostCard, [](int page, const std::wstring& scan) {
         OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
         EditorGoTools(page, scan);
+    });
+    autos::Init(inst, g_wnd, &g_cfg, g_cfgPath, [] { Reload(); }, [](int, const std::wstring& focus) {
+        OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
+        EditorGoState(focus);
     });
     corners::SetTools([] {
         if (g_menu.IsOpen()) return;

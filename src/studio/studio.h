@@ -14,6 +14,8 @@ void OpenEditor(HINSTANCE inst, const std::wstring& cfgPath, std::function<void(
 void EditorGoNet();
 // Раздел «Утилиты»: tab 0 PATH, 1 диски, 2 автозагрузка, 3 порты; scan - сразу посчитать, что занимает место.
 void EditorGoTools(int tab, const std::wstring& scan);
+// Раздел «Состояние»; focus - к какой карточке прокрутить («downloads», «projects» или пусто).
+void EditorGoState(const std::wstring& focus);
 
 // Для проверки без окна: раздел (page - номер из enum Page, tab - вкладка утилит) в PNG.
 int EditorSnapshot(HINSTANCE inst, const std::wstring& cfgPath, int page, int tab, const std::wstring& out, int ms);

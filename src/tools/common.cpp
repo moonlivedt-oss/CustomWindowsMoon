@@ -335,4 +335,87 @@ std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots,
     return sized;
 }
 
+// ---------------- разбор Загрузок ----------------
+
+std::wstring DownloadsDir() {
+    PWSTR p = nullptr;
+    std::wstring out;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, nullptr, &p))) out = p;
+    CoTaskMemFree(p);
+    return out;
+}
+
+std::vector<DownloadJunk> FindDownloadJunk(int days) {
+    std::vector<DownloadJunk> out;
+    std::wstring dir = DownloadsDir();
+    if (dir.empty()) return out;
+    ULONGLONG now = NowStamp(), old = now - (ULONGLONG)days * kDay, week = now - 7 * kDay, two = now - 2 * kDay;
+    // всё содержимое корня Загрузок: имя (без регистра) -> размер, и какие там папки
+    struct F {
+        std::wstring name;
+        ULONGLONG bytes, time;
+    };
+    std::vector<F> files;
+    std::map<std::wstring, ULONGLONG> sizeByName;
+    std::map<std::wstring, bool> dirs;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do {
+        if (Dots(fd.cFileName) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            dirs[Lower(fd.cFileName)] = true;
+            continue;
+        }
+        ULONGLONG b = ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+        // скачанное: время создания - когда легло в папку
+        files.push_back({fd.cFileName, b, std::max(Stamp(fd.ftCreationTime), Stamp(fd.ftLastWriteTime))});
+        sizeByName[Lower(fd.cFileName)] = b;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    auto ext = [](const std::wstring& n) {
+        size_t d = n.find_last_of(L'.');
+        return d == std::wstring::npos ? std::wstring() : Lower(n.substr(d));
+    };
+    auto stem = [](const std::wstring& n) {
+        std::wstring l = Lower(n);
+        if (EndsWithI(l, L".tar.gz")) return l.substr(0, l.size() - 7);
+        size_t d = l.find_last_of(L'.');
+        return d == std::wstring::npos ? l : l.substr(0, d);
+    };
+    for (const F& f : files) {
+        std::wstring e = ext(f.name), why;
+        if ((e == L".exe" || e == L".msi" || e == L".msix" || e == L".appx" || e == L".msixbundle") && f.time < old) {
+            why = L"установщик";
+        } else if ((e == L".crdownload" || e == L".part" || e == L".partial" || e == L".tmp") && f.time < two) {
+            why = L"недокачанный";
+        } else if (e == L".torrent" && f.time < week) {
+            why = L"торрент-файл";
+        } else if ((e == L".zip" || e == L".rar" || e == L".7z" || EndsWithI(f.name, L".tar.gz")) && f.time < old) {
+            // архив, который уже распакован рядом в папку с тем же именем
+            if (dirs.count(stem(f.name))) why = L"уже распакован";
+        }
+        if (why.empty()) {
+            // копия: «файл (1).zip», а рядом такой же «файл.zip» того же размера
+            std::wstring s = stem(f.name);
+            size_t br = s.rfind(L" (");
+            if (br != std::wstring::npos && s.back() == L')') {
+                std::wstring orig = s.substr(0, br) + e;
+                auto it = sizeByName.find(orig);
+                if (it != sizeByName.end() && it->second == f.bytes) why = L"копия";
+            }
+        }
+        if (why.empty()) continue;
+        DownloadJunk d;
+        d.path = dir + L"\\" + f.name;
+        d.name = f.name;
+        d.why = why;
+        d.bytes = f.bytes;
+        d.days = now > f.time ? (int)((now - f.time) / kDay) : 0;
+        out.push_back(d);
+    }
+    std::sort(out.begin(), out.end(), [](const DownloadJunk& a, const DownloadJunk& b) { return a.bytes > b.bytes; });
+    return out;
+}
+
 }  // namespace tools

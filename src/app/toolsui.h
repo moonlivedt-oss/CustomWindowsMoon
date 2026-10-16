@@ -10,9 +10,7 @@
 struct Config;
 class BoostCard;
 class RadialMenu;
-namespace tools {
-struct HeavyApp;
-}
+#include "tools/tools.h"
 
 namespace toolsui {
 
@@ -35,5 +33,23 @@ std::vector<std::wstring> ProjectRoots(const Config& cfg);
 // даже если памяти хватает (вызов вручную). true - карточка показана.
 bool MemoryOffer(const std::wstring& why, const std::vector<std::wstring>& keep, bool force);
 void CloseHeavy(const tools::HeavyApp& app);  // мягко закрыть программу в фоне, ход - в карточке
+
+// Для страницы «Состояние» в студии: последний фоновый подсчёт и действия над ним.
+struct State {
+    std::vector<tools::Junk> junk;
+    std::vector<tools::ProjectJunk> projects;
+    std::vector<tools::Growth> growth;
+    ULONGLONG ddcOld = 0;
+    tools::Driver driver;
+    ULONGLONG at = 0;       // когда посчитано (GetTickCount64), 0 - ещё ни разу
+    bool scanning = false;  // считается прямо сейчас
+};
+State Snapshot();
+void Refresh();  // пересчитать сейчас
+void PrimeForSnapshot(const Config* cfg);  // для --studio-snap: посчитать сразу и дождаться
+void CleanQuick();  // «Всё сразу»: быстрые кэши и временные файлы
+void TrimDdc();     // старое из кэша Unreal
+void CleanProjectList(const std::vector<tools::ProjectJunk>& list);
+bool Busy();
 
 }  // namespace toolsui

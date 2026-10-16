@@ -208,7 +208,21 @@ bool AutostartOn() {
 
 bool AutostartEarly() { return TaskState() != 0; }
 
+int AutostartWanted() {
+    DWORD v = 0, sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\MoonRadial", L"AutostartWanted", RRF_RT_REG_DWORD, nullptr, &v,
+                     &sz) != ERROR_SUCCESS)
+        return -1;
+    return v ? 1 : 0;
+}
+
+void SetAutostartWanted(bool on) {
+    DWORD v = on ? 1 : 0;
+    RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\MoonRadial", L"AutostartWanted", REG_DWORD, &v, sizeof(v));
+}
+
 void SetAutostart(bool on) {
+    SetAutostartWanted(on);
     if (on) {
         if (RegisterTask()) {
             WriteRun(false);  // две записи не нужны: вторая копия всё равно вышла бы по мьютексу
