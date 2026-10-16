@@ -234,6 +234,23 @@ int ToolsDiag() {
     return 0;
 }
 
+// Очистка всего, что пересоздаётся быстро (как «Всё сразу» в кольце): кэши шейдеров и Unreal не трогаются.
+int Clean() {
+    std::wstring s;
+    const std::wstring nl = L"\r\n";
+    ULONGLONG freed = 0;
+    for (const tools::Junk& j : tools::FindJunk(true)) {
+        if (j.slow) {
+            s += L"пропущен (долго собирается заново): " + j.name + L" " + tools::Bytes(j.bytes) + nl;
+            continue;
+        }
+        freed += tools::CleanJunk(j, [&](const std::wstring& line) { s += line + nl; });
+    }
+    s += L"Всего освобождено: " + tools::Bytes(freed) + nl;
+    WriteOut(L"clean_out.txt", s);
+    return 0;
+}
+
 }  // namespace
 
 bool HasFlag(const wchar_t* flag) { return Has(Args(), flag); }
@@ -264,6 +281,8 @@ bool Run(int& exitCode) {
         std::wstring out = i + 3 < args.size() ? args[i + 3] : ExeDir() + L"\\studio_snap.png";
         int ms = i + 4 < args.size() ? _wtoi(args[i + 4].c_str()) : 2500;
         exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
+    } else if (Has(args, L"--clean")) {  // очистить кэши и временные файлы, итог в clean_out.txt
+        exitCode = Clean();
     } else if (Has(args, L"--tools-diag")) {
         exitCode = ToolsDiag();
     } else if (Has(args, L"--net-diag")) {
