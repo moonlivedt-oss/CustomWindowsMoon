@@ -227,7 +227,7 @@ struct Problem {
 // действия над выбранным сектором: из меню по ПКМ, кнопки «…» и с клавиатуры
 enum Op { OP_RENAME, OP_UP, OP_DOWN, OP_OTHER_SIDE, OP_DUPLICATE, OP_DELETE };
 
-inline constexpr UINT_PTR kTipTimer = 2, kToastTimer = 3;
+inline constexpr UINT_PTR kTipTimer = 2, kToastTimer = 3, kBusyTimer = 4;
 
 struct FolderStats {
     int total = 0, dirs = 0;
@@ -319,6 +319,10 @@ private:
 
     // рисование
     void Paint();
+    // Пока что-то считается в фоне: следующий кадр через ms, а не сразу (иначе кадры идут без передышки
+    // и съедают процессор, пока сканируется диск).
+    void RepaintIn(UINT ms);
+    void LoadPhysAsync();  // здоровье дисков (WMI) - в своём потоке: COM в окне рисования прокачивает сообщения
     void Frame(float w, float h);
     void Rail(const RectF& r);
     void StatusBar(const RectF& r);
@@ -385,6 +389,13 @@ private:
     tools::MemoryState stateMem_;
     std::vector<tools::HeavyApp> stateApps_;
     std::vector<tools::Physical> statePhys_;
+    struct PhysJob {
+        SRWLOCK lock = SRWLOCK_INIT;
+        volatile bool done = false;
+        std::vector<tools::Physical> disks;
+    };
+    std::shared_ptr<PhysJob> physJob_;
+    bool painting_ = false, paintAgain_ = false;  // кадр уже рисуется (вложенный WM_PAINT из COM)
     std::set<std::wstring> projSel_, dlSel_;
     std::wstring stateFocus_;
     float stateFocusY_ = -1;

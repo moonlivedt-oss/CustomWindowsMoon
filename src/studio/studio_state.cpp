@@ -69,12 +69,18 @@ void Studio::StatePage(const RectF& r) {
     }
     if (!statePhysAt_) {
         statePhysAt_ = now;
-        statePhys_ = tools::PhysicalDisks();
+        LoadPhysAsync();
+    }
+    if (physJob_ && physJob_->done) {
+        AcquireSRWLockShared(&physJob_->lock);
+        statePhys_ = physJob_->disks;
+        if (toolsPhys_.empty()) toolsPhys_ = physJob_->disks;
+        ReleaseSRWLockShared(&physJob_->lock);
     }
     toolsui::State s = toolsui::Snapshot();
     std::vector<tools::DownloadJunk> dls = autos::Downloads();
     bool working = s.scanning || autos::Cleaning() || toolsui::Busy();
-    if (working) ui.Invalidate();  // пока считается - кадры идут, итог появится сам
+    if (working) RepaintIn(250);  // пока считается - изредка перерисовываемся, итог появится сам
 
     Header(col, L"Состояние",
            L"Всё важное сейчас и что можно сделать в один клик. Подсчёт размеров: " +
@@ -497,7 +503,7 @@ void Studio::AutoPage(const RectF& r) {
             Save();
         }
     };
-    if (autos::Cleaning() || toolsui::Busy()) ui.Invalidate();
+    if (autos::Cleaning() || toolsui::Busy()) RepaintIn(250);
 
     cols.Card(L"Тихая чистка", 2.2f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Раз в неделю и когда на C: мало места");

@@ -63,8 +63,14 @@ void Studio::ToolsScan(const std::wstring& dir) {
     std::wstring d = dir;
     toolsJob_.reset();
     ToolsRun(L"Что занимает место", [d](const tools::Log& log, ToolsJob& job) {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);  // обход диска не мешает работе
         log(L"Считаю " + d + L"...");
-        std::vector<tools::FolderSize> r = tools::ScanSizes(d, &job.cancel, &job.progress);
+        std::vector<tools::FolderSize> r =
+            tools::ScanSizes(d, &job.cancel, &job.progress, [&job](const std::vector<tools::FolderSize>& sofar) {
+                AcquireSRWLockExclusive(&job.lock);  // список растёт по мере подсчёта
+                job.sizes = sofar;
+                ReleaseSRWLockExclusive(&job.lock);
+            });
         AcquireSRWLockExclusive(&job.lock);
         job.sizes = std::move(r);
         job.hasSizes = true;
@@ -116,7 +122,7 @@ void Studio::ToolsPage(const RectF& r) {
     auto rowsFor = [&](size_t n) { return (float)(n * lineH / rowH); };
 
     bool busy = toolsJob_ && !toolsJob_->done;
-    if (busy) ui.Invalidate();
+    if (busy) RepaintIn(120);  // ход работы - несколько раз в секунду, не каждый кадр
     // данные вкладки - при входе и раз в несколько секунд (порты чаще)
     ULONGLONG now = GetTickCount64();
     ULONGLONG every = toolsTab_ == 3 ? 3000 : 15000;
@@ -128,7 +134,7 @@ void Studio::ToolsPage(const RectF& r) {
             toolsEnv_ = tools::ReadEnv();
         } else if (toolsTab_ == 1) {
             toolsVols_ = tools::Volumes();
-            if (toolsPhys_.empty()) toolsPhys_ = tools::PhysicalDisks();
+            if (toolsPhys_.empty()) LoadPhysAsync();
             // размеры кэшей - сами, один раз при входе на вкладку (считаются в фоне)
             if (toolsJunk_.empty() && !toolsJunkAsked_ && !(toolsJob_ && !toolsJob_->done)) {
                 toolsJunkAsked_ = true;
@@ -338,6 +344,11 @@ void Studio::ToolsPage(const RectF& r) {
                 y += lineH * 1.6f;
             }
         });
+        if (toolsPhys_.empty() && physJob_ && physJob_->done) {  // здоровье дисков пришло из потока
+            AcquireSRWLockShared(&physJob_->lock);
+            toolsPhys_ = physJob_->disks;
+            ReleaseSRWLockShared(&physJob_->lock);
+        }
         card(L"Физические диски", rowsFor(toolsPhys_.size()) + 1.5f, [&](const RectF& b) {
             float y = b.Y;
             for (const tools::Physical& d : toolsPhys_) {

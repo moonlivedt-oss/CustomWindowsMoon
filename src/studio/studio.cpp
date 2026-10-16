@@ -64,6 +64,14 @@ int GroupOf(Page p) {
 }  // namespace
 
 void Studio::Paint() {
+    // Вложенный WM_PAINT (COM или WMI внутри кадра прокачали сообщения): второй кадр поверх первого
+    // закончил бы ui.Begin/End раньше внешнего, и тот рисовал бы без холста. Нарисуем после.
+    if (painting_) {
+        ValidateRect(wnd, nullptr);
+        paintAgain_ = true;
+        return;
+    }
+    painting_ = true;
     PERF_SCOPE("studio.Paint");
     // по одному имени на каждый раздел из enum Page, в том же порядке
     static const char* kPageScope[] = {
@@ -115,7 +123,42 @@ void Studio::Paint() {
     }
     BitBlt(dc, 0, 0, w, h, memDC_, 0, 0, SRCCOPY);
     EndPaint(wnd, &ps);
-    if (ui.TakeRepaint()) InvalidateRect(wnd, nullptr, FALSE);
+    painting_ = false;
+    if (ui.TakeRepaint() || paintAgain_) InvalidateRect(wnd, nullptr, FALSE);
+    paintAgain_ = false;
+}
+
+void Studio::RepaintIn(UINT ms) {
+    if (wnd) SetTimer(wnd, kBusyTimer, ms, nullptr);
+}
+
+void Studio::LoadPhysAsync() {
+    if (physJob_ && !physJob_->done) return;
+    auto job = std::make_shared<PhysJob>();
+    physJob_ = job;
+    HWND w = wnd;
+    struct Box {
+        std::shared_ptr<PhysJob> job;
+        HWND wnd;
+    };
+    auto* box = new Box{job, w};
+    HANDLE th = CreateThread(
+        nullptr, 0,
+        [](void* p) -> DWORD {
+            std::unique_ptr<Box> b((Box*)p);
+            std::vector<tools::Physical> d = tools::PhysicalDisks();  // свой COM в своём потоке
+            AcquireSRWLockExclusive(&b->job->lock);
+            b->job->disks = std::move(d);
+            ReleaseSRWLockExclusive(&b->job->lock);
+            b->job->done = true;
+            if (b->wnd) InvalidateRect(b->wnd, nullptr, FALSE);
+            return 0;
+        },
+        box, 0, nullptr);
+    if (th)
+        CloseHandle(th);
+    else
+        delete box;
 }
 
 void Studio::Frame(float w, float h) {
@@ -465,7 +508,7 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_TIMER:
             if (wp == kSaveTimer) Save();
-            if (wp == kTipTimer || wp == kToastTimer) {
+            if (wp == kTipTimer || wp == kToastTimer || wp == kBusyTimer) {
                 KillTimer(wnd, wp);
                 InvalidateRect(wnd, nullptr, FALSE);
             }

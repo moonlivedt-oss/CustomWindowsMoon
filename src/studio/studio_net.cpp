@@ -112,7 +112,7 @@ void Studio::NetPage(const RectF& r) {
         if (netJob_->hasReport) netReport_ = std::make_shared<net::Report>(netJob_->report);
         ReleaseSRWLockShared(&netJob_->lock);
     }
-    if (busy) ui.Invalidate();
+    if (busy) RepaintIn(120);
 
     // --- состояние ---
     card(L"Состояние", 3.2f, [&](const RectF& b) {

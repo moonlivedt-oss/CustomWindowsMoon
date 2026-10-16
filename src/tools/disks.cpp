@@ -130,7 +130,8 @@ bool DiskHealth(std::vector<Physical>& disks, const Log& log) {
     return ok && any;
 }
 
-std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* cancel, volatile long* progress) {
+std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* cancel, volatile long* progress,
+                                  const std::function<void(const std::vector<FolderSize>&)>& partial) {
     PERF_SCOPE("tools.ScanSizes");
     std::wstring dir = dirIn;
     while (dir.size() > 3 && dir.back() == L'\\') dir.pop_back();
@@ -154,6 +155,12 @@ std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* canc
             f.path = base + L"\\" + fd.cFileName;
             f.bytes = DirBytes(f.path, &f.files, cancel, progress);
             out.push_back(f);
+            if (partial) {
+                std::vector<FolderSize> sofar = out;
+                std::sort(sofar.begin(), sofar.end(),
+                          [](const FolderSize& a, const FolderSize& b) { return a.bytes > b.bytes; });
+                partial(sofar);
+            }
         } else {
             loose.bytes += ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
             ++loose.files;

@@ -587,6 +587,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                              CurrentTheme(g_cfg));
             return 0;
         }
+        case WM_APP + 57:  // для проверки: студия, «Что занимает место» на C: (как клик по шкале диска)
+            toolsui::Run(L"scan:C:\\");
+            return 0;
         case WM_APP + 56:  // для проверки: карточка снимка
             g_snip.Demo();
             return 0;

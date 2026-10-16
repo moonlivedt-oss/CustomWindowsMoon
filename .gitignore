@@ -14,3 +14,4 @@ media_snap.png
 .ruff_cache/
 __pycache__/
 build-check/
+build-sym/

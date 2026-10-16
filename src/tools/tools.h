@@ -73,7 +73,9 @@ struct FolderSize {
 };
 // Что занимает место в папке: размеры вложенных папок (с файлами в корне - отдельной строкой).
 // cancel - выставить в true, чтобы остановить; progress - сколько файлов уже просмотрено.
-std::vector<FolderSize> ScanSizes(const std::wstring& dir, volatile bool* cancel, volatile long* progress);
+// partial - после каждой посчитанной папки: что уже известно (по убыванию), чтобы список рос на глазах.
+std::vector<FolderSize> ScanSizes(const std::wstring& dir, volatile bool* cancel, volatile long* progress,
+                                  const std::function<void(const std::vector<FolderSize>&)>& partial = nullptr);
 
 struct Junk {
     std::wstring name, path;

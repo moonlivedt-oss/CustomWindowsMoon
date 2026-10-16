@@ -16,8 +16,9 @@ target_include_directories(RadialMenu PRIVATE src)
 target_compile_definitions(RadialMenu PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 target_link_libraries(RadialMenu PRIVATE gdiplus shcore shlwapi shell32 ole32 oleaut32 wtsapi32 user32 gdi32 comctl32 comdlg32 uxtheme windowscodecs winmm uuid dwmapi version propsys winhttp dxva2 wbemuuid oleacc taskschd iphlpapi ws2_32 wininet rstrtmgr)
 
+option(RADIAL_STRIP "убрать символы из exe (OFF - для разбора падений по адресу)" ON)
 if(MINGW)
-  target_link_options(RadialMenu PRIVATE -municode -static -s)
+  target_link_options(RadialMenu PRIVATE -municode -static $<$<BOOL:${RADIAL_STRIP}>:-s>)
 endif()
 
 # exe кладём в корень проекта рядом с radial.cfg и icons/;
