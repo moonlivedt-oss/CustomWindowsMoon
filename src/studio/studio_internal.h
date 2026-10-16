@@ -181,6 +181,7 @@ enum Id {
     ID_TOOLS_SCAN_PATH,
     ID_TOOLS_SCAN,
     ID_TOOLS_SCAN_UP,
+    ID_TOOLS_RING,
     ID_TOOLS_JUNK_SCAN,
     ID_TOOLS_LOCK_PATH,
     ID_TOOLS_LOCK,
@@ -461,6 +462,13 @@ private:
     void Reveal(const RectF& r) { ui.MarkCard(r); }  // карточка выезжает отдельно от страницы
     void RevealComposite(const RectF& body, ULONGLONG since);
     int tabsGroup_ = -1;  // группа, чьи вкладки рисовались в прошлом кадре
+    int SizeRing(const RectF& r, const std::wstring& dir, const std::vector<tools::FolderSize>& sizes, bool scanning,
+                 long seen, int& hot);  // кольцо долей «Что занимает место»
+    int pathDrag_ = -1, pathDragTo_ = -1;  // своя строка PATH, которую тянут, и куда её поставят
+    float pathGrab_ = 0;
+    std::map<std::wstring, float> ringShown_;
+    std::wstring ringDir_;
+    ULONGLONG ringAt_ = 0;
     void NetRoute(const RectF& r, bool busy);  // схема ПК - выход - DNS - интернет, по ней бежит проверка
     bool netWasBusy_ = false;
     ULONGLONG netDoneAt_ = 0;  // когда пришёл итог проверки: узлы схемы загораются по очереди

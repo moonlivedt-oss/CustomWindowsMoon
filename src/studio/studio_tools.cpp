@@ -4,8 +4,11 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <cmath>
 
+#include "core/fx.h"
 #include "core/text.h"
+#include "gfx/color.h"
 #include "gfx/draw.h"
 #include "net/net.h"
 #include "studio/studio_internal.h"
@@ -41,7 +44,130 @@ DWORD WINAPI ToolsThread(void* p) {
 
 std::wstring Ellip(const std::wstring& s, size_t n) { return s.size() > n ? s.substr(0, n - 1) + L"…" : s; }
 
+// В кольце места - столько крупных папок, остальные одним серым куском.
+constexpr size_t kRingParts = 12;
+// Цвет доли: свои цвета темы по кругу, вторая шестёрка - те же, но глуше.
+Color SizeColor(const UiColors& c, int i, int n) {
+    if (i >= (int)kRingParts) return c.faint;
+    (void)n;
+    Color base[6] = {c.accent,
+                     c.gold,
+                     c.accent2,
+                     MixColor(c.accent, c.gold, 0.5),
+                     MixColor(c.accent2, c.accent, 0.5),
+                     MixColor(c.gold, c.text, 0.45)};
+    Color col = base[i % 6];
+    return i >= 6 ? MixColor(col, c.card, 0.35) : col;
+}
+
 }  // namespace
+
+// Кольцо долей папки. Доли дорастают до своего размера плавно (список растёт по ходу подсчёта),
+// наведённая выдвигается наружу, в середине - что под курсором или итог. hot - строка под курсором
+// в списке справа (её доля подсвечивается); возвращает долю, по которой щёлкнули, или -1.
+int Studio::SizeRing(const RectF& r, const std::wstring& dir, const std::vector<tools::FolderSize>& sizes,
+                     bool scanning, long seen, int& hot) {
+    const UiColors& c = ui.C();
+    Graphics& g = ui.G();
+    float side = std::min(r.Width, r.Height);
+    float cx = r.X + side / 2, cy = r.Y + side / 2;
+    float ro = side / 2 - ui.S(8), ri = ro * 0.6f;
+    if (dir != ringDir_) {
+        ringDir_ = dir;
+        ringShown_.clear();
+    }
+    ULONGLONG now = GetTickCount64();
+    float dt = ringAt_ && now - ringAt_ < 200 ? (now - ringAt_) / 1000.0f : 0.016f;
+    ringAt_ = now;
+    ULONGLONG total = 0;
+    for (const tools::FolderSize& f : sizes) total += f.bytes;
+    size_t n = std::min(sizes.size(), kRingParts);
+    std::vector<float> part(n + 1, 0.0f);
+    bool moving = false;
+    for (size_t i = 0; i <= n; ++i) {
+        ULONGLONG bytes = 0;
+        if (i < n)
+            bytes = sizes[i].bytes;
+        else
+            for (size_t k = n; k < sizes.size(); ++k) bytes += sizes[k].bytes;
+        float target = total ? (float)((double)bytes / total) : 0;
+        float& s = ringShown_[i < n ? sizes[i].path : L"*"];
+        s += (target - s) * std::min(1.0f, dt * 7 / (float)std::max(0.3, fx::Dur(1)));
+        if (fx::Game() || std::fabs(target - s) < 0.0015f)
+            s = target;
+        else
+            moving = true;
+        part[i] = s;
+    }
+    if (moving) ui.Tick();
+    // попадание: угол от верха по часовой стрелке
+    RectF box(cx - ro - ui.S(8), cy - ro - ui.S(8), (ro + ui.S(8)) * 2, (ro + ui.S(8)) * 2);
+    bool click = ui.Click(ID_TOOLS_RING, box);
+    POINT m = ui.Mouse();
+    float dx = m.x - cx, dy = m.y - cy, dist = std::sqrt(dx * dx + dy * dy);
+    float ang = std::fmod(std::atan2(dy, dx) * 57.29578f + 90 + 720, 360.0f);
+    int under = -1;
+    float start = 0;
+    for (size_t i = 0; i <= n; ++i) {
+        float sw = 360 * part[i];
+        if (ui.Hot(ID_TOOLS_RING) && dist >= ri && dist <= ro + ui.S(8) && ang >= start && ang < start + sw)
+            under = (int)i;
+        start += sw;
+    }
+    if (under >= 0) hot = under < (int)n ? under : -2;
+    // дорожка под кольцом, пока долей ещё нет
+    Pen track(WithAlpha(c.text, 18), ro - ri);
+    float mid = (ro + ri) / 2;
+    g.DrawEllipse(&track, cx - mid, cy - mid, mid * 2, mid * 2);
+    start = -90;
+    for (size_t i = 0; i <= n; ++i) {
+        float sw = 360 * part[i];
+        if (sw < 0.3f) {
+            start += sw;
+            continue;
+        }
+        bool on = (int)i == hot || (i == n && hot == -2);
+        float lift = ui.Anim(0x60000000 + (int)i, on, 16);
+        float o = ro + ui.S(7) * lift, gap = std::min(1.4f, sw * 0.3f);
+        // выдвинутая доля чуть отъезжает от центра по своей середине
+        float midA = (start + sw / 2) * 3.14159265f / 180;
+        float ox = std::cos(midA) * ui.S(4) * lift, oy = std::sin(midA) * ui.S(4) * lift;
+        GraphicsPath p;
+        p.AddArc(cx + ox - o, cy + oy - o, o * 2, o * 2, start + gap / 2, sw - gap);
+        p.AddArc(cx + ox - ri, cy + oy - ri, ri * 2, ri * 2, start + sw - gap / 2, -(sw - gap));
+        p.CloseFigure();
+        Color col = i < n ? SizeColor(c, (int)i, (int)n) : c.faint;
+        SolidBrush b(MixColor(col, Color(255, 255, 255), 0.18 * lift));
+        g.FillPath(&b, &p);
+        start += sw;
+    }
+    // середина
+    float tw = ri * 1.6f;
+    RectF mid1(cx - tw / 2, cy - ui.S(22), tw, ui.S(22)), mid2(cx - tw / 2, cy + ui.S(1), tw, ui.S(20));
+    if (hot >= 0 && hot < (int)n) {
+        const tools::FolderSize& f = sizes[hot];
+        ui.Text(f.name, mid1, c.text, 12.5f, true, ui::Center);
+        int pct = total ? (int)std::lround(100.0 * f.bytes / total) : 0;
+        ui.Text(tools::Bytes(f.bytes) + L", " + std::to_wstring(pct) + L"%", mid2, c.muted, 11.5f, false, ui::Center);
+    } else if (hot == -2) {
+        ui.Text(L"Остальное", mid1, c.text, 12.5f, true, ui::Center);
+        ui.Text(Plural((int)(sizes.size() - n), L"папка", L"папки", L"папок"), mid2, c.muted, 11.5f, false, ui::Center);
+    } else if (scanning) {
+        ui.HexSpinner(RectF(cx - ui.S(15), cy - ui.S(34), ui.S(30), ui.S(30)), c.accent);
+        ui.Text(tools::Bytes(total), RectF(cx - tw / 2, cy - ui.S(2), tw, ui.S(20)), c.text, 12.5f, true, ui::Center);
+        ui.Text(L"файлов: " + std::to_wstring(seen), RectF(cx - tw / 2, cy + ui.S(17), tw, ui.S(18)), c.faint, 10.5f,
+                false, ui::Center);
+    } else {
+        ui.Text(tools::Bytes(total), mid1, c.text, 15, true, ui::Center);
+        std::wstring leaf = dir;
+        while (leaf.size() > 3 && leaf.back() == L'\\') leaf.pop_back();
+        size_t cut = leaf.find_last_of(L'\\');
+        if (cut != std::wstring::npos && leaf.size() > 3) leaf = leaf.substr(cut + 1);
+        ui.Text(leaf, mid2, c.muted, 11.5f, false, ui::Center);
+    }
+    if (under >= 0 && under < (int)n) ui.Tip(ID_TOOLS_RING, L"Щелчок - зайти в " + sizes[under].name);
+    return click && under >= 0 && under < (int)n ? under : -1;
+}
 
 void Studio::ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work) {
     if (toolsJob_ && !toolsJob_->done) return;
@@ -193,6 +319,50 @@ void Studio::ToolsPage(const RectF& r) {
             if (toolsShowSys_)
                 for (size_t i = 0; i < toolsPath_.size(); ++i)
                     if (toolsPath_[i].system) order.push_back(i);
+            // кто кого затеняет: команда есть в двух папках - побеждает та, что выше
+            struct Link {
+                size_t win, lose;
+                std::wstring cmd;
+            };
+            std::vector<Link> links;
+            {
+                auto norm = [](std::wstring s) {
+                    while (s.size() > 3 && (s.back() == L'\\' || s.back() == L'/')) s.pop_back();
+                    CharLowerBuffW(s.data(), (DWORD)s.size());
+                    return s;
+                };
+                auto dirOf = [&](const std::wstring& file) {
+                    size_t cut = file.find_last_of(L'\\');
+                    return norm(cut == std::wstring::npos ? file : file.substr(0, cut));
+                };
+                std::vector<std::wstring> dirs;
+                for (const tools::PathEntry& e : toolsPath_) dirs.push_back(norm(e.full));
+                auto find = [&](const std::wstring& d) {
+                    for (size_t j = 0; j < dirs.size(); ++j)
+                        if (dirs[j] == d) return j;
+                    return SIZE_MAX;
+                };
+                for (const tools::Which& w : toolsWhich_) {
+                    size_t wi = find(dirOf(w.path));
+                    if (wi == SIZE_MAX) continue;
+                    for (const std::wstring& o : w.other) {
+                        size_t li = find(dirOf(o));
+                        if (li != SIZE_MAX && li != wi) links.push_back({wi, li, w.cmd});
+                    }
+                }
+            }
+            // свои строки можно перетаскивать за левый край; остальные расступаются
+            size_t nUser = user.size();
+            float userTop = y;
+            POINT m = ui.Mouse();
+            if (pathDrag_ >= (int)nUser) pathDrag_ = -1;
+            if (pathDrag_ >= 0) {
+                float at = m.y - pathGrab_ - userTop;
+                pathDragTo_ = std::clamp((int)std::lround(at / lineH), 0, (int)nUser - 1);
+            }
+            std::vector<float> rowY(toolsPath_.size(), -1);
+            size_t hoverRow = SIZE_MAX;
+            int dragRow = -1;
             for (size_t i : order) {
                 if (i == SIZE_MAX) {
                     RectF rr(b.X - ui.S(6), y, b.Width + ui.S(12), lineH);
@@ -206,36 +376,114 @@ void Studio::ToolsPage(const RectF& r) {
                     continue;
                 }
                 const tools::PathEntry& e = toolsPath_[i];
-                RectF rowR(b.X - ui.S(6), y, b.Width + ui.S(12), lineH);
-                bool hot = !e.system && rowHot(rowR);
-                if (hot) ui.Fill(rowR, WithAlpha(c.cardHi, 170), ui.S(6));
                 int kk = e.system ? -1 : ui_++;
+                float ry = y;
+                if (kk >= 0) {
+                    // место строки с учётом перетаскиваемой, доезжает пружиной
+                    int slot = kk;
+                    if (pathDrag_ >= 0 && kk != pathDrag_) {
+                        if (pathDrag_ < pathDragTo_ && kk > pathDrag_ && kk <= pathDragTo_) slot = kk - 1;
+                        if (pathDragTo_ < pathDrag_ && kk >= pathDragTo_ && kk < pathDrag_) slot = kk + 1;
+                    }
+                    ry = userTop + ui.Glide(-2000 - kk, RectF(0, slot * lineH, 1, 1)).Y;
+                    if (kk == pathDrag_) {
+                        dragRow = (int)i;
+                        rowY[i] = m.y - pathGrab_;
+                        y += lineH;
+                        continue;  // рисуется последней, поверх остальных
+                    }
+                }
+                rowY[i] = ry;
+                RectF rowR(b.X - ui.S(6), ry, b.Width + ui.S(12), lineH);
+                bool hot = pathDrag_ < 0 && rowHot(rowR);
+                if (hot) hoverRow = i;
+                y += lineH;
+            }
+            // дуги затенения для строки под курсором: от победителя к проигравшему, по ним бегут штрихи
+            auto rowCenter = [&](size_t i) { return rowY[i] + lineH / 2; };
+            bool anyLink = false;
+            for (const Link& l : links) {
+                bool on = hoverRow != SIZE_MAX && (l.win == hoverRow || l.lose == hoverRow);
+                if (!on || rowY[l.win] < 0 || rowY[l.lose] < 0) continue;
+                anyLink = true;
+                float y1 = rowCenter(l.win), y2 = rowCenter(l.lose);
+                float bend = ui.S(10) + std::min(ui.S(10), std::fabs(y2 - y1) * 0.04f);
+                Pen arc(c.gold, ui.S(1.8f));
+                arc.SetDashStyle(DashStyleDash);
+                arc.SetDashOffset(-(float)std::fmod(GetTickCount64() / std::max(1.0, fx::Dur(60)), 1000.0));
+                arc.SetEndCap(LineCapArrowAnchor);
+                ui.G().DrawBezier(&arc, PointF(b.X - ui.S(2), y1), PointF(b.X - bend - ui.S(4), y1),
+                             PointF(b.X - bend - ui.S(4), y2), PointF(b.X - ui.S(2), y2));
+            }
+            if (anyLink && !fx::Game()) ui.Tick();
+            auto drawRow = [&](size_t i, bool lifted) {
+                const tools::PathEntry& e = toolsPath_[i];
+                float ry = rowY[i];
+                RectF rowR(b.X - ui.S(6), ry, b.Width + ui.S(12), lineH);
+                if (lifted) {
+                    ui.Fill(RectF(rowR.X - ui.S(2), rowR.Y + ui.S(2), rowR.Width + ui.S(4), rowR.Height + ui.S(3)),
+                            WithAlpha(Color(0, 0, 0), 90), ui.S(8));
+                    ui.Fill(rowR, c.cardHi, ui.S(7));
+                    ui.Stroke(rowR, WithAlpha(c.accent, 200), ui.S(7), ui.S(1.4f));
+                } else if (i == hoverRow && !e.system) {
+                    ui.Fill(rowR, WithAlpha(c.cardHi, 170), ui.S(6));
+                }
+                // подсветка участников затенения
+                bool winner = false, loser = false;
+                std::wstring loseTo;
+                for (const Link& l : links) {
+                    if (hoverRow == SIZE_MAX || (l.win != hoverRow && l.lose != hoverRow)) continue;
+                    if (l.win == i) winner = true;
+                    if (l.lose == i) {
+                        loser = true;
+                        loseTo += (loseTo.empty() ? L"" : L", ") + l.cmd;
+                    }
+                }
+                if ((winner || loser) && i != hoverRow) ui.Fill(rowR, WithAlpha(c.gold, 22), ui.S(6));
                 Color col = e.dead ? c.warn : e.dup ? c.gold : c.text;
-                ui.Text(e.system ? L"система" : L"свой", RectF(b.X, y, ui.S(64), lineH), c.faint, 10.5f);
+                // левый край своей строки - ручка: под курсором вместо «свой» точки для перетаскивания
+                int gid = ID_TOOLS_ROW + (int)i * 4 + 3;
+                RectF grip(b.X - ui.S(6), ry, ui.S(62), lineH);
+                if (!e.system && !busy) ui.Hover(gid, grip);
+                if (!e.system && (ui.Hot(gid) || lifted)) {
+                    SolidBrush dot(lifted ? c.accent : c.muted);
+                    for (int r = 0; r < 3; ++r)
+                        for (int q = 0; q < 2; ++q)
+                            ui.G().FillEllipse(&dot, b.X + q * ui.S(6), ry + lineH / 2 - ui.S(7) + r * ui.S(6), ui.S(3),
+                                          ui.S(3));
+                    ui.Text(L"тяни", RectF(b.X + ui.S(16), ry, ui.S(48), lineH), c.faint, 10.5f);
+                    ui.Tip(gid, L"Перетащи, чтобы поменять порядок: кто выше, того Windows находит первым");
+                } else {
+                    ui.Text(e.system ? L"система" : L"свой", RectF(b.X, ry, ui.S(64), lineH), c.faint, 10.5f);
+                }
                 float bw = e.system ? 0 : ui.S(210);
                 std::wstring txt = e.raw + (e.dead ? L"   (нет папки)" : e.dup ? L"   (дубль)" : L"");
-                ui.Text(txt, RectF(b.X + ui.S(66), y, b.Width - ui.S(66) - bw - ui.S(150), lineH), col, 11.5f);
-                if (!e.provides.empty())
-                    ui.Text(e.provides, RectF(b.X + b.Width - bw - ui.S(148), y, ui.S(144), lineH), c.muted, 10.5f,
-                            false, ui::Right);
-                if (hot) {
+                ui.Text(txt, RectF(b.X + ui.S(66), ry, b.Width - ui.S(66) - bw - ui.S(150), lineH), col, 11.5f);
+                if (loser)
+                    ui.Text(L"уступает: " + loseTo, RectF(b.X + b.Width - bw - ui.S(148), ry, ui.S(144), lineH), c.gold,
+                            10.5f, true, ui::Right);
+                else if (!e.provides.empty())
+                    ui.Text(e.provides, RectF(b.X + b.Width - bw - ui.S(148), ry, ui.S(144), lineH),
+                            winner ? c.gold : c.muted, 10.5f, winner, ui::Right);
+                if (i == hoverRow && !e.system && !lifted) {
                     float bx = b.X + b.Width - bw;
-                    int k = kk;
+                    int k = 0;
+                    for (size_t j = 0; j < i; ++j) k += !toolsPath_[j].system;
                     auto move = [&](int to) {
                         std::vector<std::wstring> v = user;
                         std::swap(v[k], v[to]);
                         ToolsRun(L"PATH", [v](const tools::Log& l, ToolsJob&) { return tools::WriteUserPath(v, l); });
                         refresh();
                     };
-                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4, RectF(bx, y + ui.S(2), ui.S(64), ui.S(26)), L"Выше") &&
+                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4, RectF(bx, ry + ui.S(2), ui.S(64), ui.S(26)), L"Выше") &&
                         k > 0 && !busy)
                         move(k - 1);
-                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4 + 1, RectF(bx + ui.S(70), y + ui.S(2), ui.S(64), ui.S(26)),
+                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4 + 1, RectF(bx + ui.S(70), ry + ui.S(2), ui.S(64), ui.S(26)),
                                   L"Ниже") &&
                         k + 1 < (int)user.size() && !busy)
                         move(k + 1);
-                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4 + 2, RectF(bx + ui.S(140), y + ui.S(2), ui.S(70), ui.S(26)),
-                                  L"Убрать") &&
+                    if (ui.Button(ID_TOOLS_ROW + (int)i * 4 + 2,
+                                  RectF(bx + ui.S(140), ry + ui.S(2), ui.S(70), ui.S(26)), L"Убрать") &&
                         !busy) {
                         std::vector<std::wstring> v = user;
                         v.erase(v.begin() + k);
@@ -243,8 +491,38 @@ void Studio::ToolsPage(const RectF& r) {
                         refresh();
                     }
                 }
-                y += lineH;
+                // перетаскивание: началось - запоминаем, отпустили - пишем новый порядок
+                if (!e.system) {
+                    int k = 0;
+                    for (size_t j = 0; j < i; ++j) k += !toolsPath_[j].system;
+                    if (pathDrag_ < 0 && ui.Dragging(gid)) {
+                        pathDrag_ = k;
+                        pathDragTo_ = k;
+                        pathGrab_ = ui.PressPt().y - ry;
+                    }
+                    if (ui.Released(gid) && pathDrag_ == k) {
+                        int to = pathDragTo_;
+                        pathDrag_ = -1;
+                        ui.Invalidate();
+                        if (to != k && to >= 0 && !busy) {
+                            std::vector<std::wstring> v = user;
+                            std::wstring moved = v[k];
+                            v.erase(v.begin() + k);
+                            v.insert(v.begin() + to, moved);
+                            ToolsRun(L"PATH",
+                                     [v](const tools::Log& l, ToolsJob&) { return tools::WriteUserPath(v, l); });
+                            refresh();
+                        }
+                    }
+                }
+            };
+            for (size_t i : order)
+                if (i != SIZE_MAX && (int)i != dragRow && rowY[i] >= 0) drawRow(i, false);
+            if (dragRow >= 0) {
+                ui.Invalidate();
+                drawRow((size_t)dragRow, true);
             }
+            if (pathDrag_ >= 0 && !ui.Down()) pathDrag_ = -1;  // кнопку отпустили где-то вне окна
             y += ui.S(8);
             RectF fr(b.X, y, b.Width - ui.S(140), ui.S(36));
             FieldOrText(
@@ -395,7 +673,13 @@ void Studio::ToolsPage(const RectF& r) {
             seen = toolsJob_->progress;
         }
         size_t shown = std::min<size_t>(sizes.size(), 20);
-        wide(L"Что занимает место", rowsFor(shown) + 2.0f + (scanning ? 1 : 0), [&](const RectF& b) {
+        // слева кольцо долей (наведение и щелчок - как по строке списка), справа сам список
+        bool ring = !sizes.empty() || scanning;
+        float ringW = ring ? ui.S(250) : 0;
+        float rows = rowsFor(shown) + 2.0f;
+        if (ring) rows = std::max(rows, (ui.S(46) + ringW) / rowH);
+        if (!ring) rows += 2.6f;  // место под приглашение посчитать
+        wide(L"Что занимает место", rows, [&](const RectF& b) {
             std::wstring dir = toolsScanPath_.empty() ? L"C:\\" : toolsScanPath_;
             RectF fr(b.X, b.Y, b.Width - ui.S(290), ui.S(36));
             FieldOrText(
@@ -416,28 +700,45 @@ void Studio::ToolsPage(const RectF& r) {
                 if (cut != std::wstring::npos && d.size() > 3) ToolsScan(cut <= 2 ? d.substr(0, 3) : d.substr(0, cut));
             }
             float y = b.Y + ui.S(46);
-            if (scanning)
-                ui.Text(L"Считаю... просмотрено файлов: " + std::to_wstring(seen), RectF(b.X, y, b.Width, lineH),
-                        c.muted, 11.5f);
+            if (!ring) {
+                ui.EmptyState(ID_TOOLS_RING, RectF(b.X, y, b.Width, ui.S(110)),
+                              L"Укажи папку или диск и нажми «Посчитать» - здесь вырастет кольцо: чем больше папка, "
+                              L"тем шире её доля. Щелчок по доле - зайти внутрь.");
+                return;
+            }
+            int hot = -1;
+            for (size_t i = 0; i < shown; ++i)
+                if (ui.Hot(ID_TOOLS_SIZE + (int)i * 2)) hot = (int)i;
+            int clicked = SizeRing(RectF(b.X, y, ringW - ui.S(20), ringW - ui.S(20)), dir, sizes, scanning, seen, hot);
+            if (clicked >= 0 && clicked < (int)sizes.size() && sizes[clicked].name.front() != L'(' && !busy)
+                ToolsScan(sizes[clicked].path);
+            RectF lb(b.X + ringW, b.Y, b.Width - ringW, b.Height);
             ULONGLONG top = sizes.empty() ? 1 : std::max<ULONGLONG>(1, sizes[0].bytes);
             for (size_t i = 0; i < shown; ++i) {
                 const tools::FolderSize& f = sizes[i];
-                float yy = y + (scanning ? lineH : 0) + i * lineH;
+                float yy = y + i * lineH;
                 bool isDir = f.name.front() != L'(';
                 // вся строка - «зайти внутрь»; размер полоской на всю ширину строки
-                RectF rr(b.X - ui.S(6), yy, b.Width - ui.S(110), lineH);
+                RectF rr(lb.X - ui.S(6), yy, lb.Width - ui.S(110), lineH);
                 if (rowHover(ID_TOOLS_SIZE + (int)i * 2, rr) && isDir && !busy) ToolsScan(f.path);
-                RectF bar(b.X, yy + lineH - ui.S(5), (REAL)((b.Width - ui.S(240)) * (double)f.bytes / top), ui.S(3));
-                ui.Fill(bar, WithAlpha(c.accent, 150), ui.S(1.5f));
-                ui.Text(f.name, RectF(b.X, yy, b.Width - ui.S(360), lineH), isDir ? c.text : c.muted, 12, isDir);
-                ui.Text(tools::Bytes(f.bytes), RectF(b.X + b.Width - ui.S(360), yy, ui.S(110), lineH), c.text, 12, true,
-                        ui::Right);
+                if (hot == (int)i && !ui.Hot(ID_TOOLS_SIZE + (int)i * 2))  // наведено на долю в кольце
+                    ui.Fill(rr, WithAlpha(c.cardHi, 200), ui.S(6));
+                Color mark = SizeColor(c, (int)i, (int)std::min<size_t>(sizes.size(), kRingParts));
+                if (i < kRingParts)
+                    ui.Fill(RectF(lb.X - ui.S(2), yy + ui.S(10), ui.S(4), lineH - ui.S(20)), mark, ui.S(2));
+                RectF bar(lb.X + ui.S(8), yy + lineH - ui.S(5), (REAL)((lb.Width - ui.S(248)) * (double)f.bytes / top),
+                          ui.S(3));
+                ui.Fill(bar, WithAlpha(i < kRingParts ? mark : c.accent, 150), ui.S(1.5f));
+                ui.Text(f.name, RectF(lb.X + ui.S(8), yy, lb.Width - ui.S(368), lineH), isDir ? c.text : c.muted, 12,
+                        isDir);
+                ui.Text(tools::Bytes(f.bytes), RectF(lb.X + lb.Width - ui.S(360), yy, ui.S(110), lineH), c.text, 12,
+                        true, ui::Right);
                 if (f.files)
                     ui.Text(Plural(f.files, L"файл", L"файла", L"файлов"),
-                            RectF(b.X + b.Width - ui.S(240), yy, ui.S(124), lineH), c.faint, 10.5f, false, ui::Right);
-                if (rowHot(RectF(b.X - ui.S(6), yy, b.Width + ui.S(12), lineH)) &&
+                            RectF(lb.X + lb.Width - ui.S(240), yy, ui.S(124), lineH), c.faint, 10.5f, false, ui::Right);
+                if (rowHot(RectF(lb.X - ui.S(6), yy, lb.Width + ui.S(12), lineH)) &&
                     ui.Button(ID_TOOLS_SIZE + (int)i * 2 + 1,
-                              RectF(b.X + b.Width - ui.S(100), yy + ui.S(2), ui.S(100), ui.S(26)), L"Открыть")) {
+                              RectF(lb.X + lb.Width - ui.S(100), yy + ui.S(2), ui.S(100), ui.S(26)), L"Открыть")) {
                     std::wstring p = f.path;
                     Defer([p] { ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
                 }
@@ -529,7 +830,8 @@ void Studio::ToolsPage(const RectF& r) {
                         RectF(b.X, y, ui.S(90), lineH), l.dev ? c.gold : c.text, 12, l.dev);
                 ui.Text(l.process + L"   PID " + std::to_wstring(l.pid),
                         RectF(b.X + ui.S(96), y, b.Width - ui.S(230), lineH), c.muted, 11.5f);
-                if (rowHot(portR) && ui.Button(ID_TOOLS_PORT + (int)i,
+                if (rowHot(portR) &&
+                    ui.Button(ID_TOOLS_PORT + (int)i,
                               RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Завершить")) {
                     bool ok = tools::KillPid(l.pid, l.process);
                     Toast(ok ? L"Завершён " + l.process : L"Не удалось завершить " + l.process);

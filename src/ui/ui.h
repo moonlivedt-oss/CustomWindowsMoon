@@ -103,6 +103,9 @@ public:
     void Shimmer(const RectF& r, float radius, BYTE strength = 34);  // блик проходит слева направо
     float BounceDots(float x, float cy, Color c, float d);           // три точки волной; ширина
     void Skeleton(const RectF& r, int rows, float rowH);             // заготовки строк, пока список считается
+    // пустой список: сота с галочкой и пояснение; под курсором сота покачивается и вокруг кружат
+    // маленькие соты, щелчок по ней - россыпь сот
+    void EmptyState(int id, const RectF& r, const std::wstring& text);
     void Tick() { tick_ = true; }
     bool TakeTick() {
         bool t = tick_;

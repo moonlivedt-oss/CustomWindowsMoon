@@ -325,7 +325,7 @@ void Studio::StatePage(const RectF& r) {
 
     // ---- мусор проектов и Загрузки ----
     {
-        size_t shown = std::max<size_t>(s.at ? 1 : 4, std::min<size_t>(7, std::max(s.projects.size(), dls.size())));
+        size_t shown = std::max<size_t>(!s.at ? 4 : s.projects.empty() || dls.empty() ? 3 : 1, std::min<size_t>(7, std::max(s.projects.size(), dls.size())));
         float h = ui.S(64) + rowH * shown + ui.S(60);
         RectF pc(x, y, cw, h), dc(two ? x + cw + gap : x, two ? y : y + h + gap, cw, h);
         if (stateFocus_ == L"downloads" && stateFocusY_ < 0) stateFocusY_ = dc.Y + off - view.Y;
@@ -354,8 +354,8 @@ void Studio::StatePage(const RectF& r) {
             ui.Tip(ID_STATE_PROJ + (int)i, p.kind + L": " + p.path);
         }
         if (s.projects.empty() && s.at)
-            ui.Text(L"Мусора сборки не нашлось", RectF(pc.X + ui.S(18), pc.Y + ui.S(64), pc.Width - ui.S(36), ui.S(24)),
-                    c.muted, 12);
+            ui.EmptyState(ID_STATE_ANIM + 90, RectF(pc.X, pc.Y + ui.S(64), pc.Width, rowH * shown - ui.S(8)),
+                          L"Мусора сборки не нашлось: в проектах из колец чисто");
         else if (s.projects.empty())  // ищет: заготовки строк с бликом
             ui.Skeleton(RectF(pc.X + ui.S(8), pc.Y + ui.S(60), pc.Width - ui.S(16), rowH * 4), 4, rowH);
         std::vector<tools::ProjectJunk> pick;
@@ -396,8 +396,8 @@ void Studio::StatePage(const RectF& r) {
             ui.Tip(ID_STATE_DL + (int)i, d.why + L", лежит " + Days(d.days) + L"\n" + d.path);
         }
         if (dls.empty())
-            ui.Text(L"Лишнего не нашлось (или ещё не разбирал - «Обновить»)",
-                    RectF(dc.X + ui.S(18), dc.Y + ui.S(64), dc.Width - ui.S(36), ui.S(24)), c.muted, 12);
+            ui.EmptyState(ID_STATE_ANIM + 91, RectF(dc.X, dc.Y + ui.S(64), dc.Width, rowH * shown - ui.S(8)),
+                          L"Лишнего не нашлось (или ещё не разбирал - «Обновить»)");
         std::vector<std::wstring> dlPick;
         for (const tools::DownloadJunk& d : dls)
             if (dlSel_.count(d.path)) dlPick.push_back(d.path), dlSelBytes += d.bytes;

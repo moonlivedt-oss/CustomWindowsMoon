@@ -567,7 +567,7 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         ui.End();
         Sleep(120);
     } while (GetTickCount64() < end);
-    // RADIAL_FILM - проверка движения без мыши: «c x y» щелчок, «m x y» наведение, «w мс» подождать,
+    // RADIAL_FILM - проверка движения без мыши: «c x y» щелчок, «m x y» наведение, «d/u x y» нажать/отпустить, «w мс» подождать,
     // «f n мс» снять n кадров через мс; кадры (вдвое меньше) ложатся листом по три в ряд вместо снимка
     std::unique_ptr<Bitmap> sheet;
     if (const char* film = getenv("RADIAL_FILM")) {
@@ -606,6 +606,16 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
                 run(70);
                 ui.OnUp(a, b);
                 frame();
+            } else if (op == 'd') {  // нажать и держать (перетаскивание)
+                ui.OnMouseMove(a, b);
+                frame();
+                ui.OnDown(a, b);
+                run(40);
+            } else if (op == 'u') {
+                ui.OnMouseMove(a, b);
+                frame();
+                ui.OnUp(a, b);
+                run(40);
             } else if (op == 'w') {
                 run(a);
             } else if (op == 'f') {

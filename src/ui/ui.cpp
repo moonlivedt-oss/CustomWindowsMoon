@@ -254,6 +254,62 @@ void Ui::Skeleton(const RectF& r, int rows, float rowH) {
     g_->Restore(st);
 }
 
+void Ui::EmptyState(int id, const RectF& r, const std::wstring& text) {
+    float d = S(46), cx = r.X + r.Width / 2, top = r.Y + S(4);
+    RectF badge(cx - d / 2 - S(6), top - S(4), d + S(12), d + S(8));
+    ULONGLONG now = GetTickCount64();
+    if (Click(id, badge)) bursts_[id] = now;
+    float hov = Anim(id + kHoverKey, Hot(id), 10);
+    if (hov > 0.01f && !fx::Game()) Tick();
+    double t = now / std::max(1.0, fx::Dur(1000));
+    float bob = (float)std::sin(t * 4.2) * S(2.5f) * hov;
+    float cy = top + d / 2 + bob;
+    // кружащие соты
+    if (hov > 0.01f) {
+        for (int i = 0; i < 6; ++i) {
+            double a = t * 1.6 + i * 1.0471976;
+            float rr = d * (0.55f + 0.25f * hov);
+            GraphicsPath sp;
+            AddHex(sp, cx + (float)std::cos(a) * rr, cy + (float)std::sin(a) * rr * 0.8f, S(4) * hov);
+            SolidBrush b(Alpha(i % 2 ? c_.gold : c_.accent, (BYTE)(200 * hov)));
+            g_->FillPath(&b, &sp);
+        }
+    }
+    GraphicsPath hp;
+    AddHex(hp, cx, cy, d / 2);
+    SolidBrush fill(MixColor(c_.card, c_.accent, 0.22f + 0.16f * hov));
+    g_->FillPath(&fill, &hp);
+    Pen edge(Alpha(c_.accent, (BYTE)(150 + 105 * hov)), S(1.6f));
+    g_->DrawPath(&edge, &hp);
+    Pen ck(MixColor(c_.text, c_.gold, hov), S(3));
+    ck.SetStartCap(LineCapRound);
+    ck.SetEndCap(LineCapRound);
+    ck.SetLineJoin(LineJoinRound);
+    PointF pts[3] = {{cx - S(9), cy + S(1)}, {cx - S(2.5f), cy + S(7.5f)}, {cx + S(10), cy - S(6)}};
+    g_->DrawLines(&ck, pts, 3);
+    // щелчок: соты разлетаются и падают
+    auto it = bursts_.find(id);
+    if (it != bursts_.end()) {
+        float bt = (float)((now - it->second) / fx::Dur(900));
+        if (bt >= 1) {
+            bursts_.erase(it);
+        } else {
+            Tick();
+            for (int i = 0; i < 14; ++i) {
+                float a = i * 0.4488f + 0.2f, sp = S(40) + S(5) * (i % 4);
+                float px = cx + std::cos(a) * sp * bt, py = cy + std::sin(a) * sp * bt + S(60) * bt * bt;
+                GraphicsPath cp;
+                AddHex(cp, px, py, S(3.5f) * (1 - bt * 0.5f));
+                SolidBrush b(Alpha(i % 3 ? c_.accent : c_.gold, (BYTE)(255 * (1 - bt))));
+                g_->FillPath(&b, &cp);
+            }
+        }
+    }
+    float ty = top + d + S(14);
+    Text(text, RectF(r.X + S(20), ty, r.Width - S(40), std::max(S(20), r.GetBottom() - ty)), c_.muted, 12, false,
+         Center, true);
+}
+
 void Ui::Tip(int id, const std::wstring& text) {
     if (interactive) tips_[id] = text;
 }

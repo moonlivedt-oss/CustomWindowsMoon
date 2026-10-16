@@ -12,6 +12,7 @@
 #include <ctime>
 
 #include "core/files.h"
+#include "core/fx.h"
 #include "core/perf.h"
 #include "app/autostart.h"
 #include "core/text.h"
@@ -143,6 +144,8 @@ void Studio::DeskPage(const RectF& r) {
     ui.Text(L"Горячие углы", RectF(card.X + ui.S(18), card.Y + ui.S(14), w, ui.S(24)), c.text, 14, true);
     ui.Text(L"Задержи курсор в углу, толкни в него дважды или покрути колесо. Alt + край по-прежнему открывает кольцо.",
             RectF(card.X + ui.S(150), card.Y + ui.S(16), w - ui.S(170), ui.S(20)), c.muted, 11);
+    // схема экрана живая: курсор едет в угол строки под мышью и показывает жест - задержку,
+    // двойной толчок или колесо; точка угла сама открывает выбор действия
     RectF scr(card.X + ui.S(22), card.Y + ui.S(96), ui.S(104), ui.S(66));
     ui.Fill(scr, c.field, ui.S(6));
     ui.Stroke(scr, c.border, ui.S(6), ui.S(1.5f));
@@ -160,24 +163,117 @@ void Studio::DeskPage(const RectF& r) {
         ui.Text(heads[k2], RectF(body.X + labelW + k2 * (colW + colGap) + ui.S(4), body.Y, colW, ui.S(20)), c.faint,
                 11);
     const wchar_t* names[4] = {L"Левый верхний", L"Правый верхний", L"Левый нижний", L"Правый нижний"};
+    POINT m = ui.Mouse();
+    int showCorner = -1, showKind = 0;
     for (int i = 0; i < 4; ++i) {
         bool hot = false, set = !cfg.corners[i].empty() || !cfg.corners2[i].empty() || !cfg.cornerWheel[i].empty();
         RectF rr(body.X, body.Y + ui.S(26) + i * rowH, body.Width, ui.S(44));
+        RectF band(rr.X - ui.S(8), rr.Y - ui.S(2), rr.Width + ui.S(16), rr.Height + ui.S(4));
+        bool over = ui.interactive && m.x >= band.X && m.x < band.GetRight() && m.y >= band.Y && m.y < band.GetBottom();
+        float rh = ui.Anim(ID_CORNER + 16 + i, over || ui.Hot(ID_CORNER + i * 4 + 3), 16);
+        if (rh > 0.01f) ui.Fill(band, WithAlpha(c.cardHi, (BYTE)(150 * rh)), ui.S(10));
         ui.Text(names[i], RectF(rr.X, rr.Y, labelW, rr.Height), c.text, 12.5f);
         std::wstring* vals[3] = {&cfg.corners[i], &cfg.corners2[i], &cfg.cornerWheel[i]};
         for (int k2 = 0; k2 < 3; ++k2) {
             int id = ID_CORNER + i * 4 + k2;
             RectF b(rr.X + labelW + k2 * (colW + colGap), rr.Y + ui.S(4), colW, ui.S(36));
             bool capturing = captureCorner_ == i && captureKind_ == k2;
-            std::wstring text = capturing ? L"Нажми сочетание..." : corners::ActionName(*vals[k2]) + L"  ▾";
-            if (ui.Button(id, b, text, capturing ? Kind::Primary : Kind::Secondary) && !capturing)
+            std::wstring text = capturing ? L"Нажми сочетание" : corners::ActionName(*vals[k2]) + L"  ▾";
+            if (ui.Button(id, b, text, capturing ? Kind::Primary : Kind::Secondary, L"", capturing) && !capturing)
                 Defer([this, i, k2] { CornerMenu(i, k2); });
             ui.Tip(id, capturing ? L"Esc - отмена" : L"Выбрать действие");
+            if (ui.Hot(id)) showKind = k2;
             hot |= ui.Hot(id);
         }
-        float d = ui.S(hot ? 16 : 12);
-        float cx = i % 2 ? scr.X + scr.Width : scr.X, cy = i < 2 ? scr.Y : scr.Y + scr.Height;
-        ui.Fill(RectF(cx - d / 2, cy - d / 2, d, d), set ? c.accent : c.faint, d / 2);
+        if (over || hot || ui.Hot(ID_CORNER + i * 4 + 3)) showCorner = i;
+        (void)set;
+    }
+    // точки углов: наведение растит, щелчок - выбор действия «задержать»
+    auto cornerPt = [&](int i) {
+        return PointF(i % 2 ? scr.X + scr.Width : scr.X, i < 2 ? scr.Y : scr.Y + scr.Height);
+    };
+    Graphics& g = ui.G();
+    for (int i = 0; i < 4; ++i) {
+        int did = ID_CORNER + i * 4 + 3;
+        PointF p = cornerPt(i);
+        if (ui.Click(did, RectF(p.X - ui.S(13), p.Y - ui.S(13), ui.S(26), ui.S(26))))
+            Defer([this, i] { CornerMenu(i, 0); });
+        ui.Tip(did, std::wstring(names[i]) + L": задержать - " + corners::ActionName(cfg.corners[i]));
+        bool set = !cfg.corners[i].empty() || !cfg.corners2[i].empty() || !cfg.cornerWheel[i].empty();
+        float hv = ui.Anim(did, showCorner == i, 16);
+        float d = ui.S(12) + ui.S(5) * hv;
+        if (hv > 0.01f) {
+            SolidBrush halo(WithAlpha(c.accent, (BYTE)(60 * hv)));
+            float hd = d + ui.S(10) * hv;
+            g.FillEllipse(&halo, p.X - hd / 2, p.Y - hd / 2, hd, hd);
+        }
+        ui.Fill(RectF(p.X - d / 2, p.Y - d / 2, d, d), set ? c.accent : c.faint, d / 2);
+        ui.Ripple(did, RectF(p.X - d / 2, p.Y - d / 2, d, d), d / 2);
+    }
+    // курсор: без наведения отдыхает в середине экрана
+    PointF aim(scr.X + scr.Width * 0.46f, scr.Y + scr.Height * 0.42f);
+    if (showCorner >= 0) {
+        PointF p = cornerPt(showCorner);
+        aim = PointF(p.X + (showCorner % 2 ? -ui.S(3) : ui.S(3)), p.Y + (showCorner < 2 ? ui.S(3) : -ui.S(3)));
+    }
+    RectF cur = ui.Glide(-300, RectF(aim.X, aim.Y, 0, 0));
+    float px = cur.X, py = cur.Y;
+    ULONGLONG now = GetTickCount64();
+    bool arrived = showCorner >= 0 && std::fabs(px - aim.X) + std::fabs(py - aim.Y) < ui.S(2);
+    if (arrived && !fx::Game()) {
+        ui.Tick();
+        PointF p = cornerPt(showCorner);
+        float sx = showCorner % 2 ? 1.0f : -1.0f, sy = showCorner < 2 ? -1.0f : 1.0f;
+        if (showKind == 0) {
+            // задержка: вокруг угла набегает кольцо ровно за cornerDelay, потом вспышка
+            double delay = std::max(100, cfg.cornerDelay), period = delay + 700;
+            double t = std::fmod((double)now, period);
+            float prog = (float)std::min(1.0, t / delay);
+            Pen ring(c.gold, ui.S(2.5f));
+            ring.SetStartCap(LineCapRound);
+            ring.SetEndCap(LineCapRound);
+            float rr = ui.S(13);
+            g.DrawArc(&ring, p.X - rr, p.Y - rr, rr * 2, rr * 2, -90, 360 * prog);
+            if (t > delay) {
+                float f = (float)((t - delay) / 700);
+                float fr = rr + ui.S(14) * f;
+                Pen flash(WithAlpha(c.accent, (BYTE)(220 * (1 - f))), ui.S(2) * (1 - f) + ui.S(0.5f));
+                g.DrawEllipse(&flash, p.X - fr, p.Y - fr, fr * 2, fr * 2);
+            }
+        } else if (showKind == 1) {
+            // двойной толчок: курсор дважды упирается в угол
+            double t = std::fmod((double)now, 1100.0) / 1100.0;
+            float bump = 0;
+            for (double at : {0.1, 0.36})
+                if (t > at && t < at + 0.14) bump = (float)std::sin((t - at) / 0.14 * 3.14159265);
+            px += sx * ui.S(4) * bump;
+            py += sy * ui.S(4) * bump;
+            if (bump > 0.05f) {
+                Pen hit(WithAlpha(c.accent, (BYTE)(200 * bump)), ui.S(2));
+                float hr = ui.S(9) + ui.S(6) * bump;
+                g.DrawEllipse(&hit, p.X - hr, p.Y - hr, hr * 2, hr * 2);
+            }
+        } else {
+            // колесо: две дуги крутятся вокруг угла
+            float a = (float)std::fmod(now / 4.0, 360.0);
+            Pen arc(c.gold, ui.S(2.2f));
+            arc.SetStartCap(LineCapRound);
+            arc.SetEndCap(LineCapArrowAnchor);
+            float rr = ui.S(14);
+            g.DrawArc(&arc, p.X - rr, p.Y - rr, rr * 2, rr * 2, a, 70);
+            g.DrawArc(&arc, p.X - rr, p.Y - rr, rr * 2, rr * 2, a + 180, 70);
+        }
+    }
+    // стрелка курсора остриём в (px, py)
+    {
+        float k = ui.S(0.95f);
+        PointF arrow[7] = {{0, 0}, {0, 15}, {4, 11.5f}, {6.8f, 17.5f}, {9.2f, 16.4f}, {6.4f, 10.6f}, {11.5f, 10.6f}};
+        for (PointF& q : arrow) q = PointF(px + q.X * k, py + q.Y * k);
+        SolidBrush fillA(Color(255, 250, 250, 250));
+        Pen edge(Color(255, 20, 20, 24), ui.S(1.2f));
+        edge.SetLineJoin(LineJoinRound);
+        g.FillPolygon(&fillA, arrow, 7);
+        g.DrawPolygon(&edge, arrow, 7);
     }
     RectF s(body.X, body.Y + ui.S(26) + 4 * rowH, body.Width, ui.S(44));
     ui.Text(L"Задержка в углу", RectF(s.X, s.Y, labelW, s.Height), c.text, 12.5f);
