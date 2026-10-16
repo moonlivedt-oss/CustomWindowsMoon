@@ -81,6 +81,8 @@ struct Config {
     std::wstring devApps = L"UnrealEditor.exe|UE4Editor.exe";  // маски, как у games
     bool devWallpaper = true;  // ставить Wallpaper Engine на паузу
     bool devBoost = true;      // при запуске редактора предлагать освободить память
+    // «Защита» в кольце утилит: программы из этой папки (System Informer, RecoveryKit...) - пунктами кольца
+    std::wstring securityDir = L"D:\\tools\\security";
     // экран блокировки
     std::wstring lockSource;  // картинка для экрана блокировки, пусто - обои
     bool lockReveal = true;

@@ -111,6 +111,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.devAuto = ParseBool(val);
             else if (key == L"dev_apps")
                 cfg.devApps = val;
+            else if (key == L"security_dir")
+                cfg.securityDir = val;
             else if (key == L"dev_wallpaper")
                 cfg.devWallpaper = ParseBool(val);
             else if (key == L"dev_boost")
@@ -348,6 +350,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"dev_apps = " << c.devApps << L"\n";
     o << L"dev_wallpaper = " << (c.devWallpaper ? 1 : 0) << L"\n";
     o << L"dev_boost = " << (c.devBoost ? 1 : 0) << L"\n";
+    o << L"# «Защита» в кольце утилит: программы из этой папки (и её подпапок на уровень) - пунктами кольца\n";
+    o << L"security_dir = " << c.securityDir << L"\n";
     o << L"# экран блокировки: lock_source - картинка (пусто - обои), lock_reveal - после входа картинка\n"
          L"# плавно растворяется в рабочий стол\n";
     o << L"lock_source = " << c.lockSource << L"\n";

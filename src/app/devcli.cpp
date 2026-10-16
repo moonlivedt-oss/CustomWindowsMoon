@@ -4,11 +4,13 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #include <objidl.h>
 #include <gdiplus.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 #include "core/config.h"
@@ -275,6 +277,57 @@ int ToolsDiag() {
     return 0;
 }
 
+// «Защита» без окна: отчёт в sec_out.txt - все находки со счётом, время проверки (первый и второй раз - с кэшем).
+int SecDiag() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const std::wstring nl = L"\r\n";
+    ULONGLONG t0 = GetTickCount64();
+    tools::SecurityScan r = tools::ScanSecurity();
+    ULONGLONG t1 = GetTickCount64();
+    tools::ScanSecurity();
+    ULONGLONG t2 = GetTickCount64();
+    std::wstring s = L"Проверено процессов " + std::to_wstring(r.processes) + L", записей автозапуска " +
+                     std::to_wstring(r.autoruns) + L", без подписи (разных файлов) " + std::to_wstring(r.unsignedCount) +
+                     L"; первый раз " + std::to_wstring(t1 - t0) + L" мс, из кэша " + std::to_wstring(t2 - t1) +
+                     L" мс" + nl;
+    auto dump = [&](const wchar_t* title, const std::vector<tools::Suspect>& v) {
+        s += nl + title + L" (" + std::to_wstring(v.size()) + L"):" + nl;
+        for (const tools::Suspect& x : v)
+            s += L"  [" + std::to_wstring(x.score) + L"] " + x.name + (x.pid ? L" pid " + std::to_wstring(x.pid) : L"") +
+                 L" | " + x.path + L" | " + x.why + (x.signer.empty() ? L"" : L" | подпись " + x.signer) +
+                 (x.where.empty() ? L"" : L" | " + x.where) + nl;
+    };
+    dump(L"Реестр", r.hijacks);
+    dump(L"Процессы", r.procs);
+    dump(L"Автозапуск", r.autos);
+    // подписи всего запущенного: что признано подписанным и кем (проверка ложных срабатываний)
+    s += nl + L"Подписи запущенных программ:" + nl;
+    std::set<std::wstring> seen;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    PROCESSENTRY32W pe{sizeof(pe)};
+    for (BOOL ok = snap != INVALID_HANDLE_VALUE && Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+        if (!h) continue;
+        wchar_t p[MAX_PATH * 2];
+        DWORD n = MAX_PATH * 2;
+        bool got = QueryFullProcessImageNameW(h, 0, p, &n);
+        CloseHandle(h);
+        if (!got || !seen.insert(Lower(std::wstring(p, n))).second) continue;
+        std::wstring signer;
+        tools::SignState st = tools::CheckSign(std::wstring(p, n), &signer);
+        static const wchar_t* kState[] = {L"нет файла", L"ok", L"НЕТ ПОДПИСИ", L"недоверенная", L"ИСПОРЧЕНА"};
+        s += L"  " + std::wstring(kState[st]) + L"  " + std::wstring(p, n) + (signer.empty() ? L"" : L"  <" + signer + L">") +
+             (tools::SystemImposter(std::wstring(p, n)) ? L"  САМОЗВАНЕЦ" : L"") + nl;
+    }
+    if (snap != INVALID_HANDLE_VALUE) CloseHandle(snap);
+    s += nl + L"Программы из папки защиты:" + nl;
+    for (const tools::SecurityApp& a : tools::SecurityApps(LoadOwnConfig().securityDir)) s += L"  " + a.name + L" = " + a.exe + nl;
+    s += L"Антивирус: " + tools::AntivirusUi() + nl;
+    s += L"SHA-256 RadialMenu.exe: " + tools::FileSha256(ExeDir() + L"\\RadialMenu.exe") + nl;
+    WriteOut(L"sec_out.txt", s);
+    return 0;
+}
+
 // Очистка всего, что пересоздаётся быстро (как «Всё сразу» в кольце): кэши шейдеров и Unreal не трогаются.
 int Clean() {
     std::wstring s;
@@ -334,6 +387,8 @@ bool Run(int& exitCode) {
         exitCode = AutostartOn() ? 0 : 1;
     } else if (Has(args, L"--tools-diag")) {
         exitCode = ToolsDiag();
+    } else if (Has(args, L"--sec-diag")) {  // «Защита»: находки и подписи всего запущенного -> sec_out.txt
+        exitCode = SecDiag();
     } else if (Has(args, L"--net-diag")) {
         exitCode = NetDiag();
     } else if (Has(args, L"--lock-apply")) {

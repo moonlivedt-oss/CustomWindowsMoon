@@ -218,6 +218,46 @@ struct MemoryState {
 };
 MemoryState Memory();
 
+// ---------------- защита ----------------
+// Без своего движка: подпись файла (встроенная или каталожная, как у системных), откуда запущено, подмена
+// системных имён, скрипты в автозапуске, перехваты в реестре. Только смотрит, ничего не меняет.
+
+enum SignState { SIGN_NOFILE, SIGN_OK, SIGN_NONE, SIGN_UNTRUSTED, SIGN_BAD };
+SignState CheckSign(const std::wstring& path, std::wstring* signer = nullptr);  // кэш по пути, размеру и времени
+
+constexpr int kSuspectScore = 3;  // с какого счёта показывать; 6 и выше - «опасно»
+struct Suspect {
+    DWORD pid = 0;          // процесс; 0 - запись автозапуска или реестра
+    std::wstring name;      // svchost.exe, имя записи автозапуска, «Shell»
+    std::wstring path;      // файл (для реестра - значение)
+    std::wstring where;     // откуда запись: «Run (пользователь)», ключ реестра
+    std::wstring parent;    // кто запустил процесс
+    std::wstring signer;    // издатель из подписи
+    SignState sign = SIGN_NOFILE;
+    bool net = false;       // есть соединения в сеть
+    int start = -1;         // номер в SecurityScan::starts (для автозапуска)
+    int score = 0;          // сумма признаков
+    std::wstring why;       // признаки через «; »
+};
+struct SecurityScan {
+    std::vector<Suspect> procs, autos, hijacks;  // по убыванию счёта
+    std::vector<StartItem> starts;               // вся автозагрузка на момент проверки
+    int processes = 0, autoruns = 0;             // сколько проверено
+    int unsignedCount = 0;                       // запущенных программ без подписи (разных файлов)
+};
+SecurityScan ScanSecurity();  // секунды при первом разе (подписи), потом из кэша; из рабочего потока
+std::wstring FileSha256(const std::wstring& path);  // для поиска на VirusTotal: файл никуда не отправляется
+std::wstring AntivirusUi();  // avpui.exe Касперского, пусто - нет
+struct SecurityApp {
+    std::wstring name, exe;
+};
+std::vector<SecurityApp> SecurityApps(const std::wstring& dir);  // exe из папки и подпапок (кроме установщиков)
+std::wstring StartExe(const StartItem& it);  // какой exe запускает запись автозагрузки
+const std::vector<std::wstring>& SystemExeNames();  // svchost.exe, lsass.exe...: под них маскируются чаще всего
+bool InWindowsDir(const std::wstring& path);         // файл прямо в Windows, System32, SysWOW64 (или их wbem)
+// Имя системного процесса, но файл не в папке Windows: такой не защищён от завершения.
+bool SystemImposter(const std::wstring& fullPath);
+
 // ---------------- PATH: конфликты и терминал ----------------
 
 // Затенённые версии: python 3.10 находится раньше 3.14 и т.п. Пустой список -

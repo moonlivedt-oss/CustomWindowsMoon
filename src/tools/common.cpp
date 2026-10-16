@@ -131,6 +131,30 @@ bool ProtectedExe(const std::wstring& exe) {
     return false;
 }
 
+const std::vector<std::wstring>& SystemExeNames() {
+    static const std::vector<std::wstring> names = {
+        L"svchost.exe",   L"csrss.exe",       L"lsass.exe",         L"services.exe",   L"smss.exe",
+        L"wininit.exe",   L"winlogon.exe",    L"dwm.exe",           L"conhost.exe",    L"rundll32.exe",
+        L"taskhostw.exe", L"spoolsv.exe",     L"sihost.exe",        L"dllhost.exe",    L"ctfmon.exe",
+        L"runtimebroker.exe", L"wmiprvse.exe", L"audiodg.exe",      L"explorer.exe",   L"fontdrvhost.exe",
+        L"searchindexer.exe", L"lsaiso.exe",  L"regsvr32.exe",      L"userinit.exe"};
+    return names;
+}
+
+bool InWindowsDir(const std::wstring& path) {
+    static const std::wstring win = Lower(Env(L"%SystemRoot%"));
+    std::wstring l = Lower(path);
+    std::wstring d = l.substr(0, l.find_last_of(L'\\') == std::wstring::npos ? 0 : l.find_last_of(L'\\'));
+    return d == win || d == win + L"\\system32" || d == win + L"\\syswow64" || d == win + L"\\system32\\wbem" ||
+           d == win + L"\\syswow64\\wbem";
+}
+
+bool SystemImposter(const std::wstring& fullPath) {
+    std::wstring leaf = Lower(fullPath.substr(fullPath.find_last_of(L'\\') + 1));
+    const std::vector<std::wstring>& n = SystemExeNames();
+    return std::find(n.begin(), n.end(), leaf) != n.end() && !InWindowsDir(fullPath);
+}
+
 // ---------------- кэши ----------------
 
 std::vector<Junk> FindJunk(bool sizes) {

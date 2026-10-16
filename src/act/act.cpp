@@ -147,11 +147,15 @@ int Projects(const std::vector<std::wstring>& paths) {
     return bad ? 1 : 0;
 }
 
-std::wstring ExeName(HANDLE h) {
-    wchar_t buf[MAX_PATH];
-    DWORD n = MAX_PATH;
+std::wstring ExePath(HANDLE h) {
+    wchar_t buf[MAX_PATH * 2];
+    DWORD n = MAX_PATH * 2;
     if (!QueryFullProcessImageNameW(h, 0, buf, &n)) return L"";
-    std::wstring p(buf, n);
+    return std::wstring(buf, n);
+}
+
+std::wstring ExeName(HANDLE h) {
+    std::wstring p = ExePath(h);
     return p.substr(p.find_last_of(L'\\') + 1);
 }
 
@@ -160,11 +164,16 @@ int Kill(DWORD pid, const std::wstring& expect) {
     if (pid > 4) {
         HANDLE h = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
         if (h) {
-            std::wstring exe = ExeName(h);
+            std::wstring full = ExePath(h), exe = full.substr(full.find_last_of(L'\\') + 1);
             // номер мог уже достаться другому процессу, пока кольцо было открыто
             bool same = expect.empty() || expect == L"?" || _wcsicmp(exe.c_str(), expect.c_str()) == 0;
-            if (!same) Out(L"Номер " + std::to_wstring(pid) + L" уже у другого процесса: " + exe);
-            ok = same && !tools::ProtectedExe(exe) && TerminateProcess(h, 1);
+            if (full.empty())
+                Out(L"Процесс уже завершился или недоступен");
+            else if (!same)
+                Out(L"Номер " + std::to_wstring(pid) + L" уже у другого процесса: " + exe);
+            // «svchost.exe» не из папки Windows - самозванец, его защищать не нужно
+            bool guarded = tools::ProtectedExe(exe) && !tools::SystemImposter(full);
+            ok = same && !full.empty() && !guarded && TerminateProcess(h, 1);
             if (ok) WaitForSingleObject(h, 1500);  // порт и файлы освобождаются, когда процесс действительно ушёл
             CloseHandle(h);
         }

@@ -37,6 +37,19 @@ std::vector<tools::Listener> g_ports;
 std::vector<tools::Which> g_which;
 std::vector<tools::ProjectJunk> g_projects;
 std::vector<tools::Conflict> g_conflicts;
+std::vector<tools::Suspect> g_finds;        // «Защита»: что показано в кольце
+std::vector<tools::StartItem> g_secStarts;  // автозагрузка на момент проверки (номера из Suspect::start)
+std::vector<tools::SecurityApp> g_secApps;
+
+// «Защита»: проверка подписей - секунды при первом разе, дальше из кэша; в фоне раз в полчаса.
+SRWLOCK g_secLock = SRWLOCK_INIT;
+tools::SecurityScan g_sec;
+volatile ULONGLONG g_secAt = 0;  // 0 - ещё не проверяли
+volatile bool g_secRunning = false;
+std::set<std::wstring> g_secWarned;  // о чём уже сказали карточкой (путь или запись)
+constexpr int kDangerScore = 6;
+constexpr UINT kSecTag = 0x5E;  // wParam у WM_TOOLS_JOB: проверка защиты закончилась
+bool g_secAsked = false;        // проверку просили из кольца: итог показать, даже если всё чисто
 
 // Тяжёлое (обход тысяч файлов, версии программ) считается в фоне раз в полчаса: кольцо открывается сразу
 // и показывает последнее известное.
@@ -193,6 +206,53 @@ void RefreshScan() {
     } else {
         delete roots;
         g_scanRunning = false;
+    }
+}
+
+// Проверка «Защиты» в фоне: подписи, места запуска, автозапуск, перехваты в реестре. Итог - сообщением в окно,
+// чтобы карточка об опасном показалась из основного потока.
+void RefreshSecurity() {
+    if (g_secRunning || !g_app) return;
+    g_secRunning = true;
+    HANDLE th = CreateThread(
+        nullptr, 0,
+        [](void*) -> DWORD {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            tools::SecurityScan s = tools::ScanSecurity();
+            CoUninitialize();
+            AcquireSRWLockExclusive(&g_secLock);
+            g_sec = std::move(s);
+            g_secAt = GetTickCount64();
+            ReleaseSRWLockExclusive(&g_secLock);
+            g_secRunning = false;
+            PostMessageW(g_app, WM_TOOLS_JOB, kSecTag, 0);
+            return 0;
+        },
+        nullptr, 0, nullptr);
+    if (th)
+        CloseHandle(th);
+    else
+        g_secRunning = false;
+}
+
+std::wstring FindKey(const tools::Suspect& s) {
+    return s.pid ? Lower(s.path) : s.where + L"|" + s.name + L"|" + s.path;
+}
+
+// После фоновой проверки: об опасном (счёт 6+) - карточка, про каждую находку один раз.
+void OnSecurity() {
+    if (g_busy) return;
+    AcquireSRWLockShared(&g_secLock);
+    std::vector<tools::Suspect> all = g_sec.hijacks;
+    all.insert(all.end(), g_sec.procs.begin(), g_sec.procs.end());
+    all.insert(all.end(), g_sec.autos.begin(), g_sec.autos.end());
+    ReleaseSRWLockShared(&g_secLock);
+    for (const tools::Suspect& s : all) {
+        if (s.score < kDangerScore || !g_secWarned.insert(FindKey(s)).second) continue;
+        g_card.Show(BoostCard::DONE, L"Защита: " + s.name, s.why + L". Подробнее - кольцо «Утилиты», «Защита».",
+                    Theme(), 30000, Toast::G_WARN);
+        return;
     }
 }
 
@@ -382,6 +442,162 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
     g_started = GetTickCount64();
     g_weeklyCheck = g_started;
 }
+
+namespace {
+
+std::wstring Level(int score) { return score >= kDangerScore ? L"Опасно: " : L"Странно: "; }
+
+void CopyText(const std::wstring& s) {
+    if (!OpenClipboard(g_app)) return;
+    EmptyClipboard();
+    size_t bytes = (s.size() + 1) * sizeof(wchar_t);
+    if (HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+        memcpy(GlobalLock(h), s.c_str(), bytes);
+        GlobalUnlock(h);
+        if (!SetClipboardData(CF_UNICODETEXT, h)) GlobalFree(h);
+    }
+    CloseClipboard();
+}
+
+// Отчёт VirusTotal по хэшу: сам файл никуда не уходит, открывается только страница.
+void OpenVirusTotal(const std::wstring& path) {
+    RunJob(L"VirusTotal", [path](const tools::Log& log, std::wstring& res) {
+        log(L"Считаю SHA-256 файла...");
+        std::wstring h = tools::FileSha256(path);
+        if (h.empty()) {
+            res = L"Файл не прочитать: " + path;
+            return false;
+        }
+        std::wstring url = L"https://www.virustotal.com/gui/file/" + h;
+        ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        res =
+            L"Открыл отчёт по хэшу, сам файл никуда не отправлен. Если VirusTotal его не знает, загрузить можно "
+            L"вручную на той же странице.";
+        return true;
+    });
+}
+
+void SecurityAction(const tools::Suspect& s) {
+    bool file = !s.path.empty() && GetFileAttributesW(s.path.c_str()) != INVALID_FILE_ATTRIBUTES;
+    std::wstring facts = s.why + L". " + s.path + (s.signer.empty() ? L"" : L", подпись «" + s.signer + L"»") +
+                         (s.parent.empty() ? L"" : L", запустил " + s.parent);
+    if (s.pid) {
+        tools::Suspect c = s;
+        Ask(
+            Level(s.score) + NoExe(s.name) + L" (PID " + std::to_wstring(s.pid) + L")", facts,
+            file ? L"VirusTotal" : L"Понятно", L"Завершить",
+            [c, file] {
+                if (file) OpenVirusTotal(c.path);
+            },
+            [c] {
+                Ask(L"Завершить " + c.name + L"?",
+                    L"PID " + std::to_wstring(c.pid) + L", " + c.path +
+                        L". Несохранённое в нём пропадёт. Если это вирус, он может запуститься снова - проверь "
+                        L"автозапуск и Kaspersky.",
+                    L"Завершить", L"Не надо", [c] {
+                        RunJob(L"Завершаю " + NoExe(c.name), [c](const tools::Log&, std::wstring& res) {
+                            bool ok = tools::KillPid(c.pid, c.name);
+                            res = ok ? c.name + L" завершён."
+                                     : L"Не далось: процесс уже закрылся, запущен с правами или защищён.";
+                            return ok;
+                        });
+                    });
+            },
+            30000, Toast::G_WARN);
+        return;
+    }
+    if (s.start >= 0 && s.start < (int)g_secStarts.size()) {
+        tools::StartItem it = g_secStarts[s.start];
+        std::wstring path = s.path;
+        Ask(
+            Level(s.score) + it.name + L" при входе", it.where + L": " + Short(it.command, 120) + L". " + s.why,
+            file ? L"VirusTotal" : L"Понятно", it.canToggle ? L"Выключить" : L"Закрыть",
+            [path, file] {
+                if (file) OpenVirusTotal(path);
+            },
+            [it] {
+                if (!it.canToggle) return;
+                std::wstring msg;
+                bool ok = tools::SetStartup(it, false, [&](const std::wstring& t) { msg = t; });
+                g_card.Show(BoostCard::DONE, ok ? L"Автозагрузка" : L"Не получилось",
+                            msg + (ok ? L" Включить обратно - в студии или Диспетчере задач." : L""), Theme());
+            },
+            30000, Toast::G_WARN);
+        return;
+    }
+    // находка в реестре: исправляется с правами, сам не трогаю
+    std::wstring where = s.where;
+    Ask(
+        Level(s.score) + s.name,
+        s.why + L". Значение: " + s.path +
+            L". Править - с правами администратора: скопирую путь к ключу, вставь его в адресную строку regedit.",
+        L"Открыть regedit", L"Понятно",
+        [where] {
+            CopyText(where);  // адресная строка regedit понимает и HKLM\..., и HKCU\...
+            ShellExecuteW(nullptr, L"open", L"regedit.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        },
+        nullptr, 30000, Toast::G_WARN);
+}
+
+// «Защита»: находки последней проверки, антивирус, починка Windows и свои программы из папки security_dir.
+Item SecurityItem() {
+    ULONGLONG now = GetTickCount64();
+    AcquireSRWLockShared(&g_secLock);
+    bool checked = g_secAt != 0;
+    tools::SecurityScan sec = g_sec;
+    ReleaseSRWLockShared(&g_secLock);
+    if (!checked || now - g_secAt > 10 * 60 * 1000) RefreshSecurity();
+
+    g_finds.clear();
+    g_finds.insert(g_finds.end(), sec.hijacks.begin(), sec.hijacks.end());
+    g_finds.insert(g_finds.end(), sec.procs.begin(), sec.procs.end());
+    g_finds.insert(g_finds.end(), sec.autos.begin(), sec.autos.end());
+    g_secStarts = sec.starts;
+    int danger = 0;
+    for (const tools::Suspect& s : g_finds) danger += s.score >= kDangerScore;
+
+    std::wstring checkedNote = L"Проверено " + Plural(sec.processes, L"программа", L"программы", L"программ") + L" и " +
+                               Plural(sec.autoruns, L"запись", L"записи", L"записей") + L" автозапуска";
+    Item item = Act(L"Защита", danger ? L"tools-bug.png" : L"tools-shield.png", L"",
+                    !checked          ? L"Подписи, места запуска, автозапуск и перехваты в реестре; проверяю..."
+                    : g_finds.empty() ? checkedNote + L": ничего странного"
+                    : danger          ? L"Опасного: " + std::to_wstring(danger) + L", всего находок " +
+                                   std::to_wstring(g_finds.size()) + L". " + checkedNote
+                             : L"Странного: " + std::to_wstring(g_finds.size()) + L". " + checkedNote);
+    for (size_t i = 0; i < g_finds.size() && i < 12; ++i) {
+        const tools::Suspect& s = g_finds[i];
+        std::wstring what = s.pid ? L"процесс" : s.start >= 0 ? L"автозапуск" : L"реестр";
+        item.children.push_back(
+            Act(Short(NoExe(s.name), 14), L"tools-bug.png", L"sec-find:" + std::to_wstring(i),
+                Level(s.score) + what + L". " + s.why + L". " + Short(s.path, 90) + L". 2 клика - что с этим сделать"));
+    }
+    if (checked && g_finds.empty())
+        item.children.push_back(
+            Act(L"Чисто", L"tools-shield.png", L"",
+                checkedNote + L". Без подписи " + std::to_wstring(sec.unsignedCount) +
+                    L" - это обычно (свои сборки, мелкие программы); странными они становятся по месту и имени"));
+    if (!checked)
+        item.children.push_back(Act(L"Проверка", L"tools-shield.png", L"", L"Первая проверка подписей идёт в фоне"));
+    item.children.push_back(Act(L"Заново", L"tools-shield.png", L"sec-rescan",
+                                L"Ещё раз проверить запущенное, автозапуск и реестр; итог - карточкой"));
+    std::wstring av = tools::AntivirusUi();
+    item.children.push_back(Act(av.empty() ? L"Defender" : L"Kaspersky", L"tools-shield.png", L"sec-av",
+                                av.empty() ? L"Открыть «Защиту от вирусов» Windows - там полная и офлайн-проверка"
+                                           : L"Открыть Kaspersky - там полная проверка компьютера"));
+    item.children.push_back(Act(L"Починить Windows", L"tools-box.png", L"sec-repair",
+                                L"Сверить системные файлы (SFC) или восстановить их из Windows Update (DISM); "
+                                L"нужны права - Windows спросит"));
+    g_secApps = tools::SecurityApps(g_cfg->securityDir);
+    for (size_t i = 0; i < g_secApps.size(); ++i) {
+        Item a = Act(g_secApps[i].name, L"", L"sec-app:" + std::to_wstring(i), g_secApps[i].exe);
+        a.iconFull.clear();  // значок самой программы
+        a.full = g_secApps[i].exe;
+        item.children.push_back(a);
+    }
+    return item;
+}
+
+}  // namespace
 
 void ShowRing(RadialMenu& menu) {
     g_roots = ProjectRoots(*g_cfg);
@@ -587,6 +803,7 @@ void ShowRing(RadialMenu& menu) {
                        L"node_modules, Unreal"));
     ring.push_back(Act(L"Кто держит", L"tools-lock.png", L"lock-clip",
                        L"Кто не даёт удалить файл или папку: скопируй её в Проводнике и выбери это"));
+    ring.push_back(SecurityItem());
     ring.push_back(Act(L"Все утилиты", L"tools-box.png", L"studio:0", L"PATH, диски, автозагрузка и порты в студии"));
     if (sized && quickTotal + scan.ddcOld + bin > 0)
         status += L"   |   можно освободить " + tools::Bytes(quickTotal + scan.ddcOld + bin);
@@ -851,6 +1068,53 @@ void Run(const std::wstring& key) {
             });
         return;
     }
+    if (key == L"sec-rescan") {
+        if (g_secRunning) {
+            g_card.Show(BoostCard::DONE, L"Защита: уже проверяю", L"Итог придёт карточкой.", Theme(), 0, Toast::G_INFO);
+            return;
+        }
+        g_secWarned.clear();  // перепроверка по просьбе - сказать заново
+        g_secAsked = true;
+        RefreshSecurity();
+        g_card.Show(BoostCard::WORKING, L"Защита", L"Проверяю подписи и автозапуск...", Theme(), 60000);
+        return;
+    }
+    if (key == L"sec-av") {
+        std::wstring av = tools::AntivirusUi();
+        ShellExecuteW(nullptr, L"open", av.empty() ? L"windowsdefender://threat/" : av.c_str(), nullptr, nullptr,
+                      SW_SHOWNORMAL);
+        return;
+    }
+    if (key == L"sec-repair") {
+        auto run = [](const wchar_t* title, const wchar_t* cmd) {
+            std::wstring args = std::wstring(L"/k title ") + title + L" & " + cmd;
+            HINSTANCE r = ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+            if ((INT_PTR)r <= 32)
+                g_card.Show(BoostCard::DONE, L"Не запустилось", L"Без прав администратора проверка не идёт.", Theme(),
+                            0, Toast::G_WARN);
+        };
+        Ask(
+            L"Починить системные файлы?",
+            L"SFC сверит файлы Windows и заменит испорченные (минут 10-15). Если SFC не справится - DISM "
+            L"восстановит хранилище из Windows Update (минут 20, нужен интернет), потом снова SFC.",
+            L"SFC", L"DISM", [run] { run(L"SFC", L"sfc /scannow"); },
+            [run] { run(L"DISM", L"DISM /Online /Cleanup-Image /RestoreHealth"); }, 30000, Toast::G_INFO);
+        return;
+    }
+    if (key.rfind(L"sec-app:", 0) == 0) {
+        size_t i = idx(8, g_secApps.size());
+        if (i == (size_t)-1) return;
+        std::wstring exe = g_secApps[i].exe, dir = exe.substr(0, exe.find_last_of(L'\\'));
+        if ((INT_PTR)ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL) <= 32)
+            g_card.Show(BoostCard::DONE, L"Не запустилось", exe, Theme(), 0, Toast::G_WARN);
+        return;
+    }
+    if (key.rfind(L"sec-find:", 0) == 0) {
+        size_t i = idx(9, g_finds.size());
+        if (i == (size_t)-1) return;
+        SecurityAction(g_finds[i]);
+        return;
+    }
     if (key == L"lock-clip") {
         std::wstring p = tools::ClipboardPath();
         if (p.empty()) {
@@ -929,6 +1193,22 @@ void OnJob(WPARAM wp, LPARAM lp) {
         OnWeekly(m.get());
         return;
     }
+    if (wp == kSecTag) {
+        if (!g_secAsked) return OnSecurity();
+        g_secAsked = false;
+        AcquireSRWLockShared(&g_secLock);
+        size_t n = g_sec.procs.size() + g_sec.autos.size() + g_sec.hijacks.size();
+        int procs = g_sec.processes, autos = g_sec.autoruns;
+        ReleaseSRWLockShared(&g_secLock);
+        std::wstring checked = L"Проверено " + Plural(procs, L"программа", L"программы", L"программ") + L" и " +
+                               Plural(autos, L"запись", L"записи", L"записей") + L" автозапуска.";
+        if (!n)
+            g_card.Show(BoostCard::DONE, L"Защита: ничего странного", checked, Theme(), 9000, Toast::G_OK);
+        else
+            g_card.Show(BoostCard::DONE, L"Защита: находок " + std::to_wstring(n),
+                        checked + L" Что именно - кольцо «Утилиты», «Защита».", Theme(), 20000, Toast::G_WARN);
+        return;
+    }
     std::unique_ptr<JobMsg> m((JobMsg*)lp);
     if (!m->done) {
         g_card.Show(BoostCard::WORKING, m->title + L"...", m->text, Theme());
@@ -944,6 +1224,8 @@ void Tick() {
     ULONGLONG now = GetTickCount64();
     // фоновый подсчёт: первый раз через минуту после старта, дальше раз в полчаса
     if (now - g_started > 60000 && (!g_scanAt || now - g_scanAt > 30 * 60 * 1000)) RefreshScan();
+    // «Защита»: первый раз через 3 минуты после старта (подписи считаются долго), дальше раз в полчаса
+    if (now - g_started > 3 * 60 * 1000 && (!g_secAt || now - g_secAt > 30 * 60 * 1000)) RefreshSecurity();
     // недельные проверки: через 3 минуты после старта, потом раз в 6 часов смотрим, не пора ли
     if (now - g_weeklyCheck > (g_weeklyCheck == g_started ? 3 * 60 * 1000 : 6 * 3600 * 1000)) {
         g_weeklyCheck = now;

@@ -82,8 +82,6 @@ MemoryState Memory() {
     return r;
 }
 
-namespace {
-
 // Какой exe запускает строка автозагрузки: путь в кавычках или до «.exe»; ярлык - по его цели;
 // «Update.exe --processStart Discord.exe» (Squirrel) - на деле работает Discord.exe.
 std::wstring StartExe(const StartItem& it) {
@@ -116,8 +114,6 @@ std::wstring StartExe(const StartItem& it) {
     size_t e = l.find(L".exe");
     return e == std::wstring::npos ? c : c.substr(0, e + 4);
 }
-
-}  // namespace
 
 void StartupWeight(std::vector<StartItem>& items) {
     // запущенные программы этого входа: полный путь и имя -> личная память
