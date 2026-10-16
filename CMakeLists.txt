@@ -10,6 +10,7 @@ endif()
 
 # исходники раскладываются по папкам src/<часть>/, ресурсы - в src/res
 file(GLOB_RECURSE RADIAL_SOURCES CONFIGURE_DEPENDS src/*.cpp)
+list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/act/")  # src/act - отдельный RadialTools.exe
 add_executable(RadialMenu WIN32 ${RADIAL_SOURCES} src/res/app.rc)
 target_include_directories(RadialMenu PRIVATE src)
 target_compile_definitions(RadialMenu PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
@@ -23,3 +24,14 @@ endif()
 # для проверочной сборки без остановки работающей копии: -DRADIAL_OUT_DIR=<папка>
 set(RADIAL_OUT_DIR ${CMAKE_SOURCE_DIR} CACHE PATH "куда класть RadialMenu.exe")
 set_target_properties(RadialMenu PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_OUT_DIR})
+
+# RadialTools.exe - удаление и завершение процессов отдельным процессом по кнопке:
+# постоянно работающий RadialMenu.exe сам ничего не удаляет и чужие процессы не трогает
+add_executable(RadialTools src/act/act.cpp src/core/text.cpp src/tools/common.cpp)
+target_include_directories(RadialTools PRIVATE src)
+target_compile_definitions(RadialTools PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
+target_link_libraries(RadialTools PRIVATE shlwapi shell32 ole32 user32)
+if(MINGW)
+  target_link_options(RadialTools PRIVATE -municode -static -s)
+endif()
+set_target_properties(RadialTools PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_OUT_DIR})

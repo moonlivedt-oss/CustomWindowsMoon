@@ -77,6 +77,125 @@ std::vector<Listener> Listeners() {
     return out;
 }
 
+namespace {
+
+using NtQip = LONG(WINAPI*)(HANDLE, int, void*, ULONG, ULONG*);
+
+NtQip NtQuery() {
+    static NtQip f = (NtQip)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess");
+    return f;
+}
+
+struct UStr {
+    USHORT Length, MaximumLength;
+    PWSTR Buffer;
+};
+
+// Командная строка процесса (ProcessCommandLineInformation, Windows 8.1+, хватает прав на запрос сведений).
+std::wstring CommandLine(HANDLE h) {
+    if (!NtQuery()) return L"";
+    ULONG need = 0;
+    NtQuery()(h, 60, nullptr, 0, &need);
+    if (!need || need > 65536) return L"";
+    std::vector<BYTE> buf(need);
+    if (NtQuery()(h, 60, buf.data(), need, &need) != 0) return L"";
+    auto* u = (UStr*)buf.data();
+    return std::wstring(u->Buffer, u->Length / sizeof(wchar_t));
+}
+
+// Текущая папка процесса из его PEB (свои процессы того же пользователя, 64 бита).
+std::wstring CurrentDir(HANDLE h) {
+    struct Basic {
+        LONG ExitStatus;
+        PVOID PebBaseAddress;
+        ULONG_PTR AffinityMask;
+        LONG BasePriority;
+        ULONG_PTR UniqueProcessId, InheritedFromUniqueProcessId;
+    } bi{};
+    if (!NtQuery() || NtQuery()(h, 0, &bi, sizeof(bi), nullptr) != 0 || !bi.PebBaseAddress) return L"";
+    PVOID params = nullptr;
+    SIZE_T got = 0;
+    if (!ReadProcessMemory(h, (BYTE*)bi.PebBaseAddress + 0x20, &params, sizeof(params), &got) || !params) return L"";
+    UStr cur{};
+    if (!ReadProcessMemory(h, (BYTE*)params + 0x38, &cur, sizeof(cur), &got) || !cur.Length || cur.Length > 2048)
+        return L"";
+    std::wstring s(cur.Length / sizeof(wchar_t), L'\0');
+    if (!ReadProcessMemory(h, cur.Buffer, s.data(), cur.Length, &got)) return L"";
+    while (s.size() > 3 && s.back() == L'\\') s.pop_back();
+    return s;
+}
+
+// Подняться от пути к папке проекта: там, где лежит package.json, Cargo.toml, pyproject.toml...
+std::wstring ProjectOf(std::wstring p) {
+    static const wchar_t* kMarks[] = {L"package.json", L"Cargo.toml",     L"pyproject.toml", L"manage.py",
+                                      L"go.mod",       L"CMakeLists.txt", L"composer.json",  L".git"};
+    std::wstring l = Lower(p);
+    if (l.find(L"\\program files") != std::wstring::npos || l.find(L"\\appdata\\") != std::wstring::npos ||
+        l.find(L"\\windows\\") != std::wstring::npos)
+        return L"";
+    for (int up = 0; up < 8 && p.size() > 3; ++up) {
+        // внутри node_modules проект - выше него
+        size_t nm = Lower(p).rfind(L"\\node_modules");
+        if (nm != std::wstring::npos) p = p.substr(0, nm);
+        for (const wchar_t* m : kMarks)
+            if (GetFileAttributesW((p + L"\\" + m).c_str()) != INVALID_FILE_ATTRIBUTES) return p;
+        size_t cut = p.find_last_of(L'\\');
+        if (cut == std::wstring::npos || cut < 3) break;
+        p = p.substr(0, cut);
+    }
+    return L"";
+}
+
+std::vector<std::wstring> Tokens(const std::wstring& cmd) {
+    std::vector<std::wstring> out;
+    std::wstring cur;
+    bool q = false;
+    for (wchar_t c : cmd) {
+        if (c == L'"') {
+            q = !q;
+        } else if (c == L' ' && !q) {
+            if (!cur.empty()) out.push_back(cur);
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+}  // namespace
+
+void ListenerProjects(std::vector<Listener>& ls) {
+    std::map<DWORD, std::pair<std::wstring, std::wstring>> done;  // pid -> проект, команда
+    for (Listener& l : ls) {
+        if (!l.dev) continue;
+        auto it = done.find(l.pid);
+        if (it == done.end()) {
+            std::wstring project, command;
+            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, l.pid);
+            if (!h) h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, l.pid);
+            if (h) {
+                std::vector<std::wstring> t = Tokens(CommandLine(h));
+                for (size_t i = 1; i < t.size() && project.empty(); ++i)
+                    if (t[i].size() > 3 && t[i][1] == L':' && t[i][2] == L'\\') project = ProjectOf(t[i]);
+                if (project.empty()) project = ProjectOf(CurrentDir(h));  // python manage.py, npm run dev
+                for (size_t i = 1; i < t.size(); ++i) {
+                    std::wstring a = t[i];
+                    // длинные пути - по имени файла
+                    if (a.size() > 3 && a[1] == L':') a = a.substr(a.find_last_of(L'\\') + 1);
+                    command += (command.empty() ? L"" : L" ") + a;
+                }
+                if (command.size() > 80) command = command.substr(0, 79) + L"…";
+                CloseHandle(h);
+            }
+            it = done.insert({l.pid, {project, command}}).first;
+        }
+        l.project = it->second.first;
+        l.command = it->second.second;
+    }
+}
+
 std::vector<Locker> WhoLocks(const std::wstring& pathIn) {
     std::vector<Locker> out;
     std::wstring path = Trim(pathIn);

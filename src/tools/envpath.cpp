@@ -105,19 +105,6 @@ const wchar_t* const kCommands[] = {L"python", L"py",    L"pip",   L"node",   L"
 
 }  // namespace
 
-std::wstring DataDir() {
-    wchar_t p[MAX_PATH];
-    ExpandEnvironmentStringsW(L"%APPDATA%\\MoonDesk\\tools", p, MAX_PATH);
-    SHCreateDirectoryExW(nullptr, p, nullptr);
-    return p;
-}
-
-std::wstring Bytes(ULONGLONG b) {
-    wchar_t buf[32] = L"";
-    StrFormatByteSizeW((LONGLONG)b, buf, 32);
-    return buf;
-}
-
 std::vector<Which> WhichAll() {
     std::vector<std::wstring> dirs;
     for (const std::wstring& p : SplitPath(RegRaw(HKEY_LOCAL_MACHINE, kSysEnv, L"Path"))) dirs.push_back(Expand(p));

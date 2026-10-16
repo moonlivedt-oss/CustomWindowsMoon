@@ -1,4 +1,5 @@
 #include "app/devcli.h"
+#include "app/toolsui.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -184,6 +185,7 @@ int NetDiag() {
 
 // Утилиты без окна: отчёт в tools_out.txt
 int ToolsDiag() {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // Проводник и ярлыки - через COM
     const std::wstring nl = L"\r\n";
     std::wstring s = L"PATH:" + nl;
     for (const tools::PathEntry& e : tools::ReadPath())
@@ -230,6 +232,44 @@ int ToolsDiag() {
     s += nl + L"Кэши:" + nl;
     for (const tools::Junk& j : tools::FindJunk(true))
         s += std::wstring(j.slow ? L"  slow " : L"       ") + j.name + L" " + tools::Bytes(j.bytes) + nl;
+    s += L"  Unreal DDC, не открывалось 30 дней: " + tools::Bytes(tools::OldBytes(tools::DdcDir(), 30)) + nl;
+    Config cfg = LoadOwnConfig();
+    std::vector<std::wstring> roots = toolsui::ProjectRoots(cfg);
+    s += nl + L"Корни проектов:" + nl;
+    for (const std::wstring& r : roots) s += L"  " + r + nl;
+    s += nl + L"Мусор проектов:" + nl;
+    for (const tools::ProjectJunk& p : tools::FindProjectJunk(roots))
+        s += L"  " + tools::Bytes(p.bytes) + L"  " + p.kind + L"  " + p.path + L"  (правок " +
+             std::to_wstring(p.idleDays) + L" дн. назад)" + nl;
+    s += nl + L"Конфликты версий в PATH:" + nl;
+    for (const tools::Conflict& c : tools::PathConflicts())
+        s += L"  " + c.cmd + L": " + c.winnerVer + L" " + c.winner + L"  затеняет  " + c.loserVer + L" " + c.loser +
+             (c.fixable ? L"  [можно поднять]" : L"  [системный]") + nl;
+    s += nl + L"Порты разработки и проекты:" + nl;
+    std::vector<tools::Listener> ls = tools::Listeners();
+    tools::ListenerProjects(ls);
+    for (const tools::Listener& l : ls)
+        if (l.dev) s += L"  " + std::to_wstring(l.port) + L" " + l.process + L" [" + l.project + L"] " + l.command + nl;
+    s += nl + L"Автозагрузка с весом:" + nl;
+    std::vector<tools::StartItem> st = tools::StartupItems();
+    tools::StartupWeight(st);
+    for (const tools::StartItem& it : st)
+        s += std::wstring(it.enabled ? L"  on  " : L"  off ") + it.name + (it.running ? L"  работает, " : L"  -, ") +
+             tools::Bytes(it.memory) + nl;
+    s += nl + L"Память: свободно " + tools::Bytes(tools::Memory().avail) + L" из " +
+         tools::Bytes(tools::Memory().total) + nl;
+    tools::TermEnv env = tools::DetectEnv(ExeDir());
+    if (env.what.empty()) env = tools::DetectEnv(ExeDir().substr(0, ExeDir().find_last_of(L'\\')));  // из build-check
+    s += nl + L"Окружение для " + env.dir + L":";
+    for (const std::wstring& w : env.what) s += L" " + w + L";";
+    s += nl + L"  " + env.setup + nl;
+    s += nl + L"Проводник сейчас: " + tools::ExplorerFolder() + nl;
+    tools::Driver d = tools::NvidiaDriver();
+    s += nl + L"Драйвер: " + d.gpu + L" установлен " + d.installed + L", новейший " + d.latest + L" (" + d.date + L")" +
+         (d.newer ? L" - есть новее" : L"") + nl;
+    s += nl + L"Рост за неделю:" + nl;
+    for (const tools::Growth& g : tools::WeekGrowth(7))
+        s += L"  " + g.name + L" " + std::to_wstring(g.delta / 1048576) + L" МБ" + nl;
     WriteOut(L"tools_out.txt", s);
     return 0;
 }

@@ -293,14 +293,31 @@ void StartBoost() {
 
 // Карточка «освободить память»: при запуске игры или редактора (если памяти мало по minFreePercent и есть
 // что закрыть) или вручную из трея, угла, студии. why - к чему готовимся: «перед игрой», «для Unreal Editor».
+// Что не предлагать закрыть: сама игра и редактор.
+std::vector<std::wstring> KeepApps() {
+    std::vector<std::wstring> keep;
+    if (g_game.On())
+        for (DWORD pid : g_game.GamePids())
+            if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+                wchar_t p[MAX_PATH];
+                DWORD n = MAX_PATH;
+                if (QueryFullProcessImageNameW(h, 0, p, &n)) {
+                    std::wstring full(p, n);
+                    keep.push_back(full.substr(full.find_last_of(L'\\') + 1));
+                }
+                CloseHandle(h);
+            }
+    if (g_dev.On()) keep.push_back(L"UnrealEditor.exe");
+    return keep;
+}
+
 void OfferBoost(bool manual, const std::wstring& why = L"перед игрой") {
     if (g_boostBusy) return;
     boost::Settings s = boost::Load(BoostDir());
     ThemeInfo t = CurrentTheme(g_cfg);
     if (!s.ok) {
-        if (manual)
-            g_boostCard.Show(BoostCard::DONE, L"Boost не найден",
-                             L"Укажи папку Boost в студии: Красота - Память перед игрой.", t);
+        // Boost не настроен: свои силы - самые тяжёлые программы и мягкое «Закрыть»
+        toolsui::MemoryOffer(manual ? L"" : why, KeepApps(), manual);
         return;
     }
     int used = 0;
@@ -309,7 +326,8 @@ void OfferBoost(bool manual, const std::wstring& why = L"перед игрой")
     g_boostGroups = boost::Scan(s);
     double mb = boost::TotalMb(g_boostGroups);
     if (g_boostGroups.empty() || (!manual && mb < 150)) {
-        if (manual) g_boostCard.Show(BoostCard::DONE, L"Закрывать нечего", L"Свободно " + Size(avail) + L".", t);
+        // в списках Boost закрывать нечего - может, тяжёлое что-то другое
+        toolsui::MemoryOffer(manual ? L"" : why, KeepApps(), manual);
         return;
     }
     std::vector<std::wstring> names;
@@ -530,7 +548,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             netui::OnJob(lp);
             return 0;
         case toolsui::WM_TOOLS_JOB:
-            toolsui::OnJob(lp);
+            toolsui::OnJob(wp, lp);
             return 0;
         case WM_APP + 54:  // для проверки: кольцо утилит у курсора
             corners::Run(L"tools");
