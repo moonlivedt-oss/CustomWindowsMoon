@@ -106,16 +106,17 @@ void Studio::HomePage(const RectF& r) {
         float hov = ui.Anim(id + 50, ui.Hot(id), 16);
         ui.Fill(tr, MixColor(c.card, c.cardHi, hov), ui.S(14));
         ui.Stroke(tr, tl.warn ? c.warn : MixColor(c.border, c.accent, hov * 0.6), ui.S(14), tl.warn ? ui.S(1.6f) : 1);
-        ui.Icon(ExeDir() + L"\\icons\\" + tl.icon, RectF(tr.X + ui.S(16), tr.Y + ui.S(16), ui.S(34), ui.S(34)));
-        ui.Text(tl.title, RectF(tr.X + ui.S(60), tr.Y + ui.S(14), tr.Width - ui.S(70), ui.S(22)), c.muted, 11.5f);
+        // значок крупно: графит на тёмной плитке в 34 px терялся
+        ui.Icon(ExeDir() + L"\\icons\\" + tl.icon, RectF(tr.X + ui.S(14), tr.Y + ui.S(14), ui.S(56), ui.S(56)));
+        ui.Text(tl.title, RectF(tr.X + ui.S(82), tr.Y + ui.S(14), tr.Width - ui.S(92), ui.S(22)), c.muted, 11.5f);
         if (tl.warn) ui.Fill(RectF(tr.X + tr.Width - ui.S(22), tr.Y + ui.S(18), ui.S(8), ui.S(8)), c.warn, ui.S(4));
         int lines = 1 + (int)std::count(tl.value.begin(), tl.value.end(), L'\n');
-        bool multi = lines > 1 || ui.Measure(tl.value, 14, true) > tr.Width - ui.S(76);
+        bool multi = lines > 1 || ui.Measure(tl.value, 14, true) > tr.Width - ui.S(98);
         float vh = multi ? ui.S(18) * std::max(lines, 2) + ui.S(6) : ui.S(26);
-        ui.Text(tl.value, RectF(tr.X + ui.S(60), tr.Y + ui.S(36), tr.Width - ui.S(72), vh), c.text, multi ? 12 : 14,
+        ui.Text(tl.value, RectF(tr.X + ui.S(82), tr.Y + ui.S(36), tr.Width - ui.S(94), vh), c.text, multi ? 12 : 14,
                 true, ui::Left, multi);
         if (!tl.hint.empty())
-            ui.Text(tl.hint, RectF(tr.X + ui.S(60), tr.Y + th - ui.S(38), tr.Width - ui.S(72), ui.S(22)),
+            ui.Text(tl.hint, RectF(tr.X + ui.S(82), tr.Y + th - ui.S(38), tr.Width - ui.S(94), ui.S(22)),
                     tl.warn ? c.warn : c.faint, 11);
         if (click) {
             if (tl.page == PAGE_TOOLS)

@@ -7,7 +7,7 @@
 
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 ART = ROOT / "art"
@@ -209,15 +209,28 @@ def fit(im: Image.Image) -> Image.Image:
     box = im.getchannel("A").point(lambda v: 255 if v > 12 else 0).getbbox()
     if box:
         im = im.crop(box)
-    pad = int(SIZE * 0.03)
+    pad = int(SIZE * 0.06)  # место под ореол (polish)
     im.thumbnail((SIZE - 2 * pad, SIZE - 2 * pad), Image.LANCZOS)
     canvas = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     canvas.paste(im, ((SIZE - im.width) // 2, (SIZE - im.height) // 2), im)
     return canvas
 
 
+def polish(im: Image.Image, gamma: float = 0.72, glow: float = 0.6) -> Image.Image:
+    """Тёмные значки (графит) на тёмном кольце теряются: тени приподнимаются, вокруг силуэта - холодный ореол."""
+    r, g, b, a = im.split()
+    lut = [min(255, int(255 * (v / 255) ** gamma * 1.04)) for v in range(256)]
+    rgb = Image.merge("RGB", (r, g, b)).point(lut * 3)
+    out = Image.merge("RGBA", (*rgb.split(), a))
+    halo_a = a.filter(ImageFilter.GaussianBlur(max(2, im.width * 0.03)))
+    halo = Image.new("RGBA", im.size, (170, 186, 210, 0))
+    halo.putalpha(halo_a.point(lambda v: int(min(255, v * 1.6) * glow)))
+    halo.alpha_composite(out)
+    return halo
+
+
 def save(im: Image.Image, name: str) -> None:
-    fit(im).save(OUT / f"{name}.png")
+    polish(fit(im)).save(OUT / f"{name}.png")
     print("ok", name)
 
 
