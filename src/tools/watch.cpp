@@ -108,6 +108,14 @@ int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs) 
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+    // sfc и часть служебных программ пишут в UTF-16: каждый второй байт нулевой
+    size_t zeros = 0;
+    for (size_t i = 1; i < buf.size(); i += 2) zeros += buf[i] == 0;
+    if (buf.size() >= 4 && zeros * 3 > buf.size() / 2) {
+        size_t start = (unsigned char)buf[0] == 0xFF && (unsigned char)buf[1] == 0xFE ? 2 : 0;
+        out.assign((const wchar_t*)(buf.data() + start), (buf.size() - start) / 2);
+        return (int)code;
+    }
     // консольные программы Windows пишут в кодировке консоли (cp866), остальные - в UTF-8 или ASCII
     UINT cp = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, buf.data(), (int)buf.size(), nullptr, 0) ? CP_UTF8
                                                                                                           : CP_OEMCP;

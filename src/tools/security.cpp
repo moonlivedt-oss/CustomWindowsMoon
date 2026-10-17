@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 
+#include "core/elevate.h"
 #include "core/text.h"
 #include "tools/tools.h"
 
@@ -285,6 +286,15 @@ void Flag(Suspect& s, int score, const std::wstring& why) {
     s.why += (s.why.empty() ? L"" : L"; ") + why;
 }
 
+// Свои exe: RadialMenu.exe и RadialTools.exe рядом с программой и копии-помощники в Program Files\MoonRadial.
+bool OwnBinary(const std::wstring& lowerPath) {
+    wchar_t own[MAX_PATH];
+    GetModuleFileNameW(nullptr, own, MAX_PATH);
+    std::wstring dir = Lower(Dir(own)), leaf = LeafOf(lowerPath), helper = Lower(elevate::HelperDir());
+    if (Dir(lowerPath) == dir && (leaf == L"radialmenu.exe" || leaf == L"radialtools.exe")) return true;
+    return !helper.empty() && Dir(lowerPath) == helper && leaf.rfind(L"radialmenu-", 0) == 0;
+}
+
 // Общая оценка файла: подпись, место, двойное расширение, похожесть на системное имя.
 void JudgeFile(Suspect& s) {
     std::wstring lp = LongLower(s.path), leaf = LeafOf(lp);
@@ -294,6 +304,12 @@ void JudgeFile(Suspect& s) {
         return;
     }
     s.sign = CheckSign(s.path, &s.signer);
+    // Свой сертификат подписи RadialMenu доверен только для своих exe: чужой файл с ним - подделка (ключ лежит на
+    // этом компьютере, и вредонос мог им воспользоваться)
+    if (s.sign == SIGN_OK && s.signer.find(L"MoonRadial Local") != std::wstring::npos && !OwnBinary(lp)) {
+        Flag(s, 6, L"подписан локальным сертификатом RadialMenu, но это не RadialMenu");
+        s.sign = SIGN_UNTRUSTED;
+    }
     bool trusted = s.sign == SIGN_OK;
     bool microsoft = trusted && s.signer.find(L"Microsoft") != std::wstring::npos;
     if (SystemImposter(lp) && !microsoft) Flag(s, 6, L"имя системного " + leaf + L", но лежит не в папке Windows");
@@ -1027,6 +1043,8 @@ SecurityScan ScanSecurity() {
     CheckServices(r.hijacks);
     CheckWmi(r.hijacks);
     CheckSelf(r.hijacks);
+    CheckCerts(r.hijacks);
+    CheckFirewall(r.hijacks);
     r.hijacks.erase(
         std::remove_if(r.hijacks.begin(), r.hijacks.end(), [](const Suspect& s) { return s.score < kSuspectScore; }),
         r.hijacks.end());

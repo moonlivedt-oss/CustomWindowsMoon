@@ -401,6 +401,70 @@ int WatchDiag(bool slow) {
     return 0;
 }
 
+// Новые утилиты без окна: восстановление, приватность, система, разработка -> sys_out.txt
+int SysDiag() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const std::wstring nl = L"\r\n";
+    std::wstring s;
+    auto t0 = GetTickCount64();
+    auto lap = [&](const wchar_t* what) {
+        s += std::wstring(L"  (") + what + L": " + std::to_wstring(GetTickCount64() - t0) + L" мс)" + nl;
+        t0 = GetTickCount64();
+    };
+    s += L"Сломано вирусами:" + nl;
+    for (const tools::Broken& b : tools::FindBroken())
+        s += L"  " + b.what + L" | " + b.where + L" = " + b.value + (b.admin ? L" [права]" : L"") + nl;
+    lap(L"FindBroken");
+    s += L"Ждёт перезагрузки:";
+    for (const std::wstring& w : tools::PendingReboot()) s += L" " + w + L";";
+    s += nl;
+    s += nl + L"Камера, микрофон, геопозиция:" + nl;
+    for (const tools::PrivacyUse& u : tools::PrivacyUses())
+        s += L"  " + u.capability + L" | " + u.app + (u.inUse ? L" | СЕЙЧАС" : L"") +
+             (u.unsignedApp ? L" | без подписи" : L"") + L" | " + u.path + nl;
+    lap(L"PrivacyUses");
+    std::vector<tools::Suspect> f;
+    tools::CheckCerts(f);
+    lap(L"CheckCerts");
+    tools::CheckFirewall(f);
+    lap(L"CheckFirewall");
+    s += nl + L"Сертификаты и брандмауэр:" + nl;
+    for (const tools::Suspect& x : f)
+        s += L"  [" + std::to_wstring(x.score) + L"] " + x.name + L" | " + x.path + L" | " + x.why + nl;
+    s += nl + L"Устройства с ошибками:" + nl;
+    for (const tools::DeviceProblem& p : tools::DeviceProblems()) s += L"  " + p.name + L": " + p.text + nl;
+    lap(L"DeviceProblems");
+    tools::GpuSample g = tools::GpuNow();
+    s += L"Видеокарта: " + std::wstring(g.ok ? L"" : L"нет данных ") + std::to_wstring(g.temp) + L" C, нагрузка " +
+         std::to_wstring(g.load) + L"%, " + std::to_wstring((int)g.watts) + L" Вт" + (g.thermal ? L", ПЕРЕГРЕВ" : L"") +
+         nl;
+    lap(L"GpuNow");
+    tools::BatteryTrend bt = tools::BatteryHistory();
+    s += L"Батарея: паспорт " + std::to_wstring(bt.designed) + L", сейчас " + std::to_wstring(bt.now) + L", записей " +
+         std::to_wstring(bt.points.size()) + nl;
+    tools::UpdateInfo u = tools::WindowsUpdates();
+    s += L"Обновления: прочитано " + std::to_wstring(u.ok) + L", последнее: " + u.lastTitle + L", ошибок " +
+         std::to_wstring(u.failed.size()) + nl;
+    lap(L"WindowsUpdates");
+    s += nl + L"Git:" + nl;
+    Config cfg = LoadOwnConfig();
+    std::vector<std::wstring> roots = toolsui::ProjectRoots(cfg);
+    for (const tools::GitRepo& r : tools::GitRepos(roots))
+        s += L"  " + r.name + L" [" + r.branch + L"] изменений " + std::to_wstring(r.changed) + L", не отправлено " +
+             std::to_wstring(r.ahead) + (r.noUpstream ? L", без удалённой ветки" : L"") + L" | " + r.path + nl;
+    lap(L"GitRepos");
+    s += nl + L"Диски WSL и Docker:" + nl;
+    for (const tools::VirtualDisk& v : tools::VirtualDisks())
+        s += L"  " + v.name + L" " + tools::Bytes(v.bytes) + L" | " + v.path + nl;
+    s += nl + L"Хвосты удалённых программ:" + nl;
+    for (const tools::Leftover2& l : tools::AppLeftovers())
+        s += L"  " + tools::Bytes(l.bytes) + L" | " + l.name + L" | " + std::to_wstring(l.idleDays) + L" дн. | " +
+             l.path + nl;
+    lap(L"AppLeftovers");
+    WriteOut(L"sys_out.txt", s);
+    return 0;
+}
+
 // Самопроверка логики слежки на выдуманных данных: утечка, скачок, фоновый процессор, хвосты сборки.
 // Итог в selftest_out.txt, код выхода - число провалов.
 int WatchSelftest() {
@@ -706,6 +770,8 @@ bool Run(int& exitCode) {
         exitCode = SecDiag();
     } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
         exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--sys-diag")) {  // восстановление, приватность, система, разработка -> sys_out.txt
+        exitCode = SysDiag();
     } else if (Has(args, L"--watch-selftest")) {  // логика слежки на выдуманных данных -> selftest_out.txt
         exitCode = WatchSelftest();
     } else if (Has(args, L"--net-diag")) {
