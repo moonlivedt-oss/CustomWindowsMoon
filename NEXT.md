@@ -36,8 +36,8 @@
 - Снимок вкладки: `RadialMenu.exe --studio-snap 7 6 out.png` (находки считаются заранее).
 
 **Не проверено руками:** действия с правами (JOB_REPAIR, JOB_WU_RESET, JOB_UNBREAK, JOB_DEFENDER_OFFLINE,
-JOB_VHD_COMPACT), «Настроить подпись» (окно Windows о доверии корню), особая загрузка. Значки набора 3
-(rec-*, tools-git, tools-privacy и др.) не нарисованы - пока подставляется tools-box.
+JOB_VHD_COMPACT), «Настроить подпись» (окно Windows о доверии корню), особая загрузка. Значки набора 3 уже
+есть (коммит 6edc75e); новые сектора берут их по именам из tools/import_art.py.
 
 ---
 
