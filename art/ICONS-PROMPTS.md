@@ -239,39 +239,29 @@ Avoid: SSD sticks, memory modules, microchips, branching trees, brooms, swirls, 
 
 ---
 
-# Набор 5: свои инструменты из `D:\Desktop\components`
+# Набор 5: свои инструменты - в стиле самих проектов
 
-Сейчас в кольце «Проекты» у каждого инструмента свой значок из его папки, и все они разные: сиреневые
-наклейки (AutoTranslator, ContestReminder), неоновый геймпад (TestMenuMoon), плоские значки расширений VS Code,
-а у Boost, NetworkDoctor, moon-core, moon-bundle, image и training-site значка нет вовсе - там бейдж по типу
-файлов. Этот лист даёт всем по предмету в стиле колец.
+Значки инструментов из `D:\Desktop\components` рисуются не в стиле колец, а каждый в манере и палитре
+своего проекта (как обложки README): промпты - в `github-profile/tools/logo-prompts.md`, готовые значки
+ложатся в библиотеку, `image/05 Логотипы`.
 
-Куда идут: `import_art.py` кладёт их в `icons\` как `proj-<имя папки>.png`, и кольцо «Проекты» берёт такой
-значок раньше значка из папки проекта (core/project.cpp). Сами проекты не меняются; их .ico для exe и значки
-расширений можно потом собрать из тех же картинок. RadialMenu уже в этом стиле (`app.png`), его в листе нет.
+Кольцо «Проекты» берёт `icons\proj-<имя папки>.png` раньше значка из папки проекта (core/project.cpp):
+готовый логотип достаточно скопировать сюда под этим именем.
 
-| # | имя | инструмент | предмет |
-|---|---|---|---|
-| 1 | `proj-autotranslator` | AutoTranslator: перевод RU и EN, текст с экрана | два сцепленных облачка речи |
-| 2 | `proj-boost` | Boost: закрыть фоновое перед игрой | турбина |
-| 3 | `proj-contestreminder` | ContestReminder: напоминания о конкурсах | настольный звонок с флажком |
-| 4 | `proj-networkdoctor` | NetworkDoctor: чинит сеть после прокси и туннелей | стетоскоп на сетевом разъёме |
-| 5 | `proj-testmenumoon` | TestMenuMoon: меню проверки для Ren'Py | полумесяц с рычажком |
-| 6 | `proj-vscodelauncher` | VSCodeLauncher: VS Code с выбранными наборами расширений | картриджи на направляющей |
-| 7 | `proj-cpp-docs-panel` | cpp-docs-panel: документация C++ в VS Code | раскрытый справочник с застёжками |
-| 8 | `proj-vscode-bg` | vscode-bg: фон в VS Code | картина на мольберте |
-| 9 | `proj-moon-core` | moon-core: платформа настройки VS Code | луна в разрезе с ядром |
-| 10 | `proj-moon-bundle` | moon-bundle: установщики для раздачи | дорожный сундук |
-| 11 | `proj-image` | image: библиотека картинок и MCP для ИИ | рамка со слайдами |
-| 12 | `proj-training-site` | training-site и LessonReader: уроки | лампа над страницей |
-
-## 15. `sheet-projects.png`: свои инструменты, 12 значков, сетка 4 x 3
-
-```
-A premium icon sheet of exactly twelve finely crafted miniature objects on a fully transparent background, arranged in a strict 4 x 3 grid of equal square cells, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) two interlocking speech bubble plaques, one of brushed graphite with a polished silver rim, the other of deep crimson enamel, joined by a thin silver bridge, small abstract dot patterns instead of any writing, (2) a compact turbocharger of dark graphite metal with polished silver turbine blades visible in its intake and a crimson glow from the hot core, (3) a small graphite service bell with a polished silver dome and push button, a tiny crimson enamel pennant flag tied to its base, (4) a graphite stethoscope with silver tubing wrapped around a compact network cable plug, the chest piece glowing crimson, (5) a graphite crescent moon standing upright on its tip, a small polished silver lever switch mounted on its inner curve, a crimson gem at the lever's knob, (6) three slim graphite cartridges with silver edges sliding along a short silver launch rail, the leading cartridge glowing crimson, (7) an open thick graphite reference manual with silver page edges, two small crimson enamel clasps on the cover corners and a silver ribbon bookmark, (8) a tiny graphite easel holding a framed canvas with a silver frame, the painting a glowing crimson night horizon with soft stars, (9) a graphite moon sphere with a wedge cut away, revealing polished silver inner layers and a glowing crimson core, (10) a small graphite travel trunk with silver corner guards and latches, a crimson enamel crescent emblem on its lid, (11) a graphite slide viewer frame holding three overlapping silver-rimmed photo slides, the front slide glowing crimson, (12) a slim graphite desk lamp bending over a single open silver page, warm crimson light falling onto the page.
-Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 34 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere.
-Avoid: globes, rockets, bells without a flag, gamepads, puzzle pieces, books with graduation caps, parcel boxes with seals, shields, padlocks, microchips, sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, lavender, pink, orange, green, teal, purple, gold, letters, numbers, labels, VS Code logo, Ren'Py logo, brand logos, watermark, signature, background color or scenery, floor, pedestals, cast shadows on the background, grid lines drawn on the image, frames around cells, glow spilling far outside the object, objects touching each other, uneven object sizes, two objects that look alike
-```
+| логотип | файл в `icons\` |
+|---|---|
+| `logo-auto-translator` | `proj-autotranslator.png` |
+| `logo-contest-reminder` | `proj-contestreminder.png` |
+| `logo-network-doctor` | `proj-networkdoctor.png` |
+| `logo-boost` | `proj-boost.png` |
+| `logo-vscode-launcher` | `proj-vscodelauncher.png` |
+| `logo-cpp-docs` | `proj-cpp-docs-panel.png` |
+| `logo-moon-core` | `proj-moon-core.png` |
+| `logo-moon-bundle` | `proj-moon-bundle.png` |
+| `logo-library` | `proj-image.png` |
+| `logo-unreal-course` | `proj-training-site.png` |
+| `RenpyTestMenu.png` (уже есть) | `proj-testmenumoon.png` |
+| `MoonLight BG.webp` (уже есть) | `proj-vscode-bg.png` |
 
 ## Цвет под тему - без новых картинок
 
