@@ -31,6 +31,7 @@ void SetScreenOff(bool (*off)());     // screen_off: выключить с пе�
 void SetBoost(void (*boost)());       // boost: карточка «освободить память»
 void SetNet(void (*net)());           // net: кольцо «Сеть»
 void SetTools(void (*tools)());       // tools: кольцо «Утилиты»
+void SetMinecraft(void (*mc)());      // minecraft: кольцо сборок Minecraft
 // keys:ctrl+shift+esc -> «Ctrl + Shift + Esc»; виртуальная клавиша -> имя для keys:
 std::wstring KeyName(UINT vk);
 // на этом мониторе открыта игра или видео на весь экран
@@ -54,7 +55,7 @@ private:
 
     HWND wnd_ = nullptr;
     const Config* cfg_ = nullptr;
-    std::atomic<int> wheelMask_{0};          // в каких углах колесу что-то назначено (снимок для перехвата)
+    std::atomic<int> wheelMask_{0};  // в каких углах колесу что-то назначено (снимок для перехвата)
     std::atomic<bool> skipFullscreen_{true};
     Brightness bright_;
     int corner_ = -1;      // в каком углу курсор

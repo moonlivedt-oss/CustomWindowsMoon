@@ -167,3 +167,11 @@ void BoostPick::Click(int id) {
     }
     if (id == H_SKIP) Dismiss();
 }
+
+void BoostPick::Closed() {
+    if (onSkip) {
+        auto f = std::move(onSkip);
+        onSkip = nullptr;
+        f();
+    }
+}

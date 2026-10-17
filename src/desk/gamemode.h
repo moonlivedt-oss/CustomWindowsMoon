@@ -25,6 +25,8 @@ void WallpaperControl(const std::wstring& exe, const wchar_t* what);  // pause /
 class GameMode {
 public:
     std::function<void(bool on)> onChange;
+    // своё распознавание игр, которых нет в масках (Minecraft - это javaw): имя игры или пусто
+    std::function<std::wstring(DWORD pid, const std::wstring& path)> recognize;
 
     void Recover();                // при запуске: вернуть то, что осталось от прошлого раза
     void Tick(const Config& cfg);  // из общего опроса; сама проверка раз в 2 секунды

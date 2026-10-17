@@ -174,6 +174,8 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
             if (!path.empty() && MatchAny(path, cfg.games) && !MatchAny(path, cfg.gamesSkip) &&
                 !MatchAny(path, cfg.devApps))  // редактор из папки Epic Games - не игра
                 game = FileName(path);
+            else if (!path.empty() && recognize && !MatchAny(path, cfg.gamesSkip))
+                game = recognize(pid, path);
         }
         seen[pid] = {pe.szExeFile, game};
         if (!game.empty() && !found) {

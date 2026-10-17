@@ -54,6 +54,7 @@ const Action kActions[] = {
     {L"boost", L"Освободить память"},
     {L"net", L"Кольцо сети"},
     {L"tools", L"Кольцо утилит"},
+    {L"minecraft", L"Кольцо Minecraft"},
 };
 
 const Action kWheel[] = {
@@ -203,6 +204,10 @@ void (*g_tools)() = nullptr;
 
 void SetTools(void (*tools)()) { g_tools = tools; }
 
+void (*g_minecraft)() = nullptr;
+
+void SetMinecraft(void (*mc)()) { g_minecraft = mc; }
+
 void Run(const std::wstring& a) {
     if (a.empty()) return;
     if (a == L"windows") {
@@ -224,9 +229,13 @@ void Run(const std::wstring& a) {
         if (g_tools) g_tools();
         return;
     }
+    if (a == L"minecraft") {
+        if (g_minecraft) g_minecraft();
+        return;
+    }
     if (a == L"screen_off") {
         if (g_screenOff && g_screenOff()) return;  // портал схлопнется в угол и погасит экран сам
-        SetTimer(nullptr, 0, 600, ScreenOff);  // пусть мышь успокоится, иначе экран сразу проснётся
+        SetTimer(nullptr, 0, 600, ScreenOff);      // пусть мышь успокоится, иначе экран сразу проснётся
         return;
     }
     if (a == L"lock") {
@@ -414,7 +423,8 @@ void HotCorners::Tick(const Config& cfg, bool blocked) {
     }
     flash_ = std::max(0.0f, flash_ - fx::Step(0.06f));
     if (levelShow_ > 0) {
-        levelShow_ = now < levelUntil_ ? std::min(1.0f, levelShow_ + fx::Step(0.2f)) : std::max(0.0f, levelShow_ - fx::Step(0.08f));
+        levelShow_ = now < levelUntil_ ? std::min(1.0f, levelShow_ + fx::Step(0.2f))
+                                       : std::max(0.0f, levelShow_ - fx::Step(0.08f));
     }
 
     if (corner_ >= 0 || progress_ > 0 || flash_ > 0 || levelShow_ > 0) fx::Active();  // курсор в углу или свечение

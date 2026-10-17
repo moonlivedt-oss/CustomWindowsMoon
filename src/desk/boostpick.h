@@ -17,6 +17,7 @@ public:
         int act = 0;  // gboost::Act
     };
     std::function<void(const std::vector<Row>&)> onApply;
+    std::function<void()> onSkip;  // «Не сейчас», крестик или ушла по таймеру (запуск сборки всё равно идёт)
 
     void Create(HINSTANCE inst);
     void Show(const std::wstring& title, const std::wstring& sub, std::vector<Row> rows, const ThemeInfo& theme);
@@ -29,6 +30,7 @@ private:
     void Paint(Gdiplus::Graphics& g, const Gdiplus::RectF& body) override;
     int HitContent(const Gdiplus::PointF& p) const override;
     void Click(int id) override;
+    void Closed() override;
     double Freed() const;
 
     std::wstring title_, sub_;
