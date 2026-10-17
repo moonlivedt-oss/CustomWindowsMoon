@@ -1237,11 +1237,20 @@ void ShowRing(RadialMenu& menu) {
         if (!e.system && e.dead) ++dead;
         if (!e.system && e.dup) ++dup;
     }
+    // папки системного PATH, куда может писать кто угодно, - опаснее всего в разделе: они первыми
+    std::vector<tools::PathAcl> open = tools::SystemPathAcl();
     Item path =
-        Act(L"PATH", L"tools-path.png", L"",
-            dead + dup || !g_conflicts.empty() ? L"Лишних записей: " + std::to_wstring(dead + dup) +
-                                                     L", конфликтов версий: " + std::to_wstring(g_conflicts.size())
-                                               : L"Чисто; ниже - какая команда найдётся первой");
+        Act(L"PATH", open.empty() ? L"tools-path.png" : L"tools-bug.png", L"",
+            (open.empty() ? L"" : L"Открыто на запись: " + std::to_wstring(open.size()) + L". ") +
+                (dead + dup || !g_conflicts.empty() ? L"Лишних записей: " + std::to_wstring(dead + dup) +
+                                                          L", конфликтов версий: " + std::to_wstring(g_conflicts.size())
+                                                    : L"Чисто; ниже - какая команда найдётся первой"));
+    for (const tools::PathAcl& a : open)
+        path.children.push_back(Act(L"Закрыть " + Leaf(a.dir), L"tools-bug.png", L"path-acl",
+                                    a.dir + (a.exists ? L": писать сюда может любой пользователь, а находят отсюда "
+                                                        L"файлы и программы с правами. 2 клика - закрыть (спрошу права)"
+                                                      : L": папки нет, а создать её может любой. 2 клика - убрать из "
+                                                        L"PATH (спрошу права)")));
     if (dead + dup)
         path.children.push_back(Act(
             L"Почистить " + std::to_wstring(dead + dup), L"tools-clean.png", L"path-clean",
@@ -1634,6 +1643,21 @@ void Run(const std::wstring& key) {
             res = n ? L"Убрано записей: " + std::to_wstring(n) + L". Старый PATH - в бэкапах." : L"Чистить нечего.";
             return true;
         });
+    if (key == L"path-acl") {  // то же, что находка «Защиты»: закрыть запись или убрать мёртвую папку
+        std::vector<tools::PathAcl> open = tools::SystemPathAcl();
+        if (open.empty()) {
+            g_card.Show(BoostCard::DONE, L"PATH", L"Открытых на запись папок в системном PATH уже нет.", Theme(), 0,
+                        Toast::G_OK);
+            return;
+        }
+        tools::Suspect s;
+        s.kind = tools::FIND_PATH;
+        s.score = 6;
+        s.path = open[0].dir;
+        s.why = L"писать сюда может любой пользователь";
+        SecurityAction(s);
+        return;
+    }
     if (key == L"syspath-clean")
         return RunJob(L"Системный PATH",
                       [](const tools::Log& log, std::wstring&) { return net::RunAdmin(net::JOB_SYSPATH_CLEAN, log); });
