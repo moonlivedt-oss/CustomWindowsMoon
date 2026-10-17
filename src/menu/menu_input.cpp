@@ -347,6 +347,14 @@ void RadialMenu::Activate(const Item& it) {
         winlist::Activate(w);
         return;
     }
+    if (it.path.rfind(L"action:", 0) == 0) {  // действие угла из обычного кольца: делает main, меню гаснет
+        std::wstring a = it.path.substr(7);
+        StopHooks();
+        Launch();
+        if (cfg_->sounds) Sound::Play(Sound::Select);
+        if (onAction) onAction(a);
+        return;
+    }
     if (it.full.empty()) return;
     std::wstring full = it.full;
     bool dir = it.dir;

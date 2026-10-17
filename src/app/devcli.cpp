@@ -23,6 +23,7 @@
 #include "desk/gamemode.h"
 #include "desk/lockscreen.h"
 #include "desk/gameboost.h"
+#include "desk/minecraft.h"
 #include "desk/modefx.h"
 #include "desk/ocr.h"
 #include "desk/startbg.h"
@@ -771,8 +772,14 @@ bool Run(int& exitCode) {
         for (const gboost::Adapter& a : gboost::Adapters())
             o += L"adapter: " + a.name + L" vram=" + std::to_wstring((int)a.vramMb) +
                  (a.integrated ? L" (встроенная)" : L"") + L"\n";
-        for (const gboost::Session& s : gboost::History(10))
-            o += L"session: " + s.name + L" " + std::to_wstring(s.ms / 60000) + L" мин\n";
+        for (const mc::Instance& in : mc::Instances())
+            o += L"mc: " + in.id + L" | " + in.name + L" | " + std::to_wstring(in.maxMb) + L" МБ | " +
+                 std::to_wstring(in.mods) + L" модов | pretouch=" + (in.preTouch ? L"1" : L"0") + L" | icon=" +
+                 in.icon + L" | game=" + in.game + L"\n";
+                 o += std::wstring(L"prism: ") + mc::PrismExe() + L" | pagefile auto=" +
+                      (mc::PagefileAuto() ? L"1" : L"0") + L"\n";
+                      for (const gboost::Session& s : gboost::History(10))
+                          o += L"session: " + s.name + L" " + std::to_wstring(s.ms / 60000) + L" мин\n";
         WriteOut(L"boost_out.txt", o);
         exitCode = 0;
     } else if (Has(args, L"--scene-film")) {  // --scene-film clean|guard|guard0 out.png: лист кадров живой сцены

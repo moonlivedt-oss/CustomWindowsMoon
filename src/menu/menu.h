@@ -30,7 +30,9 @@ public:
     // Кольцо «Сеть» (действие угла): пункты - действия (special 3, ключ в path), сверху строка состояния.
     void ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi);
     std::function<void(const std::wstring& key)> onNet;  // выбрали действие сети
-    std::function<std::wstring()> netStatus;             // строка состояния для кольца сети
+    // пункт кольца с path = action:<действие> (как у горячих углов: minecraft, net, tools...)
+    std::function<void(const std::wstring& action)> onAction;
+    std::function<std::wstring()> netStatus;  // строка состояния для кольца сети
     void Close();
     bool IsOpen() const { return open_; }
     void Guard();  // раз в секунду: закрытое кольцо не остаётся видимым, оборванное угасание доводится до конца
