@@ -2,8 +2,7 @@
 
 ## Ход работ (2026-10-17, продолжать с этого места)
 
-Выбрано: всё из списка ниже, **кроме Г3, Г4, Д1**. Нижний слой написан и проверен (`--sys-diag`), кольцо и
-студия ещё не подключены.
+Выбрано: всё из списка ниже, **кроме Г3, Г4, Д1**. Нижний слой и подключение к кольцу и студии - готовы.
 
 **Готово (код есть, собирается, проверено на этом ПК через `RadialMenu.exe --sys-diag` -> `sys_out.txt`):**
 - `src/tools/recovery.cpp` - FindBroken / FixBrokenUser / FixBrokenAdminMain (А4), PendingReboot (В1),
@@ -23,46 +22,22 @@
   в «Очистке» уже показаны пункты «Docker и WSL» (ключ `vhd`) и «Хвост ...» (ключи `left:i`).
 - Защита: свой локальный сертификат подписи доверен только для своих exe (OwnBinary в security.cpp).
 
-**Осталось:**
-1. toolsui.cpp, Run(key): обработчики `vhd` (Ask: «Почистить Docker» = `docker system prune -f` через
-   RunCapture / «Сжать диски» = `wsl --shutdown` + net::RunAdmin(JOB_VHD_COMPACT)) и `left:i`
-   (Ask -> tools::RecycleLeftovers).
-2. toolsui.cpp: RecoveryItem() - сектор «Восстановление» (значки rec-*.png, починка/точки - tools-repair,
-   tools-snapshot): rec-repair (RunAdmin JOB_REPAIR, таймаут 90 мин), sec-restore (уже есть), rec-rstrui
-   (rstrui.exe), rec-wu (Ask -> JOB_WU_RESET), rec-unbreak (FindBroken: HKCU - FixBrokenUser, HKLM - JOB_UNBREAK),
-   rec-explorer (Ask -> tools::ResetExplorer), rec-boot (Ask -> RestartToRecovery), rec-offline (Kaspersky есть
-   -> открыть avpui; иначе Ask -> JOB_DEFENDER_OFFLINE), rec-memo (карточка «если Windows не грузится» +
-   RecoveryDrive.exe).
-3. toolsui.cpp: SystemItem(scan) - сектор «Система»: ждёт перезагрузки (+ карточка один раз за загрузку в
-   TryProactive, кнопка = shutdown /r /t 30), обновления (scan.updates), устройства (scan.devices),
-   видеокарта (GpuNow в RunJob), батарея (BatteryHistory: было/стало, совет про лимит заряда в Armoury Crate,
-   если mostlyAc), отчёт (RunJob -> SystemReport -> Документы\Отчёт RadialMenu <дата>.txt -> notepad).
-4. toolsui.cpp: GitItem(scan) - сектор «Git» (g_git = scan.git, только репо с changed/ahead), `git:i` ->
-   OpenEnvTerminal(DetectEnv(path)).
-5. «Защита»: пункт «Камера и микрофон» (`sec-privacy`: карточка с последними за 30 дней, дубли по
-   программе схлопнуть, «сейчас» первыми, кнопка ms-settings:privacy-webcam); в kWhat добавить
-   L"сертификат", L"брандмауэр"; SecurityAction для FIND_CERT (certmgr.msc / certlm.msc) и FIND_FW (wf.msc);
-   FileOrigin - в карточку неподписанной программы (sec-app), в карточку Песочницы и в факты SecurityAction.
-6. Б1: вкладка «Защита» в студии (studio_tools.cpp, вкладки ToolsPage): находки списком по видам, причина,
-   кнопка «Что делать» (экспортировать из toolsui SecurityAction) и «Это моё» (ignored.tsv в DataDir; фильтр
-   в SecurityItem, OnSecurity и студии).
-7. Б6: подпись своих exe - кнопка «Настроить подпись» (PowerShell New-SelfSignedCertificate CN=MoonRadial
-   Local, CodeSigningCert, в CurrentUser\My и CurrentUser\Root - Windows сама спросит подтверждение) и
-   POST_BUILD в CMakeLists: Set-AuthenticodeSignature перед cmake/integrity.cmake; без сертификата - пропуск.
-7а. Значки набора 3 уже нарезаны в icons/ (26 штук). Подставить: Песочница - tools-sandbox (сейчас tools-shield),
-   режим проверки - tools-sandbox-check; «Чисто»/«Тихо» - tools-ok, «Собираю»/«Проверка» - tools-wait (сейчас
-   tools-box/tools-shield); находки «Защиты» по виду: FIND_PATH - tools-path-open, FIND_SVC - tools-service,
-   FIND_WMI - tools-wmi, FIND_SELF - tools-integrity, FIND_CERT - tools-certs, FIND_FW - tools-firewall.
-8. Собрать (`cmake --build build-check`), проверить (`--sys-diag`, `--sec-diag`, `--watch-selftest`),
-   build.cmd, запустить, коммит без упоминаний Claude.
+**Подключено (2026-10-17, вторая сессия):**
+- Кольцо «Утилиты»: новые сектора «Git», «Восстановление», «Система» (после «Защиты»); в «Очистке» работают
+  «Docker и WSL» (почистить Docker / сжать диски) и «Хвост ...» (в Корзину). «Снимок» и «Починить Windows»
+  переехали из «Защиты» в «Восстановление»; починка теперь одно задание JOB_REPAIR вместо двух окон cmd.
+- «Защита»: «Камера и микрофон», карточки для сертификатов (certmgr/certlm) и брандмауэра (wf.msc), «скачан:»
+  в карточках неподписанного, Песочницы и находок; пункт «Списком» - вкладка «Защита» в студии.
+- Студия, «Утилиты» - «Защита» (вкладка 6): находки с фильтром по виду, «Что делать», «Это моё»
+  (ignored.tsv в DataDir, фильтр и в кольце, и в карточках), «Показать скрытые»; карточка «Подпись своих exe».
+- Б6: кнопка «Настроить подпись» (tools::SetupCodeSigning), сборка подписывает exe через cmake/sign.cmake перед
+  integrity.cmake; без сертификата - пропуск. Корень MoonRadial Local не считается чужим.
+- Карточка «Windows ждёт перезагрузки» - раз за загрузку (weekly.ini, reboot-said = минута загрузки).
+- Снимок вкладки: `RadialMenu.exe --studio-snap 7 6 out.png` (находки считаются заранее).
 
-**Промпт для новой сессии** (вставить целиком):
-
-> Продолжаем RadialMenu (D:\Desktop\components\RadialMenu). Прочитай NEXT.md, раздел «Ход работ»: нижний слой
-> новых утилит уже написан и собирается, осталось подключить его к кольцу «Утилиты» и студии - пункты 1-8 по
-> порядку. Код в стиле проекта (комментарии по-русски, без эмодзи), правки строк с обратными слешами - через
-> Edit, не через heredoc. Проверочная сборка - build-check, рабочая - build.cmd. Коммить сам, без упоминаний
-> Claude; в GitHub не отправляй, пока не скажу.
+**Не проверено руками:** действия с правами (JOB_REPAIR, JOB_WU_RESET, JOB_UNBREAK, JOB_DEFENDER_OFFLINE,
+JOB_VHD_COMPACT), «Настроить подпись» (окно Windows о доверии корню), особая загрузка. Значки набора 3
+(rec-*, tools-git, tools-privacy и др.) не нарисованы - пока подставляется tools-box.
 
 ---
 

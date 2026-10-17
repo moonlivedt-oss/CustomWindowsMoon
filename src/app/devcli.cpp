@@ -744,6 +744,10 @@ bool Run(int& exitCode) {
             snapCfg = LoadOwnConfig();
             toolsui::PrimeForSnapshot(&snapCfg);
         }
+        if (page == 7 && tab == 6) {  // «Защита» в студии: находки - заранее, как после фоновой проверки
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            toolsui::PrimeSecurityForSnapshot();
+        }
         exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
     } else if (Has(args, L"--scene-film")) {  // --scene-film clean|guard|guard0 out.png: лист кадров живой сцены
         Gdip gdip;

@@ -214,6 +214,10 @@ enum Id {
     ID_LIVE_BATTERY,
     ID_LIVE_VERS,
     ID_TOOLS_VER_CHECK,
+    ID_TOOLS_SEC_KIND,    // вкладка «Защита»: фильтр по виду находок
+    ID_TOOLS_SEC_RESCAN,  // «Проверить заново»
+    ID_TOOLS_SEC_UNHIDE,  // «Показать скрытые»
+    ID_TOOLS_SIGN,        // «Настроить подпись»
     ID_LANE_BIN,    // «Кольца»: корзина под дорожками
     ID_TAPE,        // лента правок
     ID_ICON_DOCK,   // сетка значков-дока (наведение)
@@ -227,6 +231,7 @@ enum Id {
     ID_TOOLS_START = 8500,   // +i: переключатель автозагрузки
     ID_TOOLS_PORT = 8600,    // +i: «Завершить» у порта
     ID_TOOLS_LOCKER = 8700,  // +i: «Завершить» у того, кто держит файл
+    ID_TOOLS_SEC = 8800,     // +i*2: «Что делать» и «Это моё» у находки «Защиты»
     ID_SECTOR = 1000,        // +i
     ID_CHILD = 2000,         // +j*8 + поле
     ID_THEME = 3000,         // +i
@@ -651,6 +656,8 @@ private:
     std::shared_ptr<NetSampler> sampler_;
     std::vector<tools::ToolVersion> versions_;
     bool versionsBusy_ = false;
+    toolsui::SecurityView secView_;  // вкладка «Защита»
+    int secKind_ = 0;                // фильтр: 0 - все, дальше - виды, что есть в находках
     ULONGLONG liveAt_ = 0;  // данные колбы и батареи - не чаще раза в 3 с
     tools::MemoryState liveMem_;
     std::vector<tools::HeavyApp> liveApps_;
