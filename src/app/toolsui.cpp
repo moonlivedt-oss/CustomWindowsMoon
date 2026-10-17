@@ -1298,7 +1298,7 @@ Item SecurityItem() {
                                     : L"Песочница Windows выключена: 2 клика - как включить"));
     item.children.push_back(Act(L"Камера и микрофон", L"tools-privacy.png", L"sec-privacy",
                                 L"Кто и когда брал камеру, микрофон и геопозицию (Windows записывает сама). Снимок "
-                                L"и починка Windows - в секторе «Восстановление»"));
+                                L"и починка Windows - в секторе «Починка»"));
     g_secApps = tools::SecurityApps(g_cfg->securityDir);
     for (size_t i = 0; i < g_secApps.size(); ++i) {
         Item a = Act(g_secApps[i].name, L"", L"sec-app:" + std::to_wstring(i), g_secApps[i].exe);
@@ -1312,9 +1312,10 @@ Item SecurityItem() {
 // «Восстановление»: свой Recovery Kit. Всё с правами - через задачу помощника (одно окно UAC).
 Item RecoveryItem() {
     std::vector<tools::Broken> broken = tools::FindBroken();  // реестр, мгновенно
-    Item item = Act(L"Восстановление", L"rec-kit.png", L"",
-                    broken.empty() ? L"Починить Windows, точки восстановления, Центр обновления, Проводник, особая "
-                                     L"загрузка, офлайн-проверка"
+    // «Восстановление» в боковой сектор кольца не влезает даже мелким шрифтом - на кольце «Починка»
+    Item item = Act(L"Починка", L"rec-kit.png", L"",
+                    broken.empty() ? L"Восстановление: починить Windows, точки восстановления, Центр обновления, "
+                                     L"Проводник, особая загрузка, офлайн-проверка"
                                    : L"Испорчено вирусами или программами: " + std::to_wstring(broken.size()) +
                                          L". Ниже - вернуть и починить остальное");
     if (!broken.empty()) {
@@ -1814,10 +1815,33 @@ void ShowRing(RadialMenu& menu) {
     ring.push_back(Act(L"Кто держит", L"tools-lock.png", L"lock-clip",
                        L"Кто не даёт удалить файл или папку: скопируй её в Проводнике и выбери это"));
     ring.push_back(GitItem(scan));
-    ring.push_back(SecurityItem());
-    ring.push_back(RecoveryItem());
-    ring.push_back(SystemItem(scan));
-    ring.push_back(Act(L"Все утилиты", L"tools-box.png", L"studio:0", L"PATH, диски, автозагрузка и порты в студии"));
+
+    // Первое кольцо - шесть групп (art/tools_rings_sketch.html, вариант A): во втором - утилиты группы,
+    // щелчок по утилите - её пункты на месте второго кольца. Последний пункт группы - она же в студии.
+    enum { DISKS, CLEAN, PROJECTS, PATH, PORTS, PROCS, BG, STARTS, TERM, LOCK, GIT };
+    auto group = [&](const std::wstring& name, const wchar_t* icon, const std::wstring& note,
+                     std::initializer_list<int> tools, int studioTab, const std::wstring& studioNote) {
+        Item g = Act(name, icon, L"", note);
+        for (int t : tools) {
+            Item it = ring[t];
+            if (!it.children.empty()) it.note += L". Щелчок - открыть";
+            g.children.push_back(std::move(it));
+        }
+        g.children.push_back(Act(L"В студии", L"tools-box.png", L"studio:" + std::to_wstring(studioTab), studioNote));
+        return g;
+    };
+    std::vector<Item> groups;
+    groups.push_back(group(L"Место", L"tools-disk.png", L"Диски, очистка, мусор проектов. " + ring[CLEAN].note,
+                           {DISKS, CLEAN, PROJECTS}, 1, L"Что занимает место: соты по папкам, кэши"));
+    groups.push_back(group(L"Память", L"tools-mem.png", L"Процессы, фон, автозагрузка. " + ring[PROCS].note,
+                           {PROCS, BG, STARTS}, 4, L"Колба памяти и батарея в студии"));
+    groups.push_back(group(L"Разработка", L"tools-git.png",
+                           L"Git, PATH, порты, терминал, кто держит файл. " + ring[GIT].note,
+                           {GIT, PATH, PORTS, TERM, LOCK}, 0, L"PATH и переменные, порты, версии в студии"));
+    groups.push_back(SecurityItem());
+    groups.push_back(RecoveryItem());
+    groups.push_back(SystemItem(scan));
+    ring = std::move(groups);
     if (sized && quickTotal + scan.ddcOld + bin > 0)
         status += L"   |   можно освободить " + tools::Bytes(quickTotal + scan.ddcOld + bin);
     if (projTotal) status += L"   |   мусор проектов " + tools::Bytes(projTotal);
@@ -2499,7 +2523,7 @@ void Run(const std::wstring& key) {
         ShellExecuteW(nullptr, L"open", L"ms-settings:windowsupdate", nullptr, nullptr, SW_SHOWNORMAL);
         if (!g_updates.failed.empty())
             g_card.Show(BoostCard::DONE, L"Обновления не ставятся",
-                        L"Если «Повторить» в Центре обновления не помогает - «Восстановление», «Центр обновления» "
+                        L"Если «Повторить» в Центре обновления не помогает - «Починка», «Центр обновления» "
                         L"сбросит его кэш.",
                         Theme(), 20000, Toast::G_INFO);
         return;
