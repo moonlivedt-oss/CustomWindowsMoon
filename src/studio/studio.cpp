@@ -106,9 +106,7 @@ void Studio::Paint() {
     }
     {
         Graphics g(memDC_);
-        Config view = cfg;
-        if (!hoverTheme_.empty() && page_ == PAGE_THEMES && ov_ == OV_NONE) view.theme = hoverTheme_;
-        UiColors target = UiPalette(view);
+        UiColors target = TryoutPalette();
         ULONGLONG now = GetTickCount64();
         float dt = lastPaint_ ? std::min(0.1f, (now - lastPaint_) / 1000.0f) : 1.0f;
         lastPaint_ = now;
@@ -137,6 +135,88 @@ void Studio::Paint() {
     else if (ui.TakeTick())
         RepaintIn(33);  // ожидание крутится ~30 кадров в секунду, а не без передышки
     paintAgain_ = false;
+}
+
+// Цвета студии с примеркой: наведённая тема в «Темах» и в «Обзоре» красит всё окно.
+UiColors Studio::TryoutPalette() {
+    Config view = cfg;
+    if (!hoverTheme_.empty() && (page_ == PAGE_THEMES || page_ == PAGE_HOME) && ov_ == OV_NONE)
+        view.theme = hoverTheme_;
+    return UiPalette(view);
+}
+
+// Смена темы волной: прежний кадр остаётся в своём холсте, новый проступает кругом от точки щелчка.
+void Studio::ThemeWave(const std::wstring& key, Gdiplus::PointF from) {
+    if (cfg.theme == key) return;
+    Defer([this, key, from] {
+        if (cfg.theme == key) return;
+        Change();
+        cfg.theme = key;
+        ApplyAccent();
+        for (const ThemeInfo& t : Themes())
+            if (key == t.key) Log(std::wstring(L"Тема: ") + t.name);
+        Save();
+        hoverTheme_.clear();
+        curUiReady_ = false;  // новые цвета сразу, без перетекания: их открывает волна
+        waveFrom_ = from;
+        waveGrab_ = !fx::Game();
+        ui.Invalidate();
+        if (wnd) InvalidateRect(wnd, nullptr, FALSE);
+    });
+}
+
+// Первый кадр после смены темы: в холсте ещё прежний кадр - он и уходит под волну.
+void Studio::WaveGrab(float w, float h) {
+    if (!waveGrab_) return;
+    waveGrab_ = false;
+    int pw = (int)std::ceil(w), ph = (int)std::ceil(h);
+    if (!waveDC_ || pw != waveW_ || ph != waveH_) {
+        if (waveDC_) {
+            SelectObject(waveDC_, waveOld_);
+            DeleteObject(waveBmp_);
+            DeleteDC(waveDC_);
+        }
+        HDC sdc = GetDC(nullptr);
+        waveDC_ = CreateCompatibleDC(sdc);
+        waveBmp_ = CreateCompatibleBitmap(sdc, pw, ph);
+        ReleaseDC(nullptr, sdc);
+        waveOld_ = SelectObject(waveDC_, waveBmp_);
+        waveW_ = pw;
+        waveH_ = ph;
+    }
+    Graphics& g = ui.G();
+    g.Flush();
+    HDC dc = g.GetHDC();
+    BitBlt(waveDC_, 0, 0, pw, ph, dc, 0, 0, SRCCOPY);
+    g.ReleaseHDC(dc);
+    waveStart_ = GetTickCount64();
+}
+
+// Прежний кадр поверх нового везде, кроме растущего круга; по кромке - светлое кольцо акцента.
+void Studio::WaveComposite(float w, float h) {
+    if (!waveStart_) return;
+    double t = (GetTickCount64() - waveStart_) / fx::Dur(760);
+    if (t >= 1 || fx::Game()) {
+        waveStart_ = 0;
+        return;
+    }
+    float e = (float)EaseOut(t), cx = waveFrom_.X, cy = waveFrom_.Y;
+    float R = std::hypot(std::max(cx, w - cx), std::max(cy, h - cy)) * e;
+    Graphics& g = ui.G();
+    g.Flush();
+    HDC dc = g.GetHDC();
+    HRGN rest = CreateRectRgn(0, 0, waveW_, waveH_);
+    HRGN hole = CreateEllipticRgn((int)(cx - R), (int)(cy - R), (int)(cx + R) + 1, (int)(cy + R) + 1);
+    CombineRgn(rest, rest, hole, RGN_DIFF);
+    SelectClipRgn(dc, rest);
+    BitBlt(dc, 0, 0, waveW_, waveH_, waveDC_, 0, 0, SRCCOPY);
+    SelectClipRgn(dc, nullptr);
+    DeleteObject(hole);
+    DeleteObject(rest);
+    g.ReleaseHDC(dc);
+    Pen p(WithAlpha(ui.C().accent, (BYTE)(170 * (1 - e))), ui.S(3));
+    g.DrawEllipse(&p, cx - R, cy - R, 2 * R, 2 * R);
+    ui.Invalidate();
 }
 
 void Studio::RepaintIn(UINT ms) {
@@ -178,6 +258,7 @@ void Studio::LoadPhysAsync() {
 
 void Studio::Frame(float w, float h) {
     const UiColors& c = ui.C();
+    WaveGrab(w, h);
     ui.Fill(RectF(0, 0, w, h), c.win);
     float rail = ui.S(78), status = ui.S(48);
     ui.interactive = ov_ == OV_NONE;
@@ -269,6 +350,7 @@ void Studio::Frame(float w, float h) {
     ui.interactive = ov_ == OV_NONE || ov_ == OV_JOURNAL;  // «Журнал» внизу закрывает сам себя
     StatusBar(RectF(rail, h - status, w - rail, status));
     ui.interactive = ov_ == OV_NONE;
+    WaveComposite(w, h);
     DrawToast(w, h);  // под всплывающими окнами, чтобы не налезать на журнал
     ui.interactive = true;
     if (ov_ == OV_TOUR) TourOverlay(w, h);
@@ -527,6 +609,7 @@ void Studio::StatusBar(const RectF& r) {
 void Studio::GoPage(Page p) {
     if (page_ == p) return;
     pageAt_ = GetTickCount64();
+    if (p == PAGE_HOME) homeBoot_ = -1;  // карта экрана включается заново
     renaming_ = -1;
     page_ = p;
     ui.ResetScroll(ID_PAGE_SCROLL);
@@ -587,9 +670,11 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
             MSG m;
             while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
             Graphics g(mdc);
-            ui.Begin(g, UiPalette(cfg), k);
+            hoverThemeNext_.clear();
+            ui.Begin(g, TryoutPalette(), k);
             Frame((float)w, (float)h);
             ui.End();
+            hoverTheme_ = hoverThemeNext_;
         };
         auto run = [&](int ms) {
             ULONGLONG until = GetTickCount64() + ms;
@@ -985,7 +1070,13 @@ std::function<std::wstring()> g_gameStatus;
 std::wstring GameStatus() { return g_gameStatus ? g_gameStatus() : L""; }
 std::function<std::wstring()> g_devStatus;
 std::wstring DevStatus() { return g_devStatus ? g_devStatus() : L""; }
+std::function<void()> g_gameToggle;
+void GameToggle() {
+    if (g_gameToggle) g_gameToggle();
+}
 }  // namespace studio
+
+void SetEditorGameToggle(std::function<void()> f) { studio::g_gameToggle = std::move(f); }
 
 void SetEditorGameStatus(std::function<std::wstring()> f) { studio::g_gameStatus = std::move(f); }
 void SetEditorDevStatus(std::function<std::wstring()> f) { studio::g_devStatus = std::move(f); }

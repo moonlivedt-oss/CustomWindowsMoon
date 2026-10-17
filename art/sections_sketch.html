@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разделы: новые направления</title>
+<style>
+:root{--pbg:#0b0c10;--ptext:#eef0f5;--pmuted:#9aa3b4;--pacc:#c8323f;--warn:#e0a14a;--ok:#78cda0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pbg);color:var(--ptext);font:14px/1.45 "Segoe UI",system-ui,sans-serif;padding:28px 16px 60px}
+.wrap{max-width:1200px;margin:0 auto}
+h1{font-size:24px;margin:0 0 4px}
+h2{font-size:19px;margin:38px 0 4px;display:flex;gap:10px;align-items:baseline}
+h2 b{color:var(--pacc);font-size:13px}
+h2 span{margin-left:auto;font-size:12px;font-weight:400;color:#5b6272}
+.lead{color:var(--pmuted);margin:0 0 10px;max-width:980px}
+ul.how{margin:0 0 12px;padding-left:18px;color:var(--pmuted);font-size:13px;max-width:1040px}
+ul.how b{color:var(--ptext);font-weight:600}
+.bar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.btn{background:#1c1f2a;color:var(--pmuted);border:1px solid #2a2e3c;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.btn:hover{color:var(--ptext)}
+.stage{position:relative;height:620px;border-radius:14px;overflow:hidden;user-select:none;background:#000}
+.foot{margin-top:28px;color:var(--pmuted);max-width:980px}
+.foot b{color:var(--ptext)}
+.layer{position:absolute;inset:0;background:var(--bg);color:var(--text)}
+.layer *{transition-property:background-color,border-color,color,box-shadow,opacity;transition-duration:.5s}
+.flat *{transition:none!important;animation:none!important}
+.toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%) translateY(10px);background:var(--card2);border:1px solid var(--acc);border-radius:10px;padding:7px 14px;font-size:12.5px;opacity:0;transition:opacity .25s,transform .3s cubic-bezier(.2,.9,.3,1.4)!important;pointer-events:none;white-space:nowrap;z-index:50}
+.toast.on{opacity:1;transform:translateX(-50%)}
+.badge{position:absolute;min-width:24px;height:24px;border-radius:12px;background:var(--warn);color:#17120a;font-weight:800;font-size:12.5px;display:flex;align-items:center;justify-content:center;padding:0 7px;z-index:20;box-shadow:0 0 0 4px color-mix(in srgb,var(--warn) 25%,transparent);animation:bin .55s cubic-bezier(.2,.9,.3,1.9) both}
+@keyframes bin{0%{transform:scale(0) rotate(-30deg)}100%{transform:none}}
+.badge.out{animation:bout .35s ease-in forwards}
+@keyframes bout{to{transform:scale(0);opacity:0}}
+.fix{background:var(--warn);color:#17120a;border:0;border-radius:7px;padding:4px 10px;font:600 11.5px "Segoe UI",sans-serif;cursor:pointer}
+.tip{position:absolute;background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:7px 11px;font-size:12px;pointer-events:none;opacity:0;transform:translateY(6px);transition:opacity .2s,transform .25s cubic-bezier(.2,.9,.3,1.4)!important;z-index:40;white-space:nowrap}
+.tip.on{opacity:1;transform:none}
+.tip b{display:block;font-size:13px}
+.tip span{color:var(--muted)}
+.tip .w{color:var(--warn)}
+
+/* ---------- карта экрана ---------- */
+.mon{position:absolute;border-radius:16px;background:#050608;padding:12px;box-shadow:0 30px 60px rgba(0,0,0,.5),0 0 0 1px #2a2e3c}
+.scrn{position:absolute;inset:12px;border-radius:8px;overflow:hidden;background:#000}
+.wall{position:absolute;inset:-8px;background-size:cover;background-position:center;transition:opacity .6s,transform 1.2s cubic-bezier(.2,.8,.3,1)!important}
+.dim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15),rgba(0,0,0,.45))}
+.stand{position:absolute;background:linear-gradient(#1a1c24,#0d0e12);border-radius:0 0 10px 10px}
+.edge{position:absolute;top:22%;bottom:22%;width:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;z-index:5}
+.edge .tab{position:absolute;top:30%;bottom:30%;width:5px;border-radius:3px;background:var(--acc);box-shadow:0 0 14px var(--acc)}
+.edge img{width:30px;height:30px;opacity:0;transform:translateX(var(--from));transition:opacity .3s,transform .4s cubic-bezier(.2,.9,.3,1.5)!important;filter:drop-shadow(0 2px 4px #000)}
+.edge.open img{opacity:1;transform:none}
+.edge.warn .tab{background:var(--warn);box-shadow:0 0 14px var(--warn);animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{50%{box-shadow:0 0 4px var(--warn);opacity:.7}}
+.edge.healed .tab{animation:healed 1s ease-out}
+@keyframes healed{0%{background:var(--ok);box-shadow:0 0 22px var(--ok)}}
+.edge img.bad{filter:drop-shadow(0 0 5px var(--warn))}
+.corner{position:absolute;width:46px;height:46px;cursor:pointer;z-index:6}
+.corner i{position:absolute;width:30px;height:30px;border:3px solid var(--acc);opacity:.85;filter:drop-shadow(0 0 6px var(--acc))}
+.corner:hover i{opacity:1;width:38px;height:38px}
+.wnd{position:absolute;border-radius:10px;overflow:hidden;background:color-mix(in srgb,var(--card) 92%,transparent);box-shadow:0 0 0 2px var(--acc),0 0 30px color-mix(in srgb,var(--acc) 45%,transparent),0 20px 40px rgba(0,0,0,.5);z-index:4;backdrop-filter:blur(8px)}
+.wnd .tb{height:30px;background:var(--card2);display:flex;align-items:center;gap:8px;padding:0 10px;font-size:12px;color:var(--text)}
+.wnd .tb span{margin-left:auto;display:flex;gap:12px;color:var(--muted)}
+.wnd .bd{padding:14px 16px}
+.wnd .nm{font-size:22px;font-weight:700}
+.wnd .ds{font-size:12px;color:var(--muted)}
+.mth{display:flex;gap:7px;margin-top:12px}
+.mth div{width:54px;height:36px;border-radius:7px;background-size:cover;background-position:center;cursor:pointer;border:2px solid transparent;transform-origin:50% 100%;transition:transform .2s cubic-bezier(.2,.9,.3,1.5),border-color .3s!important}
+.mth div:hover{transform:scale(1.18)}
+.mth div.cur{border-color:var(--acc)}
+.pal{display:flex;gap:6px;margin-top:10px}
+.pal i{width:22px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.2)}
+.task{position:absolute;left:0;right:0;bottom:0;height:38px;background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(10px);display:flex;align-items:center;gap:6px;padding:0 10px;z-index:6}
+.task .ti{height:28px;border-radius:7px;display:flex;align-items:center;gap:6px;padding:0 8px;font-size:11.5px;cursor:pointer;color:var(--text);position:relative}
+.task .ti:hover{background:color-mix(in srgb,var(--text) 12%,transparent)}
+.task .ti img{width:20px;height:20px}
+.task .ti.off{opacity:.45}
+.shelf{position:absolute;border-radius:14px;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;gap:18px;padding:0 18px}
+.shelf .it{display:flex;align-items:center;gap:10px;cursor:pointer;position:relative;padding:6px 8px;border-radius:9px}
+.shelf .it:hover{background:var(--card2)}
+.shelf img{width:30px;height:30px}
+.shelf .v{font-size:12.5px;font-weight:600}
+.shelf .s{font-size:11px;color:var(--muted)}
+.dr{width:120px;height:6px;border-radius:3px;background:var(--card2);overflow:hidden;margin-top:4px}
+.dr i{display:block;height:100%;width:0;background:var(--acc2);transition:width 1s cubic-bezier(.2,.9,.3,1)!important}
+.boot{position:absolute;left:0;right:0;top:50%;height:2px;background:#fff;box-shadow:0 0 30px #fff;z-index:30;pointer-events:none}
+
+/* ---------- соты ---------- */
+.hx{position:absolute;cursor:pointer}
+.hx .b,.hx .f{position:absolute;inset:0;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.hx .b{background:var(--border)}
+.hx .f{inset:2px;background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:2px;padding:0 10px}
+.hx:hover .b{background:var(--acc)}
+.hx .f img{width:34px;height:34px}
+.hx .f .n{font-size:11.5px;color:var(--muted)}
+.hx .f .v{font-size:12.5px;font-weight:650;line-height:1.2}
+.hx.empty{cursor:default}
+.hx.empty .f{background:color-mix(in srgb,var(--card) 35%,var(--bg))}
+.hx.empty .b{background:color-mix(in srgb,var(--border) 50%,var(--bg))}
+.hx.prob .b{background:var(--warn);animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{50%{background:color-mix(in srgb,var(--warn) 45%,var(--border))}}
+.hx .fx{display:none;margin-top:4px}
+.hx.prob:hover .fx{display:inline-block}
+.hx.prob:hover .v{display:none}
+.hx.okd .b{background:var(--ok)!important}
+.big .b,.big .f{clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)}
+.big .f{padding:0;background-size:cover;background-position:center;justify-content:flex-end}
+.big .f .sh{position:absolute;inset:0;background:linear-gradient(0deg,color-mix(in srgb,var(--bg) 90%,transparent) 0,transparent 65%)}
+.big .f .tn{position:relative;font-size:21px;font-weight:700}
+.big .f .td{position:relative;font-size:11px;color:var(--muted);margin-bottom:10px}
+.big .f .row{position:relative;display:flex;gap:6px;margin-bottom:30px}
+.mini{width:28px;height:32px;cursor:pointer;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background-size:cover;background-position:center;transition:transform .2s cubic-bezier(.2,.9,.3,1.6)!important}
+.mini:hover{transform:scale(1.35) translateY(-4px)}
+.mini.cur{outline:none;filter:drop-shadow(0 0 4px var(--acc))}
+
+/* ---------- колода ---------- */
+.card{position:absolute;width:170px;height:240px;border-radius:16px;background:var(--card);border:1px solid var(--border);cursor:pointer;transform-origin:50% 50%;padding:16px 14px;overflow:hidden;box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.card .ci{width:46px;height:46px}
+.card .cn{font-size:12px;color:var(--muted);margin-top:10px}
+.card .cv{font-size:16px;font-weight:650;margin-top:2px;line-height:1.25}
+.card .cs{position:absolute;left:14px;right:14px;bottom:14px;font-size:11px;color:var(--muted)}
+.card.prob{border-color:var(--warn)}
+.card.prob::after{content:"";position:absolute;right:0;top:0;width:34px;height:34px;background:linear-gradient(225deg,var(--warn) 50%,color-mix(in srgb,var(--warn) 50%,#000) 50%);border-radius:0 16px 0 8px}
+.card.theme{padding:0;background-size:cover;background-position:center}
+.card.theme .sh{position:absolute;inset:0;background:linear-gradient(0deg,color-mix(in srgb,var(--bg) 92%,transparent) 0,transparent 60%)}
+.card.theme .cv{position:absolute;left:14px;bottom:36px;font-size:19px}
+.card.theme .cs{bottom:16px}
+.detail{position:absolute;opacity:0;pointer-events:none}
+.card.open .detail{opacity:1;pointer-events:auto}
+.card.open .cs{opacity:0}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;z-index:15}
+.scrim.on{opacity:1;pointer-events:auto}
+.hdr{position:absolute;left:24px;top:20px}
+.hdr b{display:block;font-size:22px}
+.hdr span{color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Разделы: три новых направления</h1>
+<p class="lead">Мозаика - это всё ещё плитки. Здесь три заметно другие идеи для «Обзора / Разделов»; во всех тема - главная, метка проблемы на месте, тема меняется прямо отсюда волной. Наведи, щёлкни, тяни; «Ещё раз» - сначала. Значки и картинки настоящие.</p>
+
+<h2><b>1</b>Карта экрана<span>каждая настройка там, где она работает</span></h2>
+<p class="lead">Вместо плиток - маленький монитор. Программа живёт на экране, и обзор показывает, где именно: кольца у краёв, углы в углах, тема на обоях и рамке окна, сеть и игровой режим в панели задач, диски и PATH - под монитором.</p>
+<ul class="how">
+ <li><b>Включение</b>: экран загорается полосой, как монитор, обои проявляются, следом выезжают ручки колец у краёв, загораются углы, появляется окно.</li>
+ <li><b>Края</b>: наведи на левую или правую ручку - значки секторов выезжают из края. Сломанный сектор: ручка становится жёлтой и тихо дышит, при наведении сломанный значок светится; щелчок - «найти», ручка вспыхивает зелёным.</li>
+ <li><b>Углы</b> - уголки цвета акцента; наведи - что делает угол. <b>Окно</b> в середине - тема: его рамка и есть рамка окон; миниатюры внизу окна - примерка и смена темы волной по экрану.</li>
+ <li><b>Панель задач</b>: сеть с задержкой, игровой режим и автозапуск щелчком; <b>под монитором</b> - диски и PATH, с метками и починкой.</li>
+</ul>
+<div class="bar"><button class="btn" id="aAgain">Ещё раз</button><button class="btn" id="aBreak">Сломать путь</button></div>
+<div class="stage" id="sA"></div>
+
+<h2><b>2</b>Соты<span>своя фирменная форма</span></h2>
+<p class="lead">Программа уже говорит сотами (диск, загрузка, стекло колец). Разделы - соты вокруг большой шестигранной темы; поле строится от середины наружу, как улей в «Что занимает место».</p>
+<ul class="how">
+ <li><b>Наведение</b>: сота приподнимается, рамка загорается акцентом, соседи расступаются пружиной.</li>
+ <li><b>Тема</b> - большая сота с картинкой; маленькие соты-миниатюры в ней: наведи - всё поле примеряет, щёлкни - волна.</li>
+ <li><b>Проблема</b> - рамка соты тихо дышит жёлтым, метка сверху; наведи - вместо значения кнопка починки; починил - рамка вспыхивает зелёным.</li>
+ <li>Пустые соты по краям держат форму улья.</li>
+</ul>
+<div class="bar"><button class="btn" id="bAgain">Ещё раз</button><button class="btn" id="bBreak">Мусор в PATH</button></div>
+<div class="stage" id="sB"></div>
+
+<h2><b>3</b>Колода<span>разделы как карты в руке</span></h2>
+<p class="lead">Разделы - веер карт внизу, тема - большая карта в центре веера. Наведи - карта поднимается, соседи расступаются; щёлкни - карта выезжает в середину и раскрывается подробностями и действиями.</p>
+<ul class="how">
+ <li><b>Раздача</b>: карты вылетают из колоды и раскладываются веером по очереди.</li>
+ <li><b>Проблема</b> - уголок карты загнут жёлтым и на ней метка; в раскрытой карте - причина и кнопка.</li>
+ <li><b>Тема</b>: в раскрытой карте - миниатюры тем, примерка и смена волной.</li>
+</ul>
+<div class="bar"><button class="btn" id="cAgain">Ещё раз</button></div>
+<div class="stage" id="sC"></div>
+
+<p class="foot"><b>Как это ляжет в программу:</b> всё - рамки и пути GDI+ (шестигранники уже есть в gfx/hex), пружины - Mover из «Колец», смена темы волной - новый кадр в свой холст, проступающий кругом. Кадры только пока что-то движется; «дыхание» проблемной соты - редкие кадры через RepaintIn, в игровом режиме всё сразу на местах и без дыхания. Выбери направление (или смешай) - перенесём в новой сессии.</p>
+</div>
+<script>
+const IC=n=>'../icons/'+n+'.png', BG=f=>'../themes/'+f;
+const T=[
+ ['Багровое поле','bg-crimson.jpg','#12141C','#1C1F2A','#EEF0F5','#9AA3B4','#C8323F','#8FA3BF','#D9DEE6','Грозовое небо, багряные цветы и сталь'],
+ ['Закат','bg-sunset.webp','#1F1129','#2E183A','#FFF1E0','#C9A9C0','#FF7A6B','#E8608C','#FFD36E','Тёплый вечер над спокойной водой'],
+ ['Лунная ночь','bg-default.webp','#121433','#1E1D4F','#EDE9FF','#A9A3D9','#C3B6FF','#9C8CF0','#FFC857','Сиреневые горы под луной'],
+ ['Catppuccin','bg-mocha.webp','#181825','#1E1E2E','#CDD6F4','#A6ADC8','#CBA6F7','#89B4FA','#F9E2AF','Пастель на тёплом графите'],
+ ['Tokyo Night','bg-tokyo.webp','#1A1B26','#1F2335','#C0CAF5','#A9B1D6','#7AA2F7','#BB9AF7','#E0AF68','Ночной город в неоновой синеве'],
+ ['Nord','bg-nord.webp','#2E3440','#353C4A','#ECEFF4','#D8DEE9','#88C0D0','#81A1C1','#EBCB8B','Ледяной фьорд и северный свет'],
+ ['Gruvbox','bg-gruvbox.webp','#1D2021','#282828','#EBDBB2','#D5C4A1','#FE8019','#FB4934','#FABD2F','Осенние холмы в ретро-тонах'],
+ ['Лес','bg-forest.webp','#141D18','#1A2620','#DDE9E0','#A9C2B1','#7FD4A0','#D8C97A','#E6D27F','Хвойный туман и мох']];
+function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!==undefined)e.innerHTML=html;return e}
+function mix(a,b,t){const p=h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16));const x=p(a),y=p(b);return'#'+x.map((v,i)=>Math.round(v+(y[i]-v)*t).toString(16).padStart(2,'0')).join('')}
+function vars(node,t){const s=node.style;[['--bg',t[2]],['--card',t[3]],['--text',t[4]],['--muted',t[5]],['--acc',t[6]],['--acc2',t[7]],['--gold',t[8]],['--card2',mix(t[3],t[4],.07)],['--border',mix(t[3],t[4],.14)]].forEach(([k,v])=>s.setProperty(k,v))}
+function picOf(t){return'url('+BG(t[1])+')'}
+function toast(stage,s){let t=stage.querySelector('.toast');if(!t){t=el('div','toast');stage.appendChild(t)}t.textContent=s;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),1900)}
+function wave(stage,old,fresh,x,y){const R=Math.hypot(Math.max(x,stage.clientWidth-x),Math.max(y,stage.clientHeight-y));stage.appendChild(fresh);
+  fresh.animate([{clipPath:'circle(0px at '+x+'px '+y+'px)'},{clipPath:'circle('+R+'px at '+x+'px '+y+'px)'}],{duration:760,easing:'cubic-bezier(.3,.7,.2,1)'}).onfinish=()=>{old.remove();const t=stage.querySelector('.toast');if(t)stage.appendChild(t)}}
+function rel(stage,node){const r=node.getBoundingClientRect(),o=stage.getBoundingClientRect();return[r.left-o.left+r.width/2,r.top-o.top+r.height/2]}
+function tipAt(L,x,y,html){let t=L.querySelector('.tip');if(!t){t=el('div','tip');L.appendChild(t)}t.innerHTML=html;t.style.left=x+'px';t.style.top=y+'px';t.classList.add('on');return t}
+function untip(L){const t=L.querySelector('.tip');if(t)t.classList.remove('on')}
+// живая сцена: слой в цветах темы, смена темы - новый слой волной
+function Scene(id,build){const stage=document.getElementById(id);const sc={stage,theme:0,layer:null,st:{}};
+  sc.make=(enter)=>{const L=el('div','layer');vars(L,T[sc.theme]);build(sc,L,enter);return L};
+  sc.rebuild=(enter)=>{const n=sc.make(enter);if(sc.layer)sc.layer.remove();stage.appendChild(n);sc.layer=n};
+  sc.setTheme=(i,x,y)=>{if(i===sc.theme)return;sc.theme=i;const n=sc.make(false);wave(stage,sc.layer,n,x,y);sc.layer=n;toast(stage,'Тема: '+T[i][0])};
+  sc.tryTheme=(i)=>{vars(sc.layer,T[i<0?sc.theme:i])};
+  return sc}
+function badge(parent,n,x,y){const b=el('div','badge',String(n));b.style.left=x+'px';b.style.top=y+'px';parent.appendChild(b);return b}
+
+// ================= 1. Карта экрана =================
+const A=Scene('sA',(sc,L,enter)=>{const S=sc.st;const W=sc.stage.clientWidth,H=sc.stage.clientHeight,t=T[sc.theme];
+  const mw=Math.min(820,W-300),mh=430,mx=(W-mw)/2,my=24;
+  const hdr=el('div','hdr','<b>Обзор</b><span>программа на твоём экране</span>');L.appendChild(hdr);
+  const mon=el('div','mon');Object.assign(mon.style,{left:mx+'px',top:my+'px',width:mw+'px',height:mh+'px'});L.appendChild(mon);
+  const stand=el('div','stand');Object.assign(stand.style,{left:(mx+mw/2-60)+'px',top:(my+mh)+'px',width:'120px',height:'26px'});L.appendChild(stand);
+  const scr=el('div','scrn','<div class="wall" style="background-image:'+picOf(t)+'"></div><div class="dim"></div>');mon.appendChild(scr);
+  const sw=mw-24,sh=mh-24;
+  // края с кольцами
+  const left=['projects','folder','code','study'],right=['apps','music','downloads','desktop','recycle'];
+  [[0,left],[1,right]].forEach(([side,icons])=>{const e=el('div','edge');e.style[side?'right':'left']='0';e.style.setProperty('--from',side?'40px':'-40px');
+    e.innerHTML='<div class="tab" style="'+(side?'right':'left')+':0"></div>'+icons.map((n,k)=>'<img src="'+IC(n)+'" class="'+(side===0&&k===1&&S.broken?'bad':'')+'" style="transition-delay:'+k*.05+'s">').join('');scr.appendChild(e);
+    e.onmouseenter=()=>{e.classList.add('open');const[x,y]=rel(sc.stage,e);tipAt(L,side?x-250:x+40,y-20,'<b>'+(side?'Правый':'Левый')+' край: '+icons.length+' секторов</b>'+(side===0&&S.broken?'<span class="w">«Сломанный»: путь пропал</span>':'<span>Alt + курсор к краю</span>'))};
+    e.onmouseleave=()=>{e.classList.remove('open');untip(L)};
+    e.onclick=()=>{if(side===0&&S.broken)fixRings();else toast(sc.stage,'Переход в «Кольца»')};
+    if(side===0&&S.broken)e.classList.add('warn')});
+  function fixRings(){S.broken=false;scr.querySelector('.edge.warn')&&scr.querySelector('.edge.warn').classList.replace('warn','healed');scr.querySelectorAll('img.bad').forEach(i=>i.classList.remove('bad'));toast(sc.stage,'Нашлась: D:\\Desktop\\components\\RadialMenu');untip(L)}
+  // углы
+  const names=['Кольцо утилит','Кольцо сети','Рабочий стол','Все окна'];
+  [[0,0],[1,0],[0,1],[1,1]].forEach(([r,b],k)=>{const c=el('div','corner');c.style[r?'right':'left']='0';c.style[b?'bottom':'top']=b?'38px':'0';
+    c.innerHTML='<i style="'+(r?'right':'left')+':6px;'+(b?'bottom':'top')+':6px;border-'+(r?'left':'right')+':0;border-'+(b?'top':'bottom')+':0;border-'+(b?'bottom':'top')+'-'+(r?'right':'left')+'-radius:14px"></i>';scr.appendChild(c);
+    c.onmouseenter=()=>{const[x,y]=rel(sc.stage,c);tipAt(L,r?x-170:x+30,b?y-50:y+10,'<b>'+names[k]+'</b><span>курсор в угол</span>')};c.onmouseleave=()=>untip(L);c.onclick=()=>toast(sc.stage,'Переход в «Углы»')});
+  // окно = тема
+  const ww=Math.min(420,sw-200),wh=210;const wnd=el('div','wnd','<div class="tb"><img src="'+IC('hub')+'" style="width:16px;height:16px">Тема<span><b>-</b><b>□</b><b>×</b></span></div><div class="bd"><div class="nm">'+t[0]+'</div><div class="ds">'+t[9]+'</div><div class="pal">'+[t[6],t[7],t[8],t[2]].map(c=>'<i style="background:'+c+'"></i>').join('')+'</div><div class="mth">'+T.slice(0,6).map((q,i)=>'<div class="'+(i===sc.theme?'cur':'')+'" data-i="'+i+'" style="background-image:'+picOf(q)+'"></div>').join('')+'</div></div>');
+  Object.assign(wnd.style,{left:(sw-ww)/2+'px',top:(sh-38-wh)/2+'px',width:ww+'px',height:wh+'px'});scr.appendChild(wnd);
+  wnd.querySelectorAll('.mth div').forEach(d=>{const i=+d.dataset.i;d.onmouseenter=()=>{sc.tryTheme(i);scr.querySelector('.wall').style.backgroundImage=picOf(T[i]);wnd.querySelector('.nm').textContent=T[i][0]};
+    d.onmouseleave=()=>{sc.tryTheme(-1);scr.querySelector('.wall').style.backgroundImage=picOf(T[sc.theme]);wnd.querySelector('.nm').textContent=T[sc.theme][0]};
+    d.onclick=()=>{const[x,y]=rel(sc.stage,d);sc.setTheme(i,x,y)}});
+  // панель задач
+  const task=el('div','task','<div class="ti" data-k="net"><img src="'+IC('net-globe')+'">158 мс</div><div class="ti'+(S.game?'':' off')+'" data-k="game"><img src="'+IC('game')+'">'+(S.game?'игры: вкл':'игры')+'</div><div class="ti'+(S.auto?'':' off')+'" data-k="auto"><img src="'+IC('app')+'">'+(S.auto?'автозапуск':'автозапуск выкл')+'</div><div style="margin-left:auto;font-size:11px;color:var(--muted)">Alt + край - кольца</div>');scr.appendChild(task);
+  task.querySelectorAll('.ti').forEach(ti=>{const k=ti.dataset.k;ti.onmouseenter=()=>{const[x,y]=rel(sc.stage,ti);tipAt(L,x-60,y-70,k==='net'?'<b>Интернет есть</b><span>Россия, через туннель</span>':k==='game'?'<b>Игровой режим</b><span>щелчок - '+(S.game?'выключить':'включить')+'</span>':'<b>Автозапуск</b><span>щелчок - '+(S.auto?'выключить':'включить')+'</span>')};ti.onmouseleave=()=>untip(L);
+    ti.onclick=()=>{if(k==='net'){toast(sc.stage,'Переход в «Сеть»');return}if(k==='game')S.game=!S.game;else S.auto=!S.auto;sc.rebuild(false)}});
+  if(!S.auto){const[,]=[0,0];setTimeout(()=>{const ti=task.querySelector('[data-k=auto]');badge(ti,1,ti.offsetWidth-14,-12)},0)}
+  // под монитором
+  const shelf=el('div','shelf','<div class="it" data-k="disk"><img src="'+IC('tools-disk')+'"><div><div class="v">C: 138 ГБ  D: 211 ГБ</div><div class="dr"><i data-w="42%"></i></div></div></div>'+
+    '<div class="it" data-k="path"><img src="'+IC('tools-path')+'"><div><div class="v">PATH</div><div class="s">'+(S.path?'<span style="color:var(--warn)">2 лишние записи</span>':'всё чисто')+'</div></div></div>'+
+    '<div class="it" data-k="keys"><img src="'+IC('terminal')+'"><div><div class="v">Утилиты</div><div class="s">кольцо по углу слева вверху</div></div></div>');
+  Object.assign(shelf.style,{left:(mx+40)+'px',top:(my+mh+38)+'px',width:(mw-80)+'px',height:'74px'});L.appendChild(shelf);
+  if(S.path){const p=shelf.querySelector('[data-k=path]');const b=badge(p,2,20,-10);p.onclick=()=>{S.path=false;b.classList.add('out');p.querySelector('.s').textContent='всё чисто';toast(sc.stage,'PATH почищен')}}
+  shelf.querySelectorAll('.it').forEach(it=>{if(!it.onclick)it.onclick=()=>toast(sc.stage,'Переход: '+it.querySelector('.v').textContent)});
+  if(S.game)L.classList.add('flat');
+  setTimeout(()=>L.querySelectorAll('.dr i').forEach(i=>i.style.width=i.dataset.w),enter&&!S.game?1300:20);
+  if(enter&&!S.game){const boot=el('div','boot');scr.appendChild(boot);
+    boot.animate([{transform:'scaleX(0)',opacity:1},{transform:'scaleX(1)',opacity:1,offset:.4},{transform:'scaleX(1) scaleY(140)',opacity:0}],{duration:900,easing:'cubic-bezier(.3,.7,.2,1)',fill:'forwards'});
+    scr.querySelector('.wall').animate([{opacity:0,transform:'scale(1.12)'},{opacity:1,transform:'scale(1)'}],{duration:1400,delay:350,easing:'cubic-bezier(.2,.8,.3,1)',fill:'backwards'});
+    scr.querySelectorAll('.edge').forEach((e,k)=>{e.animate([{opacity:0,transform:'translateX('+(k?40:-40)+'px)'},{opacity:1,transform:'none'}],{duration:500,delay:900+k*120,easing:'cubic-bezier(.2,.9,.3,1.4)',fill:'backwards'});setTimeout(()=>{e.classList.add('open');setTimeout(()=>e.classList.remove('open'),900)},1100+k*120)});
+    scr.querySelectorAll('.corner').forEach((c,k)=>c.animate([{opacity:0,transform:'scale(.3)'},{opacity:1,transform:'none'}],{duration:400,delay:1150+k*90,easing:'cubic-bezier(.2,.9,.3,1.8)',fill:'backwards'}));
+    wnd.animate([{opacity:0,transform:'translateY(24px) scale(.94)'},{opacity:1,transform:'none'}],{duration:560,delay:1400,easing:'cubic-bezier(.2,.9,.3,1.3)',fill:'backwards'});
+    task.animate([{transform:'translateY(40px)'},{transform:'none'}],{duration:450,delay:1250,easing:'cubic-bezier(.2,.9,.3,1.2)',fill:'backwards'});
+    shelf.animate([{opacity:0,transform:'translateY(20px)'},{opacity:1,transform:'none'}],{duration:500,delay:1600,easing:'cubic-bezier(.2,.9,.3,1.3)',fill:'backwards'})}});
+A.st={broken:true,path:true,auto:true,game:false};A.rebuild(true);
+document.getElementById('aAgain').onclick=()=>{A.st={broken:true,path:true,auto:true,game:false};A.theme=0;A.rebuild(true)};
+document.getElementById('aBreak').onclick=()=>{A.st.broken=true;A.rebuild(false)};
+
+// ================= 2. Соты =================
+const B=Scene('sB',(sc,L,enter)=>{const S=sc.st;const W=sc.stage.clientWidth,H=sc.stage.clientHeight,t=T[sc.theme];
+  const s=68,cx=W/2,cy=H/2+6,hw=Math.sqrt(3)*s,hh=2*s;
+  const pos=(q,r)=>[cx+hw*(q+r/2),cy+1.5*s*r];
+  const hdr=el('div','hdr','<b>Обзор</b><span>соты: всё главное вокруг темы</span>');L.appendChild(hdr);
+  const ring2=[[2,0],[2,-1],[2,-2],[1,-2],[0,-2],[-1,-1],[-2,0],[-2,1],[-2,2],[-1,2],[0,2],[1,1]];
+  const sect={0:['apps','Кольца','слева 4, справа 5','rings'],2:['net-globe','Сеть','158 мс','net'],3:['tools-disk','Диски','C: 138  D: 211 ГБ','disk'],5:['desktop','Углы','4 назначено','corners'],
+    6:['tools-path','PATH',S.path?'2 лишние':'всё чисто','path'],8:['game','Игры',S.game?'включён':'выключен','game'],9:['app','Автозапуск',S.auto?'после входа':'выключен','auto'],11:['terminal','Утилиты','кольцо в углу','tools']};
+  const cells=[];
+  function hex(q,r,size,cls,html){const[x,y]=pos(q,r);const flat=cls.includes('big'),w=flat?2*size:Math.sqrt(3)*size,h=flat?Math.sqrt(3)*size:2*size;const e=el('div','hx '+cls,'<div class="b"></div><div class="f">'+html+'</div>');
+    Object.assign(e.style,{left:(x-w/2)+'px',top:(y-h/2)+'px',width:w+'px',height:h+'px'});L.appendChild(e);const c={e,x,y,ox:0,oy:0,vx:0,vy:0,tx:0,ty:0,big:cls.includes('big')};cells.push(c);return c}
+  // большая тема
+  const big=hex(0,0,s*2.28,'big','<div class="sh"></div><div class="tn">'+t[0]+'</div><div class="td">'+t[9]+'</div><div class="row">'+T.slice(0,6).map((q,i)=>'<div class="mini'+(i===sc.theme?' cur':'')+'" data-i="'+i+'" style="background-image:'+picOf(q)+'"></div>').join('')+'</div>');
+  big.e.querySelector('.f').style.backgroundImage=picOf(t);
+  big.e.querySelectorAll('.mini').forEach(m=>{const i=+m.dataset.i;m.onmouseenter=()=>{sc.tryTheme(i);big.e.querySelector('.f').style.backgroundImage=picOf(T[i]);big.e.querySelector('.tn').textContent=T[i][0]};
+    m.onmouseleave=()=>{sc.tryTheme(-1);big.e.querySelector('.f').style.backgroundImage=picOf(T[sc.theme]);big.e.querySelector('.tn').textContent=T[sc.theme][0]};
+    m.onclick=e=>{e.stopPropagation();const[x,y]=rel(sc.stage,m);sc.setTheme(i,x,y)}});
+  ring2.forEach(([q,r],k)=>{const d=sect[k];
+    if(!d){hex(q,r,s-3,'empty','');return}
+    const prob=(d[3]==='rings'&&S.broken)||(d[3]==='path'&&S.path)||(d[3]==='auto'&&!S.auto);
+    const c=hex(q,r,s-3,prob?'prob':'','<img src="'+IC(d[0])+'"><div class="n">'+d[1]+'</div><div class="v">'+d[2]+'</div>'+(prob?'<button class="fix fx">'+({rings:'Найти',path:'Почистить',auto:'Включить'}[d[3]])+'</button>':''));
+    c.key=d[3];
+    if(prob)c.badge=badge(c.e,d[3]==='path'?2:1,c.e.offsetWidth*.72||80,4);
+    c.e.onclick=ev=>{if(d[3]==='game'){S.game=!S.game;sc.rebuild(false);return}if(d[3]==='auto'&&S.auto){S.auto=false;sc.rebuild(false);return}
+      if(prob&&ev.target.classList.contains('fx')){if(d[3]==='rings')S.broken=false;if(d[3]==='path')S.path=false;if(d[3]==='auto')S.auto=true;
+        c.badge&&c.badge.classList.add('out');c.e.classList.remove('prob');c.e.classList.add('okd');const v=c.e.querySelector('.v');v.textContent={rings:'слева 4, справа 5',path:'всё чисто',auto:'после входа'}[d[3]];ev.target.remove();
+        toast(sc.stage,{rings:'Нашлась: D:\\Desktop\\components\\RadialMenu',path:'PATH почищен',auto:'Автозапуск включён'}[d[3]]);setTimeout(()=>c.e.classList.remove('okd'),900);return}
+      toast(sc.stage,'Переход: '+d[1])}});
+  cells.forEach(c=>{if(c.badge)c.badge.style.left=(c.e.offsetWidth*.7)+'px'});
+  // соседи расступаются от соты под курсором
+  let hot=null;cells.forEach(c=>{if(c.e.classList.contains('empty'))return;c.e.onmouseenter=()=>hot=c;c.e.onmouseleave=()=>{if(hot===c)hot=null}});
+  sc.update=dt=>{cells.forEach(c=>{if(S.game){c.tx=c.ty=0}else if(hot&&c!==hot){const dx=c.x-hot.x,dy=c.y-hot.y,d=Math.hypot(dx,dy)||1;const k=hot.big?6:Math.max(0,14-d/24);c.tx=dx/d*k;c.ty=dy/d*k}else{c.tx=0;c.ty=0}
+    c.vx+=((c.tx-c.ox)*200-c.vx*18)*dt;c.vy+=((c.ty-c.oy)*200-c.vy*18)*dt;c.ox+=c.vx*dt;c.oy+=c.vy*dt;const sc2=c===hot?(c.big?1.02:1.08):1;c.e.style.transform='translate('+c.ox+'px,'+c.oy+'px) scale('+sc2+')';c.e.style.zIndex=c===hot?5:''})};
+  if(S.game)L.classList.add('flat');
+  if(enter&&!S.game)cells.forEach(c=>{const d=Math.hypot(c.x-cx,c.y-cy);c.e.animate([{opacity:0,transform:'scale(.2)'},{opacity:1,transform:'scale(1.08)',offset:.7},{opacity:1,transform:'scale(1)'}],{duration:520,delay:d*1.6,easing:'ease-out',fill:'backwards'})})});
+B.st={broken:true,path:false,auto:true,game:false};B.rebuild(true);
+document.getElementById('bAgain').onclick=()=>{B.st={broken:true,path:false,auto:true,game:false};B.theme=0;B.rebuild(true)};
+document.getElementById('bBreak').onclick=()=>{B.st.path=true;B.rebuild(false)};
+
+// ================= 3. Колода =================
+const C=Scene('sC',(sc,L,enter)=>{const S=sc.st;const W=sc.stage.clientWidth,H=sc.stage.clientHeight,t=T[sc.theme];
+  const hdr=el('div','hdr','<b>Обзор</b><span>наведи на карту, щёлкни - раскроется</span>');L.appendChild(hdr);
+  const scrim=el('div','scrim');L.appendChild(scrim);
+  const D=[['apps','Кольца','слева 4, справа 5','Alt + курсор к краю',S.broken?{n:1,why:'«Сломанный»: путь пропал',act:'Найти'}:null],
+    ['net-globe','Сеть','158 мс','Россия, через туннель'],['tools-disk','Диски','C: 138 ГБ\nD: 211 ГБ','свободно'],['desktop','Углы','4 назначено','курсор в угол'],
+    ['THEME'],
+    ['tools-path','PATH','всё чисто','мёртвых папок нет'],['game','Игры','выключен','в игре без анимаций'],['app','Автозапуск','после входа','вместе с Windows'],['terminal','Утилиты','кольцо в углу','слева вверху']];
+  const n=D.length,mid=(n-1)/2,cards=[];let hover=-1,open=-1;
+  D.forEach((d,i)=>{let e;
+    if(d[0]==='THEME'){e=el('div','card theme','<div class="sh"></div><div class="cn" style="position:absolute;left:14px;top:4px;color:#fff">Тема</div><div class="cv">'+t[0]+'</div><div class="cs">щёлкни - сменить</div>'+
+        '<div class="detail" style="left:14px;right:14px;bottom:60px"><div style="display:flex;gap:5px;flex-wrap:wrap">'+T.map((q,k)=>'<div class="mt" data-i="'+k+'" style="width:44px;height:30px;border-radius:6px;background:'+picOf(q)+' center/cover;border:2px solid '+(k===sc.theme?'var(--acc)':'transparent')+';cursor:pointer"></div>').join('')+'</div></div>');
+      e.style.backgroundImage=picOf(t)}
+    else{e=el('div','card'+(d[4]?' prob':''),'<img class="ci" src="'+IC(d[0])+'"><div class="cn">'+d[1]+'</div><div class="cv">'+d[2].replace('\n','<br>')+'</div><div class="cs">'+d[3]+'</div>'+
+        '<div class="detail" style="left:14px;right:14px;bottom:14px">'+(d[4]?'<div style="font-size:11.5px;color:var(--warn);margin-bottom:6px">'+d[4].why+'</div><button class="fix">'+d[4].act+'</button>':'<button class="fix" style="background:var(--acc);color:#fff">Открыть раздел</button>')+'</div>');
+      if(d[4])badge(e,d[4].n,12,12)}
+    L.appendChild(e);const c={e,i,x:W/2-85,y:H+40,r:0,s:1,vx:0,vy:0,vr:0,vs:0,tx:0,ty:0,tr:0,ts:1,delay:enter?.15+i*.07:0};cards.push(c);
+    e.onmouseenter=()=>{if(open<0)hover=i};e.onmouseleave=()=>{if(hover===i)hover=-1};
+    e.onclick=ev=>{if(ev.target.classList.contains('mt')){const k=+ev.target.dataset.i;const[x,y]=rel(sc.stage,ev.target);sc.setTheme(k,x,y);return}
+      if(ev.target.classList.contains('fix')&&d[4]){S.broken=false;e.classList.remove('prob');const b=e.querySelector('.badge');b&&b.classList.add('out');ev.target.parentNode.innerHTML='<div style="color:var(--ok);font-size:12px">Нашлась: путь исправлен</div>';d[4]=null;return}
+      if(ev.target.classList.contains('fix')){toast(sc.stage,'Переход: '+d[1]);return}
+      if(open===i){open=-1;scrim.classList.remove('on');e.classList.remove('open')}else{if(open>=0)cards[open].e.classList.remove('open');open=i;hover=-1;scrim.classList.add('on');e.classList.add('open')}}});
+  scrim.onclick=()=>{if(open>=0)cards[open].e.classList.remove('open');open=-1;scrim.classList.remove('on')};
+  if(!enter)cards.forEach(c=>c.delay=0);
+  let first=!enter;
+  sc.update=dt=>{cards.forEach((c,i)=>{const off=i-mid;let spread=0;if(hover>=0&&i!==hover)spread=(i<hover?-1:1)*Math.max(0,34-Math.abs(i-hover)*8);
+    const th=c.e.classList.contains('theme');
+    c.tx=W/2-85+off*104+spread;c.ty=H-318+off*off*5-(th?26:0);c.tr=off*4;c.ts=th?1.12:1;
+    if(i===hover){c.ty-=46;c.tr*=.3;c.ts+=.06}
+    if(i===open){c.tx=W/2-85;c.ty=H/2-120;c.tr=0;c.ts=1.5}
+    if(c.delay>0){c.delay-=dt;return}
+    if(first){c.x=c.tx;c.y=c.ty;c.r=c.tr;c.s=c.ts}
+    const k=190,d=19;c.vx+=((c.tx-c.x)*k-c.vx*d)*dt;c.vy+=((c.ty-c.y)*k-c.vy*d)*dt;c.vr+=((c.tr-c.r)*k-c.vr*d)*dt;c.vs+=((c.ts-c.s)*k-c.vs*d)*dt;
+    c.x+=c.vx*dt;c.y+=c.vy*dt;c.r+=c.vr*dt;c.s+=c.vs*dt;
+    c.e.style.transform='translate('+c.x+'px,'+c.y+'px) rotate('+c.r+'deg) scale('+c.s+')';c.e.style.zIndex=i===open?30:i===hover?20:(th?12:10-Math.abs(Math.round(off)))});first=false};
+  if(S.game){L.classList.add('flat')}});
+C.st={broken:true};C.rebuild(true);
+document.getElementById('cAgain').onclick=()=>{C.st={broken:true};C.theme=0;C.rebuild(true)};
+
+let last=performance.now();
+function frame(now){const dt=Math.min(.033,(now-last)/1000);last=now;[A,B,C].forEach(s=>s.update&&s.layer&&s.update(dt));requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+let lw=innerWidth;addEventListener('resize',()=>{if(Math.abs(innerWidth-lw)>40){lw=innerWidth;[A,B,C].forEach(s=>s.rebuild(false))}});
+</script>
+</body>
+</html>

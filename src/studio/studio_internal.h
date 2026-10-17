@@ -240,7 +240,8 @@ enum Id {
     ID_RAIL_BAR = 9500,      // +страница: анимация полоски выбранного раздела
     ID_RAIL_HOVER = 9600,    // +страница: анимация наведения на раздел
     ID_SUBTAB = 9700,        // +страница: вкладка внутри группы
-    ID_HOME_TILE = 9800,     // +i: плитка «Обзора» (+50 - её анимация)
+    ID_HOME_TILE = 9800,     // +i: предмет карты экрана «Обзора» (+50 - его анимация)
+
     ID_STATE_PROJ = 10000,   // +i: строка мусора проектов (выбор)
     ID_STATE_DL = 10100,     // +i: строка Загрузок (выбор)
     ID_STATE_APP = 10200,    // +i: «Закрыть» у тяжёлой программы
@@ -340,8 +341,17 @@ struct NetSampler {
     volatile bool running = false;
 };
 
+// Картинка темы, которая сменяется растворением с медленным наездом (обои «Обзора», витрина «Тем»).
+struct PicFade {
+    ThemeInfo cur{}, prev{};
+    std::wstring key;
+    double at = -10;  // когда пришла новая (clock_)
+};
+
 void Preview(int what);     // studio.h: EditorPreview
 std::wstring GameStatus();  // studio.h: SetEditorGameStatus
+void GameToggle();          // studio.h: SetEditorGameToggle
+const wchar_t* ThemeTagline(const std::wstring& key);  // настроение темы одной строкой (studio_themes.cpp)
 std::wstring DevStatus();   // studio.h: SetEditorDevStatus
 
 class Studio {
@@ -423,7 +433,15 @@ private:
     void TabIcon(const RectF& view, float y, float& bottom);
     void ThemesPage(const RectF& r);
     void ThemeHero(const RectF& hero, const ThemeInfo& t, bool trying);
-    void ThemeCard(int index, const ThemeInfo& t, const RectF& cr, const RectF& view);
+    void ThemeFilm(const RectF& r);  // лента тем доком: пейзажи, за чертой «Из обоев» и «Своя палитра»
+    void ThemeInAction(const RectF& r, const ThemeInfo& t);  // кусочек студии, окно и сообщение в цветах темы
+    // картинка темы со сменой растворением; zoom - наезд новой, scale - общий масштаб (включение экрана)
+    bool ThemeFade(PicFade& f, const ThemeInfo& t, const RectF& r, float radius, float zoom, float scale = 1);
+    void Fading(const RectF& r, float alpha, float scale, float dy, const std::function<void()>& draw);
+    void ThemeWave(const std::wstring& key, Gdiplus::PointF from);  // выбрать тему волной от точки
+    UiColors TryoutPalette();
+    void WaveGrab(float w, float h);
+    void WaveComposite(float w, float h);
     void ThemePicture(const ThemeInfo& t, const RectF& r, float radius, float alpha);
     void HeroText(const RectF& hero, const ThemeInfo& t, bool trying, float alpha);
     void Scrim(const RectF& clip, float radius, const RectF& band, Color from, Color to, bool horizontal);
@@ -434,6 +452,14 @@ private:
     void StylePage(const RectF& r);
     void NetPage(const RectF& r);
     void HomePage(const RectF& r);
+    // «Обзор / Разделы» - карта экрана (studio_home.cpp)
+    void HomeEdge(int side, const RectF& scr, double t);
+    void HomeCorners(const RectF& scr, float taskH, double t);
+    void HomeWindow(const RectF& scr, float taskH, double t);
+    void HomeTaskbar(const RectF& scr, float taskH, double t);
+    void HomeShelf(const RectF& r, double t);
+    void HomeBadge(float cx, float cy, int n, float scale);
+    void HomeTipAt(const RectF& anchor, const std::wstring& title, const std::wstring& sub, bool warn, int place);
     void StatePage(const RectF& r);    // «Состояние»: шкалы, что освободить, проекты, Загрузки, рост, система
     void AutoPage(const RectF& r);     // «Автоматика»: переключатели и журнал
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
@@ -472,6 +498,22 @@ private:
     std::vector<tools::Volume> homeVols_;
     int homePathBad_ = 0;
     bool homeAuto_ = false;
+    double homeBoot_ = -1;               // когда экран включился (clock_); -1 - включится в следующем кадре
+    float homeOpen_[2] = {};             // ручки краёв: насколько выехали значки
+    double homeHealAt_[2] = {-10, -10};  // ручка вспыхнула зелёным после починки
+    double homePathAt_ = -10, homeAutoAt_ = -10;  // метка PATH сжалась, метка автозапуска выскочила
+    bool homeAutoWas_ = true;
+    Mover homeThumbs_[8];  // подъём миниатюр тем в окне (x: 0..1)
+    int homePathGone_ = 0;  // сколько было лишних в PATH: метка сжимается с этим числом
+    PicFade homeWall_;         // обои монитора
+    struct HomeTip {
+        std::wstring title, sub;
+        bool warn = false;
+        RectF at;
+        int place = 0;  // 0 справа от рамки, 1 слева, 2 над ней
+        float a = 0;
+        bool want = false;
+    } homeTip_;
     // «Состояние»: живые данные (не чаще раза в 3 с), выбор строк, к какой карточке прокрутить
     ULONGLONG stateAt_ = 0, statePhysAt_ = 0;
     std::vector<tools::Volume> stateVols_;
@@ -617,12 +659,22 @@ private:
     ULONGLONG railPopAt_ = 0;
     std::wstring hoverTheme_, hoverThemeNext_;  // примерка темы наведением
     // витрина тем: прежняя тема растворяется в новую
+    PicFade heroPic_;
+    float filmDock_[16] = {};  // лента тем: увеличение карточек под курсором
     ThemeInfo heroCur_{}, heroPrev_{};
     std::wstring heroKey_;
     bool heroTrying_ = false, heroPrevTrying_ = false;
     ULONGLONG heroAt_ = 0;
     UiColors curUi_{};
     bool curUiReady_ = false;
+    // смена темы волной: прежний кадр в своём холсте уходит под растущий круг
+    HDC waveDC_ = nullptr;
+    HBITMAP waveBmp_ = nullptr;
+    HGDIOBJ waveOld_ = nullptr;
+    int waveW_ = 0, waveH_ = 0;
+    bool waveGrab_ = false;
+    ULONGLONG waveStart_ = 0;
+    Gdiplus::PointF waveFrom_;
     ULONGLONG lastPaint_ = 0;
     std::vector<std::pair<std::wstring, std::wstring>> log_;
     std::wstring status_ = L"Готово";
