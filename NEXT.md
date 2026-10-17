@@ -49,6 +49,10 @@
 7. Б6: подпись своих exe - кнопка «Настроить подпись» (PowerShell New-SelfSignedCertificate CN=MoonRadial
    Local, CodeSigningCert, в CurrentUser\My и CurrentUser\Root - Windows сама спросит подтверждение) и
    POST_BUILD в CMakeLists: Set-AuthenticodeSignature перед cmake/integrity.cmake; без сертификата - пропуск.
+7а. Значки набора 3 уже нарезаны в icons/ (26 штук). Подставить: Песочница - tools-sandbox (сейчас tools-shield),
+   режим проверки - tools-sandbox-check; «Чисто»/«Тихо» - tools-ok, «Собираю»/«Проверка» - tools-wait (сейчас
+   tools-box/tools-shield); находки «Защиты» по виду: FIND_PATH - tools-path-open, FIND_SVC - tools-service,
+   FIND_WMI - tools-wmi, FIND_SELF - tools-integrity, FIND_CERT - tools-certs, FIND_FW - tools-firewall.
 8. Собрать (`cmake --build build-check`), проверить (`--sys-diag`, `--sec-diag`, `--watch-selftest`),
    build.cmd, запустить, коммит без упоминаний Claude.
 
