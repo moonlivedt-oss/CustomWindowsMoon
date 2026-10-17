@@ -16,7 +16,8 @@ namespace toolsui {
 
 inline constexpr UINT WM_TOOLS_JOB = WM_APP + 63;  // ход действия: lParam - строка журнала или итог
 
-// openStudio(page): 0 - PATH, 1 - диски, 2 - автозагрузка, 3 - порты, 4 - процессы (колба, батарея), 5 - версии; scan -
+// openStudio(page): 0 - PATH, 1 - диски, 2 - автозагрузка, 3 - порты, 4 - процессы (колба, батарея), 5 - версии,
+// 6 - защита; scan -
 // что сразу просканировать
 void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
           std::function<void(int page, const std::wstring& scan)> openStudio);
@@ -62,6 +63,21 @@ void PrimeForSnapshot(const Config* cfg);                    // для --studio-
 void TrimDdc();                                              // старое из кэша Unreal
 void CleanProjectList(const std::vector<tools::ProjectJunk>& list);
 bool Busy();
+
+// Вкладка «Защита» в студии: находки последней проверки без отмеченных «Это моё».
+struct SecurityView {
+    std::vector<tools::Suspect> finds;
+    bool checked = false, running = false;
+    int processes = 0, autoruns = 0;
+    int ignored = 0;  // сколько отмечено «Это моё»
+};
+SecurityView SecurityFinds();                    // не проверялось - запускает проверку в фоне
+void PrimeSecurityForSnapshot();                 // для --studio-snap 7 6: проверить сразу, в этом потоке
+void SecurityRescan();                           // проверить заново (итог - в SecurityFinds)
+void SecurityAct(const tools::Suspect& s);       // карточка «что с этим сделать», как из кольца
+void IgnoreFind(const tools::Suspect& s);        // «Это моё»: больше не показывать (ignored.tsv)
+void ClearIgnored();                             // показывать снова всё
+const wchar_t* FindKindName(tools::FindKind k);  // «процесс», «сертификат»...
 // Для проверки (WM_APP+58): карточка со сценой на выдуманных данных, ничего не удаляет.
 // 0 - очистка, 1 - защита с находками, 2 - защита, всё чисто
 void Demo(int what);

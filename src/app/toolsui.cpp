@@ -54,6 +54,9 @@ std::vector<tools::SecurityApp> g_secApps;
 std::vector<tools::VirtualDisk> g_vhd;      // «Docker и WSL» в «Очистке»
 std::vector<tools::Leftover2> g_leftovers;  // хвосты удалённых программ (номера left:i)
 std::vector<tools::GitRepo> g_git;          // кольцо Git (номера git:i)
+std::vector<tools::DeviceProblem> g_devs;   // «Система»: устройства с ошибками
+tools::UpdateInfo g_updates;                // «Система»: история Центра обновления
+ULONGLONG g_rebootAt = 0;                   // когда последний раз смотрели, ждёт ли Windows перезагрузки
 
 // «Защита»: проверка подписей - секунды при первом разе, дальше из кэша; в фоне раз в полчаса.
 SRWLOCK g_secLock = SRWLOCK_INIT;
@@ -304,14 +307,65 @@ std::wstring FindKey(const tools::Suspect& s) {
     return s.pid ? Lower(s.path) : s.where + L"|" + s.name + L"|" + s.path;
 }
 
+// «Это моё»: находки, которые больше не показывать (ignored.tsv в папке данных, по строке на находку).
+// Процесс запоминается по пути - тот же exe под другим номером тоже свой.
+std::set<std::wstring> g_ignored;
+bool g_ignoredLoaded = false;
+
+std::wstring IgnoredFile() { return tools::DataDir() + L"\\ignored.tsv"; }
+
+std::string ReadSmall(const std::wstring& path) {
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return "";
+    std::string s(256 * 1024, '\0');
+    DWORD got = 0;
+    ReadFile(f, s.data(), (DWORD)s.size(), &got, nullptr);
+    CloseHandle(f);
+    s.resize(got);
+    return s;
+}
+
+void WriteSmall(const std::wstring& path, const std::string& s) {
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD put = 0;
+    WriteFile(f, s.data(), (DWORD)s.size(), &put, nullptr);
+    CloseHandle(f);
+}
+
+const std::set<std::wstring>& Ignored() {
+    if (!g_ignoredLoaded) {
+        g_ignoredLoaded = true;
+        for (const std::wstring& l : Split(Widen(ReadSmall(IgnoredFile())), L'\n')) {
+            std::wstring t = Trim(l);
+            if (!t.empty()) g_ignored.insert(t);
+        }
+    }
+    return g_ignored;
+}
+
+bool IsIgnored(const tools::Suspect& s) { return Ignored().count(FindKey(s)) != 0; }
+
+void SaveIgnored() {
+    std::wstring all;
+    for (const std::wstring& k : g_ignored) all += k + L"\n";
+    WriteSmall(IgnoredFile(), Narrow(all));
+}
+
+// все находки последней проверки, кроме отмеченных «Это моё»; вызывать под g_secLock
+std::vector<tools::Suspect> AllFinds(const tools::SecurityScan& sec) {
+    std::vector<tools::Suspect> all;
+    for (const auto* v : {&sec.hijacks, &sec.procs, &sec.autos, &sec.tasks, &sec.nets, &sec.exts})
+        for (const tools::Suspect& s : *v)
+            if (!IsIgnored(s)) all.push_back(s);
+    return all;
+}
+
 // После фоновой проверки: об опасном (счёт 6+) - карточка, про каждую находку один раз.
 void OnSecurity() {
     if (g_busy) return;
     AcquireSRWLockShared(&g_secLock);
-    std::vector<tools::Suspect> all = g_sec.hijacks;
-    all.insert(all.end(), g_sec.procs.begin(), g_sec.procs.end());
-    all.insert(all.end(), g_sec.autos.begin(), g_sec.autos.end());
-    for (const auto* v : {&g_sec.tasks, &g_sec.exts, &g_sec.nets}) all.insert(all.end(), v->begin(), v->end());
+    std::vector<tools::Suspect> all = AllFinds(g_sec);
     ReleaseSRWLockShared(&g_secLock);
     for (const tools::Suspect& s : all) {
         if (s.score < kDangerScore || !g_secWarned.insert(FindKey(s)).second) continue;
@@ -558,6 +612,27 @@ void OpenPagefile() {
 }
 
 void SecurityAction(const tools::Suspect& s);
+int LastDay(const std::wstring& what);
+void SetDay(const std::wstring& what, int day);
+
+// Перезагрузка через 30 секунд (без прав): успеть сохранить, отменить - shutdown /a.
+void RebootSoon() {
+    if ((INT_PTR)ShellExecuteW(nullptr, L"open", Sys32(L"shutdown.exe").c_str(), L"/r /t 30", Sys32(L"").c_str(),
+                               SW_HIDE) <= 32) {
+        g_card.Show(BoostCard::DONE, L"Не получилось", L"Перезагрузите через меню Пуск.", Theme(), 0, Toast::G_WARN);
+        return;
+    }
+    g_card.Show(BoostCard::DONE, L"Перезагрузка через 30 секунд",
+                L"Сохраните открытое. Передумали - Win+R, shutdown /a, Enter.", Theme(), 30000, Toast::G_INFO);
+}
+
+// Минута загрузки Windows (от 1601 года): по ней «уже говорили в эту загрузку».
+int BootMinute() {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG now = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    return (int)(now / 600000000ull - GetTickCount64() / 60000);
+}
 
 // По одной карточке: новый автозапуск, утечка, память на пределе, хвосты Unreal. Не в игре и не поверх другой.
 void TryProactive() {
@@ -614,6 +689,24 @@ void TryProactive() {
             L"Что закрыть", L"Подкачка", [] { MemoryOffer(L"память на пределе", {}, true); }, [] { OpenPagefile(); },
             40000, Toast::G_WARN);
         return;
+    }
+    // Windows ждёт перезагрузки: смотреть раз в 10 минут, говорить один раз за загрузку
+    if (now - g_started > 5 * 60 * 1000 && (!g_rebootAt || now - g_rebootAt > 10 * 60 * 1000)) {
+        g_rebootAt = now;
+        std::vector<std::wstring> why = tools::PendingReboot();
+        int boot = BootMinute();
+        if (!why.empty() && std::abs(LastDay(L"reboot-said") - boot) > 2) {
+            SetDay(L"reboot-said", boot);
+            std::wstring list;
+            for (const std::wstring& w : why) list += (list.empty() ? L"" : L", ") + w;
+            Ask(
+                L"Windows ждёт перезагрузки",
+                list +
+                    L". «Завершение работы» не поможет: с быстрым запуском Windows не выключается до конца и "
+                    L"установку не доделывает. Нужна именно перезагрузка.",
+                L"Перезагрузить", L"Позже", [] { RebootSoon(); }, nullptr, 40000, Toast::G_INFO);
+            return;
+        }
     }
     if (g_devEnded && now - g_devEnded > 2 * 60 * 1000) {
         g_devEnded = 0;
@@ -844,6 +937,33 @@ namespace {
 
 std::wstring Level(int score) { return score >= kDangerScore ? L"Опасно: " : L"Странно: "; }
 
+const wchar_t* FindWhat(tools::FindKind k) {
+    static const wchar_t* kWhat[] = {
+        L"процесс", L"автозапуск", L"реестр",       L"задача планировщика", L"расширение браузера", L"сеть",
+        L"PATH",    L"служба",     L"подписка WMI", L"сам RadialMenu",      L"сертификат",          L"брандмауэр"};
+    static_assert(sizeof(kWhat) / sizeof(kWhat[0]) == tools::kFindKinds, "вид находки без названия");
+    return k >= 0 && k < tools::kFindKinds ? kWhat[k] : L"находка";
+}
+
+// FILETIME (UTC) -> «12.10.2026 14:30» по местному времени; withTime=false - только дата
+std::wstring FtText(ULONGLONG ft, bool withTime = true) {
+    FILETIME u{(DWORD)ft, (DWORD)(ft >> 32)}, l;
+    SYSTEMTIME t;
+    if (!ft || !FileTimeToLocalFileTime(&u, &l) || !FileTimeToSystemTime(&l, &t)) return L"?";
+    wchar_t buf[32];
+    if (withTime)
+        swprintf(buf, 32, L"%02d.%02d.%04d %02d:%02d", t.wDay, t.wMonth, t.wYear, t.wHour, t.wMinute);
+    else
+        swprintf(buf, 32, L"%02d.%02d.%04d", t.wDay, t.wMonth, t.wYear);
+    return buf;
+}
+
+ULONGLONG FtNow() {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    return ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+}
+
 void CopyText(const std::wstring& s) {
     if (!OpenClipboard(g_app)) return;
     EmptyClipboard();
@@ -869,6 +989,7 @@ void OpenInSandbox(const std::wstring& file) {
         return;
     }
     std::wstring name = file.substr(file.find_last_of(L'\\') + 1);
+    std::wstring origin = tools::FileOrigin(file);      // откуда скачан: адрес из метки Windows
     std::wstring kit = ExpandPath(g_cfg->securityDir);  // Sysinternals для проверки поведения
     auto run = [file, kit](bool net, bool check) {
         std::wstring err;
@@ -893,8 +1014,9 @@ void OpenInSandbox(const std::wstring& file) {
     };
     Ask(
         L"Песочница: " + name,
-        L"«Проверить поведение» - снимок системы до и после, запись всех действий программы и отчёт, где она пыталась "
-        L"закрепиться. «Просто открыть» - одноразовая Windows с программой.",
+        (origin.empty() ? L"" : L"Скачан: " + Short(origin, 100) + L". ") +
+            L"«Проверить поведение» - снимок системы до и после, запись всех действий программы и отчёт, где она "
+            L"пыталась закрепиться. «Просто открыть» - одноразовая Windows с программой.",
         L"Проверить поведение", L"Просто открыть", [ask] { ask(true); }, [ask] { ask(false); }, 30000, Toast::G_INFO);
 }
 
@@ -917,8 +1039,38 @@ void OpenVirusTotal(const std::wstring& path) {
 
 void SecurityAction(const tools::Suspect& s) {
     bool file = !s.path.empty() && GetFileAttributesW(s.path.c_str()) != INVALID_FILE_ATTRIBUTES;
+    std::wstring origin = file ? tools::FileOrigin(s.path) : L"";
     std::wstring facts = s.why + L". " + s.path + (s.signer.empty() ? L"" : L", подпись «" + s.signer + L"»") +
-                         (s.parent.empty() ? L"" : L", запустил " + s.parent);
+                         (s.parent.empty() ? L"" : L", запустил " + s.parent) +
+                         (origin.empty() ? L"" : L", скачан: " + Short(origin, 90));
+    if (s.kind == tools::FIND_CERT) {
+        bool user = s.where.find(L"пользователя") != std::wstring::npos;
+        Ask(
+            Level(s.score) + Short(s.name, 60),
+            s.why + L". Хранилище: " + s.where +
+                L". Убрать: «Доверенные корневые центры сертификации» - «Сертификаты», правый щелчок - «Удалить». "
+                L"Kaspersky, Docker, свои сертификаты разработки - оставить.",
+            L"Открыть сертификаты", L"Понятно",
+            [user] {
+                ShellExecuteW(nullptr, L"open", user ? L"certmgr.msc" : L"certlm.msc", nullptr, nullptr, SW_SHOWNORMAL);
+            },
+            nullptr, 30000, Toast::G_WARN);
+        return;
+    }
+    if (s.kind == tools::FIND_FW) {
+        std::wstring path = s.path;
+        Ask(
+            Level(s.score) + Short(s.name, 60),
+            s.why + L". " + s.path + (origin.empty() ? L"" : L", скачан: " + Short(origin, 90)) +
+                L". Выключить: «Правила для входящих подключений», правило с этим именем - «Отключить правило».",
+            L"Брандмауэр", file ? L"VirusTotal" : L"Понятно",
+            [] { ShellExecuteW(nullptr, L"open", L"wf.msc", nullptr, nullptr, SW_SHOWNORMAL); },
+            [path, file] {
+                if (file) OpenVirusTotal(path);
+            },
+            30000, Toast::G_WARN);
+        return;
+    }
     if (s.pid) {
         tools::Suspect c = s;
         Ask(
@@ -1104,11 +1256,7 @@ Item SecurityItem() {
     ReleaseSRWLockShared(&g_secLock);
     if (!checked || now - g_secAt > 10 * 60 * 1000) RefreshSecurity();
 
-    g_finds.clear();
-    g_finds.insert(g_finds.end(), sec.hijacks.begin(), sec.hijacks.end());
-    g_finds.insert(g_finds.end(), sec.procs.begin(), sec.procs.end());
-    g_finds.insert(g_finds.end(), sec.autos.begin(), sec.autos.end());
-    for (const auto* v : {&sec.tasks, &sec.nets, &sec.exts}) g_finds.insert(g_finds.end(), v->begin(), v->end());
+    g_finds = AllFinds(sec);
     g_secStarts = sec.starts;
     int danger = 0;
     for (const tools::Suspect& s : g_finds) danger += s.score >= kDangerScore;
@@ -1123,10 +1271,7 @@ Item SecurityItem() {
                              : L"Странного: " + std::to_wstring(g_finds.size()) + L". " + checkedNote);
     for (size_t i = 0; i < g_finds.size() && i < 12; ++i) {
         const tools::Suspect& s = g_finds[i];
-        static const wchar_t* kWhat[] = {
-            L"процесс", L"автозапуск", L"реестр", L"задача планировщика", L"расширение браузера",
-            L"сеть",    L"PATH",       L"служба", L"подписка WMI",        L"сам RadialMenu"};
-        std::wstring what = kWhat[s.kind];
+        std::wstring what = FindWhat(s.kind);
         item.children.push_back(
             Act(Short(NoExe(s.name), 14), L"tools-bug.png", L"sec-find:" + std::to_wstring(i),
                 Level(s.score) + what + L". " + s.why + L". " + Short(s.path, 90) + L". 2 клика - что с этим сделать"));
@@ -1140,6 +1285,8 @@ Item SecurityItem() {
         item.children.push_back(Act(L"Проверка", L"tools-shield.png", L"", L"Первая проверка подписей идёт в фоне"));
     item.children.push_back(Act(L"Заново", L"tools-scan.png", L"sec-rescan",
                                 L"Ещё раз проверить запущенное, автозапуск и реестр; итог - карточкой"));
+    item.children.push_back(Act(L"Списком", L"tools-shield.png", L"studio:6",
+                                L"Все находки в студии: по видам, с причинами; «Это моё» - больше не показывать"));
     std::wstring av = tools::AntivirusUi();
     item.children.push_back(Act(av.empty() ? L"Defender" : L"Kaspersky", L"tools-shield.png", L"sec-av",
                                 av.empty() ? L"Открыть «Защиту от вирусов» Windows - там полная и офлайн-проверка"
@@ -1149,12 +1296,9 @@ Item SecurityItem() {
                                     ? L"Скопируйте exe в Проводнике (Ctrl+C) и 2 клика: он откроется в одноразовой "
                                       L"Windows - закрыли окно, и всё, что он сделал, исчезло"
                                     : L"Песочница Windows выключена: 2 клика - как включить"));
-    item.children.push_back(Act(L"Снимок", L"tools-snapshot.png", L"sec-restore",
-                                L"Точка восстановления системы - перед драйвером, правками реестра или "
-                                L"«Починить Windows»; нужны права"));
-    item.children.push_back(Act(L"Починить Windows", L"tools-repair.png", L"sec-repair",
-                                L"Сверить системные файлы (SFC) или восстановить их из Windows Update (DISM); "
-                                L"нужны права - Windows спросит"));
+    item.children.push_back(Act(L"Камера и микрофон", L"tools-privacy.png", L"sec-privacy",
+                                L"Кто и когда брал камеру, микрофон и геопозицию (Windows записывает сама). Снимок "
+                                L"и починка Windows - в секторе «Восстановление»"));
     g_secApps = tools::SecurityApps(g_cfg->securityDir);
     for (size_t i = 0; i < g_secApps.size(); ++i) {
         Item a = Act(g_secApps[i].name, L"", L"sec-app:" + std::to_wstring(i), g_secApps[i].exe);
@@ -1162,6 +1306,143 @@ Item SecurityItem() {
         a.full = g_secApps[i].exe;
         item.children.push_back(a);
     }
+    return item;
+}
+
+// «Восстановление»: свой Recovery Kit. Всё с правами - через задачу помощника (одно окно UAC).
+Item RecoveryItem() {
+    std::vector<tools::Broken> broken = tools::FindBroken();  // реестр, мгновенно
+    Item item = Act(L"Восстановление", L"rec-kit.png", L"",
+                    broken.empty() ? L"Починить Windows, точки восстановления, Центр обновления, Проводник, особая "
+                                     L"загрузка, офлайн-проверка"
+                                   : L"Испорчено вирусами или программами: " + std::to_wstring(broken.size()) +
+                                         L". Ниже - вернуть и починить остальное");
+    if (!broken.empty()) {
+        std::wstring list;
+        for (const tools::Broken& b : broken)
+            if (list.size() < 140) list += (list.empty() ? L"" : L"; ") + b.what;
+        item.children.push_back(Act(L"Вернуть " + std::to_wstring(broken.size()), L"rec-unbreak.png", L"rec-unbreak",
+                                    list + L". 2 клика - вернуть как было в Windows (спрошу)"));
+    }
+    item.children.push_back(Act(L"Починить Windows", L"tools-repair.png", L"rec-repair",
+                                L"DISM восстановит хранилище из Windows Update, потом SFC сверит системные файлы - "
+                                L"одним заданием, ход в карточке (до часа, нужен интернет и права)"));
+    item.children.push_back(Act(L"Снимок", L"tools-snapshot.png", L"sec-restore",
+                                L"Точка восстановления системы - перед драйвером, правками реестра или починкой; "
+                                L"нужны права"));
+    item.children.push_back(Act(L"Откатить", L"tools-snapshot.png", L"rec-rstrui",
+                                L"«Восстановление системы»: точки с датами и откат к одной из них"));
+    item.children.push_back(Act(L"Центр обновления", L"rec-update.png", L"rec-wu",
+                                L"Обновления зависли или не ставятся: остановить службы, убрать кэш загрузок и "
+                                L"catroot2 (в копию .old), запустить заново. Спрошу"));
+    if (broken.empty())
+        item.children.push_back(Act(L"Всё на месте", L"rec-unbreak.png", L"rec-unbreak",
+                                    L"Диспетчер задач, regedit, запуск .exe и .bat, Shell и Userinit - как в Windows"));
+    item.children.push_back(Act(L"Проводник", L"rec-explorer.png", L"rec-explorer",
+                                L"Значки «поехали» или эскизы старые: очистить их кэш и перезапустить Проводник"));
+    item.children.push_back(Act(L"Особая загрузка", L"rec-boot.png", L"rec-boot",
+                                L"Перезагрузка в меню восстановления: безопасный режим, откат, командная строка "
+                                L"(спрошу)"));
+    std::wstring av = tools::AntivirusUi();
+    item.children.push_back(Act(L"Офлайн-проверка", L"rec-offline.png", L"rec-offline",
+                                av.empty() ? L"Проверка Microsoft Defender до загрузки Windows - когда вирус мешает "
+                                             L"обычной; компьютер перезагрузится (спрошу)"
+                                           : L"У вас Kaspersky: проверка до загрузки - его средствами; 2 клика - "
+                                             L"подсказка"));
+    item.children.push_back(Act(L"Не грузится?", L"rec-kit.png", L"rec-memo",
+                                L"Что делать, если Windows не загружается: куда нажать и где точки, флешка "
+                                L"восстановления"));
+    return item;
+}
+
+// «Система»: перезагрузка, обновления, устройства, видеокарта, батарея, отчёт.
+Item SystemItem(const Scan& scan) {
+    std::vector<std::wstring> reboot = tools::PendingReboot();
+    g_updates = scan.updates;
+    g_devs.clear();
+    int off = 0;
+    for (const tools::DeviceProblem& d : scan.devices)
+        if (d.disabled)
+            ++off;
+        else
+            g_devs.push_back(d);
+    int issues = (int)!reboot.empty() + (int)!g_updates.failed.empty() + (int)g_devs.size();
+    Item item = Act(L"Система", reboot.empty() ? L"tools-report.png" : L"tools-reboot.png", L"",
+                    issues ? L"Стоит посмотреть: " + std::to_wstring(issues) +
+                                 L". Перезагрузка, обновления, устройства, видеокарта, батарея, отчёт"
+                           : L"Перезагрузка, обновления, устройства, видеокарта, батарея и отчёт о системе");
+    if (!reboot.empty()) {
+        std::wstring list;
+        for (const std::wstring& w : reboot) list += (list.empty() ? L"" : L", ") + w;
+        item.children.push_back(Act(L"Перезагрузка", L"tools-reboot.png", L"sys-reboot",
+                                    L"Windows ждёт: " + list +
+                                        L". «Завершение работы» не поможет (быстрый запуск). 2 клика - перезагрузить "
+                                        L"через 30 с (спрошу)"));
+    }
+    if (g_updates.ok) {
+        std::wstring failed;
+        for (const std::wstring& f : g_updates.failed)
+            if (failed.size() < 120) failed += (failed.empty() ? L"" : L"; ") + f;
+        item.children.push_back(Act(
+            g_updates.failed.empty() ? L"Обновления"
+                                     : L"Обновления: ошибок " + std::to_wstring(g_updates.failed.size()),
+            L"tools-update.png", L"sys-wu",
+            (g_updates.lastOk
+                 ? L"Последнее установлено " + FtText(g_updates.lastOk, false) + L": " + Short(g_updates.lastTitle, 80)
+                 : std::wstring(L"Установленных за последнее время нет")) +
+                (failed.empty() ? L"" : L". Не установились за 30 дней: " + failed) + L". 2 клика - Центр обновления"));
+    } else if (scan.devices.empty() && !g_scanAt) {
+        item.children.push_back(Act(L"Считаю", L"tools-box.png", L"", L"Обновления и устройства считаются в фоне"));
+    }
+    for (size_t i = 0; i < g_devs.size() && i < 4; ++i)
+        item.children.push_back(Act(Short(g_devs[i].name, 14), L"tools-devices.png", L"sys-dev",
+                                    g_devs[i].name + L": " + g_devs[i].text + L". 2 клика - Диспетчер устройств"));
+    if (g_devs.empty() && g_scanAt)
+        item.children.push_back(Act(L"Устройства", L"tools-devices.png", L"sys-dev",
+                                    std::wstring(L"Ошибок в Диспетчере устройств нет") +
+                                        (off ? L"; выключено вручную: " + std::to_wstring(off) : L"") +
+                                        L". 2 клика - открыть"));
+    item.children.push_back(Act(L"Видеокарта", L"tools-temp.png", L"sys-gpu",
+                                L"Температура, нагрузка и питание сейчас (nvidia-smi); в игре слежка меряет сама и "
+                                L"после игры скажет, если был перегрев"));
+    if (tools::Battery().present)
+        item.children.push_back(Act(L"Износ батареи", L"tools-battery.png", L"sys-battery",
+                                    L"Ёмкость по паспорту, сейчас и месяц назад; совет про ограничение заряда"));
+    item.children.push_back(Act(L"Отчёт", L"tools-report.png", L"sys-report",
+                                L"Железо, диски, драйверы, находки «Защиты» - одним текстом в Документы, чтобы "
+                                L"показать, если просите помощи"));
+    return item;
+}
+
+// «Git»: проекты с незакоммиченным и неотправленным; 2 клика - терминал с окружением проекта.
+Item GitItem(const Scan& scan) {
+    g_git.clear();
+    int changed = 0, ahead = 0;
+    for (const tools::GitRepo& r : scan.git)
+        if (r.changed || r.ahead) {
+            g_git.push_back(r);
+            changed += r.changed > 0;
+            ahead += r.ahead > 0;
+        }
+    Item item = Act(L"Git", L"tools-git.png", L"",
+                    !g_scanAt       ? L"Проекты с незакоммиченным и неотправленным; считается в фоне"
+                    : g_git.empty() ? L"Все проекты из колец закоммичены и отправлены"
+                                    : L"С правками: " + std::to_wstring(changed) + L", не отправлено в GitHub: " +
+                                          std::to_wstring(ahead));
+    for (size_t i = 0; i < g_git.size() && i < 12; ++i) {
+        const tools::GitRepo& r = g_git[i];
+        std::wstring label = Short(r.name, 12);
+        if (r.ahead) label += L" +" + std::to_wstring(r.ahead);
+        std::wstring note = r.path + L", ветка " + r.branch;
+        if (r.changed) note += L". Изменено файлов: " + std::to_wstring(r.changed);
+        if (r.ahead) note += L". Коммитов не в GitHub: " + std::to_wstring(r.ahead);
+        if (r.noUpstream) note += L". Ветка не связана с удалённой (не отправлялась)";
+        if (r.behind) note += L". Отстаёт на " + std::to_wstring(r.behind);
+        item.children.push_back(
+            Act(label, L"tools-git.png", L"git:" + std::to_wstring(i), note + L". 2 клика - терминал в папке"));
+    }
+    if (g_scanAt && g_git.empty())
+        item.children.push_back(Act(L"Чисто", L"tools-git.png", L"", L"Незакоммиченного и неотправленного нет"));
     return item;
 }
 
@@ -1532,7 +1813,10 @@ void ShowRing(RadialMenu& menu) {
                        L"node_modules, Unreal"));
     ring.push_back(Act(L"Кто держит", L"tools-lock.png", L"lock-clip",
                        L"Кто не даёт удалить файл или папку: скопируй её в Проводнике и выбери это"));
+    ring.push_back(GitItem(scan));
     ring.push_back(SecurityItem());
+    ring.push_back(RecoveryItem());
+    ring.push_back(SystemItem(scan));
     ring.push_back(Act(L"Все утилиты", L"tools-box.png", L"studio:0", L"PATH, диски, автозагрузка и порты в студии"));
     if (sized && quickTotal + scan.ddcOld + bin > 0)
         status += L"   |   можно освободить " + tools::Bytes(quickTotal + scan.ddcOld + bin);
@@ -1974,6 +2258,355 @@ void Run(const std::wstring& key) {
             });
         return;
     }
+    if (key == L"vhd") {
+        if (g_vhd.empty()) return;
+        std::vector<tools::VirtualDisk> disks = g_vhd;
+        ULONGLONG total = 0;
+        std::wstring list;
+        for (const tools::VirtualDisk& v : disks) {
+            total += v.bytes;
+            if (list.size() < 120) list += (list.empty() ? L"" : L", ") + v.name + L" " + tools::Bytes(v.bytes);
+        }
+        Ask(
+            L"Docker и WSL: " + tools::Bytes(total),
+            list +
+                L". «Почистить Docker» - остановленные контейнеры, ненужные сети и образы без имени (Docker "
+                L"должен быть запущен). «Сжать диски» - закрою WSL и Docker и верну освобождённое внутри место "
+                L"на диск (нужны права).",
+            L"Почистить Docker", L"Сжать диски",
+            [] {
+                RunJob(L"Docker", [](const tools::Log& log, std::wstring& res) {
+                    log(L"docker system prune: убираю неиспользуемое...");
+                    std::wstring out;
+                    int code = tools::RunCapture(L"docker system prune -f", out, 10 * 60 * 1000);
+                    if (code == -1) {
+                        res = L"Docker не найден в PATH.";
+                        return false;
+                    }
+                    std::wstring freed;
+                    for (const std::wstring& l : Split(out, L'\n'))
+                        if (l.find(L"reclaimed") != std::wstring::npos) freed = l;
+                    res = code != 0 ? L"Docker ответил ошибкой (Docker Desktop запущен?): " + Short(Trim(out), 140)
+                          : freed.empty() ? L"Убирать было нечего."
+                                          : freed + L". Чтобы место вернулось на диск - «Сжать диски».";
+                    g_scanAt = 0;
+                    return code == 0;
+                });
+            },
+            [disks, total] {
+                RunJob(L"Сжатие дисков", [disks, total](const tools::Log& log, std::wstring& res) {
+                    log(L"Закрываю WSL и Docker (wsl --shutdown)...");
+                    std::wstring out;
+                    tools::RunCapture(L"\"" + Sys32(L"wsl.exe") + L"\" --shutdown", out, 60000);
+                    log(L"Сжимаю диски (минуты, зависит от размера)...");
+                    bool ok = net::RunAdmin(net::JOB_VHD_COMPACT, log, 60 * 60 * 1000);
+                    ULONGLONG after = 0;
+                    for (const tools::VirtualDisk& v : tools::VirtualDisks()) after += v.bytes;
+                    res =
+                        after < total ? L"Освобождено " + tools::Bytes(total - after) + L"." : L"Сжимать было нечего.";
+                    g_scanAt = 0;
+                    return ok;
+                });
+            },
+            30000, Toast::G_INFO);
+        return;
+    }
+    if (key.rfind(L"left:", 0) == 0) {
+        size_t i = idx(5, g_leftovers.size());
+        if (i == (size_t)-1) return;
+        tools::Leftover2 l = g_leftovers[i];
+        Ask(
+            L"Убрать хвост " + l.name + L"?",
+            l.path + L", " + tools::Bytes(l.bytes) + L". Программы с таким именем нет, папку не открывали " +
+                Days(l.idleDays) + L". Уйдёт в Корзину - вернуть можно оттуда.",
+            L"В Корзину", L"Показать",
+            [l] {
+                RunJob(L"Хвост " + l.name, [l](const tools::Log& log, std::wstring& res) {
+                    int n = tools::RecycleLeftovers({l.path}, log);
+                    res = n ? L"В Корзине, освободится " + tools::Bytes(l.bytes) + L" после её очистки."
+                            : L"Не убрано: папка занята или уже не похожа на хвост.";
+                    g_scanAt = 0;
+                    return n > 0;
+                });
+            },
+            [l] { ShellExecuteW(nullptr, L"open", l.path.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
+        return;
+    }
+    if (key.rfind(L"git:", 0) == 0) {
+        size_t i = idx(4, g_git.size());
+        if (i == (size_t)-1) return;
+        tools::TermEnv env = tools::DetectEnv(g_git[i].path);
+        if (!tools::OpenEnvTerminal(env)) g_card.Show(BoostCard::DONE, L"Терминал не открылся", env.dir, Theme());
+        return;
+    }
+    // ---------------- восстановление ----------------
+    if (key == L"rec-repair" || key == L"sec-repair") {
+        Ask(
+            L"Починить Windows?",
+            L"Сначала DISM сверит хранилище компонентов с Windows Update (до получаса, нужен интернет), потом SFC "
+            L"проверит системные файлы. Компьютером можно пользоваться. Перед этим стоит сделать «Снимок».",
+            L"Починить", L"Не надо",
+            [] {
+                RunJob(L"Починка Windows", [](const tools::Log& log, std::wstring&) {
+                    return net::RunAdmin(net::JOB_REPAIR, log, 90 * 60 * 1000);
+                });
+            },
+            nullptr, 30000, Toast::G_INFO);
+        return;
+    }
+    if (key == L"rec-rstrui") {
+        if ((INT_PTR)ShellExecuteW(nullptr, L"open", Sys32(L"rstrui.exe").c_str(), nullptr, Sys32(L"").c_str(),
+                                   SW_SHOWNORMAL) <= 32)
+            g_card.Show(BoostCard::DONE, L"Не открылось", L"Восстановление системы выключено или нет прав.", Theme(), 0,
+                        Toast::G_WARN);
+        return;
+    }
+    if (key == L"rec-wu") {
+        Ask(
+            L"Сбросить Центр обновления?",
+            L"Остановлю службы обновления, уберу кэш загрузок и каталог подписей (в копии .old - вернуть можно), "
+            L"запущу заново. Windows скачает список обновлений с нуля. Нужны права.",
+            L"Сбросить", L"Не надо",
+            [] {
+                RunJob(L"Центр обновления", [](const tools::Log& log, std::wstring&) {
+                    return net::RunAdmin(net::JOB_WU_RESET, log, 10 * 60 * 1000);
+                });
+            },
+            nullptr, 30000, Toast::G_INFO);
+        return;
+    }
+    if (key == L"rec-unbreak") {
+        std::vector<tools::Broken> broken = tools::FindBroken();
+        if (broken.empty()) {
+            g_card.Show(BoostCard::DONE, L"Всё на месте",
+                        L"Диспетчер задач, regedit, командная строка, запуск .exe и .bat, Shell и Userinit - как в "
+                        L"Windows. Чинить нечего.",
+                        Theme(), 9000, Toast::G_OK);
+            return;
+        }
+        std::wstring list;
+        bool admin = false;
+        for (const tools::Broken& b : broken) {
+            admin |= b.admin;
+            if (list.size() < 220) list += (list.empty() ? L"" : L"; ") + b.what;
+        }
+        Ask(
+            L"Вернуть " + Plural((int)broken.size(), L"настройку", L"настройки", L"настроек") + L"?",
+            list + L". Верну как в Windows; старые значения - в журнале." +
+                (admin ? L" Часть - системная, нужны права." : L""),
+            L"Вернуть", L"Не надо",
+            [broken, admin] {
+                RunJob(L"Вернуть сломанное", [broken, admin](const tools::Log& log, std::wstring& res) {
+                    int fixed = tools::FixBrokenUser(broken, log);
+                    bool ok = true;
+                    if (admin) ok = net::RunAdmin(net::JOB_UNBREAK, log, 120000);
+                    size_t left = tools::FindBroken().size();
+                    res = left ? L"Вернул " + std::to_wstring(fixed) + L", осталось " + std::to_wstring(left) +
+                                     L". Если ломается снова - что-то его ставит, стоит проверить «Защиту»."
+                               : L"Всё вернул как в Windows.";
+                    g_secAt = 0;
+                    return ok && !left;
+                });
+            },
+            nullptr, 30000, Toast::G_WARN);
+        return;
+    }
+    if (key == L"rec-explorer") {
+        Ask(
+            L"Сбросить Проводник?",
+            L"Удалю кэш значков и эскизов и перезапущу Проводник: окна папок закроются, панель задач мигнёт. "
+            L"Файлы не трогаю.",
+            L"Сбросить", L"Не надо",
+            [] {
+                RunJob(L"Проводник", [](const tools::Log& log, std::wstring&) { return tools::ResetExplorer(log); });
+            },
+            nullptr, 20000, Toast::G_INFO);
+        return;
+    }
+    if (key == L"rec-boot") {
+        Ask(
+            L"Перезагрузить в особую загрузку?",
+            L"Windows спросит права и через 15 секунд перезагрузится в синее меню. Там: «Поиск и устранение "
+            L"неисправностей» - «Дополнительные параметры»: безопасный режим («Параметры загрузки», клавиша 4), "
+            L"восстановление системы, командная строка. Сохраните открытое.",
+            L"Перезагрузить", L"Не надо",
+            [] {
+                if (tools::RestartToRecovery())
+                    g_card.Show(BoostCard::DONE, L"Перезагрузка через 15 секунд",
+                                L"Передумали - Win+R, shutdown /a, Enter.", Theme(), 15000, Toast::G_INFO);
+                else
+                    g_card.Show(BoostCard::DONE, L"Не получилось", L"Без прав перезагрузку в меню не запустить.",
+                                Theme(), 0, Toast::G_WARN);
+            },
+            nullptr, 30000, Toast::G_WARN);
+        return;
+    }
+    if (key == L"rec-offline") {
+        std::wstring av = tools::AntivirusUi();
+        if (!av.empty()) {
+            Ask(
+                L"Офлайн-проверка: Kaspersky",
+                L"Пока работает Kaspersky, Defender выключен, и его офлайн-проверка не запустится. В Kaspersky - "
+                L"«Проверка» - «Полная». Если вирус мешает самому антивирусу: Kaspersky Virus Removal Tool (KVRT) "
+                L"или загрузочная флешка Kaspersky Rescue Disk.",
+                L"Открыть Kaspersky", L"Понятно",
+                [av] { ShellExecuteW(nullptr, L"open", av.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }, nullptr, 40000,
+                Toast::G_INFO);
+            return;
+        }
+        Ask(
+            L"Офлайн-проверка Defender?",
+            L"Компьютер сразу перезагрузится и минут 15 будет проверяться до загрузки Windows - так находятся "
+            L"вирусы, которые прячутся от обычной проверки. Сохраните открытое. Нужны права.",
+            L"Перезагрузить и проверить", L"Не надо",
+            [] {
+                RunJob(L"Офлайн-проверка", [](const tools::Log& log, std::wstring&) {
+                    return net::RunAdmin(net::JOB_DEFENDER_OFFLINE, log, 180000);
+                });
+            },
+            nullptr, 30000, Toast::G_WARN);
+        return;
+    }
+    if (key == L"rec-memo") {
+        Ask(
+            L"Если Windows не грузится",
+            L"1. Две-три неудачные загрузки подряд - Windows сама откроет «Автоматическое восстановление»; или на "
+            L"экране входа - Shift + «Перезагрузка». 2. Там: «Поиск и устранение неисправностей» - "
+            L"«Дополнительные параметры»: «Восстановление системы» (точки, что делает «Снимок»), «Удалить "
+            L"обновления», «Параметры загрузки» - 4, безопасный режим. 3. Меню не открывается вовсе - флешка "
+            L"восстановления (от 16 ГБ); её делают заранее, на работающей Windows.",
+            L"Сделать флешку", L"Понятно",
+            [] {
+                ShellExecuteW(nullptr, L"open", Sys32(L"RecoveryDrive.exe").c_str(), nullptr, Sys32(L"").c_str(),
+                              SW_SHOWNORMAL);
+            },
+            nullptr, 90000, Toast::G_INFO);
+        return;
+    }
+    // ---------------- система ----------------
+    if (key == L"sys-reboot") {
+        std::vector<std::wstring> why = tools::PendingReboot();
+        if (why.empty()) {
+            g_card.Show(BoostCard::DONE, L"Перезагрузка не нужна", L"Windows уже ничего не ждёт.", Theme(), 0,
+                        Toast::G_OK);
+            return;
+        }
+        Ask(L"Перезагрузить через 30 секунд?", L"Успеете сохранить открытое; отменить - shutdown /a.", L"Перезагрузить",
+            L"Не надо", [] { RebootSoon(); });
+        return;
+    }
+    if (key == L"sys-wu") {
+        ShellExecuteW(nullptr, L"open", L"ms-settings:windowsupdate", nullptr, nullptr, SW_SHOWNORMAL);
+        if (!g_updates.failed.empty())
+            g_card.Show(BoostCard::DONE, L"Обновления не ставятся",
+                        L"Если «Повторить» в Центре обновления не помогает - «Восстановление», «Центр обновления» "
+                        L"сбросит его кэш.",
+                        Theme(), 20000, Toast::G_INFO);
+        return;
+    }
+    if (key == L"sys-dev") {
+        ShellExecuteW(nullptr, L"open", L"devmgmt.msc", nullptr, nullptr, SW_SHOWNORMAL);
+        return;
+    }
+    if (key == L"sys-gpu")
+        return RunJob(L"Видеокарта", [](const tools::Log& log, std::wstring& res) {
+            log(L"Спрашиваю nvidia-smi...");
+            tools::GpuSample g = tools::GpuNow();
+            if (!g.ok) {
+                res = L"nvidia-smi не ответил: видеокарта NVIDIA спит или драйвер без него.";
+                return false;
+            }
+            wchar_t w[32];
+            swprintf(w, 32, L"%.0f", g.watts);
+            res = std::to_wstring(g.temp) + L" °C, нагрузка " + std::to_wstring(g.load) + L"%, " + w + L" Вт" +
+                  (g.thermal    ? L". Упирается в перегрев - частота снижена."
+                   : g.powerCap ? L". Упирается в предел питания - это обычно для ноутбука."
+                                : L". Ни во что не упирается.");
+            return true;
+        });
+    if (key == L"sys-battery") {
+        tools::BatteryTrend t = tools::BatteryHistory();
+        if (!t.designed || !t.now) {
+            g_card.Show(BoostCard::DONE, L"Батарея", L"Драйвер батареи не отдаёт ёмкость.", Theme(), 0, Toast::G_INFO);
+            return;
+        }
+        auto wh = [](ULONGLONG mwh) {
+            return std::to_wstring(mwh / 1000) + L"," + std::to_wstring(mwh % 1000 / 100) + L" Вт*ч";
+        };
+        int wear = t.now >= t.designed ? 0 : (int)(100 - t.now * 100 / t.designed);
+        std::wstring text =
+            L"Держит " + wh(t.now) + L" из " + wh(t.designed) + L" по паспорту, износ " + std::to_wstring(wear) + L"%.";
+        if (t.monthAgo && t.monthDays >= 7)
+            text += L" " + Days(t.monthDays) + L" назад было " + wh(t.monthAgo) +
+                    (t.monthAgo > t.now ? L", минус " + wh(t.monthAgo - t.now) + L"." : L" - без потерь.");
+        else
+            text += L" История копится с этой версии: через неделю будет видно, как быстро уходит ёмкость.";
+        if (t.mostlyAc)
+            text +=
+                L" Последние две недели ноутбук почти всё время на зарядке: в Armoury Crate включите "
+                L"ограничение заряда (80%) - батарея будет изнашиваться заметно медленнее.";
+        g_card.Show(BoostCard::DONE, L"Износ батареи " + std::to_wstring(wear) + L"%", text, Theme(), 40000,
+                    Toast::G_INFO);
+        return;
+    }
+    if (key == L"sys-report")
+        return RunJob(L"Отчёт о системе", [](const tools::Log& log, std::wstring& res) {
+            log(L"Собираю: железо, диски, драйверы, находки «Защиты»...");
+            std::wstring text = tools::SystemReport();
+            SYSTEMTIME st;
+            GetLocalTime(&st);
+            wchar_t day[16];
+            swprintf(day, 16, L"%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
+            std::wstring path = KnownFolder(FOLDERID_Documents) + L"\\Отчёт RadialMenu " + day + L".txt";
+            // UTF-8 с меткой: Блокнот откроет русский текст правильно
+            WriteSmall(path, "\xEF\xBB\xBF" + Narrow(text));
+            if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                res = L"Не записался: " + path;
+                return false;
+            }
+            ShellExecuteW(nullptr, L"open", Sys32(L"notepad.exe").c_str(), (L"\"" + path + L"\"").c_str(), nullptr,
+                          SW_SHOWNORMAL);
+            res = L"Сохранён: " + path + L". Перед отправкой посмотрите, нет ли лишних путей и имён.";
+            return true;
+        });
+    if (key == L"sec-privacy") {
+        std::vector<tools::PrivacyUse> uses = tools::PrivacyUses();
+        ULONGLONG now = FtNow(), month = 30ull * 24 * 3600 * 10000000;
+        // одна строка на программу: что брала, когда последний раз; «сейчас» - первыми (так уже отсортировано)
+        struct Row {
+            std::wstring app, caps;
+            ULONGLONG start = 0;
+            bool inUse = false, unsignedApp = false;
+        };
+        std::vector<Row> rows;
+        for (const tools::PrivacyUse& u : uses) {
+            if (!u.inUse && now - u.start > month) continue;
+            auto it = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.app == u.app; });
+            if (it == rows.end()) {
+                rows.push_back({u.app, u.capability, u.start, u.inUse, u.unsignedApp});
+                continue;
+            }
+            if (it->caps.find(u.capability) == std::wstring::npos) it->caps += L", " + u.capability;
+            it->inUse |= u.inUse;
+            it->unsignedApp |= u.unsignedApp;
+            it->start = std::max(it->start, u.start);
+        }
+        std::wstring text;
+        for (size_t i = 0; i < rows.size() && i < 8; ++i)
+            text += (text.empty() ? L"" : L"; ") + NoExe(rows[i].app) + L" (" + rows[i].caps + L") " +
+                    (rows[i].inUse ? L"сейчас" : FtText(rows[i].start)) +
+                    (rows[i].unsignedApp ? L", без подписи" : L"");
+        if (rows.size() > 8) text += L" и ещё " + std::to_wstring(rows.size() - 8);
+        bool now1 = !rows.empty() && rows[0].inUse;
+        Ask(
+            now1 ? L"Камера или микрофон заняты: " + NoExe(rows[0].app) : L"Камера и микрофон за 30 дней",
+            text.empty() ? L"За 30 дней никто не брал камеру, микрофон и геопозицию."
+                         : text + L". Незнакомое - запретить в Параметрах, а программу проверить в «Защите».",
+            L"Параметры", L"Понятно",
+            [] { ShellExecuteW(nullptr, L"open", L"ms-settings:privacy-webcam", nullptr, nullptr, SW_SHOWNORMAL); },
+            nullptr, 45000, now1 ? Toast::G_WARN : Toast::G_INFO);
+        return;
+    }
     if (key == L"sec-restore") {
         if (net::AdminReady())
             return RunJob(L"Точка восстановления", [](const tools::Log& log, std::wstring&) {
@@ -2015,24 +2648,6 @@ void Run(const std::wstring& key) {
                       SW_SHOWNORMAL);
         return;
     }
-    if (key == L"sec-repair") {
-        // всё полными путями из System32: процесс с правами не должен найти одноимённый exe в текущей папке
-        auto run = [](const wchar_t* title, const wchar_t* exe, const wchar_t* args) {
-            std::wstring line = std::wstring(L"/k title ") + title + L" & \"" + Sys32(exe) + L"\" " + args;
-            HINSTANCE r = ShellExecuteW(nullptr, L"runas", Sys32(L"cmd.exe").c_str(), line.c_str(), Sys32(L"").c_str(),
-                                        SW_SHOWNORMAL);
-            if ((INT_PTR)r <= 32)
-                g_card.Show(BoostCard::DONE, L"Не запустилось", L"Без прав администратора проверка не идёт.", Theme(),
-                            0, Toast::G_WARN);
-        };
-        Ask(
-            L"Починить системные файлы?",
-            L"SFC сверит файлы Windows и заменит испорченные (минут 10-15). Если SFC не справится - DISM "
-            L"восстановит хранилище из Windows Update (минут 20, нужен интернет), потом снова SFC.",
-            L"SFC", L"DISM", [run] { run(L"SFC", L"sfc.exe", L"/scannow"); },
-            [run] { run(L"DISM", L"dism.exe", L"/Online /Cleanup-Image /RestoreHealth"); }, 30000, Toast::G_INFO);
-        return;
-    }
     if (key == L"sec-sandbox") {
         std::wstring file = tools::ClipboardPath();
         DWORD a = file.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(file.c_str());
@@ -2064,10 +2679,12 @@ void Run(const std::wstring& key) {
         }
         Ask(
             name + (st == tools::SIGN_BAD ? L": подпись повреждена" : L": без проверенной подписи"),
-            exe + (st == tools::SIGN_BAD
-                       ? L" изменён после подписи - его лучше удалить и скачать заново."
-                       : L". Издатель не подтверждён: сначала стоит открыть его в песочнице или сверить хэш на "
-                         L"VirusTotal."),
+            exe +
+                (st == tools::SIGN_BAD
+                     ? L" изменён после подписи - его лучше удалить и скачать заново."
+                     : L". Издатель не подтверждён: сначала стоит открыть его в песочнице или сверить хэш на "
+                       L"VirusTotal.") +
+                (tools::FileOrigin(exe).empty() ? L"" : L" Скачан: " + Short(tools::FileOrigin(exe), 100) + L"."),
             L"Запустить", tools::SandboxAvailable() ? L"Песочница" : L"VirusTotal", launch,
             [exe] {
                 if (tools::SandboxAvailable())
@@ -2167,18 +2784,15 @@ void OnJob(WPARAM wp, LPARAM lp) {
         if (!g_secAsked) return OnSecurity();
         g_secAsked = false;
         AcquireSRWLockShared(&g_secLock);
-        size_t n = g_sec.procs.size() + g_sec.autos.size() + g_sec.hijacks.size() + g_sec.tasks.size() +
-                   g_sec.exts.size() + g_sec.nets.size();
+        std::vector<tools::Suspect> all = AllFinds(g_sec);
+        size_t n = all.size();
         int procs = g_sec.processes, autos = g_sec.autoruns;
         ReleaseSRWLockShared(&g_secLock);
         std::wstring checked = L"Проверено " + Plural(procs, L"программа", L"программы", L"программ") + L" и " +
                                Plural(autos, L"запись", L"записи", L"записей") + L" автозапуска.";
         if (SceneCard::Get().Visible()) {  // итог - в сцене: чистые слетаются в щит, находки - строками под ним
             std::vector<scene::GuardFind> finds;
-            AcquireSRWLockShared(&g_secLock);
-            for (const auto* v : {&g_sec.procs, &g_sec.autos, &g_sec.hijacks, &g_sec.tasks, &g_sec.exts, &g_sec.nets})
-                for (const tools::Suspect& s : *v) finds.push_back({s.name, s.why, s.score});
-            ReleaseSRWLockShared(&g_secLock);
+            for (const tools::Suspect& s : all) finds.push_back({s.name, s.why, s.score});
             std::stable_sort(finds.begin(), finds.end(),
                              [](const scene::GuardFind& a, const scene::GuardFind& b) { return a.score > b.score; });
             scene::GuardEnd(procs, finds);
@@ -2316,6 +2930,48 @@ void Demo(int what) {
 }
 
 void TrimDdc() { Run(L"ddc-trim"); }
+
+SecurityView SecurityFinds() {
+    SecurityView v;
+    AcquireSRWLockShared(&g_secLock);
+    v.checked = g_secAt != 0;
+    v.finds = AllFinds(g_sec);
+    v.processes = g_sec.processes;
+    v.autoruns = g_sec.autoruns;
+    g_secStarts = g_sec.starts;  // SecurityAct берёт запись автозагрузки по номеру из этой проверки
+    ReleaseSRWLockShared(&g_secLock);
+    v.running = g_secRunning;
+    v.ignored = (int)Ignored().size();
+    if (!v.checked && !v.running && g_cfg) RefreshSecurity();
+    return v;
+}
+
+void SecurityRescan() { RefreshSecurity(); }
+
+void PrimeSecurityForSnapshot() {
+    tools::SecurityScan sec = tools::ScanSecurity();
+    AcquireSRWLockExclusive(&g_secLock);
+    g_sec = std::move(sec);
+    g_secAt = GetTickCount64();
+    ReleaseSRWLockExclusive(&g_secLock);
+}
+
+void SecurityAct(const tools::Suspect& s) { SecurityAction(s); }
+
+void IgnoreFind(const tools::Suspect& s) {
+    Ignored();
+    g_ignored.insert(FindKey(s));
+    g_secWarned.insert(FindKey(s));
+    SaveIgnored();
+}
+
+void ClearIgnored() {
+    Ignored();
+    g_ignored.clear();
+    SaveIgnored();
+}
+
+const wchar_t* FindKindName(tools::FindKind k) { return FindWhat(k); }
 
 void CleanProjectList(const std::vector<tools::ProjectJunk>& list) {
     if (list.empty()) return;

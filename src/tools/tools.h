@@ -319,6 +319,9 @@ std::vector<PrivacyUse> PrivacyUses();              // камера, микро�
 void CheckCerts(std::vector<Suspect>& out);         // незнакомые корневые сертификаты (FIND_CERT)
 void CheckFirewall(std::vector<Suspect>& out);      // входящие разрешения для программ из папок пользователя
 std::wstring FileOrigin(const std::wstring& path);  // откуда скачан файл (метка Zone.Identifier), пусто - неизвестно
+// Подпись своих exe: сертификат CN=MoonRadial Local в CurrentUser\My (подписывает сборка, cmake/sign.cmake)
+bool CodeSigningReady();
+bool SetupCodeSigning(const Log& log);  // создать и доверить у этого пользователя (Windows спросит), секунды
 
 // ---------------- система (sysinfo.cpp) ----------------
 struct DeviceProblem {

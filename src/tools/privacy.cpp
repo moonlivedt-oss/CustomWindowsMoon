@@ -86,18 +86,53 @@ namespace {
 // Корни, которые ставят известные программы сами (перехват HTTPS антивирусом и т. п.) или которые стоят
 // в Windows из коробки, - по имени. Остальные в «своих» хранилищах (не из программы Microsoft) - с вопросом.
 bool KnownRoot(const std::wstring& lowerName) {
-    static const wchar_t* kKnown[] = {L"microsoft",       L"kaspersky",    L"digicert",  L"globalsign",
-                                      L"verisign",        L"thawte",       L"symantec",  L"comodo",
-                                      L"sectigo",         L"usertrust",    L"addtrust",  L"entrust",
-                                      L"go daddy",        L"godaddy",      L"starfield", L"isrg",
-                                      L"identrust",       L"certum",       L"ssl.com",   L"securetrust",
-                                      L"trustwave",       L"google trust", L"gts root",  L"harica",
-                                      L"hellenic",        L"emsign",       L"secom",     L"security communication",
-                                      L"aaa certificate", L"baltimore",    L"quovadis",  L"amazon",
-                                      L"buypass",         L"actalis",      L"d-trust",   L"t-telesec",
-                                      L"swisssign",       L"izenpe",       L"certigna",  L"network solutions",
-                                      L"affirmtrust",     L"xramp",        L"twca",      L"telia",
-                                      L"russian trusted", L"минцифр"};
+    static const wchar_t* kKnown[] = {L"microsoft",
+                                      L"kaspersky",
+                                      L"digicert",
+                                      L"globalsign",
+                                      L"verisign",
+                                      L"thawte",
+                                      L"symantec",
+                                      L"comodo",
+                                      L"sectigo",
+                                      L"usertrust",
+                                      L"addtrust",
+                                      L"entrust",
+                                      L"go daddy",
+                                      L"godaddy",
+                                      L"starfield",
+                                      L"isrg",
+                                      L"identrust",
+                                      L"certum",
+                                      L"ssl.com",
+                                      L"securetrust",
+                                      L"trustwave",
+                                      L"google trust",
+                                      L"gts root",
+                                      L"harica",
+                                      L"hellenic",
+                                      L"emsign",
+                                      L"secom",
+                                      L"security communication",
+                                      L"aaa certificate",
+                                      L"baltimore",
+                                      L"quovadis",
+                                      L"amazon",
+                                      L"buypass",
+                                      L"actalis",
+                                      L"d-trust",
+                                      L"t-telesec",
+                                      L"swisssign",
+                                      L"izenpe",
+                                      L"certigna",
+                                      L"network solutions",
+                                      L"affirmtrust",
+                                      L"xramp",
+                                      L"twca",
+                                      L"telia",
+                                      L"russian trusted",
+                                      L"минцифр",
+                                      L"moonradial local"};
     for (const wchar_t* k : kKnown)
         if (lowerName.find(k) != std::wstring::npos) return true;
     return false;
@@ -234,6 +269,49 @@ void CheckFirewall(std::vector<Suspect>& out) {
     if (en) en->Release();
     if (rules) rules->Release();
     pol->Release();
+}
+
+// ---------------- подпись своих exe ----------------
+
+bool CodeSigningReady() {
+    HCERTSTORE s =
+        CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_READONLY_FLAG, L"My");
+    if (!s) return false;
+    PCCERT_CONTEXT c = CertFindCertificateInStore(s, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR,
+                                                  L"MoonRadial Local", nullptr);
+    bool ok = c != nullptr;
+    if (c) CertFreeCertificateContext(c);
+    CertCloseStore(s, 0);
+    return ok;
+}
+
+bool SetupCodeSigning(const Log& log) {
+    if (CodeSigningReady()) {
+        log(L"Сертификат MoonRadial Local уже есть - сборка подписывает им exe.");
+        return true;
+    }
+    // ключ не выгружается из хранилища; доверие - только у этого пользователя. Windows сама спросит, доверять ли
+    // новому корню; отказ - сертификат убирается, чтобы не остался недоверенный
+    const wchar_t* ps =
+        L"$ErrorActionPreference='Stop'; "
+        L"$c = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=MoonRadial Local' "
+        L"-CertStoreLocation Cert:\\CurrentUser\\My -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(10); "
+        L"$f = Join-Path $env:TEMP 'moonradial-local.cer'; "
+        L"try { Export-Certificate -Cert $c -FilePath $f | Out-Null; "
+        L"Import-Certificate -FilePath $f -CertStoreLocation Cert:\\CurrentUser\\Root | Out-Null; 'ok' } "
+        L"catch { Remove-Item $c.PSPath; 'отказ: ' + $_.Exception.Message } "
+        L"finally { Remove-Item $f -ErrorAction SilentlyContinue }";
+    wchar_t sys[MAX_PATH] = {};
+    GetSystemDirectoryW(sys, MAX_PATH);
+    log(L"Создаю сертификат подписи; Windows спросит, доверять ли ему - ответьте «Да».");
+    std::wstring out;
+    int code = RunCapture(L"\"" + std::wstring(sys) +
+                              L"\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -Command \"" +
+                              ps + L"\"",
+                          out, 180000);
+    bool ok = code == 0 && Trim(out).find(L"ok") != std::wstring::npos && CodeSigningReady();
+    log(ok ? L"Готово: следующая сборка подпишет RadialMenu.exe и RadialTools.exe." : L"Не вышло: " + Trim(out));
+    return ok;
 }
 
 }  // namespace tools

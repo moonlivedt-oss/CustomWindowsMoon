@@ -320,7 +320,7 @@ void Studio::ToolsScan(const std::wstring& dir) {
 }
 
 void Studio::GoTools(int tab, const std::wstring& scan) {
-    toolsTab_ = std::clamp(tab, 0, 5);
+    toolsTab_ = std::clamp(tab, 0, 6);
     toolsAt_ = 0;
     GoPage(PAGE_TOOLS);
     if (!scan.empty()) ToolsScan(scan);
@@ -331,10 +331,10 @@ void Studio::ToolsPage(const RectF& r) {
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Утилиты",
            L"PATH и переменные, диски, автозагрузка, порты. Быстрые действия - в кольце утилит на углу.");
-    RectF tabs(Column(in, ui.S(900)).X, in.Y + ui.S(58), std::min(in.Width, ui.S(720)), ui.S(38));
+    RectF tabs(Column(in, ui.S(900)).X, in.Y + ui.S(58), std::min(in.Width, ui.S(840)), ui.S(38));
     int tab = toolsTab_;
-    if (ui.Segmented(ID_TOOLS_TAB, tabs, {L"PATH", L"Диски", L"Автозагрузка", L"Порты", L"Процессы", L"Версии"},
-                     tab)) {
+    if (ui.Segmented(ID_TOOLS_TAB, tabs,
+                     {L"PATH", L"Диски", L"Автозагрузка", L"Порты", L"Процессы", L"Версии", L"Защита"}, tab)) {
         toolsTab_ = tab;
         toolsAt_ = 0;
         ui.ResetScroll(ID_PAGE_SCROLL);
@@ -366,7 +366,7 @@ void Studio::ToolsPage(const RectF& r) {
     if (busy) RepaintIn(120);  // ход работы - несколько раз в секунду, не каждый кадр
     // данные вкладки - при входе и раз в несколько секунд (порты чаще)
     ULONGLONG now = GetTickCount64();
-    ULONGLONG every = toolsTab_ == 3 ? 3000 : 15000;
+    ULONGLONG every = toolsTab_ == 3 || (toolsTab_ == 6 && secView_.running) ? 3000 : 15000;
     if (!toolsAt_ || now - toolsAt_ > every) {
         toolsAt_ = now;
         if (toolsTab_ == 0) {
@@ -397,6 +397,8 @@ void Studio::ToolsPage(const RectF& r) {
             tools::ListenerProjects(toolsPorts_);  // у кабеля подпись - проект, который занял порт
         } else if (toolsTab_ == 5 && versions_.empty()) {
             versions_ = toolsui::Versions();
+        } else if (toolsTab_ == 6) {
+            secView_ = toolsui::SecurityFinds();
         }
     }
     auto log = [&]() -> std::wstring {
@@ -532,7 +534,7 @@ void Studio::ToolsPage(const RectF& r) {
                 arc.SetDashOffset(-(float)std::fmod(GetTickCount64() / std::max(1.0, fx::Dur(60)), 1000.0));
                 arc.SetEndCap(LineCapArrowAnchor);
                 ui.G().DrawBezier(&arc, PointF(b.X - ui.S(2), y1), PointF(b.X - bend - ui.S(4), y1),
-                             PointF(b.X - bend - ui.S(4), y2), PointF(b.X - ui.S(2), y2));
+                                  PointF(b.X - bend - ui.S(4), y2), PointF(b.X - ui.S(2), y2));
             }
             if (anyLink && !fx::Game()) ui.Tick();
             auto drawRow = [&](size_t i, bool lifted) {
@@ -569,7 +571,7 @@ void Studio::ToolsPage(const RectF& r) {
                     for (int r = 0; r < 3; ++r)
                         for (int q = 0; q < 2; ++q)
                             ui.G().FillEllipse(&dot, b.X + q * ui.S(6), ry + lineH / 2 - ui.S(7) + r * ui.S(6), ui.S(3),
-                                          ui.S(3));
+                                               ui.S(3));
                     ui.Text(L"тяни", RectF(b.X + ui.S(16), ry, ui.S(48), lineH), c.faint, 10.5f);
                     ui.Tip(gid, L"Перетащи, чтобы поменять порядок: кто выше, того Windows находит первым");
                 } else {
@@ -1024,7 +1026,8 @@ void Studio::ToolsPage(const RectF& r) {
 
     if (toolsTab_ == 4) {  // ---------------- процессы: колба памяти и батарея ----------------
         float fh = scene::FlaskScene::Height((float)ui.K());
-        wide(L"Память: колба", fh / rowH, [&](const RectF& b) { FlaskLive(flaskScene_, ID_LIVE_FLASK, RectF(b.X, b.Y, b.Width, fh)); });
+        wide(L"Память: колба", fh / rowH,
+             [&](const RectF& b) { FlaskLive(flaskScene_, ID_LIVE_FLASK, RectF(b.X, b.Y, b.Width, fh)); });
         float bh = scene::BatteryScene::Height((float)ui.K());
         wide(L"Фон: куда уходит заряд", bh / rowH, [&](const RectF& b) { BatteryLive(RectF(b.X, b.Y, b.Width, bh)); });
     } else if (toolsTab_ == 5) {  // ---------------- версии ----------------
@@ -1053,6 +1056,109 @@ void Studio::ToolsPage(const RectF& r) {
                 ui.EmptyState(ID_LIVE_VERS, vr, L"Ещё не проверялось: нажми «Проверить сейчас» (около 20 секунд)");
             else
                 VersLive(vr);
+        });
+    } else if (toolsTab_ == 6) {                // ---------------- защита ----------------
+        if (secView_.running) RepaintIn(1000);  // итог проверки придёт сам
+        std::vector<tools::FindKind> kinds;
+        for (const tools::Suspect& s : secView_.finds)
+            if (std::find(kinds.begin(), kinds.end(), s.kind) == kinds.end()) kinds.push_back(s.kind);
+        std::sort(kinds.begin(), kinds.end());
+        if (secKind_ > (int)kinds.size()) secKind_ = 0;
+        std::vector<size_t> shown;
+        for (size_t i = 0; i < secView_.finds.size() && shown.size() < 60; ++i)
+            if (!secKind_ || secView_.finds[i].kind == kinds[secKind_ - 1]) shown.push_back(i);
+        float findH = lineH * 1.6f;
+        wide(L"Находки", (shown.size() * findH + ui.S(kinds.size() > 1 ? 104 : 58)) / rowH, [&](const RectF& b) {
+            std::wstring head = secView_.running ? std::wstring(L"Проверяю: подписи, места запуска, автозапуск...")
+                                : !secView_.checked
+                                    ? std::wstring(L"Ещё не проверялось")
+                                    : L"Проверено " +
+                                          Plural(secView_.processes, L"программа", L"программы", L"программ") + L" и " +
+                                          Plural(secView_.autoruns, L"запись", L"записи", L"записей") + L" автозапуска";
+            ui.Text(head, RectF(b.X, b.Y, b.Width - ui.S(390), ui.S(36)), c.muted, 11.5f);
+            if (secView_.ignored &&
+                ui.Button(ID_TOOLS_SEC_UNHIDE, RectF(b.X + b.Width - ui.S(386), b.Y, ui.S(190), ui.S(36)),
+                          L"Показать скрытые " + std::to_wstring(secView_.ignored))) {
+                toolsui::ClearIgnored();
+                refresh();
+            }
+            if (ui.Button(ID_TOOLS_SEC_RESCAN, RectF(b.X + b.Width - ui.S(186), b.Y, ui.S(186), ui.S(36)),
+                          secView_.running   ? L"Проверяю"
+                          : secView_.checked ? L"Проверить заново"
+                                             : L"Проверить",
+                          Kind::Primary, L"", secView_.running) &&
+                !secView_.running) {
+                toolsui::SecurityRescan();
+                secView_.running = true;
+                refresh();
+            }
+            float y = b.Y + ui.S(48);
+            if (kinds.size() > 1) {
+                std::vector<std::wstring> labels{L"Все"};
+                for (tools::FindKind k : kinds) {  // в фильтре - первое слово: «задача», «расширение»
+                    std::wstring n = toolsui::FindKindName(k);
+                    labels.push_back(n.substr(0, n.find(L' ')));
+                }
+                int sel = secKind_;
+                RectF fr(b.X, y, std::min(b.Width, ui.S(118) * labels.size()), ui.S(34));
+                if (ui.Segmented(ID_TOOLS_SEC_KIND, fr, labels, sel)) secKind_ = sel;
+                y += ui.S(46);
+            }
+            if (shown.empty()) {
+                ui.Text(secView_.checked
+                            ? L"Ничего странного: всё запущенное и автозапуск подписаны или лежат на своих "
+                              L"местах."
+                            : L"Первая проверка идёт в фоне - подписи считаются до минуты.",
+                        RectF(b.X, y, b.Width, lineH), c.muted, 11.5f);
+                y += lineH;
+            }
+            for (size_t n = 0; n < shown.size(); ++n) {
+                const tools::Suspect& s = secView_.finds[shown[n]];
+                RectF rr(b.X - ui.S(6), y, b.Width + ui.S(12), findH);
+                bool hot = rowHot(rr);
+                if (hot) ui.Fill(rr, WithAlpha(c.cardHi, 170), ui.S(6));
+                bool danger = s.score >= 6;
+                ui.Text(danger ? L"опасно" : L"странно", RectF(b.X, y + ui.S(2), ui.S(70), ui.S(22)),
+                        danger ? c.warn : c.gold, 11, true);
+                float tx = b.X + ui.S(76), tw = b.Width - ui.S(76) - (hot ? ui.S(250) : 0);
+                std::wstring name = Ellip(s.name, 60);
+                float nw = std::min(tw, ui.Measure(name, 12, true) + ui.S(12));
+                ui.Text(name, RectF(tx, y + ui.S(2), nw, ui.S(22)), c.text, 12, true);
+                ui.Text(toolsui::FindKindName(s.kind), RectF(tx + nw, y + ui.S(3), std::max(0.0f, tw - nw), ui.S(22)),
+                        c.faint, 10.5f);
+                ui.Text(Ellip(s.why + (s.path.empty() ? L"" : L". " + s.path), 150),
+                        RectF(tx, y + ui.S(23), tw, ui.S(22)), c.muted, 10.5f);
+                if (hot) {
+                    float bx = b.X + b.Width - ui.S(244);
+                    if (ui.Button(ID_TOOLS_SEC + (int)n * 2, RectF(bx, y + ui.S(8), ui.S(130), ui.S(28)), L"Что делать",
+                                  Kind::Primary))
+                        toolsui::SecurityAct(s);
+                    if (ui.Button(ID_TOOLS_SEC + (int)n * 2 + 1,
+                                  RectF(bx + ui.S(138), y + ui.S(8), ui.S(106), ui.S(28)), L"Это моё")) {
+                        toolsui::IgnoreFind(s);
+                        Toast(L"Больше не показываю: " + s.name);
+                        refresh();
+                        break;
+                    }
+                }
+                y += findH;
+            }
+        });
+        bool signReady = tools::CodeSigningReady();
+        wide(L"Подпись своих exe", 1.5f, [&](const RectF& b) {
+            ui.Text(signReady
+                        ? L"Сертификат MoonRadial Local есть: сборка подписывает RadialMenu.exe и RadialTools.exe. "
+                          L"Чужой файл с этой подписью «Защита» считает подделкой."
+                        : L"Своим сертификатом сборка подпишет RadialMenu.exe и RadialTools.exe - у Kaspersky "
+                          L"меньше поводов, помощник с правами сверяет подпись. Сертификат доверен только у вас.",
+                    RectF(b.X, b.Y, b.Width - ui.S(220), ui.S(52)), c.muted, 11.5f, false, ui::Left, true);
+            if (!signReady &&
+                ui.Button(ID_TOOLS_SIGN, RectF(b.X + b.Width - ui.S(206), b.Y + ui.S(6), ui.S(206), ui.S(36)),
+                          L"Настроить подпись", Kind::Secondary, L"", busy) &&
+                !busy)
+                ToolsRun(L"Подпись", [](const tools::Log& l, ToolsJob&) { return tools::SetupCodeSigning(l); });
+            if (toolsJob_ && toolsJob_->title == L"Подпись")
+                ui.Text(log(), RectF(b.X, b.Y + ui.S(52), b.Width, ui.S(40)), c.faint, 10.5f);
         });
     }
 

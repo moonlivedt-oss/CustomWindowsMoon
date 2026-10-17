@@ -37,8 +37,10 @@ if(MINGW)
 endif()
 set_target_properties(RadialTools PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_OUT_DIR})
 
-# отметка целостности: SHA-256 свежего exe - «Защита» заметит, если файл потом изменится (cmake/integrity.cmake)
+# подпись своим сертификатом, если он настроен (cmake/sign.cmake), потом отметка целостности: SHA-256 свежего exe -
+# «Защита» заметит, если файл потом изменится (cmake/integrity.cmake)
 foreach(t RadialMenu RadialTools)
   add_custom_command(TARGET ${t} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:${t}> -P ${CMAKE_SOURCE_DIR}/cmake/sign.cmake
     COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:${t}> -P ${CMAKE_SOURCE_DIR}/cmake/integrity.cmake)
 endforeach()
