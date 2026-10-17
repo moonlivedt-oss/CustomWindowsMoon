@@ -62,6 +62,12 @@ Look Detect(const std::wstring& dir) {
     PERF_SCOPE("project.Detect");
     Look l;
     std::wstring name = dir.substr(dir.find_last_of(L'\\') + 1), low = Lower(name);
+    // свой значок в стиле колец: icons\proj-<имя папки>.png (лист sheet-projects.png) - важнее значка проекта
+    std::wstring styled = ExeDir() + L"\\icons\\proj-" + low + L".png";
+    if (FileThere(styled)) {
+        l.ownPng = styled;
+        return l;
+    }
     for (const std::wstring& rel :
          {std::wstring(L"icon.png"), std::wstring(L"logo.png"), std::wstring(L"assets\\icon.png"),
           std::wstring(L"assets\\logo.png"), std::wstring(L"assets\\icons\\icon.png"),
