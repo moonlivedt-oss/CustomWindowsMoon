@@ -24,7 +24,7 @@ public:
     enum Glyph { G_NONE, G_OK, G_FAIL, G_WARN, G_ASK, G_BUSY, G_NET, G_RESTORE, G_INFO };
 
 protected:
-    enum { H_NONE = 0, H_CLOSE = 1, H_BODY = 2, H_USER = 10, kMaxHits = 24 };
+    enum { H_NONE = 0, H_CLOSE = 1, H_BODY = 2, H_USER = 10, kMaxHits = 32 };
     static constexpr float kW = 384, kM = 28;  // ширина карточки и поля под тень, до масштаба
 
     void CreateWnd(HINSTANCE inst, const wchar_t* cls, const wchar_t* title);

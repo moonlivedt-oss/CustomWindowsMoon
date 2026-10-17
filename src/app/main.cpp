@@ -2,11 +2,13 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shellscalingapi.h>
+#include <tlhelp32.h>
 #include <wtsapi32.h>
 #include <objidl.h>
 #include <gdiplus.h>
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -20,20 +22,24 @@
 #include "core/files.h"
 #include "core/fx.h"
 #include "core/llmouse.h"
+#include "core/text.h"
 #include "core/themes.h"
 #include "core/night.h"
 #include "core/perf.h"
 #include "desk/battery.h"
 #include "desk/boost.h"
 #include "desk/boostcard.h"
+#include "desk/boostpick.h"
 #include "desk/corners.h"
 #include "desk/cursor.h"
 #include "desk/deskclick.h"
 #include "desk/devmode.h"
 #include "desk/frame.h"
+#include "desk/gameboost.h"
 #include "desk/gamemode.h"
 #include "desk/hexwave.h"
 #include "desk/lockscreen.h"
+#include "desk/modefx.h"
 #include "desk/snip.h"
 #include "desk/widget.h"
 #include "desk/winfx.h"
@@ -79,7 +85,12 @@ DevMode g_dev;
 WindowFrame g_frame;
 lockscreen::Reveal g_reveal;
 HexWave g_wave;
+ModeFx g_modefx;  // анимация включения и выключения игрового режима и Unreal
 BoostCard g_boostCard;
+BoostPick g_pick;                         // выбор по программам: закрыть, усыпить, оставить
+BoostCard g_gbCard;                       // новости Boost во время игры и работы: видеокарта, шейдеры, сборки, итог
+std::wstring g_pickFor;                   // чей профиль выбора: exe игры, редактора или «вручную»
+ULONGLONG g_avHintAt = 0;                 // когда предложить исключения антивируса для Unreal (0 - не надо)
 std::vector<boost::Group> g_boostGroups;  // что предложили закрыть
 std::vector<std::wstring> g_boostClosed;  // что закрыли - вернуть после игры
 bool g_boostBusy = false;
@@ -154,6 +165,8 @@ void MaskAlt() {
     SendInput(2, in, sizeof(INPUT));
 }
 
+void ShowAvHint();
+
 void PollWork() {
     bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
     ULONGLONG nowMs = GetTickCount64();
@@ -181,6 +194,12 @@ void PollWork() {
     g_battery.Tick(g_cfg);
     g_snip.Tick();
     g_boostCard.Tick();
+    g_pick.Tick();
+    g_gbCard.Tick();
+    if (g_avHintAt && nowMs >= g_avHintAt) {
+        g_avHintAt = 0;
+        ShowAvHint();
+    }
     netui::Tick();
     toolsui::Tick();
     autos::Tick();
@@ -301,47 +320,117 @@ std::wstring Names(const std::vector<std::wstring>& names) {
     return s;
 }
 
+// Что сделать по выбору в карточке: закрыть (boost::Free) и усыпить
+// (gboost::Soften) - в потоке.
+struct BoostJob {
+    std::vector<boost::Group> close;
+    std::vector<DWORD> sleep;
+    int sleepApps = 0;
+};
+
 DWORD WINAPI BoostThread(void* p) {
-    std::unique_ptr<std::vector<boost::Group>> groups((std::vector<boost::Group>*)p);
+    std::unique_ptr<BoostJob> job((BoostJob*)p);
     std::wstring dir = BoostDir();
-    auto* r = new boost::Result(boost::Free(boost::Load(dir), dir, *groups));
+    double before = boost::AvailMb();
+    auto* r = new boost::Result;
+    if (!job->close.empty()) *r = boost::Free(boost::Load(dir), dir, job->close);
+    if (!job->sleep.empty()) {
+        gboost::Soften(job->sleep);
+        r->slept = job->sleepApps;
+        Sleep(400);
+    }
+    r->freedMb = std::max(0.0, boost::AvailMb() - before);
     PostMessageW(g_wnd, WM_BOOST_DONE, 0, (LPARAM)r);
     return 0;
 }
 
-void StartBoost() {
-    if (g_boostBusy || g_boostGroups.empty()) return;
+void StartBoost(BoostJob* job) {
+    if (g_boostBusy) {
+        delete job;
+        return;
+    }
     g_boostBusy = true;
     g_boostCard.Show(BoostCard::WORKING, L"Освобождаю память...",
-                     L"Программы закрываются мягко, как крестиком; кто не закрылся - через пару секунд добивается.",
+                     job->close.empty() ? L"Усыпляю: память программ уходит в подкачку, "
+                                          L"процессор - в экономию."
+                                        : L"Программы закрываются мягко, как крестиком; кто не "
+                                          L"закрылся - через пару "
+                                          L"секунд добивается.",
                      CurrentTheme(g_cfg));
-    auto* groups = new std::vector<boost::Group>(g_boostGroups);
-    if (HANDLE th = CreateThread(nullptr, 0, BoostThread, groups, 0, nullptr)) {
+    if (HANDLE th = CreateThread(nullptr, 0, BoostThread, job, 0, nullptr)) {
         CloseHandle(th);
     } else {
-        delete groups;
+        delete job;
         g_boostBusy = false;
     }
 }
 
-// Карточка «освободить память»: при запуске игры или редактора (если памяти мало по minFreePercent и есть
-// что закрыть) или вручную из трея, угла, студии. why - к чему готовимся: «перед игрой», «для Unreal Editor».
-// Что не предлагать закрыть: сама игра и редактор.
+std::wstring GameExe() {
+    for (DWORD pid : g_game.GamePids()) {
+        std::wstring p = gm::ProcessPath(pid);
+        if (!p.empty()) return p;
+    }
+    return L"";
+}
+
+// Путь к запущенному Unreal Editor (для списка исключений антивируса).
+std::wstring EditorExe() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return L"";
+    PROCESSENTRY32W pe{sizeof(pe)};
+    std::wstring out;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok && out.empty(); ok = Process32NextW(snap, &pe))
+        if (gm::MatchAny(pe.szExeFile, g_cfg.devApps)) out = gm::ProcessPath(pe.th32ProcessID);
+    CloseHandle(snap);
+    return out;
+}
+
+// Карточка «освободить память»: при запуске игры или редактора (если памяти
+// мало по minFreePercent и есть что закрыть) или вручную из трея, угла, студии.
+// why - к чему готовимся: «перед игрой», «для Unreal Editor». Что не предлагать
+// закрыть: сама игра и редактор.
 std::vector<std::wstring> KeepApps() {
     std::vector<std::wstring> keep;
     if (g_game.On())
-        for (DWORD pid : g_game.GamePids())
-            if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
-                wchar_t p[MAX_PATH];
-                DWORD n = MAX_PATH;
-                if (QueryFullProcessImageNameW(h, 0, p, &n)) {
-                    std::wstring full(p, n);
-                    keep.push_back(full.substr(full.find_last_of(L'\\') + 1));
-                }
-                CloseHandle(h);
-            }
+        for (DWORD pid : g_game.GamePids()) {
+            std::wstring full = gm::ProcessPath(pid);
+            if (!full.empty()) keep.push_back(gm::FileName(full));
+        }
     if (g_dev.On()) keep.push_back(L"UnrealEditor.exe");
     return keep;
+}
+
+// Что делать с программой, пока для игры нет своего выбора: WebView держит
+// поиск Windows - оставить, мессенджеры с голосом - усыпить (закрытие оборвёт
+// звонок), остальное - закрыть, как раньше.
+int DefaultAct(const std::wstring& key) {
+    if (key.find(L"webview") != std::wstring::npos) return gboost::ACT_KEEP;
+    for (const wchar_t* m : {L"discord", L"telegram", L"whatsapp", L"viber", L"skype"})
+        if (key == m) return gboost::ACT_SLEEP;
+    return gboost::ACT_CLOSE;
+}
+
+void ApplyPick(const std::vector<BoostPick::Row>& rows) {
+    std::map<std::wstring, int> acts;
+    auto* job = new BoostJob;
+    for (const BoostPick::Row& r : rows) {
+        acts[r.key] = r.act;
+        for (const boost::Group& g : g_boostGroups) {
+            if (Lower(g.name) != r.key) continue;
+            if (r.act == gboost::ACT_CLOSE) job->close.push_back(g);
+            if (r.act == gboost::ACT_SLEEP) {
+                job->sleep.insert(job->sleep.end(), g.pids.begin(), g.pids.end());
+                job->sleepApps++;
+            }
+        }
+    }
+    gboost::SaveProfile(g_pickFor, acts);
+    if (job->close.empty() && job->sleep.empty()) {
+        delete job;
+        g_boostCard.Show(BoostCard::DONE, L"Ничего не трогаю", L"Выбор запомнен.", CurrentTheme(g_cfg), 3500);
+        return;
+    }
+    StartBoost(job);
 }
 
 void OfferBoost(bool manual, const std::wstring& why = L"перед игрой") {
@@ -363,20 +452,47 @@ void OfferBoost(bool manual, const std::wstring& why = L"перед игрой")
         toolsui::MemoryOffer(manual ? L"" : why, KeepApps(), manual);
         return;
     }
-    std::vector<std::wstring> names;
-    for (const auto& g : g_boostGroups) names.push_back(g.title.empty() ? g.name : g.title);
-    g_boostCard.onYes = [] { StartBoost(); };
-    g_boostCard.Show(BoostCard::OFFER, L"Освободить ~" + Size(mb) + (manual ? L"" : L" " + why + L"?"),
-                     Names(names) + L". Сейчас свободно " + Size(avail) + L".", t);
+    // профиль: для игры - по имени её exe, для редактора - по его имени
+    std::wstring who;
+    if (manual) {
+        g_pickFor = L"вручную";
+    } else if (g_game.On()) {
+        std::wstring exe = GameExe();
+        g_pickFor = exe.empty() ? g_game.Reason() : gm::FileName(exe);
+        who = g_game.Reason();
+    } else {
+        g_pickFor = L"unrealeditor";
+        who = g_dev.Reason();
+    }
+    std::map<std::wstring, int> prof = gboost::Profile(g_pickFor);
+    std::vector<BoostPick::Row> rows;
+    bool remembered = false;
+    for (const boost::Group& g : g_boostGroups) {
+        BoostPick::Row r{g.title.empty() ? g.name : g.title, Lower(g.name), g.mb, DefaultAct(Lower(g.name))};
+        auto it = prof.find(r.key);
+        if (it != prof.end()) r.act = it->second, remembered = true;
+        rows.push_back(r);
+    }
+    g_pick.onApply = [](const std::vector<BoostPick::Row>& r) { ApplyPick(r); };
+    g_pick.Show(manual ? L"Освободить память?" : L"Освободить память " + why + L"?",
+                L"Сейчас свободно " + Size(avail) +
+                    (remembered && !who.empty() ? L". Выбор - как в прошлый раз для " + who + L"."
+                                                : L". «Усыпить» - программа остаётся открытой, но не мешает."),
+                rows, t);
 }
 
 void BoostDone(boost::Result* r) {
     g_boostBusy = false;
     for (const auto& p : r->reopen)
         if (std::find(g_boostClosed.begin(), g_boostClosed.end(), p) == g_boostClosed.end()) g_boostClosed.push_back(p);
+    std::wstring what;
+    if (r->closed) what += L"Закрыто: " + std::to_wstring(r->closed);
+    if (r->slept) what += (what.empty() ? L"Усыплено: " : L", усыплено: ") + std::to_wstring(r->slept);
     g_boostCard.Show(BoostCard::DONE, L"Освобождено " + Size(r->freedMb),
-                     L"Закрыто программ: " + std::to_wstring(r->closed) + L". Свободно " + Size(boost::AvailMb()) +
-                         (g_cfg.boostRestore && !r->reopen.empty() ? L". После игры их можно будет вернуть." : L"."),
+                     what + L". Свободно " + Size(boost::AvailMb()) +
+                         (g_cfg.boostRestore && !r->reopen.empty() ? L". После игры закрытое можно будет вернуть."
+                          : r->slept                               ? L". Усыплённые проснутся после игры."
+                                                                   : L"."),
                      CurrentTheme(g_cfg));
     delete r;
 }
@@ -399,24 +515,241 @@ void OfferRestore() {
     g_boostCard.Show(BoostCard::RESTORE, L"Вернуть закрытые программы?", Names(names), CurrentTheme(g_cfg));
 }
 
-// Игра закрылась: приоритеты и таймер назад, ещё одна очистка, предложить вернуть закрытое.
+// Игра закрылась: приоритеты и таймер назад, ещё одна очистка, предложить
+// вернуть закрытое.
 void BoostAfterGame() {
     boost::Settings s = boost::Load(BoostDir());
     boost::GameTweaks(s, false);
+    gboost::Restore(L'g');
+    if (!g_dev.On()) gboost::Restore(L's');  // усыплённые для редактора спят, пока он открыт
+    gboost::Quiet(false);
     if (g_cfg.boostAfter && s.purge) boost::RunPurge(s);
     OfferRestore();
 }
 
-// Режим разработки включился или выключился: обои и память, красота и перехват мыши не трогаются.
+std::wstring Duration(ULONGLONG ms) {
+    int m = (int)(ms / 60000);
+    wchar_t b[32];
+    if (m >= 60)
+        swprintf(b, 32, L"%d ч %d мин", m / 60, m % 60);
+    else
+        swprintf(b, 32, L"%d мин", std::max(1, m));
+    return b;
+}
+
+std::wstring MinSec(double sec) {
+    int s = (int)std::lround(sec);
+    wchar_t b[32];
+    if (s < 60)
+        swprintf(b, 32, L"%d с", s);
+    else
+        swprintf(b, 32, L"%d:%02d", s / 60, s % 60);
+    return b;
+}
+
+// Итог игры (или долгой работы в Unreal, если памяти не хватало): строка в
+// историю и карточка.
+void SessionSummary(const gboost::Session& s) {
+    gboost::SaveSession(s);
+    if (!g_cfg.boostSummary || s.ms < 3 * 60000 || s.samples < 6) return;
+    bool tight = s.stallSamples >= 3 || s.pageGrowMb > 512;
+    if (!s.game && !tight) return;  // в редакторе говорим только о проблемах
+    // в карточку влезает четыре строки: сначала цифры, потом вывод
+    std::wstring sub = L"Память до " + Size(s.peakUsedMb) + L" из " + Size(s.totalMb);
+    if (s.peakVramMb > 1 && s.vramMb > 0) sub += L", видео до " + Size(s.peakVramMb) + L" из " + Size(s.vramMb);
+    sub += L".";
+    if (tight)
+        sub += L" Не хватало: подкачка +" + Size(s.pageGrowMb) + L", диск мешал " +
+               std::to_wstring(s.stallSamples * 5) + L" с - в следующий раз усыпляй больше.";
+    else
+        sub += L" Памяти хватало.";
+    if (s.purges) sub += L" Кэш чистился " + Plural(s.purges, L"раз", L"раза", L"раз") + L".";
+    g_gbCard.Show(BoostCard::DONE, (s.game ? L"Сыграно " : L"В Unreal ") + Duration(s.ms) + L": " + s.name, sub,
+                  CurrentTheme(g_cfg), 16000, tight ? Toast::G_WARN : Toast::G_INFO);
+}
+
+bool WallpaperPaused(bool cfgFlag) { return cfgFlag && !gm::WallpaperEngine().empty(); }
+
+void CopyText(const std::wstring& s) {
+    if (!OpenClipboard(g_wnd)) return;
+    EmptyClipboard();
+    size_t bytes = (s.size() + 1) * sizeof(wchar_t);
+    if (HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+        memcpy(GlobalLock(h), s.c_str(), bytes);
+        GlobalUnlock(h);
+        if (!SetClipboardData(CF_UNICODETEXT, h)) GlobalFree(h);
+    }
+    CloseClipboard();
+}
+
+// Один раз: исключения антивируса для папок Unreal - сборка и шейдеры заметно
+// быстрее.
+void ShowAvHint() {
+    wchar_t ad[MAX_PATH];
+    ExpandEnvironmentStringsW(L"%APPDATA%\\MoonDesk\\av_hint.done", ad, MAX_PATH);
+    if (Exists(ad) || !g_dev.On()) return;
+    if (HANDLE f = CreateFileW(ad, GENERIC_WRITE, 0, nullptr, CREATE_NEW, 0, nullptr); f != INVALID_HANDLE_VALUE)
+        CloseHandle(f);
+    std::wstring list = gboost::UnrealExclusions(EditorExe());
+    g_gbCard.yesLabel = L"Скопировать список";
+    g_gbCard.noLabel = L"Не нужно";
+    g_gbCard.onNo = nullptr;
+    g_gbCard.onYes = [list] {
+        CopyText(list);
+        g_gbCard.Show(BoostCard::DONE, L"Список в буфере",
+                      L"Kaspersky: Настройки - Угрозы и исключения - Управление "
+                      L"исключениями - Добавить. "
+                      L"Папки и процессы - по одной строке.",
+                      CurrentTheme(g_cfg), 16000);
+    };
+    g_gbCard.Show(BoostCard::OFFER, L"Ускорить сборки Unreal?",
+                  L"Антивирус проверяет каждый файл компилятора и шейдеров. "
+                  L"Исключения для папок движка, проектов и "
+                  L"кэша ускоряют сборку. Список соберу, добавишь сам.",
+                  CurrentTheme(g_cfg), 30000, Toast::G_INFO);
+}
+
+// Новости слежки Boost (поток gboost): видеокарта, видеопамять, шейдеры,
+// сборки.
+void OnBoostNote(const gboost::Note& n) {
+    ThemeInfo t = CurrentTheme(g_cfg);
+    switch (n.ev) {
+        case gboost::EV_GPU_WRONG: {
+            if (!g_cfg.boostGpu) return;
+            size_t bar = n.sub.find(L'|');
+            // «NVIDIA GeForce RTX 5050 Laptop GPU» -> «RTX 5050»: в карточку влезает четыре строки
+            auto shortName = [](std::wstring g) {
+                for (const wchar_t* cut :
+                     {L"NVIDIA GeForce ", L"AMD Radeon(TM) ", L"(R)", L"(TM)", L" Laptop GPU", L" Graphics"})
+                    for (size_t at; (at = g.find(cut)) != std::wstring::npos;) g.erase(at, wcslen(cut));
+                return Trim(g);
+            };
+            std::wstring ig = shortName(n.sub.substr(0, bar)),
+                         dg = bar == std::wstring::npos ? L"" : shortName(n.sub.substr(bar + 1));
+            std::wstring exe = n.text;
+            g_gbCard.yesLabel = L"Включить";
+            g_gbCard.noLabel = L"Не нужно";
+            g_gbCard.onNo = nullptr;
+            g_gbCard.onYes = [exe, dg] {
+                bool ok = gboost::PreferDiscrete(exe);
+                g_gbCard.Show(BoostCard::DONE, ok ? L"Готово" : L"Не получилось",
+                              ok ? L"При следующем запуске игра пойдёт на " + dg + L"."
+                                 : L"Windows не дала записать настройку видеокарты.",
+                              CurrentTheme(g_cfg));
+            };
+            g_gbCard.Show(BoostCard::OFFER, L"Игра на встроенной видеокарте",
+                          L"«" + gm::FileName(exe) + L"» рисует на " + ig + L", а " + dg +
+                              L" простаивает. «Включить» - со следующего запуска игра пойдёт на " + dg + L".",
+                          t, 30000, Toast::G_WARN);
+            return;
+        }
+        case gboost::EV_VRAM_HIGH:
+            if (!g_cfg.devWatch) return;
+            g_gbCard.Show(BoostCard::DONE, L"Видеопамять: " + Size(n.a) + L" из " + Size(n.b),
+                          L"Unreal близок к «Out of video memory». Помогут Scalability пониже "
+                          L"(Settings - Engine "
+                          L"Scalability), один вьюпорт вместо двух и закрытое видео в браузере.",
+                          t, 20000, Toast::G_WARN);
+            return;
+        case gboost::EV_SHADERS_START: {
+            if (!g_cfg.devWatch) return;
+            int eco = 0;
+            if (g_cfg.boostEco)
+                eco = gboost::BackgroundEco({L"UnrealEditor", L"ShaderCompileWorker", L"UnrealBuildTool", L"UbaHost",
+                                             L"dotnet", L"cl", L"link"},
+                                            boost::Load(BoostDir()).guarded);
+            g_gbCard.Show(BoostCard::DONE, L"Компилируются шейдеры",
+                          L"Работают " + Plural((int)n.a, L"процесс", L"процесса", L"процессов") +
+                              (eco ? L", фон приглушён до конца." : L".") + L" Сообщу, когда закончится.",
+                          t, 7000, Toast::G_INFO);
+            return;
+        }
+        case gboost::EV_SHADERS_DONE:
+            gboost::Restore(L'c');
+            if (!g_cfg.devWatch || n.a < 15) return;
+            g_gbCard.Show(BoostCard::DONE, L"Шейдеры готовы за " + MinSec(n.a),
+                          L"Больше всего работало " + Plural((int)n.b, L"процесс", L"процесса", L"процессов") + L".", t,
+                          7000, Toast::G_OK);
+            return;
+        case gboost::EV_BUILD_DONE:
+            if (!g_cfg.devWatch) return;
+            if (n.b > 0)
+                g_gbCard.Show(BoostCard::DONE, L"Сборка готова за " + MinSec(n.a), n.sub, t, 7000, Toast::G_OK);
+            else
+                g_gbCard.Show(BoostCard::DONE, L"Сборка не удалась",
+                              n.text.empty() ? L"Подробности - в окне вывода." : n.text, t, 20000, Toast::G_FAIL);
+            return;
+        case gboost::EV_PURGED:
+            return;  // тихо: итог игры скажет, сколько раз
+    }
+}
+
+// Для проверки без игры: карточки на выдуманных данных.
+void BoostDemo(int what) {
+    ThemeInfo t = CurrentTheme(g_cfg);
+    if (what == 0) {
+        g_pick.onApply = [](const std::vector<BoostPick::Row>&) {};
+        g_pick.Show(L"Освободить память перед игрой?", L"Сейчас свободно 3.1 ГБ. Выбор - как в прошлый раз для NFS14.",
+                    {{L"Google Chrome", L"chrome", 1840, 0},
+                     {L"Discord", L"discord", 620, 1},
+                     {L"Telegram Desktop", L"telegram", 310, 1},
+                     {L"Microsoft Edge WebView2", L"msedgewebview2", 280, 2},
+                     {L"Yandex.Disk", L"yandexdisk2", 120, 0}},
+                    t);
+    } else if (what == 1) {
+        gboost::Session s;
+        s.name = L"NFS14";
+        s.ms = 102 * 60000;
+        s.samples = 1200;
+        s.peakUsedMb = 13500;
+        s.totalMb = 15800;
+        s.pageGrowMb = 1300;
+        s.stallSamples = 7;
+        s.peakVramMb = 7100;
+        s.vramMb = 8188;
+        s.purges = 3;
+        bool was = g_cfg.boostSummary;
+        g_cfg.boostSummary = true;
+        g_gbCard.Show(BoostCard::DONE, L"", L"", t);  // сброс подписей
+        SessionSummary(s);
+        g_cfg.boostSummary = was;
+    } else {
+        auto* n = new gboost::Note{gboost::EV_GPU_WRONG, 40, 0, L"D:\\Games\\NFS14\\NFS14.exe",
+                                   L"Intel(R) UHD Graphics|NVIDIA GeForce RTX 5050 Laptop GPU"};
+        PostMessageW(g_wnd, gboost::WM_GBOOST, n->ev, (LPARAM)n);
+    }
+}
+
+// Режим разработки включился или выключился: обои и память, красота и перехват
+// мыши не трогаются.
 void OnDevMode(bool on) {
     UpdateTrayTip();
     autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
     toolsui::OnModes(g_game.On(), on);
-    if (on && g_cfg.devBoost && !g_game.On()) OfferBoost(false, L"для " + g_dev.Reason());
-    if (!on) OfferRestore();
+    gboost::SetDev(on && g_cfg.devWatch, g_dev.Reason());
+    std::vector<std::wstring> chips;
+    if (on) {
+        if (WallpaperPaused(g_cfg.devWallpaper)) chips.push_back(L"Обои на паузе");
+        if (g_cfg.devWatch) {
+            chips.push_back(L"Видеопамять");
+            chips.push_back(L"Шейдеры");
+            chips.push_back(L"Сборки UBT");
+        }
+        if (g_cfg.autoPower && !tools::OnBattery()) chips.push_back(L"Питание: максимум");
+        if (g_cfg.devBoost && !g_game.On()) OfferBoost(false, L"для " + g_dev.Reason());
+        g_avHintAt = GetTickCount64() + 90000;
+    } else {
+        g_avHintAt = 0;
+        gboost::Restore(L'c');
+        if (!g_game.On()) gboost::Restore(L's');
+        SessionSummary(gboost::TakeSession(false));
+        if (g_cfg.devWallpaper) chips.push_back(L"Обои снова идут");
+        chips.push_back(L"Фон как был");
+        OfferRestore();
+    }
     if (g_cfg.hexGlass && !g_game.On())
-        g_wave.Play(on, on ? L"Режим разработки: " + g_dev.Reason() : L"Режим разработки выключен",
-                    CurrentTheme(g_cfg));
+        g_modefx.Play(ModeFx::DEV, on, on ? L"Режим разработки: " + g_dev.Reason() : L"Режим разработки выключен",
+                      chips, CurrentTheme(g_cfg));
 }
 
 // Игровой режим включился или выключился: эффекты, рамки окон и перехват мыши.
@@ -427,18 +760,50 @@ void OnGameMode(bool on) {
     autos::OnModes(on, g_dev.On());  // питание: в игре - производительность
     toolsui::OnModes(on, g_dev.On());
     UpdateTrayTip();
-    // Boost: во время игры таймер и приоритеты, при запуске - предложить освободить память
-    netui::Game(on, g_game.GamePids(), g_game.Reason());  // сеть в игре: туннель и пинг до сервера
+    // Boost: во время игры таймер и приоритеты, при запуске - предложить
+    // освободить память
+    netui::Game(on, g_game.GamePids(),
+                g_game.Reason());  // сеть в игре: туннель и пинг до сервера
+    std::vector<std::wstring> chips;
     if (on) {
-        boost::GameTweaks(boost::Load(BoostDir()), true);
+        boost::Settings s = boost::Load(BoostDir());
+        boost::GameTweaks(s, true);
+        chips.push_back(L"Красота выключена");
+        if (WallpaperPaused(g_cfg.gameWallpaper)) chips.push_back(L"Обои на паузе");
+        if (s.ok && s.timer) chips.push_back(L"Таймер 0.5 мс");
+        if (g_cfg.boostEco) {
+            int n = gboost::GameFirst(g_game.GamePids(), Split(g_cfg.boostKeepFast, L'|'), s.guarded);
+            chips.push_back(L"Игре высокий приоритет");
+            if (n) chips.push_back(L"Фон в экономии: " + std::to_wstring(n));
+        }
+        if (g_cfg.boostQuiet) {
+            gboost::Quiet(true);
+            if (gboost::QuietOn()) chips.push_back(L"Уведомления молчат");
+        }
+        bool battery = tools::OnBattery();
+        if (g_cfg.autoPower) chips.push_back(battery ? L"От батареи: баланс" : L"Питание: максимум");
+        gboost::SetGame(true, g_game.GamePids(), GameExe(), g_game.Reason(), g_cfg.boostIslc);
         if (g_cfg.boostOffer) OfferBoost(false);
+        if (battery)
+            g_gbCard.Show(BoostCard::DONE, L"Игра от батареи",
+                          L"Процессор и видеокарта будут работать медленнее, а заряд "
+                          L"уйдёт за час-полтора. С зарядкой "
+                          L"режим питания сам станет «максимум».",
+                          CurrentTheme(g_cfg), 12000, Toast::G_WARN);
     } else {
+        bool quiet = gboost::QuietOn();
+        gboost::SetGame(false, {}, L"", L"", false);
         BoostAfterGame();
+        SessionSummary(gboost::TakeSession(true));
         g_dev.Reapply(g_cfg);  // игра вернула обои, а редактор ещё открыт
+        chips.push_back(L"Красота вернулась");
+        if (g_cfg.gameWallpaper) chips.push_back(L"Обои снова идут");
+        if (g_cfg.boostEco) chips.push_back(L"Приоритеты как были");
+        if (quiet) chips.push_back(L"Уведомления включены");
     }
-    // волна сот по краям экрана - видно, что режим переключился
     if (g_cfg.hexGlass)
-        g_wave.Play(on, on ? L"Игровой режим: " + g_game.Reason() : L"Игровой режим выключен", CurrentTheme(g_cfg));
+        g_modefx.Play(ModeFx::GAME, on, on ? L"Игровой режим: " + g_game.Reason() : L"Игровой режим выключен", chips,
+                      CurrentTheme(g_cfg));
 }
 
 // Программу запустили вместе со входом в Windows: Проводник стартовал меньше полутора минут назад.
@@ -574,6 +939,32 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_BOOST_DONE:
             BoostDone(reinterpret_cast<boost::Result*>(lp));
             return 0;
+        case gboost::WM_GBOOST: {
+            std::unique_ptr<gboost::Note> n(reinterpret_cast<gboost::Note*>(lp));
+            OnBoostNote(*n);
+            return 0;
+        }
+        case WM_APP + 66: {  // для проверки: анимация режима (0/1 - игра вкл/выкл, 2/3 - Unreal вкл/выкл)
+            bool on = !(wp & 1);
+            if (wp < 2)
+                g_modefx.Play(
+                    ModeFx::GAME, on, on ? L"Игровой режим: NFS14" : L"Игровой режим выключен",
+                    on ? std::vector<std::wstring>{L"Красота выключена", L"Обои на паузе", L"Таймер 0.5 мс",
+                                                   L"Игре высокий приоритет", L"Фон в экономии: 4",
+                                                   L"Уведомления молчат"}
+                       : std::vector<std::wstring>{L"Красота вернулась", L"Обои снова идут", L"Приоритеты как были"},
+                    CurrentTheme(g_cfg));
+            else
+                g_modefx.Play(
+                    ModeFx::DEV, on, on ? L"Режим разработки: Unreal Editor" : L"Режим разработки выключен",
+                    on ? std::vector<std::wstring>{L"Обои на паузе", L"Видеопамять", L"Шейдеры", L"Сборки UBT"}
+                       : std::vector<std::wstring>{L"Обои снова идут", L"Фон как был"},
+                    CurrentTheme(g_cfg));
+            return 0;
+        }
+        case WM_APP + 67:  // для проверки: карточки Boost на выдуманных данных (0 - выбор, 1 - итог, 2 - видеокарта)
+            BoostDemo((int)wp);
+            return 0;
         case WM_WTSSESSION_CHANGE:
             g_reveal.OnSession(wp);
             if (wp == WTS_SESSION_UNLOCK) netui::Wake();
@@ -646,7 +1037,13 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             if (g_displayNotify) UnregisterPowerSettingNotification(g_displayNotify);
             if (g_acdcNotify) UnregisterPowerSettingNotification(g_acdcNotify);
             g_wave.Destroy();
+            g_modefx.Destroy();
+            gboost::Stop();
+            gboost::RestoreAll();
+            gboost::Quiet(false);
             g_boostCard.Destroy();
+            g_pick.Destroy();
+            g_gbCard.Destroy();
             netui::Shutdown();
             toolsui::Shutdown();
             autos::Shutdown();
@@ -696,6 +1093,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_inst = inst;
     g_game.Recover();  // если прошлый запуск упал в игровом режиме - вернуть анимации, прозрачность, обои
     g_dev.Recover();
+    gboost::Recover();  // приоритеты, экономия и тишина, оставшиеся от упавшего прошлого раза
     g_cfgPath = ExeDir() + L"\\radial.cfg";
     // первый запуск после клонирования: своих колец ещё нет - берём пример с общими папками
     if (!Exists(g_cfgPath)) CopyFileW((ExeDir() + L"\\radial.example.cfg").c_str(), g_cfgPath.c_str(), TRUE);
@@ -730,7 +1128,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         else if (what == PREVIEW_BOOST)
             OfferBoost(true);
         else if (what == PREVIEW_GAME_WAVE)
-            g_wave.Play(true, L"Игровой режим: так это выглядит", CurrentTheme(g_cfg));
+            g_modefx.Play(ModeFx::GAME, true, L"Игровой режим: так это выглядит",
+                          {L"Красота выключена", L"Обои на паузе", L"Игре высокий приоритет"}, CurrentTheme(g_cfg));
         else
             g_battery.Test(what == PREVIEW_BATTERY_CHARGE);
     });
@@ -764,7 +1163,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     // зарядку подключили или отключили - режим питания (автоматика)
     g_acdcNotify = RegisterPowerSettingNotification(g_wnd, &GUID_ACDC_POWER_SOURCE, DEVICE_NOTIFY_WINDOW_HANDLE);
     g_wave.Create(inst);
+    g_modefx.Create(inst);
     g_boostCard.Create(inst);
+    g_pick.Create(inst);
+    g_gbCard.Create(inst);
+    gboost::Start(g_wnd);
     corners::SetBoost([] { OfferBoost(true); });
     netui::Init(inst, g_wnd, &g_cfg, &g_boostCard, [] {
         OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);

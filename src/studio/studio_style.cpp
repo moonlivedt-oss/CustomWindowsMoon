@@ -6,6 +6,7 @@
 
 #include "core/themes.h"
 #include "desk/boost.h"
+#include "desk/gameboost.h"
 #include "desk/lockscreen.h"
 #include "desk/whreg.h"
 #include "gfx/draw.h"
@@ -109,11 +110,12 @@ void Studio::StylePage(const RectF& r) {
     });
 
     // режим разработки: тяжёлому редактору - память и видеокарту, углы и кольца остаются
-    card(L"Режим разработки", 5.6f, [&](const RectF& b) {
+    card(L"Режим разработки", 6.6f, [&](const RectF& b) {
         toggle(row(b, 0, L"Включать сам, когда открыт редактор"), ID_DEV_AUTO, cfg.devAuto);
         toggle(row(b, 1, L"Пауза Wallpaper Engine"), ID_DEV_WALL, cfg.devWallpaper);
         toggle(row(b, 2, L"Предлагать освободить память"), ID_DEV_BOOST, cfg.devBoost);
-        RectF fr(b.X, b.Y + 3 * rowH + ui.S(4), b.Width, ui.S(36));
+        toggle(row(b, 3, L"Видеопамять, шейдеры, сборки"), ID_DEV_WATCH, cfg.devWatch);
+        RectF fr(b.X, b.Y + 4 * rowH + ui.S(4), b.Width, ui.S(36));
         FieldOrText(
             ID_DEV_LIST, fr, view, cfg.devApps,
             [this](const std::wstring& s) {
@@ -122,10 +124,10 @@ void Studio::StylePage(const RectF& r) {
             },
             L"Редакторы через |, например UnrealEditor.exe|blender.exe");
         std::wstring now = DevStatus();
-        note(b, 4, 3,
+        note(b, 5, 3,
              (now.empty() ? L"" : L"Сейчас: " + now + L". ") +
                  L"Пока открыт редактор, обои стоят на паузе, а при его запуске можно закрыть лишнее (как перед "
-                 L"игрой). Анимации, углы и кольца работают; включить вручную - в меню значка в трее.",
+                 L"игрой). Сообщу, когда видеопамять на пределе, шейдеры готовы или сборка кончилась.",
              c.muted);
     });
 
@@ -201,7 +203,7 @@ void Studio::StylePage(const RectF& r) {
         toggle(row(b, 0, L"Соты в углах, кольце, заряде"), ID_HEX_GLASS, cfg.hexGlass);
         toggle(row(b, 1, L"Портал при входе после включения"), ID_HEX_BOOT, cfg.bootPortal);
         toggle(row(b, 2, L"Портал после сна и выключения экрана"), ID_HEX_WAKE, cfg.wakePortal);
-        RectF wr = row(b, 3, L"Волна игрового режима");
+        RectF wr = row(b, 3, L"Анимация игрового режима");
         if (ui.Button(ID_HEX_WAVE, RectF(wr.X + wr.Width - ui.S(150), wr.Y + ui.S(4), ui.S(150), ui.S(36)),
                       L"Показать"))
             Preview(PREVIEW_GAME_WAVE);
@@ -260,8 +262,7 @@ void Studio::StylePage(const RectF& r) {
         if (ui.Button(ID_BOOST_NOW, RectF(nr.X + nr.Width - ui.S(150), nr.Y + ui.S(4), ui.S(150), ui.S(36)),
                       L"Освободить..."))
             Preview(PREVIEW_BOOST);
-        if (ui.Button(ID_BOOST_LIST, RectF(nr.X, nr.Y + ui.S(4), ui.S(150), ui.S(36)),
-                      L"Что закрывать", Kind::Ghost) &&
+        if (ui.Button(ID_BOOST_LIST, RectF(nr.X, nr.Y + ui.S(4), ui.S(150), ui.S(36)), L"Что закрывать", Kind::Ghost) &&
             !dir.empty())
             ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + dir + L"\\boost.config.json\"").c_str(), nullptr,
                           SW_SHOWNORMAL);
@@ -269,11 +270,33 @@ void Studio::StylePage(const RectF& r) {
         double avail = boost::AvailMb(&used);
         wchar_t mem[64];
         swprintf(mem, 64, L"Сейчас занято %d%%, свободно %.1f ГБ. ", used, avail / 1024);
-        std::wstring s = dir.empty()
-                             ? L"Папка Boost не найдена: положи её рядом с RadialMenu или укажи boost_dir в radial.cfg."
-                             : std::wstring(mem) + L"Списки и что чистить - в boost.config.json, общем со скриптами Boost" +
-                                   (boostPurge_ ? L"." : L"; очистка кэша там выключена (purgeStandby).");
+        std::wstring s =
+            dir.empty() ? L"Папка Boost не найдена: положи её рядом с RadialMenu или укажи boost_dir в radial.cfg."
+                        : std::wstring(mem) + L"Списки и что чистить - в boost.config.json, общем со скриптами Boost" +
+                              (boostPurge_ ? L"." : L"; очистка кэша там выключена (purgeStandby).");
         note(b, 5, 3, s, dir.empty() ? c.warn : c.muted);
+    });
+
+    // Boost во время игры: силы игре, тишина, слежка за памятью и видеокартой
+    card(L"Во время игры", 6.7f, [&](const RectF& b) {
+        toggle(row(b, 0, L"Игре приоритет, фону экономия"), ID_BOOST_ECO, cfg.boostEco);
+        toggle(row(b, 1, L"Уведомления Windows молчат"), ID_BOOST_QUIET, cfg.boostQuiet);
+        toggle(row(b, 2, L"Чистить раздутый кэш памяти"), ID_BOOST_ISLC, cfg.boostIslc);
+        toggle(row(b, 3, L"Проверять видеокарту игры"), ID_BOOST_GPU, cfg.boostGpu);
+        toggle(row(b, 4, L"Итог после игры"), ID_BOOST_SUMMARY, cfg.boostSummary);
+        std::vector<gboost::Session> last = gboost::History(1);
+        std::wstring hist;
+        if (!last.empty()) {
+            wchar_t b2[160];
+            swprintf(b2, 160, L"Последняя игра: %ls, %d мин, пик памяти %.1f ГБ. ", last[0].name.c_str(),
+                     (int)(last[0].ms / 60000), last[0].peakUsedMb / 1024);
+            hist = b2;
+        }
+        note(b, 5, 3,
+             hist +
+                 L"Фон уходит на экономные ядра (EcoQoS), кэш чистится через задачу «Очистка кэша» выше. "
+                 L"Кого не замедлять - boost_keep_fast в radial.cfg.",
+             c.muted);
     });
 
     // экран ввода пароля: аватар, чёткий фон
@@ -311,8 +334,7 @@ void Studio::StylePage(const RectF& r) {
                 logonStatus_ = msg;
             }
         }
-        if (ui.Button(ID_LOGON_AVATAR_PICK, RectF(bx + ui.S(158), b.Y + ui.S(48), ui.S(110), ui.S(36)),
-                      L"Своя...")) {
+        if (ui.Button(ID_LOGON_AVATAR_PICK, RectF(bx + ui.S(158), b.Y + ui.S(48), ui.S(110), ui.S(36)), L"Своя...")) {
             Defer([this] {
                 std::wstring p = PickPath(false);
                 if (p.empty()) return;
@@ -322,8 +344,8 @@ void Studio::StylePage(const RectF& r) {
             });
         }
         if (!cfg.avatarSource.empty() &&
-            ui.Button(ID_LOGON_AVATAR_EMBLEM, RectF(bx + ui.S(276), b.Y + ui.S(48), ui.S(110), ui.S(36)),
-                      L"Полумесяц", Kind::Ghost)) {
+            ui.Button(ID_LOGON_AVATAR_EMBLEM, RectF(bx + ui.S(276), b.Y + ui.S(48), ui.S(110), ui.S(36)), L"Полумесяц",
+                      Kind::Ghost)) {
             Change();
             cfg.avatarSource.clear();
             Save();

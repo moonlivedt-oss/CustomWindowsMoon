@@ -354,10 +354,12 @@ bool PurgeTaskExists() { return !elevate::Blocked(elevate::TASK_PURGE) && elevat
 
 bool SetupPurgeTask() { return elevate::Setup(elevate::TASK_PURGE); }
 
-bool RunPurge(const Settings& s) {
+bool RunPurge(const Settings& s) { return RunPurgeAreas(s.areas); }
+
+bool RunPurgeAreas(const std::vector<std::wstring>& list) {
     if (!PurgeTaskExists()) return false;  // сама по себе (после игры) не спрашивает UAC - пропускает
     std::wstring areas;
-    for (const std::wstring& a : s.areas) areas += (areas.empty() ? L"" : L",") + a;
+    for (const std::wstring& a : list) areas += (areas.empty() ? L"" : L",") + a;
     elevate::Put(L"PurgeAreas", areas);  // помощник не читает настроек из папки пользователя
     if (elevate::Run(elevate::TASK_PURGE)) return true;
     // антивирус не пускает задачу: после игры UAC не спрашиваем, а в студии карточка снова предложит «Настроить»
