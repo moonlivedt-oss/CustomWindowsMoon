@@ -102,6 +102,11 @@ struct JobMsg {
 
 ThemeInfo Theme() { return CurrentTheme(*g_cfg); }
 
+// значок набора 4, если он уже нарисован, иначе нынешний (art/ICONS-PROMPTS.md, лист sheet-tools3.png)
+const wchar_t* Have(const wchar_t* want, const wchar_t* now) {
+    return Exists(ExeDir() + L"\\icons\\" + want) ? want : now;
+}
+
 Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key, const std::wstring& note) {
     Item it;
     it.name = name;
@@ -945,6 +950,26 @@ const wchar_t* FindWhat(tools::FindKind k) {
     return k >= 0 && k < tools::kFindKinds ? kWhat[k] : L"находка";
 }
 
+// значок находки по виду: у системных - свой (набор 3), у процессов, автозапуска, реестра и прочего - жук
+const wchar_t* FindIcon(tools::FindKind k) {
+    switch (k) {
+        case tools::FIND_PATH:
+            return L"tools-path-open.png";
+        case tools::FIND_SVC:
+            return L"tools-service.png";
+        case tools::FIND_WMI:
+            return L"tools-wmi.png";
+        case tools::FIND_SELF:
+            return L"tools-integrity.png";
+        case tools::FIND_CERT:
+            return L"tools-certs.png";
+        case tools::FIND_FW:
+            return L"tools-firewall.png";
+        default:
+            return L"tools-bug.png";
+    }
+}
+
 // FILETIME (UTC) -> «12.10.2026 14:30» по местному времени; withTime=false - только дата
 std::wstring FtText(ULONGLONG ft, bool withTime = true) {
     FILETIME u{(DWORD)ft, (DWORD)(ft >> 32)}, l;
@@ -1263,7 +1288,12 @@ Item SecurityItem() {
 
     std::wstring checkedNote = L"Проверено " + Plural(sec.processes, L"программа", L"программы", L"программ") + L" и " +
                                Plural(sec.autoruns, L"запись", L"записи", L"записей") + L" автозапуска";
-    Item item = Act(L"Защита", danger ? L"tools-bug.png" : L"tools-shield.png", L"",
+    Item item = Act(L"Защита",
+                    !checked          ? L"tools-wait.png"
+                    : danger          ? L"tools-bug.png"
+                    : g_finds.empty() ? L"tools-ok.png"
+                                      : L"tools-shield.png",
+                    L"",
                     !checked          ? L"Подписи, места запуска, автозапуск и перехваты в реестре; проверяю..."
                     : g_finds.empty() ? checkedNote + L": ничего странного"
                     : danger          ? L"Опасного: " + std::to_wstring(danger) + L", всего находок " +
@@ -1273,7 +1303,7 @@ Item SecurityItem() {
         const tools::Suspect& s = g_finds[i];
         std::wstring what = FindWhat(s.kind);
         item.children.push_back(
-            Act(Short(NoExe(s.name), 14), L"tools-bug.png", L"sec-find:" + std::to_wstring(i),
+            Act(Short(NoExe(s.name), 14), FindIcon(s.kind), L"sec-find:" + std::to_wstring(i),
                 Level(s.score) + what + L". " + s.why + L". " + Short(s.path, 90) + L". 2 клика - что с этим сделать"));
     }
     item.children.push_back(Act(L"Заново", L"tools-scan.png", L"sec-rescan",
@@ -1281,10 +1311,15 @@ Item SecurityItem() {
     item.children.push_back(Act(L"Списком", L"tools-shield.png", L"studio:6",
                                 L"Все находки в студии: по видам, с причинами; «Это моё» - больше не показывать"));
     std::wstring av = tools::AntivirusUi();
-    item.children.push_back(Act(av.empty() ? L"Defender" : L"Kaspersky", L"tools-shield.png", L"sec-av",
-                                av.empty() ? L"Открыть «Защиту от вирусов» Windows - там полная и офлайн-проверка"
-                                           : L"Открыть Kaspersky - там полная проверка компьютера"));
-    item.children.push_back(Act(L"Песочница", L"tools-shield.png", L"sec-sandbox",
+    Item avItem = Act(av.empty() ? L"Defender" : L"Kaspersky", L"tools-shield.png", L"sec-av",
+                      av.empty() ? L"Открыть «Защиту от вирусов» Windows - там полная и офлайн-проверка"
+                                 : L"Открыть Kaspersky - там полная проверка компьютера");
+    if (!av.empty()) {  // значок самого Kaspersky, как у программ из папки защиты
+        avItem.iconFull.clear();
+        avItem.full = av;
+    }
+    item.children.push_back(avItem);
+    item.children.push_back(Act(L"Песочница", L"tools-sandbox.png", L"sec-sandbox",
                                 tools::SandboxAvailable()
                                     ? L"Скопируйте exe в Проводнике (Ctrl+C) и 2 клика: он откроется в одноразовой "
                                       L"Windows - закрыли окно, и всё, что он сделал, исчезло"
@@ -1489,23 +1524,25 @@ void ShowRing(RadialMenu& menu) {
                                  L": кэши, временные файлы, старое из кэша Unreal, корзина"
                            : L"Временные файлы, кэши и корзина; размеры ещё считаются");
     if (sized && quick > 1)
-        clean.children.push_back(Act(L"Всё сразу " + tools::Bytes(quickTotal), L"tools-clean.png", L"clean-all",
+        clean.children.push_back(Act(L"Всё сразу " + tools::Bytes(quickTotal),
+                                     Have(L"tools-dustpan.png", L"tools-clean.png"), L"clean-all",
                                      L"Кэши и временные файлы (свежее суток не трогаю), кроме кэшей шейдеров; "
                                      L"занятое пропускается"));
     if (scan.ddcOld > 256ull * 1024 * 1024)
-        clean.children.push_back(Act(L"Unreal: старое " + tools::Bytes(scan.ddcOld), L"tools-clean.png", L"ddc-trim",
+        clean.children.push_back(Act(L"Unreal: старое " + tools::Bytes(scan.ddcOld),
+                                     Have(L"tools-archive.png", L"tools-clean.png"), L"ddc-trim",
                                      L"Из кэша Unreal - то, что не открывалось " + Days(kDdcDays) +
                                          L". Шейдеры текущих проектов остаются, пересборки не будет"));
     for (size_t i = 0; i < g_junk.size(); ++i)
         clean.children.push_back(
-            Act(JunkShort(g_junk[i].name) + (sized ? L" " + tools::Bytes(g_junk[i].bytes) : L""), L"tools-clean.png",
-                L"clean:" + std::to_wstring(i),
+            Act(JunkShort(g_junk[i].name) + (sized ? L" " + tools::Bytes(g_junk[i].bytes) : L""),
+                Have(L"tools-cache.png", L"tools-clean.png"), L"clean:" + std::to_wstring(i),
                 g_junk[i].name + L": " + g_junk[i].path +
                     (g_junk[i].slow ? L". Соберётся заново: первые запуски игр и редактора будут медленнее (спрошу)"
                                     : L". Программа скачает или создаст заново")));
     if (bin)
         clean.children.push_back(
-            Act(L"Корзина " + tools::Bytes(bin), L"tools-clean.png", L"bin",
+            Act(L"Корзина " + tools::Bytes(bin), L"recycle.png", L"bin",
                 Plural((int)binItems, L"объект", L"объекта", L"объектов") + L". Очистить насовсем (спрошу ещё раз)"));
     // Docker и WSL: их диски только растут, место внутри освобождается, а файл - нет
     g_vhd = scan.vhd;
@@ -1558,7 +1595,8 @@ void ShowRing(RadialMenu& menu) {
                                              : L"Мусор сборки в проектах: " + tools::Bytes(projTotal) +
                                                    L"; соберётся заново командой сборки или установки");
     if (idleCount > 1)
-        projects.children.push_back(Act(L"Давние " + tools::Bytes(idleTotal), L"tools-clean.png", L"proj-idle",
+        projects.children.push_back(Act(L"Давние " + tools::Bytes(idleTotal),
+                                        Have(L"tools-shelved.png", L"tools-clean.png"), L"proj-idle",
                                         L"Проекты без правок дольше " + Days(kIdleDays) + L": " +
                                             std::to_wstring(idleCount) + L" папок мусора (спрошу)"));
     for (size_t i = 0; i < g_projects.size() && i < 14; ++i) {
@@ -1580,13 +1618,13 @@ void ShowRing(RadialMenu& menu) {
     // папки системного PATH, куда может писать кто угодно, - опаснее всего в разделе: они первыми
     std::vector<tools::PathAcl> open = tools::SystemPathAcl();
     Item path =
-        Act(L"PATH", open.empty() ? L"tools-path.png" : L"tools-bug.png", L"",
+        Act(L"PATH", open.empty() ? L"tools-path.png" : L"tools-path-open.png", L"",
             (open.empty() ? L"" : L"Открыто на запись: " + std::to_wstring(open.size()) + L". ") +
                 (dead + dup || !g_conflicts.empty() ? L"Лишних записей: " + std::to_wstring(dead + dup) +
                                                           L", конфликтов версий: " + std::to_wstring(g_conflicts.size())
                                                     : L"Чисто; ниже - какая команда найдётся первой"));
     for (const tools::PathAcl& a : open)
-        path.children.push_back(Act(L"Закрыть " + Leaf(a.dir), L"tools-bug.png", L"path-acl",
+        path.children.push_back(Act(L"Закрыть " + Leaf(a.dir), L"tools-path-open.png", L"path-acl",
                                     a.dir + (a.exists ? L": писать сюда может любой пользователь, а находят отсюда "
                                                         L"файлы и программы с правами. 2 клика - закрыть (спрошу права)"
                                                       : L": папки нет, а создать её может любой. 2 клика - убрать из "
@@ -1654,7 +1692,8 @@ void ShowRing(RadialMenu& menu) {
             g_ports.push_back(l);
         }
     if (!g_oldPorts.empty())
-        ports.children.push_back(Act(L"Старые " + std::to_wstring(g_oldPorts.size()), L"tools-clean.png", L"ports-old",
+        ports.children.push_back(Act(L"Старые " + std::to_wstring(g_oldPorts.size()),
+                                     Have(L"tools-stale-server.png", L"tools-clean.png"), L"ports-old",
                                      L"Серверы разработки, работающие дольше 6 часов - скорее всего забытые с прошлого "
                                      L"раза. 2 клика - завершить (спрошу)"));
     if (ports.children.empty()) ports.note = L"Порты разработки свободны: ни один сервер проекта не слушает";
@@ -1690,7 +1729,8 @@ void ShowRing(RadialMenu& menu) {
             tm += t.mem;
             if (names.size() < 90) names += (names.empty() ? L"" : L", ") + NoExe(t.name);
         }
-        procs.children.push_back(Act(L"Хвосты " + std::to_wstring(g_tails.size()), L"tools-clean.png", L"tails",
+        procs.children.push_back(Act(L"Хвосты " + std::to_wstring(g_tails.size()),
+                                     Have(L"tools-cable.png", L"tools-clean.png"), L"tails",
                                      L"Остались после сборки: " + names + L"; держат " + tools::Bytes(tm) +
                                          L". 2 клика - завершить все (спрошу)"));
     }
@@ -1699,7 +1739,7 @@ void ShowRing(RadialMenu& menu) {
             L"Растёт " + Short(NoExe(g_leakList[i].name), 10), L"tools-bug.png", L"leak:" + std::to_wstring(i),
             L"Память: " + tools::Bytes(g_leakList[i].was) + L" -> " + tools::Bytes(g_leakList[i].now) + L" за " +
                 std::to_wstring(g_leakList[i].minutes) + L" мин, ровно и без остановки. 2 клика - закрыть (спрошу)"));
-    procs.children.push_back(Act(L"Подкачка", L"tools-mem.png", L"pagefile",
+    procs.children.push_back(Act(L"Подкачка", Have(L"tools-pagefile.png", L"tools-mem.png"), L"pagefile",
                                  L"Выделено " + tools::Bytes(cm.total) + L" из " + tools::Bytes(cm.limit) +
                                      L" (память " + tools::Bytes(cm.phys) + L" + подкачка " +
                                      tools::Bytes(tools::PagefileBytes()) + L"), пик с загрузки " +
@@ -1741,10 +1781,10 @@ void ShowRing(RadialMenu& menu) {
         bg.note += L". Процессор в фоне считается за 10 минут с запуска RadialMenu";
     else if (g_hogs.empty())
         bg.note += L". За 10 минут ни одна программа без окна не съела больше 1% процессора";
-    bg.children.push_back(Act(L"Кто качает", L"tools-ports.png", L"net-top",
+    bg.children.push_back(Act(L"Кто качает", L"net-procs.png", L"net-top",
                               std::wstring(L"Трафик по программам за 3 секунды (TCP; QUIC браузеров не видно). ") +
                                   speed + (net::AdminReady() ? L"" : L". Нужна задача с правами (спрошу)")));
-    bg.children.push_back(Act(L"Мешает сну", L"tools-battery.png", L"power",
+    bg.children.push_back(Act(L"Мешает сну", Have(L"tools-alarm.png", L"tools-battery.png"), L"power",
                               std::wstring(L"Кто не даёт уснуть или выключить экран и кто будит по таймеру") +
                                   (net::AdminReady() ? L"" : L". Нужна задача с правами (спрошу)")));
     AcquireSRWLockShared(&g_watchLock);
@@ -1753,7 +1793,8 @@ void ShowRing(RadialMenu& menu) {
     if (!g_wake.empty()) {
         std::wstring list;
         for (const std::wstring& w : g_wake) list += (list.empty() ? L"" : L", ") + w;
-        bg.children.push_back(Act(L"Будят " + std::to_wstring(g_wake.size()), L"tools-battery.png", L"wake",
+        bg.children.push_back(Act(L"Будят " + std::to_wstring(g_wake.size()),
+                                  Have(L"tools-alarm.png", L"tools-battery.png"), L"wake",
                                   L"Могут разбудить из сна: " + list + L". 2 клика - Диспетчер устройств"));
     }
     ring.push_back(bg);
@@ -1799,17 +1840,19 @@ void ShowRing(RadialMenu& menu) {
             if (!it.children.empty()) it.note += L". Щелчок - открыть";
             g.children.push_back(std::move(it));
         }
-        g.children.push_back(Act(L"В студии", L"tools-box.png", L"studio:" + std::to_wstring(studioTab), studioNote));
+        g.children.push_back(Act(L"В студии", Have(L"tools-studio.png", L"tools-box.png"),
+                                 L"studio:" + std::to_wstring(studioTab), studioNote));
         return g;
     };
     std::vector<Item> groups;
-    groups.push_back(group(L"Место", L"tools-disk.png", L"Диски, очистка, мусор проектов. " + ring[CLEAN].note,
-                           {DISKS, CLEAN, PROJECTS}, 1, L"Что занимает место: соты по папкам, кэши"));
-    groups.push_back(group(L"Память", L"tools-mem.png", L"Процессы, фон, автозагрузка. " + ring[PROCS].note,
-                           {PROCS, BG, STARTS}, 4,
+    groups.push_back(group(L"Место", Have(L"grp-space.png", L"tools-disk.png"),
+                           L"Диски, очистка, мусор проектов. " + ring[CLEAN].note, {DISKS, CLEAN, PROJECTS}, 1,
+                           L"Что занимает место: соты по папкам, кэши"));
+    groups.push_back(group(L"Память", Have(L"grp-memory.png", L"tools-mem.png"),
+                           L"Процессы, фон, автозагрузка. " + ring[PROCS].note, {PROCS, BG, STARTS}, 4,
                            L"Колба памяти (слои программ, утечки, подкачка) и батарея (ветки к фоновым программам) в "
                            L"студии"));
-    groups.push_back(group(L"Разработка", L"tools-git.png",
+    groups.push_back(group(L"Разработка", Have(L"grp-dev.png", L"tools-git.png"),
                            L"Git, PATH, порты, терминал, кто держит файл. " + ring[GIT].note,
                            {GIT, PATH, PORTS, TERM, LOCK}, 0, L"PATH и переменные, порты, версии в студии"));
     groups.push_back(SecurityItem());
@@ -2975,6 +3018,8 @@ void ClearIgnored() {
 }
 
 const wchar_t* FindKindName(tools::FindKind k) { return FindWhat(k); }
+
+const wchar_t* FindKindIcon(tools::FindKind k) { return FindIcon(k); }
 
 void CleanProjectList(const std::vector<tools::ProjectJunk>& list) {
     if (list.empty()) return;
