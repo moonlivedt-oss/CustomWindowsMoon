@@ -67,7 +67,50 @@ SHEETS = {
         "tools-dup",
     ],
     # «Защита» в кольце утилит
-    "sheet-guard.png": ["tools-shield", "tools-bug", "tools-scan", "tools-repair", "tools-snapshot"],
+    "sheet-guard.png": [
+        "tools-shield",
+        "tools-bug",
+        "tools-scan",
+        "tools-repair",
+        "tools-snapshot",
+    ],
+    # набор 3: новое в «Защите» (Песочница, проверка, PATH, службы, WMI, целостность, «Чисто», «Подождите»)
+    "sheet-guard2.png": [
+        "tools-sandbox",
+        "tools-sandbox-check",
+        "tools-path-open",
+        "tools-service",
+        "tools-wmi",
+        "tools-integrity",
+        "tools-ok",
+        "tools-wait",
+    ],
+    # набор 3: сектор «Восстановление» (свой Recovery Kit)
+    "sheet-recovery.png": [
+        "rec-kit",
+        "rec-repair",
+        "rec-restore",
+        "rec-update",
+        "rec-unbreak",
+        "rec-explorer",
+        "rec-boot",
+        "rec-offline",
+    ],
+    # набор 3: новые утилиты (NEXT.md)
+    "sheet-tools2.png": [
+        "tools-privacy",
+        "tools-certs",
+        "tools-origin",
+        "tools-reboot",
+        "tools-winupdate",
+        "tools-devices",
+        "tools-temp",
+        "tools-report",
+        "tools-git",
+        "tools-containers",
+        "tools-unreal",
+        "tools-backup",
+    ],
     # кольцо «Сеть»
     "sheet-net.png": [
         "net-check",
@@ -93,6 +136,9 @@ GRIDS = {
     "sheet-tools.png": (4, 4),
     "sheet-guard.png": (3, 2),
     "sheet-net.png": (5, 2),
+    "sheet-guard2.png": (4, 2),
+    "sheet-recovery.png": (4, 2),
+    "sheet-tools2.png": (4, 3),
 }
 
 
@@ -169,7 +215,12 @@ def blobs(
             cx = min(cols - 1, int((a0 + a1) / 2 * cols / im.width))
             cy = min(rows - 1, int((b0 + b1) / 2 * rows / im.height))
             c = cells.setdefault(cy * cols + cx, [a0, b0, a1, b1])
-            c[0], c[1], c[2], c[3] = min(c[0], a0), min(c[1], b0), max(c[2], a1), max(c[3], b1)
+            c[0], c[1], c[2], c[3] = (
+                min(c[0], a0),
+                min(c[1], b0),
+                max(c[2], a1),
+                max(c[3], b1),
+            )
         return [tuple(cells[k]) for k in sorted(cells)]
     # крупнейшие области - значки; мелкие (искры, ноты отдельно от предмета) приклеиваем к ближайшему
     boxes.sort(key=lambda b: -b[0])
