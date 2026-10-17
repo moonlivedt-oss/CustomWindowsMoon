@@ -124,6 +124,21 @@ SHEETS = {
         "tools-pagefile",
         "tools-alarm",
     ],
+    # набор 5: свои инструменты из D:\Desktop\components - значки в кольце «Проекты» (proj-<имя папки>)
+    "sheet-projects.png": [
+        "proj-autotranslator",
+        "proj-boost",
+        "proj-contestreminder",
+        "proj-networkdoctor",
+        "proj-testmenumoon",
+        "proj-vscodelauncher",
+        "proj-cpp-docs-panel",
+        "proj-vscode-bg",
+        "proj-moon-core",
+        "proj-moon-bundle",
+        "proj-image",
+        "proj-training-site",
+    ],
     # кольцо «Сеть»
     "sheet-net.png": [
         "net-check",
@@ -153,6 +168,7 @@ GRIDS = {
     "sheet-recovery.png": (3, 2),
     "sheet-tools2.png": (4, 3),
     "sheet-tools3.png": (4, 3),
+    "sheet-projects.png": (4, 3),
 }
 
 
