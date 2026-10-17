@@ -4,6 +4,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include "core/files.h"
 #include "core/text.h"
 #include "tools/tools.h"
 
@@ -60,6 +61,23 @@ void ClearDir(const std::wstring& dir) {
     FindClose(h);
 }
 
+// Инструмент в папке защиты и её подпапках (Sysinternals лежат каждый в своей).
+std::wstring FindTool(const std::wstring& dir, const wchar_t* name, int depth) {
+    std::wstring direct = dir + L"\\" + name;
+    if (GetFileAttributesW(direct.c_str()) != INVALID_FILE_ATTRIBUTES) return direct;
+    if (depth >= 2) return L"";
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return L"";
+    std::wstring found;
+    do
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != L'.')
+            found = FindTool(dir + L"\\" + fd.cFileName, name, depth + 1);
+    while (found.empty() && FindNextFileW(h, &fd));
+    FindClose(h);
+    return found;
+}
+
 }  // namespace
 
 bool SandboxAvailable() {
@@ -71,7 +89,7 @@ void OpenSandboxFeature() {
     ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
-std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring& err) {
+std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring& err, const std::wstring& checkTools) {
     DWORD a = GetFileAttributesW(file.c_str());
     if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) {
         err = L"Нет такого файла: " + file;
@@ -99,9 +117,36 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
         }
         host = in;
     }
+    // Режим проверки: рядом вторая папка (только чтение) с инструментами Sysinternals и скриптом check.ps1 - он
+    // снимает систему до и после запуска и пишет отчёт на рабочий стол песочницы.
+    std::wstring kit;
+    if (!checkTools.empty()) {
+        kit = base + L"\\kit";
+        SHCreateDirectoryExW(nullptr, kit.c_str(), nullptr);
+        ClearDir(kit);
+        bool ok = CopyFileW((ExeDir() + L"\\sandbox\\check.ps1").c_str(), (kit + L"\\check.ps1").c_str(), FALSE) != FALSE;
+        for (const wchar_t* tool : {L"Procmon64.exe", L"procexp64.exe", L"tcpview64.exe", L"Autoruns64.exe"}) {
+            std::wstring found = FindTool(checkTools, tool, 0);
+            bool need = !_wcsicmp(tool, L"Procmon64.exe") || !_wcsicmp(tool, L"procexp64.exe");
+            if (found.empty()) {
+                if (need) ok = false;
+                continue;
+            }
+            CopyFileW(found.c_str(), (kit + L"\\" + tool).c_str(), FALSE);
+        }
+        if (!ok) {
+            err = L"Для проверки нужны check.ps1 рядом с RadialMenu и Process Monitor с Process Explorer в папке защиты";
+            return L"";
+        }
+    }
     const std::wstring inside = L"C:\\Users\\WDAGUtilityAccount\\Desktop\\Check";  // латиницей: cmd в песочнице
     // запуск сам: exe и msi стартуют, остальное открывается программой по умолчанию; рядом - окно папки
-    std::wstring cmd = L"cmd.exe /c start \"\" explorer.exe \"" + inside + L"\" &amp; start \"\" \"" + inside + L"\\" +
+    const std::wstring tools = L"C:\\Users\\WDAGUtilityAccount\\Desktop\\Tools";
+    std::wstring cmd = !kit.empty()
+                           ? L"powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;" + tools +
+                                 L"\\check.ps1&quot; -Target &quot;" + inside + L"\\" + Xml(name) + L"&quot; -Tools &quot;" +
+                                 tools + L"&quot;" + (network ? L" -Network" : L"")
+                           : L"cmd.exe /c start \"\" explorer.exe \"" + inside + L"\" &amp; start \"\" \"" + inside + L"\\" +
                        Xml(name) + L"\"";
     std::wstring wsb =
         L"<Configuration>\r\n"
@@ -122,7 +167,10 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
         Xml(inside) +
         L"</SandboxFolder>\r\n"
         L"      <ReadOnly>true</ReadOnly>\r\n"
-        L"    </MappedFolder>\r\n"
+        L"    </MappedFolder>\r\n" +
+        (kit.empty() ? std::wstring()
+                     : L"    <MappedFolder>\r\n      <HostFolder>" + Xml(kit) + L"</HostFolder>\r\n      <SandboxFolder>" +
+                           tools + L"</SandboxFolder>\r\n      <ReadOnly>true</ReadOnly>\r\n    </MappedFolder>\r\n") +
         L"  </MappedFolders>\r\n"
         L"  <LogonCommand>\r\n"
         L"    <Command>" +
@@ -143,12 +191,12 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
     return path;
 }
 
-bool RunInSandbox(const std::wstring& file, bool network, std::wstring& err) {
+bool RunInSandbox(const std::wstring& file, bool network, std::wstring& err, const std::wstring& checkTools) {
     if (!SandboxAvailable()) {
         err = L"Песочница Windows не включена";
         return false;
     }
-    std::wstring path = SandboxConfig(file, network, err);
+    std::wstring path = SandboxConfig(file, network, err, checkTools);
     if (path.empty()) return false;
     // запускаем сам WindowsSandbox.exe из System32, а не по ассоциации .wsb: её может переписать любая программа
     std::wstring exe = System32(L"WindowsSandbox.exe"), args = L"\"" + path + L"\"";

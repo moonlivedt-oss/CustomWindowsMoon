@@ -687,7 +687,9 @@ bool Run(int& exitCode) {
         exitCode = SceneFilm(i + 1 < args.size() ? args[i + 1] : L"clean",
                              i + 2 < args.size() ? args[i + 2] : ExeDir() + L"\\scene_film.png");
     } else if (Value(args, L"--sandbox-wsb", v)) {  // собрать .wsb для файла, не запуская песочницу
-        std::wstring err, path = tools::SandboxConfig(v, false, err);
+        // --check: режим проверки поведения с инструментами из папки защиты
+        std::wstring tools = Has(args, L"--check") ? ExpandPath(LoadOwnConfig().securityDir) : L"";
+        std::wstring err, path = tools::SandboxConfig(v, false, err, tools);
         WriteOut(L"sandbox_out.txt", path.empty() ? L"error: " + err : path);
         exitCode = path.empty() ? 1 : 0;
     } else if (Has(args, L"--ring-bench")) {

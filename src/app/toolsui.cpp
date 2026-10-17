@@ -822,20 +822,33 @@ void OpenInSandbox(const std::wstring& file) {
         return;
     }
     std::wstring name = file.substr(file.find_last_of(L'\\') + 1);
-    auto run = [file](bool net) {
+    std::wstring kit = ExpandPath(g_cfg->securityDir);  // Sysinternals для проверки поведения
+    auto run = [file, kit](bool net, bool check) {
         std::wstring err;
-        if (tools::RunInSandbox(file, net, err))
-            g_card.Show(BoostCard::DONE, L"Песочница открывается",
-                        L"Секунд 10-20. Файл внутри - только для чтения; закроете окно - всё, что программа сделала, "
-                        L"исчезнет.",
-                        Theme(), 12000, Toast::G_OK);
+        if (tools::RunInSandbox(file, net, err, check ? kit : L""))
+            g_card.Show(BoostCard::DONE, check ? L"Проверка поведения открывается" : L"Песочница открывается",
+                        check ? L"Секунд 20-30. Внутри откроется окно проверки: снимок системы, Process Monitor и "
+                                L"Process Explorer, потом сама программа. По Enter - отчёт на рабочем столе песочницы."
+                              : L"Секунд 10-20. Файл внутри - только для чтения; закроете окно - всё, что программа "
+                                L"сделала, исчезнет.",
+                        Theme(), 15000, Toast::G_OK);
         else
             g_card.Show(BoostCard::DONE, L"Песочница: не вышло", err, Theme(), 0, Toast::G_WARN);
     };
+    // сеть - вторым вопросом: без неё безопаснее, с ней видно, куда программа подключается
+    auto ask = [name, run](bool check) {
+        Ask((check ? L"Проверить: " : L"Открыть: ") + name,
+            L"Без сети программа ничего не скачает и никуда не отправит. С сетью - видно, куда она подключается, но "
+            L"она "
+            L"сможет связаться со своим сервером и с устройствами домашней сети.",
+            L"Без сети", L"С сетью", [run, check] { run(false, check); }, [run, check] { run(true, check); }, 30000,
+            Toast::G_INFO);
+    };
     Ask(
-        L"Открыть в песочнице: " + name,
-        L"Одноразовая Windows в окне. Без сети программа не скачает ничего и никуда не отправит; с сетью - как обычно.",
-        L"Без сети", L"С сетью", [run] { run(false); }, [run] { run(true); }, 30000, Toast::G_INFO);
+        L"Песочница: " + name,
+        L"«Проверить поведение» - снимок системы до и после, запись всех действий программы и отчёт, где она пыталась "
+        L"закрепиться. «Просто открыть» - одноразовая Windows с программой.",
+        L"Проверить поведение", L"Просто открыть", [ask] { ask(true); }, [ask] { ask(false); }, 30000, Toast::G_INFO);
 }
 
 void OpenVirusTotal(const std::wstring& path) {

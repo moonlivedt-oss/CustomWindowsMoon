@@ -285,8 +285,10 @@ int FixPathAclAdminMain(const Log& log);  // в процессе с правам
 bool SandboxAvailable();    // компонент «Песочница Windows» включён
 void OpenSandboxFeature();  // окно «Компоненты Windows», где её включают
 // файл - внутрь только для чтения (папка, если программе нужны DLL рядом, иначе копия), сеть по выбору
-bool RunInSandbox(const std::wstring& file, bool network, std::wstring& err);
-std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring& err);  // только .wsb
+// checkTools - папка с Sysinternals (папка защиты): режим «проверить поведение» со снимками до и после и отчётом
+bool RunInSandbox(const std::wstring& file, bool network, std::wstring& err, const std::wstring& checkTools = L"");
+std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring& err,
+                           const std::wstring& checkTools = L"");  // только собрать .wsb
 // системный PATH: как записано и после подстановки системных переменных
 std::vector<std::pair<std::wstring, std::wstring>> SystemPathEntries();
 std::wstring FileSha256(const std::wstring& path);  // в common.cpp: VirusTotal по хэшу, сверка дубликатов
