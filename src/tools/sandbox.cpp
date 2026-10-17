@@ -108,6 +108,9 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
         L"  <Networking>" +
         std::wstring(network ? L"Default" : L"Disable") +
         L"</Networking>\r\n"
+        // без видеоускорения: на ноутбуках с двумя видеокартами (NVIDIA + встроенная) с ним окно песочницы теряет
+        // связь, а незнакомой программе доступ к драйверу GPU и не нужен
+        L"  <vGPU>Disable</vGPU>\r\n"
         L"  <ClipboardRedirection>Disable</ClipboardRedirection>\r\n"
         L"  <PrinterRedirection>Disable</PrinterRedirection>\r\n"
         L"  <MappedFolders>\r\n"
