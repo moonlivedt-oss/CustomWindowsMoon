@@ -55,6 +55,7 @@ public:
     double K() const { return k_; }
     const UiColors& C() const { return c_; }
     Gdiplus::Graphics& G() { return *g_; }
+    bool Scaled() const;  // в кадре масштаб или поворот: картинки - со сглаживанием, не один к одному
     bool interactive = true;  // false - под открытым окном поверх (тур, библиотека)
 
     // попадания

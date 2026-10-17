@@ -434,10 +434,21 @@ private:
     void ThemesPage(const RectF& r);
     void ThemeHero(const RectF& hero, const ThemeInfo& t, bool trying);
     void ThemeFilm(const RectF& r);  // лента тем доком: пейзажи, за чертой «Из обоев» и «Своя палитра»
-    void ThemeInAction(const RectF& r, const ThemeInfo& t);  // кусочек студии, окно и сообщение в цветах темы
+    void FilmCard(const ThemeInfo& t, const RectF& cr, bool on);
+    void ThemeInAction(const RectF& r);  // кусочек студии, окно и сообщение в цветах студии (она в цветах темы)
     // картинка темы со сменой растворением; zoom - наезд новой, scale - общий масштаб (включение экрана)
     bool ThemeFade(PicFade& f, const ThemeInfo& t, const RectF& r, float radius, float zoom, float scale = 1);
     void Fading(const RectF& r, float alpha, float scale, float dy, const std::function<void()>& draw);
+    // мягкая тень или свечение вокруг скруглённой рамки: размытая картинка готовится один раз
+    void Halo(const RectF& r, float radius, Color col, float spread, float dy = 0);
+    // кусок кадра, который меняется только со своим ключом: рисуется один раз в свою картинку, дальше копируется
+    void Baked(const wchar_t* slot, const std::wstring& key, const RectF& area, Color bg,
+               const std::function<void()>& draw);
+    std::wstring ArtKey(const ThemeInfo& t);        // всё, от чего зависит картинка темы: для ключей Baked
+    std::wstring UiKey(const UiColors& c) const;    // цвета студии одной строкой: для ключей Baked
+    RectF HomeWindowRect(const RectF& scr, float taskH) const;
+    ThemeInfo ThemeAs(const wchar_t* key) const;  // тема с подставленными цветами обоев и своей палитры
+    ThemeInfo ShownTheme() const;                 // выбранная или примеряемая наведением
     void ThemeWave(const std::wstring& key, Gdiplus::PointF from);  // выбрать тему волной от точки
     UiColors TryoutPalette();
     void WaveGrab(float w, float h);
@@ -460,6 +471,7 @@ private:
     void HomeShelf(const RectF& r, double t);
     void HomeBadge(float cx, float cy, int n, float scale);
     void HomeTipAt(const RectF& anchor, const std::wstring& title, const std::wstring& sub, bool warn, int place);
+    void HomeTipDraw(const RectF& page);
     void StatePage(const RectF& r);    // «Состояние»: шкалы, что освободить, проекты, Загрузки, рост, система
     void AutoPage(const RectF& r);     // «Автоматика»: переключатели и журнал
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
@@ -659,6 +671,15 @@ private:
     ULONGLONG railPopAt_ = 0;
     std::wstring hoverTheme_, hoverThemeNext_;  // примерка темы наведением
     // витрина тем: прежняя тема растворяется в новую
+    std::map<std::wstring, std::unique_ptr<Bitmap>> halos_;  // готовые тени и свечения (Halo)
+    struct BakedPart {
+        std::wstring key;
+        std::unique_ptr<Bitmap> bmp;
+    };
+    std::map<std::wstring, BakedPart> baked_;  // по месту на странице (Baked)
+    ULONGLONG wallAt_ = 0;                     // путь и время записи обоев - не чаще раза в секунду (ThemeArt)
+    std::wstring wallPath_, wallStamp_;
+    bool homeHaloBaked_ = false;  // тень и свечение окна темы уже в готовой картинке монитора
     PicFade heroPic_;
     float filmDock_[16] = {};  // лента тем: увеличение карточек под курсором
     ThemeInfo heroCur_{}, heroPrev_{};

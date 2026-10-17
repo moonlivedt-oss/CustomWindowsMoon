@@ -59,8 +59,6 @@ bool Spring(Mover& m, float to, float dt, float k = 320, float d = 17) {
     return true;
 }
 
-RectF Grow(const RectF& r, float d) { return RectF(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d); }
-
 }  // namespace
 
 // Нарисовать кусок прозрачным, увеличенным и сдвинутым: в свой холст, потом одной картинкой.
@@ -269,11 +267,15 @@ void Studio::HomeCorners(const RectF& scr, float taskH, double t) {
 
 // Окно посреди экрана - это тема: рамка акцента и есть рамка окон. Имя, настроение, четыре цвета и шесть
 // миниатюр: наведение - вся студия примеряет тему, щелчок - новая тема расходится волной от миниатюры.
+RectF Studio::HomeWindowRect(const RectF& scr, float taskH) const {
+    float ww = std::min(ui.S(420), scr.Width - ui.S(200)), wh = std::min(ui.S(210), scr.Height - taskH - ui.S(40));
+    return RectF(scr.X + (scr.Width - ww) / 2, scr.Y + (scr.Height - taskH - wh) / 2, ww, wh);
+}
+
 void Studio::HomeWindow(const RectF& scr, float taskH, double t) {
     const UiColors& c = ui.C();
     const auto& themes = Themes();
-    float ww = std::min(ui.S(420), scr.Width - ui.S(200)), wh = std::min(ui.S(210), scr.Height - taskH - ui.S(40));
-    RectF wr(scr.X + (scr.Width - ww) / 2, scr.Y + (scr.Height - taskH - wh) / 2, ww, wh);
+    RectF wr = HomeWindowRect(scr, taskH);
     float in = Span(t, 1400, 560);
     if (in <= 0.004f) return;
 
@@ -286,32 +288,20 @@ void Studio::HomeWindow(const RectF& scr, float taskH, double t) {
             pick.push_back(i);
     }
     if (cur >= 0 && std::find(pick.begin(), pick.end(), cur) == pick.end() && !pick.empty()) pick.back() = cur;
-    auto shown = [&](const ThemeInfo& th) {
-        Config v = cfg;
-        v.theme = th.key;
-        return CurrentTheme(v);
-    };
-    Config view = cfg;
-    if (!hoverTheme_.empty()) view.theme = hoverTheme_;
-    ThemeInfo tt = CurrentTheme(view);
+    ThemeInfo tt = ShownTheme();
 
     float lift = 1 - (float)EaseOutBack(in, 1.3);
     Fading(wr, std::min(1.0f, in * 1.6f), 0.94f + 0.06f * std::min(1.0f, (float)EaseOutBack(in, 1.3)), ui.S(24) * lift,
            [&] {
                float rad = ui.S(10);
-               // тень и свечение акцента вокруг рамки
-               for (int k = 4; k >= 1; --k)
-                   ui.Fill(RectF(wr.X - k * ui.S(3), wr.Y + ui.S(8) + k * ui.S(3), wr.Width + k * ui.S(6),
-                                 wr.Height + k * ui.S(2)),
-                           Color(28, 0, 0, 0), rad + k * ui.S(4));
-               for (int k = 4; k >= 1; --k)
-                   ui.Fill(Grow(wr, k * ui.S(5)), WithAlpha(c.accent, (BYTE)(26 - k * 4)), rad + k * ui.S(5));
+               if (!homeHaloBaked_) {  // тень и свечение акцента вокруг рамки (на месте - в картинке монитора)
+                   Halo(wr, rad, Color(120, 0, 0, 0), ui.S(14), ui.S(14));
+                   Halo(wr, rad, WithAlpha(c.accent, 130), ui.S(14));
+               }
                ui.Fill(wr, WithAlpha(c.card, 238), rad);
-               GraphicsState st = ui.G().Save();
-               ui.G().SetClip(ui.Round(wr, rad), CombineModeIntersect);
                float tbh = ui.S(30);
-               ui.Fill(RectF(wr.X, wr.Y, wr.Width, tbh), c.cardHi);
-               ui.G().Restore(st);
+               SolidBrush tb(c.cardHi);
+               ui.G().FillPath(&tb, ui.Round(RectF(wr.X, wr.Y, wr.Width, tbh), rad, true, false));
                ui.Icon(ExeDir() + L"\\icons\\hub.png", RectF(wr.X + ui.S(10), wr.Y + ui.S(7), ui.S(16), ui.S(16)));
                ui.Text(L"Тема", RectF(wr.X + ui.S(34), wr.Y, ui.S(120), tbh), c.text, 12);
                ui.Text(L"-     \x25A1     \x00D7", RectF(wr.X, wr.Y, wr.Width - ui.S(12), tbh), c.muted, 11.5f, false,
@@ -351,7 +341,7 @@ void Studio::HomeWindow(const RectF& scr, float taskH, double t) {
                    RectF base(px + i * (tw + gap), ty, tw, th);
                    if (base.X + base.Width > wr.X + wr.Width - ui.S(8)) return;
                    RectF r2(base.X + tw / 2 - tw * s / 2, ty + th - th * s, tw * s, th * s);
-                   ThemePicture(shown(ti), r2, ui.S(7), 1);
+                   ThemePicture(ThemeAs(ti.key), r2, ui.S(7), 1);
                    bool on = cfg.theme == ti.key;
                    ui.Stroke(r2, on ? c.accent : Color(40, 255, 255, 255), ui.S(7), on ? ui.S(2) : 1);
                };
@@ -368,7 +358,8 @@ void Studio::HomeTaskbar(const RectF& scr, float taskH, double t) {
     float dy = taskH * 1.05f * (1 - (float)EaseOutBack(in, 1.2));
     if (in <= 0.001f) return;
     RectF bar(scr.X, scr.Y + scr.Height - taskH + dy, scr.Width, taskH);
-    ui.Fill(bar, WithAlpha(c.win, 214));
+    SolidBrush barFill(WithAlpha(c.win, 214));
+    ui.G().FillPath(&barFill, ui.Round(bar, ui.S(8), false, true));  // низ экрана скруглён
     ui.Fill(RectF(bar.X, bar.Y, bar.Width, 1), Color(22, 255, 255, 255));
 
     // сеть: «Интернет есть | Швеция | 190 мс» - в панели задержка, в подсказке остальное
@@ -553,7 +544,6 @@ void Studio::HomeShelf(const RectF& r, double t) {
             } else {
                 Defer([this] { GoPage(PAGE_TOOLS); });
             }
-
         }
     });
 }
@@ -590,34 +580,51 @@ void Studio::HomePage(const RectF& r) {
     float mx = in.X + (in.Width - mw) / 2, my = top + std::max(0.0f, (avail - mh - under - shelfH) / 3);
     RectF mon(mx, my, mw, mh);
 
-    // подставка и тень монитора
     RectF stand(mx + mw / 2 - ui.S(60), my + mh - 1, ui.S(120), ui.S(26));
-    {
+    RectF scr = Inset(mon, ui.S(12), ui.S(12));
+    float rad = ui.S(8), taskH = ui.S(38);
+    RectF wr = HomeWindowRect(scr, taskH);
+    ThemeInfo shown = ShownTheme();
+    float wall = Span(t, 350, 1400);
+
+    // подставка, тень и рамка монитора
+    auto chrome = [&] {
         LinearGradientBrush lg(Grow(stand, 1), Color(255, 26, 28, 36), Color(255, 13, 14, 18),
                                LinearGradientModeVertical);
         ui.G().FillPath(&lg, ui.Round(stand, ui.S(10), false, true));
-    }
-    for (int k = 4; k >= 1; --k)
-        ui.Fill(RectF(mx - k * ui.S(4), my + ui.S(18) + k * ui.S(3), mw + k * ui.S(8), mh), Color(22, 0, 0, 0),
-                ui.S(16) + k * ui.S(4));
-    ui.Fill(mon, Color(255, 5, 6, 8), ui.S(16));
-    ui.Stroke(mon, Color(255, 42, 46, 60), ui.S(16));
-    RectF scr = Inset(mon, ui.S(12), ui.S(12));
-    float rad = ui.S(8), taskH = ui.S(38);
-
-    GraphicsState st = ui.G().Save();
-    ui.G().SetClip(ui.Round(scr, rad), CombineModeIntersect);
-    ui.Fill(scr, Color(255, 0, 0, 0));
-    // обои - картинка темы (или примеряемой); новая растворяется с наездом
-    Config view = cfg;
-    if (!hoverTheme_.empty()) view.theme = hoverTheme_;
-    float wall = Span(t, 350, 1400);
-    ThemeFade(homeWall_, CurrentTheme(view), scr, rad, 1.06f, 1 + 0.12f * (1 - (float)EaseOut(wall)));
-    {
+        Halo(mon, ui.S(16), Color(130, 0, 0, 0), ui.S(18), ui.S(26));
+        ui.Fill(mon, Color(255, 5, 6, 8), ui.S(16));
+        ui.Stroke(mon, Color(255, 42, 46, 60), ui.S(16));
+    };
+    // обои - картинка темы (или примеряемой), новая растворяется с наездом; поверх затемнение
+    auto wallpaper = [&] {
+        if (wall < 1) ui.Fill(scr, Color(255, 0, 0, 0), rad);
+        ThemeFade(homeWall_, shown, scr, rad, 1.06f, 1 + 0.12f * (1 - (float)EaseOut(wall)));
         LinearGradientBrush dim(Grow(scr, 1), Color(38, 0, 0, 0), Color(115, 0, 0, 0), LinearGradientModeVertical);
-        ui.G().FillRectangle(&dim, scr);
+        ui.G().FillPath(&dim, ui.Round(scr, rad));
+        if (wall < 1) ui.Fill(scr, Color((BYTE)(255 * (1 - EaseOut(wall))), 0, 0, 0), rad);
+    };
+    // всё устоялось - монитор с обоями, тенью и свечением окна одной непрозрачной картинкой: большие
+    // полупрозрачные заливки стоили бо́льшую часть кадра, а меняются они только с темой и цветами
+    homeHaloBaked_ = wall >= 1 && Span(t, 1400, 560) >= 1 && homeWall_.key == shown.key &&
+                     (fx::Game() || clock_ - homeWall_.at >= 1.4);
+    if (homeHaloBaked_) {
+        RectF area = Grow(mon, ui.S(40));
+        area.Height += ui.S(30);
+        Baked(L"monitor", ArtKey(shown) + UiKey(ui.C()), area, ui.C().win, [&] {
+            chrome();
+            wallpaper();
+            Halo(wr, ui.S(10), Color(120, 0, 0, 0), ui.S(14), ui.S(14));
+            Halo(wr, ui.S(10), WithAlpha(ui.C().accent, 130), ui.S(14));
+        });
+    } else {
+        chrome();
     }
-    if (wall < 1) ui.Fill(scr, Color((BYTE)(255 * (1 - EaseOut(wall))), 0, 0, 0));
+
+    // экран режется прямоугольником (обрезка по контуру в GDI+ дорогая), скругляют углы сами обои и затемнение
+    GraphicsState st = ui.G().Save();
+    ui.G().SetClip(scr, CombineModeIntersect);
+    if (!homeHaloBaked_) wallpaper();
 
     homeTip_.want = false;
     HomeEdge(0, scr, t);
@@ -641,7 +648,12 @@ void Studio::HomePage(const RectF& r) {
 
     HomeShelf(RectF(mx + ui.S(40), my + mh + under, mw - ui.S(80), shelfH), t);
 
-    // подсказка последней: поверх монитора и полки
+    HomeTipDraw(r);  // последней: поверх монитора и полки
+}
+
+// Подсказка предмета карты: всплывает и тает; держится в странице r.
+void Studio::HomeTipDraw(const RectF& r) {
+    const UiColors& c = ui.C();
     HomeTip& tip = homeTip_;
     tip.a = ui.Anim(kTip + 50, tip.want, 16);
     if (tip.a > 0.01f && !tip.title.empty()) {

@@ -467,6 +467,14 @@ void Ui::End() {
     g_ = nullptr;
 }
 
+bool Ui::Scaled() const {
+    Gdiplus::Matrix m;
+    g_->GetTransform(&m);
+    Gdiplus::REAL e[6];
+    m.GetElements(e);
+    return e[0] != 1 || e[3] != 1 || e[1] != 0 || e[2] != 0;
+}
+
 bool Ui::Hover(int id, const RectF& r) {
     if (!interactive) return false;
     hits_.push_back({id, r});
@@ -638,8 +646,9 @@ void Ui::Picture(Bitmap* b, const RectF& r, float radius, bool roundBottom, BYTE
         pg.DrawImage(b, dst, (iw - sw) / 2, (ih - sh) / 2, sw, sh, UnitPixel);
         it = pictures_.emplace(key, std::move(out)).first;
     }
+    // готовая картинка ложится один к одному; под масштабом (док, наезд) - сглаживая, а не лесенкой
     InterpolationMode im = g_->GetInterpolationMode();
-    g_->SetInterpolationMode(InterpolationModeNearestNeighbor);
+    g_->SetInterpolationMode(Scaled() ? InterpolationModeBilinear : InterpolationModeNearestNeighbor);
     Rect dst((int)std::lround(r.X), (int)std::lround(r.Y), w, h);
     if (alpha == 255) {
         g_->DrawImage(it->second.get(), dst);

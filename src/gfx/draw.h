@@ -27,6 +27,10 @@ void Downscale(const uint32_t* src, int w, int h, uint32_t* dst, int dw, int dh,
 void UpscaleBilinear(const uint32_t* src, int sw, int sh, uint32_t* dst, int dw, int dh, int dstStride);
 
 Gdiplus::RectF Inset(const Gdiplus::RectF& r, float dx, float dy);
+// рамка шире на d со всех сторон
+inline Gdiplus::RectF Grow(const Gdiplus::RectF& r, float d) {
+    return Gdiplus::RectF(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d);
+}
 Gdiplus::RectF Intersect(const Gdiplus::RectF& a, const Gdiplus::RectF& b);
 bool Inside(const Gdiplus::RectF& in, const Gdiplus::RectF& out);  // in целиком внутри out
 // Скруглённый прямоугольник в путь (радиус не больше половины меньшей стороны).

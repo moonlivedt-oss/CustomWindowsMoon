@@ -81,8 +81,6 @@ RectF Scaled(const RectF& r, float s) {
     return RectF(r.X + r.Width * (1 - s) / 2, r.Y + r.Height * (1 - s) / 2, r.Width * s, r.Height * s);
 }
 
-RectF Grow(const RectF& r, float d) { return RectF(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d); }
-
 bool Launchable(const Item& it) {
     return it.dir || EndsWithI(it.full, L".lnk") || EndsWithI(it.full, L".url") || EndsWithI(it.full, L".exe");
 }

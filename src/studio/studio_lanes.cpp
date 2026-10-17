@@ -73,8 +73,6 @@ int CardId(int L, int i) { return ID_SECTOR + L * 100 + i; }
 
 bool Simple(const Item& it) { return it.children.empty() && !it.expand; }
 
-RectF Grow(const RectF& r, float d) { return RectF(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d); }
-
 }  // namespace
 
 void Studio::LaneTick() {
