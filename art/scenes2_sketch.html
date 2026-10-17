@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Живые сцены, часть 2</title>
+<style>
+:root{--bg:#0b0c10;--card:#12141c;--card2:#1c1f2a;--text:#eef0f5;--muted:#9aa3b4;--faint:#5b6272;--acc:#c8323f;--acc2:#8fa3bf;--pale:#d9dee6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif;padding:28px 16px 60px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:24px;margin:0 0 4px}
+.lead{color:var(--muted);margin:0 0 22px;max-width:900px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(540px,1fr));gap:18px}
+@media(max-width:600px){.grid{grid-template-columns:1fr}}
+.dir{background:var(--card);border:1px solid #232634;border-radius:14px;padding:16px 16px 14px}
+.dir h2{margin:0;font-size:17px;display:flex;gap:10px;align-items:baseline}
+.dir h2 b{color:var(--acc);font-size:13px}
+.dir h2 span{margin-left:auto;font-size:12px;font-weight:400;color:var(--faint)}
+.dir p{margin:4px 0 8px;color:var(--muted)}
+.dir ul{margin:0 0 10px;padding-left:18px;color:var(--muted);font-size:13px}
+.dir li b{color:var(--text);font-weight:600}
+.bar{display:flex;gap:6px;margin-bottom:10px}
+.bar button{background:var(--card2);color:var(--muted);border:1px solid #2a2e3c;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.bar button:hover{color:var(--text)}
+canvas{display:block;width:100%;height:320px;border-radius:10px;background:#0f1016;user-select:none}
+.foot{margin-top:24px;color:var(--muted);max-width:900px}
+.foot b{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Живые сцены, часть 2: проработка</h1>
+<p class="lead">Те же шесть сцен, но глубже: опасные действия - жестом (выдернуть кабель, стащить бусину), физика несёт смысл (тяжёлые программы прогибают дорожку, утечка капает в колбу), у каждой сцены есть своя маленькая история из твоих настоящих ситуаций (смена выхода Happ, сервер, забытый на 11 часов, Python 3.10 на исходе поддержки).</p>
+<div class="grid" id="grid"></div>
+<p class="foot"><b>Общее:</b> сцена играет коротко и замирает, кадры дальше только от мыши; в игровом режиме сразу итог. Жест всегда можно отменить: отпустил кабель рядом с гнездом - он защёлкнется обратно; бусина возвращается щелчком. На GDI+ всё переносится тем же движком <b>gfx/scene</b>: верёвка кабеля - те же точки на пружинах, жидкость - полоса с волной.</p>
+</div>
+<script>
+const C={text:'#eef0f5',muted:'#9aa3b4',faint:'#5b6272',acc:'#c8323f',acc2:'#8fa3bf',pale:'#d9dee6',card:'#1c1f2a',deep:'#7e1a23'};
+const hx=c=>[1,3,5].map(i=>parseInt(c.slice(i,i+2),16));
+const mix=(a,b,t)=>'rgb('+hx(a).map((v,i)=>Math.round(v+(hx(b)[i]-v)*t)).join(',')+')';
+const rgba=(c,a)=>{const x=hx(c);return `rgba(${x[0]},${x[1]},${x[2]},${a})`};
+const ease=t=>t<0?0:t>1?1:1-Math.pow(1-t,3);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const PAL=['#c8323f','#d9dee6','#8fa3bf','#d0888f','#ab6a7f','#9a9eac'];
+function txt(g,s,x,y,col,size,bold,al){g.fillStyle=col;g.font=(bold?'600 ':'')+size+'px "Segoe UI",sans-serif';g.textAlign=al||'left';g.textBaseline='middle';g.fillText(s,x,y)}
+function rr(g,x,y,w,h,r){g.beginPath();g.roundRect(x,y,w,h,r)}
+const inR=(x,y,r)=>r&&x>=r[0]&&x<=r[0]+r[2]&&y>=r[1]&&y<=r[1]+r[3];
+function spring(p,dt,k=90,d=12){p.vx+=((p.tx-p.x)*k-p.vx*d)*dt;p.vy+=((p.ty-p.y)*k-p.vy*d)*dt;p.x+=p.vx*dt;p.y+=p.vy*dt}
+const gb=v=>(v>=10?v.toFixed(0):v.toFixed(1)).replace('.',',')+' ГБ';
+function button(g,r,label,primary,hot){rr(g,r[0],r[1],r[2],r[3],8);g.fillStyle=primary?(hot?'#d8404d':C.acc):(hot?'#2a2f3a':C.card);g.fill();if(!primary){g.strokeStyle='#2f3443';g.lineWidth=1;g.stroke()}txt(g,label,r[0]+r[2]/2,r[1]+r[3]/2,primary?'#fff':C.text,12,true,'center')}
+
+// ---------- 1. Сеть ----------
+function S_route(W,H){
+  const EX=[['Финляндия',42,'FI'],['Швеция',38,'SE'],['США',118,'US'],['Франция',55,'FR']];let ex=0;
+  const nodes=[['Этот ПК','Wi-Fi 5 ГГц','ПК'],['Роутер','192.168.1.1','Р'],['Туннель','Happ','FI'],['DNS','1.1.1.1','DNS'],['Интернет','github.com','www']]
+    .map((n,i)=>({name:n[0],sub:n[1],tag:n[2],x:46+i*(W-92)/4,y:H/2-16+(i%2?-24:16),ok:1,flash:0,flip:-1}));
+  const base=[3,11,42,18],hist=base.map(b=>Array.from({length:32},()=>b+rnd(-2,2)));
+  let t=0,acc=0,sampleAcc=0,hotNode=-1,hotLink=-1,packets=[],sparks=[],weld=-1,weldLink=-1,pulse=-1,btn=null,hotBtn=false,a1=0,a2=0;
+  const msOf=i=>hist[i][hist[i].length-1];
+  const broken=()=>nodes.findIndex(n=>!n.ok);
+  const ctrl=(a,c)=>[(a.x+c.x)/2,(a.y+c.y)/2-38];
+  const onCurve=(a,c,u)=>{const[qx,qy]=ctrl(a,c);return[(1-u)*(1-u)*a.x+2*u*(1-u)*qx+u*u*c.x,(1-u)*(1-u)*a.y+2*u*(1-u)*qy+u*u*c.y]};
+  function changeExit(){nodes[2].flip=0}
+  const CUT=.5,queue=()=>packets.filter(p=>p.wait).length;
+  return{update(dt){t+=dt;acc+=dt;sampleAcc+=dt;
+      if(sampleAcc>.18){sampleAcc=0;hist.forEach((h,i)=>{let v=(i===2?EX[ex][1]:base[i])+rnd(-3,3);if(i===2&&Math.random()<.05)v+=rnd(60,140);h.push(v);h.shift()})}
+      if(acc>.08){acc=0;packets.push({seg:0,u:0,back:false,dead:false,vy:0,dns:Math.random()<.25})}
+      const b=broken();
+      // обрыв: звено разорвано посередине, запросы доезжают до разрыва и копятся очередью
+      for(const p of packets){if(p.wait){p.jx+=(rnd(-1,1)*9-p.jx)*dt*3;p.jy+=(rnd(-1,1)*9-p.jy)*dt*3;continue}
+        p.u+=dt*(1.7/(1+msOf(p.seg)/30))*(p.rush?3:1);
+        if(b===p.seg+1&&p.u>=CUT-.03){p.wait=true;p.u=CUT-.05-Math.min(.12,queue()*.004);p.jx=0;p.jy=0;continue}
+        if(p.u>=1){p.seg++;p.u=0;if(p.seg>3)p.gone=true}
+        if(!p.gone){[p.x,p.y]=onCurve(nodes[p.seg],nodes[Math.min(4,p.seg+1)],clamp(p.u,0,1))}}
+      for(const p of packets)if(p.wait){[p.x,p.y]=onCurve(nodes[p.seg],nodes[p.seg+1],p.u);p.x+=p.jx;p.y+=p.jy}
+      {let n=0;for(let k=packets.length-1;k>=0;k--)if(packets[k].wait&&++n>45)packets[k].gone=true}
+      packets=packets.filter(p=>!p.gone);
+      if(b>0&&weld<0&&Math.random()<dt*8){const[x,y]=onCurve(nodes[b-1],nodes[b],CUT+rnd(-.06,.06));sparks.push({x,y,vx:rnd(-60,60),vy:rnd(-90,-10),l:rnd(.2,.4)})}
+      if(weld>=0){weld+=dt/.9;const[x,y]=onCurve(nodes[weldLink],nodes[weldLink+1],CUT-.06+.12*clamp(weld,0,1));for(let k=0;k<3;k++)sparks.push({x,y,vx:rnd(-140,140),vy:rnd(-220,-40),l:rnd(.3,.6)});
+        if(weld>=1){nodes[weldLink+1].ok=1;weld=-1;pulse=0;let d=0;for(const p of packets)if(p.wait){p.wait=false;p.rush=true;p.u-=d;d+=.012}}}
+      if(pulse>=0){pulse+=dt*1.6;nodes.forEach((n,i)=>{if(Math.abs(pulse*4-i)<.15)n.flash=1});if(pulse>1.2)pulse=-1}
+      const n2=nodes[2];if(n2.flip>=0){n2.flip+=dt/.6;if(n2.flip>=.5&&!n2.swapped){n2.swapped=1;ex=(ex+1)%EX.length;n2.tag=EX[ex][2];hist[2].push(EX[ex][1]+70);hist[2].shift()}if(n2.flip>=1){n2.flip=-1;n2.swapped=0;n2.flash=1}}
+      for(const s of sparks){s.vy+=600*dt;s.x+=s.vx*dt;s.y+=s.vy*dt;s.l-=dt}sparks=sparks.filter(s=>s.l>0);
+      nodes.forEach(n=>n.flash=Math.max(0,n.flash-dt*1.5));
+      if(!a1&&t>2.6){a1=1;changeExit()}if(!a2&&t>5.2){a2=1;nodes[3].ok=0}},
+    move(x,y){hotNode=nodes.findIndex(n=>Math.hypot(x-n.x,y-n.y)<24);hotLink=-1;
+      if(hotNode<0)for(let i=0;i<4;i++)for(let u=.1;u<.95;u+=.1){const[px,py]=onCurve(nodes[i],nodes[i+1],u);if(Math.hypot(x-px,y-py)<12)hotLink=i}
+      hotBtn=inR(x,y,btn)},
+    click(x,y){if(inR(x,y,btn)){const b=broken();if(b>0&&weld<0){weld=0;weldLink=b-1}return}
+      const n=nodes[hotNode];if(!n||hotNode===0)return;if(hotNode===2&&n.ok){changeExit();return}if(n.ok)n.ok=0;else if(weld<0){weld=0;weldLink=hotNode-1}},
+    draw(g){const b=broken();
+      for(let i=0;i<4;i++){const a=nodes[i],c=nodes[i+1],ms=msOf(i);const bad=b===i+1;const heat=clamp((ms-25)/90,0,1);
+        const[cx,cy]=ctrl(a,c);
+        if(bad){// разрыв: две половины, концы разошлись и разлохмачены, между ними проскакивает дуга
+          const gap=weld>=0&&weldLink===i?.06*(1-clamp(weld,0,1)):.06;const half=(u0,u1)=>{g.beginPath();for(let k=0;k<=12;k++){const[x,y]=onCurve(a,c,u0+(u1-u0)*k/12);k?g.lineTo(x,y):g.moveTo(x,y)}g.stroke()};
+          g.strokeStyle=rgba(C.acc2,.5);g.lineWidth=2;half(0,CUT-gap);g.strokeStyle=rgba(C.faint,.6);half(CUT+gap,1);
+          const[ex1,ey1]=onCurve(a,c,CUT-gap),[ex2,ey2]=onCurve(a,c,CUT+gap);
+          for(const[ex_,ey_,s] of [[ex1,ey1,1],[ex2,ey2,-1]])for(let k=-1;k<=1;k++){g.strokeStyle=rgba(C.pale,.5);g.lineWidth=1;g.beginPath();g.moveTo(ex_,ey_);g.lineTo(ex_+s*5,ey_+k*4+Math.sin(t*20+k)*1.5);g.stroke()}
+          if(Math.random()<.55){g.strokeStyle=rgba(C.pale,rnd(.4,.9));g.lineWidth=1.3;g.beginPath();g.moveTo(ex1,ey1);for(let k=1;k<6;k++){const u=k/6;g.lineTo(ex1+(ex2-ex1)*u+rnd(-3,3),ey1+(ey2-ey1)*u+rnd(-7,7))}g.lineTo(ex2,ey2);g.stroke()}
+          }
+        else{g.strokeStyle=mix(C.acc2,C.acc,heat);g.globalAlpha=Math.min(1,.45+.4*heat+(hotLink===i?.3:0));g.lineWidth=2+heat*3+(hotLink===i?1:0);g.beginPath();g.moveTo(a.x,a.y);g.quadraticCurveTo(cx,cy,c.x,c.y);g.stroke();g.globalAlpha=1}
+        const lx=(a.x+c.x)/2,ly=(a.y+c.y)/2-36;txt(g,bad?'нет ответа'+(queue()?', ждут '+queue():''):Math.round(ms)+' мс',lx,ly-(bad?10:0),bad?C.acc:heat>.4?mix(C.pale,C.acc,heat):C.muted,11,bad||heat>.4,'center')}
+      for(const p of packets){g.fillStyle=p.wait?mix(C.acc,C.pale,.5+.5*Math.sin(t*5+p.jx)):(p.dns?C.acc2:C.pale);if(p.dns){g.save();g.translate(p.x,p.y);g.rotate(Math.PI/4);g.fillRect(-2.5,-2.5,5,5);g.restore()}else g.fillRect(p.x-2.5,p.y-2.5,5,5)}
+      if(pulse>=0&&pulse<1){const seg=Math.min(3,Math.floor(pulse*4)),u=clamp(pulse*4-seg,0,1);const[x,y]=onCurve(nodes[seg],nodes[seg+1],u);const gr=g.createRadialGradient(x,y,0,x,y,16);gr.addColorStop(0,rgba(C.pale,.9));gr.addColorStop(1,rgba(C.pale,0));g.fillStyle=gr;g.beginPath();g.arc(x,y,16,0,7);g.fill()}
+      nodes.forEach((n,i)=>{const bad=!n.ok,pul=bad?.5+.5*Math.sin(t*6):0;const sx=n.flip>=0?Math.abs(Math.cos(n.flip*Math.PI)):1;
+        if(n.flash>0){g.strokeStyle=rgba(C.acc2,n.flash);g.lineWidth=2;g.beginPath();g.arc(n.x,n.y,21+(1-n.flash)*22,0,7);g.stroke()}
+        g.save();g.translate(n.x,n.y);g.scale(Math.max(.02,sx),1);g.fillStyle=bad?mix(C.card,C.acc,.35+.3*pul):(hotNode===i?'#2a2f3a':C.card);g.beginPath();g.arc(0,0,20,0,7);g.fill();g.strokeStyle=bad?C.acc:rgba(C.acc2,.6);g.lineWidth=1.5;g.stroke();
+        if(sx>.2)txt(g,n.tag,0,0,bad?C.text:C.pale,n.tag.length>2?10:11,true,'center');g.restore();
+        txt(g,n.name,n.x,n.y+34,C.text,12,true,'center');txt(g,i===2?EX[ex][0]:n.sub,n.x,n.y+50,i===2&&n.flip>=0?C.acc2:C.faint,10.5,false,'center')});
+      for(let i=0;i<4;i++)if(hotLink===i){const a=nodes[i],c=nodes[i+1],lx=(a.x+c.x)/2,ly=(a.y+c.y)/2-36,h=hist[i],bw=3,mxv=Math.max(...h,60);rr(g,lx-58,ly-64,116,52,6);g.fillStyle='#161922';g.fill();h.forEach((v,k)=>{const hh=v/mxv*30;g.fillStyle=v>80?C.acc:rgba(C.acc2,.8);g.fillRect(lx-54+k*bw+.5,ly-30-hh,bw-1,hh)});txt(g,'последние 6 с',lx,ly-20,C.faint,10,false,'center')}
+      for(const s of sparks){g.fillStyle=rgba(C.pale,clamp(s.l*2.5,0,1));g.fillRect(s.x,s.y,2.5,2.5)}
+      if(b>0){btn=[W/2-80,H-42,160,30];button(g,btn,weld>=0?'варю звено...':'Починить '+nodes[b].name,true,hotBtn)}
+      else{btn=null;txt(g,hotNode===2?'щелчок - сменить выход':'наведи на звено - график; щёлкни по узлу - сломать',W-12,H-14,C.faint,11,false,'right')}
+      txt(g,'квадрат - запрос, ромб - DNS',12,18,C.faint,10.5)}}
+}
+// ---------- 2. Порты ----------
+function S_ports(W,H){
+  const list=[[5173,'node','site-volna','12 мин',3],[3000,'node','moon-core','40 мин',2],[8080,'java','unreal-docs','11 ч',0],[5432,'postgres','','3 ч',1],[10808,'Happ','туннель','5 ч',4]];
+  const sx=74,cx=W-200;let t=0,hot=-1,drag=null,mx=0,my=0,toast=null;
+  const rows=list.map((l,i)=>{const y=38+i*52;const pts=[];for(let k=0;k<=14;k++){const u=k/14;pts.push({x:sx+(cx-sx)*u,y:y+Math.sin(u*Math.PI)*22})}pts.forEach(p=>{p.ox=p.x;p.oy=p.y});
+    return{port:l[0],proc:l[1],proj:l[2],age:l[3],traffic:l[4],idle:l[4]===0,y,ty:y,vy:0,pts,cut:false,gone:0,led:1,flow:0,snap:0}});
+  function rope(r,dt){const p=r.pts;for(const q of p){const vx=(q.x-q.ox)*.97,vy=(q.y-q.oy)*.97;q.ox=q.x;q.oy=q.y;q.x+=vx;q.y+=vy+520*dt*dt}
+    const seg=(cx-sx)/14*1.03;for(let it=0;it<16;it++){
+      if(drag===r){p[0].x=mx;p[0].y=my}else if(!r.cut){p[0].x+=(sx-p[0].x)*(r.snap>0?.35:1);p[0].y+=(r.y-p[0].y)*(r.snap>0?.35:1)}
+      p[14].x=cx;p[14].y=r.y;
+      for(let k=0;k<14;k++){const a=p[k],b=p[k+1];const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-seg)/d/2;if(k>0||r.cut){a.x+=dx*f;a.y+=dy*f}if(k<13){b.x-=dx*f;b.y-=dy*f}}}}
+  return{update(dt){t+=dt;let k=0;rows.forEach(r=>{if(r.cut){r.gone+=dt;r.led=Math.max(0,r.led-dt*2)}else{r.ty=38+k*52;k++}r.vy+=((r.ty-r.y)*90-r.vy*13)*dt;if(!r.cut||r.gone<.6)r.y+=r.vy*dt;r.flow+=dt*(.2+r.traffic*.35);r.snap=Math.max(0,r.snap-dt);rope(r,dt)});if(toast)toast.l-=dt},
+    move(x,y){mx=x;my=y;if(!drag)hot=rows.findIndex(r=>!r.cut&&Math.abs(y-r.y)<22)},
+    down(x,y){const r=rows.find(r=>!r.cut&&Math.hypot(x-r.pts[0].x,y-r.pts[0].y)<16);if(r){drag=r;mx=x;my=y}},
+    up(x,y){if(!drag)return;const r=drag;drag=null;if(Math.hypot(x-sx,y-r.y)>70){r.cut=true;toast={s:'Завершён '+r.proc+' (порт '+r.port+')',l:2.2}}else r.snap=.4},
+    click(x,y){const r=rows[hot];if(r&&!r.cut&&x>cx+150&&x<cx+186&&Math.abs(y-r.y)<14){r.cut=true;toast={s:'Завершён '+r.proc,l:2}}},
+    draw(g){rows.forEach((r,i)=>{if(r.gone>1.5)return;const a=r.cut?clamp(1-(r.gone-.7)/.8,0,1):1;const on=i===hot||drag===r;
+        const path=()=>{g.beginPath();r.pts.forEach((p,k)=>k?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y))};
+        g.globalAlpha=a;g.strokeStyle=r.idle?rgba(C.faint,.7):(on?C.acc:rgba(C.acc2,.55));g.lineWidth=on?3:2.2;path();g.stroke();
+        if(!r.cut&&!r.idle){g.setLineDash([3,12]);g.lineDashOffset=-r.flow*40;g.strokeStyle=on?C.pale:rgba(C.pale,.45);g.lineWidth=1.4;path();g.stroke();g.setLineDash([])}
+        if(r.idle&&!r.cut){for(let k=2;k<13;k+=2){const p=r.pts[k];g.fillStyle=rgba(C.faint,.7);g.fillRect(p.x+Math.sin(k)*3,p.y+4,1.5,1.5)}const m=r.pts[7];txt(g,r.age+' без дела',m.x,m.y+16,C.faint,10.5,false,'center')}
+        const p0=r.pts[0];g.fillStyle=drag===r?C.acc:C.pale;rr(g,p0.x-5,p0.y-5,11,10,2);g.fill();
+        g.globalAlpha=1;const sy=r.cut?r.ty:r.y;rr(g,sx-60,sy-16,54,32,8);g.fillStyle=C.card;g.fill();g.strokeStyle=rgba(C.acc2,.3);g.lineWidth=1;g.stroke();
+        g.fillStyle=r.led>0?mix('#2a2f3a',r.idle?C.faint:C.acc,r.led):'#2a2f3a';g.beginPath();g.arc(sx-50,sy,3.5,0,7);g.fill();
+        txt(g,String(r.port),sx-42,sy,r.led>0?C.text:C.faint,12,true);
+        g.globalAlpha=a;const yy=r.y;rr(g,cx,yy-19,190,38,9);g.fillStyle=on?'#2a2f3a':C.card;g.fill();
+        txt(g,r.proc,cx+12,yy-7,C.text,12.5,true);txt(g,(r.proj?r.proj+', ':'')+r.age,cx+12,yy+9,C.faint,10.5);
+        if(i===hot&&!r.cut&&!drag){rr(g,cx+152,yy-12,30,24,6);g.fillStyle=C.acc;g.fill();txt(g,'×',cx+167,yy,'#fff',15,true,'center')}g.globalAlpha=1});
+      if(drag){const far=Math.hypot(mx-sx,my-drag.y)>70;txt(g,far?'отпусти - завершить '+drag.proc:'отпусти рядом - вернуть',mx+14,my-14,far?C.acc:C.muted,11.5,true)}
+      if(toast&&toast.l>0){g.globalAlpha=clamp(toast.l,0,1);rr(g,W/2-120,H-44,240,28,8);g.fillStyle='#232733';g.fill();txt(g,toast.s,W/2,H-30,C.text,11.5,false,'center');g.globalAlpha=1}
+      else txt(g,'потяни штекер из гнезда - выдернуть; рядом отпустил - защёлкнется',W-12,H-12,C.faint,11,false,'right')}}
+}
+// Значок программы-заглушка: в программе здесь настоящий значок из exe (ui.Icon по пути).
+function appIcon(g, name, x, y, s, grey) {
+  const P = {
+    'Happ': ['#1c1f2a', (g, s) => { g.strokeStyle = '#c8323f'; g.lineWidth = s * .12; g.beginPath(); g.arc(0, s * .12, s * .26, Math.PI, 0); g.lineTo(s * .26, s * .3); g.moveTo(-s * .26, s * .12); g.lineTo(-s * .26, s * .3); g.stroke(); }],
+    'Telegram': ['#2a9fd6', (g, s) => { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(-s * .28, 0); g.lineTo(s * .3, -s * .24); g.lineTo(s * .16, s * .26); g.lineTo(s * .02, s * .08); g.closePath(); g.fill(); }],
+    'Discord': ['#5865f2', (g, s) => { g.fillStyle = '#fff'; g.beginPath(); g.roundRect(-s * .28, -s * .16, s * .56, s * .34, s * .14); g.fill(); g.fillStyle = '#5865f2'; g.beginPath(); g.arc(-s * .1, 0, s * .055, 0, 7); g.arc(s * .1, 0, s * .055, 0, 7); g.fill(); }],
+    'Steam': ['#1b2838', (g, s) => { g.strokeStyle = '#d9dee6'; g.lineWidth = s * .07; g.beginPath(); g.arc(s * .1, -s * .08, s * .13, 0, 7); g.stroke(); g.beginPath(); g.moveTo(s * .02, -s * .01); g.lineTo(-s * .2, s * .18); g.stroke(); g.fillStyle = '#d9dee6'; g.beginPath(); g.arc(-s * .2, s * .18, s * .07, 0, 7); g.fill(); }],
+    'Wallpaper Engine': ['#22324a', (g, s) => { g.fillStyle = '#e8963c'; g.beginPath(); g.arc(s * .14, -s * .12, s * .08, 0, 7); g.fill(); g.fillStyle = '#8fa3bf'; g.beginPath(); g.moveTo(-s * .3, s * .24); g.lineTo(-s * .08, -s * .06); g.lineTo(s * .06, s * .1); g.lineTo(s * .14, 0); g.lineTo(s * .3, s * .24); g.closePath(); g.fill(); }],
+    'Яндекс Браузер': ['#f2f2f2', (g, s) => { const gr = g.createLinearGradient(-s * .3, -s * .3, s * .3, s * .3); gr.addColorStop(0, '#ffcc00'); gr.addColorStop(1, '#ff3333'); g.strokeStyle = gr; g.lineWidth = s * .12; g.beginPath(); g.arc(0, 0, s * .24, 0, 7); g.stroke(); g.fillStyle = '#ff3333'; g.beginPath(); g.arc(0, 0, s * .08, 0, 7); g.fill(); }],
+    'NVIDIA': ['#1a1a1a', (g, s) => { g.fillStyle = '#76b900'; g.beginPath(); g.ellipse(0, 0, s * .3, s * .17, 0, 0, 7); g.fill(); g.fillStyle = '#1a1a1a'; g.beginPath(); g.arc(s * .04, 0, s * .09, 0, 7); g.fill(); }],
+    'Spotify': ['#191414', (g, s) => { g.fillStyle = '#1ed760'; g.beginPath(); g.arc(0, 0, s * .3, 0, 7); g.fill(); g.strokeStyle = '#191414'; g.lineWidth = s * .05; g.lineCap = 'round'; [.13, .02, -.09].forEach((yy, k) => { g.beginPath(); g.arc(0, s * (yy + .32), s * (.32 - k * .06), Math.PI * 1.3, Math.PI * 1.7); g.stroke(); }); g.lineCap = 'butt'; }],
+  };
+  const p = P[name] || ['#2a2f3a', () => {}];
+  g.save(); g.translate(x, y);
+  if (grey) g.filter = 'grayscale(1) brightness(.55)';
+  g.fillStyle = 'rgba(0,0,0,.35)'; rr(g, -s / 2 + 1, -s / 2 + 3, s, s, s * .24); g.fill();
+  g.fillStyle = p[0]; rr(g, -s / 2, -s / 2, s, s, s * .24); g.fill();
+  p[1](g, s);
+  g.restore();
+}
+// ---------- 3. Автозагрузка ----------
+function S_start(W,H){
+  const apps=[['Happ',.6,180],['Telegram',2.5,250],['Discord',8,420],['Steam',12,380],['Wallpaper Engine',4,300],['Яндекс Браузер',6,900],['NVIDIA',3,120],['Spotify',5,260]];
+  const L=40,R=W-40,lane=104;let t=0,hot=-1,replay=-1,btn=null,hotBtn=false;
+  const beads=apps.map((a,i)=>({name:a[0],sec:a[1],mb:a[2],on:true,x:L,y:lane,vx:0,vy:0,tx:0,ty:lane,s:22+Math.sqrt(a[2])/1.7,air:false,lit:1,pop:0,hang:1,sw:0,swv:0}));
+  let est=0,shown=0;
+  const sag=x=>beads.reduce((s,b)=>s+(b.on&&!b.air?b.mb/40*Math.exp(-Math.pow((x-b.x)/34,2)):0),0);
+  function layout(){let tot=2;beads.filter(b=>b.on).sort((a,b)=>a.sec-b.sec).forEach(b=>{tot+=b.sec*.9;b.tx=L+(R-L)*Math.min(1,tot/50)});est=tot;
+    beads.filter(b=>!b.on).forEach((b,i)=>{b.tx=L+26+i*50;b.ty=H-48})}
+  layout();
+  // ярусы: значок, который налез бы на соседа, висит на нитке подлиннее
+  function tiers(){const lv=[-1e9,-1e9,-1e9];beads.filter(b=>b.on).sort((a,b)=>a.tx-b.tx).forEach(b=>{let k=0;while(k<2&&b.tx-b.s/2<lv[k]+4)k++;b.tier=k;lv[k]=b.tx+b.s/2})}
+  tiers();
+  const tileAt=b=>{const len=8+(b.tierShown||0)*40;return[b.x+Math.sin(b.sw)*b.hang*(len+b.s/2)*.3,b.y+b.hang*(len+b.s/2)]};
+  return{update(dt){t+=dt;beads.forEach(b=>{if(b.on&&!b.air)b.ty=lane+sag(b.tx);
+      const ox=b.x;if(b.air){b.vy+=1000*dt;b.x+=(b.tx-b.x)*dt*3.5;b.y+=b.vy*dt;if(b.vy>0&&b.y>=b.ty){b.y=b.ty;b.air=false;b.vy=-b.vy*.25}}else spring(b,dt,80,11);
+      // подвеска качается от движения нитки
+      b.swv+=(-(b.x-ox)/Math.max(dt,1e-3)*.004-b.sw*30-b.swv*3)*dt;b.sw+=b.swv*dt;
+      b.hang+=((b.on&&!b.air?1:0)-b.hang)*Math.min(1,dt*8);b.tierShown=(b.tierShown||0)+((b.tier||0)-(b.tierShown||0))*Math.min(1,dt*8);b.pop=Math.max(0,b.pop-dt*1.8)});
+      shown+=(est-shown)*Math.min(1,dt*5);
+      if(replay>=0){replay+=dt/2.6;const ex=L+(R-L)*Math.min(1,est/50);const sx=L+(ex-L)*replay;beads.forEach(b=>{if(b.on){const was=b.lit;b.lit=b.x<=sx?1:.3;if(was<1&&b.lit===1){b.pop=1;b.swv+=4}}});if(replay>=1.25){replay=-1;beads.forEach(b=>b.lit=1)}}},
+    move(x,y){hot=beads.findIndex(b=>{const[cx,cy]=tileAt(b);return Math.abs(x-cx)<b.s/2+3&&Math.abs(y-cy)<b.s/2+3});hotBtn=inR(x,y,btn);const b=beads[hot];if(b&&b.on&&!this.last)b.swv+=2.5;this.last=b},
+    click(x,y){if(inR(x,y,btn)){replay=0;beads.forEach(b=>b.lit=b.on?.3:1);return}const b=beads[hot];if(!b)return;b.on=!b.on;b.air=true;b.vy=b.on?-460:-320;layout();tiers()},
+    draw(g){g.strokeStyle=rgba(C.acc2,.35);g.lineWidth=2.5;g.beginPath();for(let x=L;x<=R;x+=4){const y=lane+sag(x);x===L?g.moveTo(x,y):g.lineTo(x,y)}g.stroke();
+      g.fillStyle=C.faint;g.beginPath();g.arc(L,lane,4,0,7);g.fill();g.beginPath();g.arc(R,lane,4,0,7);g.fill();
+      for(let s=0;s<=50;s+=10){const x=L+(R-L)*s/50;txt(g,s+' с',x,lane-16,C.faint,10,false,'center')}
+      const ex=L+(R-L)*Math.min(1,shown/50);
+      if(replay>=0&&replay<=1){const sx=L+(ex-L)*replay;g.fillStyle=rgba(C.acc2,.1);g.fillRect(L,lane-30,sx-L,130);g.fillStyle=C.acc2;g.fillRect(sx-1,lane-30,2,130)}
+      const flag=replay<0||replay>=1;g.strokeStyle=C.acc;g.lineWidth=2;g.beginPath();g.moveTo(ex,lane-44);g.lineTo(ex,lane+6);g.stroke();
+      if(flag){const wv=Math.sin(t*4)*2;g.fillStyle=C.acc;g.beginPath();g.moveTo(ex,lane-44);g.lineTo(ex+16,lane-39+wv);g.lineTo(ex,lane-33);g.fill()}
+      txt(g,'стол готов через '+shown.toFixed(1).replace('.',',')+' с',clamp(ex,110,W-110),lane-58,C.text,13,true,'center');
+      const off=beads.filter(b=>!b.on);const sec=off.reduce((s,b)=>s+b.sec*.9,0),mb=off.reduce((s,b)=>s+b.mb,0);
+      txt(g,off.length?'выключено: вход быстрее на '+sec.toFixed(1).replace('.',',')+' с, свободнее на '+mb+' МБ':'выключено при входе',L,H-86,off.length?C.acc2:C.faint,11);
+      g.strokeStyle=rgba(C.faint,.4);g.lineWidth=1;g.setLineDash([4,4]);rr(g,L-8,H-74,R-L+16,52,10);g.stroke();g.setLineDash([]);
+      beads.forEach((b,i)=>{const on=i===hot;const[cx,cy]=tileAt(b);const sz=b.on?b.s:30;
+        if(b.hang>.05){g.strokeStyle=rgba(C.pale,.35*b.hang);g.lineWidth=1;g.beginPath();g.moveTo(b.x,b.y);g.lineTo(cx,cy-sz/2);g.stroke();g.fillStyle=C.faint;g.beginPath();g.arc(b.x,b.y,2.5,0,7);g.fill()}
+        if(b.pop>0){g.strokeStyle=rgba(C.pale,b.pop);g.lineWidth=1.5;rr(g,cx-sz/2-(1-b.pop)*10,cy-sz/2-(1-b.pop)*10,sz+(1-b.pop)*20,sz+(1-b.pop)*20,10);g.stroke()}
+        g.globalAlpha=b.on?b.lit:1;appIcon(g,b.name,cx,cy,sz*(on?1.1:1),!b.on);g.globalAlpha=1;
+        if(on)txt(g,b.name,cx,cy+sz/2+12,C.text,11,true,'center')});
+      btn=[12,8,138,28];button(g,btn,replay>=0?'вход идёт...':'Повторить вход',false,hotBtn);
+      const h=beads[hot];txt(g,h?h.name+': +'+h.sec+' с ко входу, '+h.mb+' МБ':'тяжёлые программы прогибают дорожку',W-12,H-10,h?C.muted:C.faint,11,false,'right')}}
+}
+
+// ---------- 4. Память ----------
+function S_mem(W,H){
+  const procs=[['система',2.9,0],['UnrealEditor',3.6,0],['Яндекс Браузер',2.4,0],['Code',2.0,1],['Figma',1.0,0],['Discord',.6,0]];
+  const fx=50,fw=170,fy=30,fh=H-74,TOT=15.6,LIM=.88;let t=0,hot=-1,bubbles=[],drops=[],tilt=0,tv=0,drag=null,mx=0,dx0=0,pf=0;
+  const L=procs.map((p,i)=>({name:p[0],gb:p[1],leak:p[2],h:p[1],boil:-1,col:i===0?C.faint:PAL[(i-1)%5],top:0,bot:0}));
+  const used=()=>L.reduce((s,l)=>s+l.h,0);
+  return{update(dt){t+=dt;L.forEach(l=>{if(l.leak&&l.boil<0){l.gb+=dt*.2;if(Math.random()<dt*3)drops.push({y:fy-4,v:0})}if(l.boil>=0){l.boil+=dt;if(Math.random()<.6)bubbles.push({x:fx+rnd(10,fw-10),y:l.top||fy+fh/2,r:rnd(2,5),v:rnd(50,100),l:1});if(l.boil>.45)l.gb=0}l.h+=(l.gb-l.h)*Math.min(1,dt*(l.boil>=0?2.5:6))});
+      tv+=(-tilt*60-tv*4)*dt;tilt+=tv*dt;
+      const surf=fy+fh-Math.min(used(),TOT*LIM)/TOT*fh;for(const d of drops){d.v+=600*dt;d.y+=d.v*dt}drops=drops.filter(d=>d.y<surf);
+      if(Math.random()<.12)bubbles.push({x:fx+rnd(10,fw-10),y:fy+fh,r:rnd(1.5,3),v:rnd(20,40),l:1});
+      for(const b of bubbles){b.y-=b.v*dt;b.l-=dt*.6}bubbles=bubbles.filter(b=>b.l>0);
+      const over=Math.max(0,used()-TOT*LIM);pf+=(over-pf)*Math.min(1,dt*3)},
+    move(x,y){if(drag){tv+=(x-mx)*.02;mx=x;return}hot=-1;if(x>fx&&x<fx+fw)L.forEach((l,i)=>{if(i>0&&y<=l.bot&&y>l.top)hot=i})},
+    down(x,y){if(x>fx&&x<fx+fw&&y>fy&&y<fy+fh){drag=1;mx=x;dx0=x}},
+    up(x){if(drag&&Math.abs(x-dx0)<4){const l=L[hot];if(l&&l.boil<0)l.boil=0}drag=null},
+    draw(g){const u=used(),cap=Math.min(u,TOT*LIM);
+      g.save();rr(g,fx,fy,fw,fh,18);g.clip();g.fillStyle='#14161e';g.fillRect(fx,fy,fw,fh);
+      let y=fy+fh,acc=0;const slope=Math.tan(clamp(tilt,-.35,.35));
+      // сначала границы слоёв, потом заливка сверху вниз: каждый слой льётся до самого дна, верхний поверх - щелей между волнами не бывает
+      L.forEach(l=>{const take=Math.max(0,Math.min(l.h,cap-acc));acc+=take;const h=take/TOT*fh;l.bot=y;l.top=y-h;l.hh=h;y-=h});
+      for(let i=L.length-1;i>=0;i--){const l=L[i];if(l.hh<.3)continue;const on=hot===i;
+        g.fillStyle=mix(l.col,'#14161e',on?0:(l.leak?.1:.22));g.beginPath();g.moveTo(fx,fy+fh+4);
+        for(let x=0;x<=fw;x+=6)g.lineTo(fx+x,l.top+slope*(x-fw/2)+Math.sin(x/16+t*2.5+i)*1.8);g.lineTo(fx+fw,fy+fh+4);g.closePath();g.fill()}
+      for(const b of bubbles){g.strokeStyle=rgba(C.pale,b.l*.6);g.lineWidth=1;g.beginPath();g.arc(b.x,b.y,b.r,0,7);g.stroke()}
+      g.restore();g.strokeStyle=rgba(C.acc2,.45);g.lineWidth=2;rr(g,fx,fy,fw,fh,18);g.stroke();
+      const ly=fy+fh*(1-LIM);g.strokeStyle=rgba(C.acc,.6);g.lineWidth=1;g.setLineDash([4,4]);g.beginPath();g.moveTo(fx-6,ly);g.lineTo(fx+fw+6,ly);g.stroke();g.setLineDash([]);txt(g,'предел',fx-8,ly,C.acc,10,false,'right');
+      const lk=L.find(l=>l.leak&&l.gb>0);g.fillStyle='#2a2f3a';rr(g,fx+fw/2-16,fy-16,32,10,3);g.fill();g.fillRect(fx+fw/2-3,fy-8,6,8);
+      if(lk){for(const d of drops){g.fillStyle=lk.col;g.beginPath();g.arc(fx+fw/2,d.y,2.5,0,7);g.fill()}txt(g,lk.name+' растёт',fx+fw/2+22,fy-11,C.acc,10.5,true)}
+      // подкачка - барабан диска: то, что выше предела, переливается через носик струйкой капель и ложится
+      // в барабан тёмным медленным слоем; по поверхности расходятся круги от струи
+      const px=fx+fw+16,pw=44,ph=84,py=fy+fh-ph,ry=6,ov=pf>.02;
+      const col=L.slice().reverse().find(l=>l.hh>.3)||L[0];
+      g.fillStyle='#14161e';g.beginPath();g.ellipse(px+pw/2,py+ph,pw/2,ry,0,0,Math.PI);g.lineTo(px,py);g.ellipse(px+pw/2,py,pw/2,ry,0,Math.PI,0,true);g.closePath();g.fill();
+      const lvl=Math.min(ph-10,pf/2.2*ph),sy=py+ph-lvl;
+      if(lvl>1){g.save();g.beginPath();g.ellipse(px+pw/2,py+ph,pw/2,ry,0,0,Math.PI);g.lineTo(px,sy);g.lineTo(px+pw,sy);g.closePath();g.clip();
+        g.fillStyle=mix(col.col,'#14161e',.45);g.fillRect(px,sy-ry,pw,lvl+ry*2);g.restore();
+        g.fillStyle=mix(col.col,'#14161e',.25);g.beginPath();g.ellipse(px+pw/2,sy,pw/2-1,ry-1+Math.sin(t*5)*.6,0,0,7);g.fill();
+        if(ov)for(let k=0;k<2;k++){const ph_=(t*1.2+k*.5)%1;g.strokeStyle=rgba(C.pale,(1-ph_)*.5);g.lineWidth=1;g.beginPath();g.ellipse(px+pw*.6,sy,4+ph_*12,(4+ph_*12)*.3,0,0,7);g.stroke()}
+        for(let k=0;k<3;k++){const u=(t*.35+k*.33)%1;g.strokeStyle=rgba(C.pale,.35*(1-u));g.beginPath();g.arc(px+8+k*12,py+ph-2-u*lvl,1.6,0,7);g.stroke()}}
+      g.strokeStyle=rgba(C.acc2,.45);g.lineWidth=1.5;g.beginPath();g.ellipse(px+pw/2,py,pw/2,ry,0,0,7);g.moveTo(px,py);g.lineTo(px,py+ph);g.ellipse(px+pw/2,py+ph,pw/2,ry,0,Math.PI,0,true);g.lineTo(px+pw,py);g.stroke();
+      for(let k=1;k<4;k++){const yy=py+ph*k/4;g.fillStyle=rgba(C.acc2,.35);g.fillRect(px+pw-8,yy,6,1)}
+      // носик на кромке колбы и струйка
+      g.fillStyle=rgba(C.acc2,.55);g.beginPath();g.moveTo(fx+fw-2,ly-3);g.lineTo(fx+fw+9,ly-6);g.lineTo(fx+fw+9,ly-2);g.lineTo(fx+fw-2,ly+3);g.fill();
+      if(ov){const p0=[fx+fw+9,ly-4],p1=[px+pw*.6+10,ly-10],p2=[px+pw*.6,sy-2];const B=u=>[(1-u)*(1-u)*p0[0]+2*u*(1-u)*p1[0]+u*u*p2[0],(1-u)*(1-u)*p0[1]+2*u*(1-u)*p1[1]+u*u*p2[1]];
+        g.strokeStyle=mix(col.col,'#14161e',.2);g.lineWidth=2;g.beginPath();for(let k=0;k<=16;k++){const[x,y]=B(k/16);k?g.lineTo(x,y):g.moveTo(x,y)}g.stroke();
+        g.fillStyle=col.col;for(let k=0;k<7;k++){const u=Math.pow((t*1.4+k/7)%1,1.6);const[x,y]=B(u);g.beginPath();g.ellipse(x,y,2,2.6+u*1.5,0,0,7);g.fill()}}
+      txt(g,'подкачка',px+pw/2,py+ph+16,ov?C.acc:C.faint,10,!!ov,'center');txt(g,ov?gb(pf)+', на диске':'пусто',px+pw/2,py+ph+29,C.faint,9.5,false,'center');
+      const lx=px+pw+22;txt(g,'занято '+gb(u)+' из '+gb(TOT),lx,30,C.text,14,true);txt(g,pf>.02?'не влезает: '+gb(pf)+' в подкачке':'свободно '+gb(TOT-u),lx,50,pf>.02?C.acc:C.acc2,11.5);
+      L.slice(1).forEach((l,k)=>{const i=k+1,yy=80+k*28;g.globalAlpha=l.gb===0?.35:(hot>0&&hot!==i?.5:1);g.fillStyle=l.col;g.fillRect(lx,yy-6,12,12);txt(g,l.name,lx+20,yy,C.text,12,hot===i);txt(g,l.gb===0?'закрыто':gb(l.h)+(l.leak?' +':''),W-16,yy,l.leak?C.acc:C.muted,11.5,true,'right');g.globalAlpha=1});
+      const hy=80+5*28+16;txt(g,'щелчок по слою - закрыть',lx,hy,C.faint,10.5);txt(g,'потяни колбу вбок - плеснёт',lx,hy+16,C.faint,10.5)}}
+}
+// ---------- 5. Батарея ----------
+// Энергия течёт из батареи по шине к программам; у каждой ветки свой рубильник. Толщина провода и
+// частота импульсов - нагрузка. Разомкнул рубильник - программа остановлена в фоне, «сядет в» уходит вправо.
+function S_battery(W,H){
+  const bx=30,by=46,bw=62,bh=H-150;let t=0,hot=-1,level=.64,pulses=[],sparks=[],charging=false,hotCap=false;
+  const ps=[['Wallpaper Engine',6,'обои без окна'],['Яндекс Браузер',3,'вкладки в фоне'],['Discord',2,'оверлей'],['OneDrive',1.2,'синхронизация']];
+  const busX=bx+bw+44,cardX=W-196,swX=(busX+cardX)/2;
+  const S=ps.map((p,i)=>({name:p[0],cpu:p[1],why:p[2],y:44+i*(bh-20)/3,on:true,blade:0,acc:0}));
+  const drain=()=>8+S.reduce((s,q)=>s+(q.on?q.cpu:0),0)*1.6;let shownH=level*90/drain();
+  const now=20*60+15;const clock=m=>{m=Math.round(m)%1440;return Math.floor(m/60)+':'+String(m%60).padStart(2,'0')};
+  const outY=by+bh*.35;
+  // путь импульса: из батареи на шину, по шине до ветки, через рубильник к программе
+  const path=s=>[[bx+bw,outY],[busX,outY],[busX,s.y],[cardX,s.y]];
+  function at(pts,u){let L=0;const seg=[];for(let k=1;k<pts.length;k++){const d=Math.hypot(pts[k][0]-pts[k-1][0],pts[k][1]-pts[k-1][1]);seg.push(d);L+=d}
+    let r=u*L;for(let k=0;k<seg.length;k++){if(r<=seg[k]){const f=r/seg[k];return[pts[k][0]+(pts[k+1][0]-pts[k][0])*f,pts[k][1]+(pts[k+1][1]-pts[k][1])*f]}r-=seg[k]}return pts[pts.length-1]}
+  const uSwitch=s=>{const p=path(s);let L=0,a=0;for(let k=1;k<p.length;k++){const d=Math.hypot(p[k][0]-p[k-1][0],p[k][1]-p[k-1][1]);if(k===3)a=L+(swX-busX);L+=d}return a/L};
+  return{update(dt){t+=dt;
+      S.forEach(s=>{s.blade+=((s.on?0:1)-s.blade)*Math.min(1,dt*10);if(s.on&&!charging){s.acc+=dt*s.cpu*1.3;if(s.acc>1){s.acc-=1;pulses.push({s,u:0,v:.55+s.cpu*.05})}}});
+      if(charging){level=Math.min(1,level+dt*.015);if(Math.random()<dt*10)pulses.push({ch:true,u:0,v:.8})}
+      for(const p of pulses){if(p.s&&!p.s.on&&p.u<uSwitch(p.s)&&p.u+dt*p.v>=uSwitch(p.s)){p.dead=true;continue}p.u+=dt*p.v}
+      pulses=pulses.filter(p=>!p.dead&&p.u<1);
+      for(const s of sparks){s.vy+=500*dt;s.x+=s.vx*dt;s.y+=s.vy*dt;s.l-=dt}sparks=sparks.filter(s=>s.l>0);
+      const target=charging?(1-level)*90/40:level*90/drain();shownH+=(target-shownH)*Math.min(1,dt*4)},
+    move(x,y){hot=S.findIndex(s=>Math.abs(y-s.y)<20&&x>swX-30);hotCap=x>bx+bw/2-18&&x<bx+bw/2+18&&y>by-16&&y<by+8},
+    click(){if(hotCap){charging=!charging;return}const s=S[hot];if(!s)return;s.on=!s.on;if(!s.on)for(let k=0;k<10;k++)sparks.push({x:swX+10,y:s.y,vx:rnd(-80,80),vy:rnd(-160,-20),l:rnd(.25,.5)})},
+    draw(g){
+      // батарея: стоит вертикально, жидкость с волной
+      rr(g,bx+bw/2-12,by-10,24,10,3);g.fillStyle=hotCap?C.pale:rgba(C.pale,.5);g.fill();
+      rr(g,bx,by,bw,bh,12);g.strokeStyle=rgba(C.pale,.5);g.lineWidth=2;g.stroke();
+      g.save();rr(g,bx+5,by+5,bw-10,bh-10,8);g.clip();const top=by+5+(bh-10)*(1-level);g.fillStyle=rgba(charging?C.acc2:C.acc,.6);g.beginPath();g.moveTo(bx,by+bh);
+      for(let x=0;x<=bw;x+=4)g.lineTo(bx+x,top+Math.sin(x/9+t*3)*2.5);g.lineTo(bx+bw,by+bh);g.fill();g.restore();
+      txt(g,Math.round(level*100)+'%',bx+bw/2,by+bh-22,C.text,15,true,'center');
+      if(charging){g.strokeStyle=rgba(C.acc2,.7);g.lineWidth=3;g.beginPath();g.moveTo(bx+bw/2,by+bh);g.bezierCurveTo(bx+bw/2,by+bh+30,bx-10,by+bh+20,bx-20,by+bh+60);g.stroke();
+        for(const p of pulses)if(p.ch){const y=by+bh+40-p.u*50;g.fillStyle=C.acc2;g.fillRect(bx+bw/2-2,Math.max(top,y)-2,4,4)}}
+      // провода: шина и ветки, толщина - нагрузка
+      const on=S.filter(s=>s.on),busW=1.5+on.reduce((a,s)=>a+s.cpu,0)*.35;
+      g.strokeStyle=rgba(C.acc2,.5);g.lineWidth=busW;g.beginPath();g.moveTo(bx+bw,outY);g.lineTo(busX,outY);g.stroke();
+      const ys=S.map(s=>s.y);g.lineWidth=2;g.beginPath();g.moveTo(busX,Math.min(...ys,outY));g.lineTo(busX,Math.max(...ys,outY));g.stroke();
+      S.forEach((s,i)=>{const w=s.on?1.5+s.cpu*.6:1.5,hl=hot===i;g.strokeStyle=s.on?(hl?C.acc:rgba(C.acc2,.6)):rgba(C.faint,.6);g.lineWidth=w;
+        g.beginPath();g.moveTo(busX,s.y);g.lineTo(swX-12,s.y);g.moveTo(swX+12,s.y);g.lineTo(cardX,s.y);g.stroke();
+        g.fillStyle=C.pale;g.beginPath();g.arc(swX-12,s.y,3,0,7);g.arc(swX+12,s.y,3,0,7);g.fill();
+        const ang=-s.blade*.75;g.strokeStyle=s.on?C.pale:C.acc;g.lineWidth=3;g.lineCap='round';g.beginPath();g.moveTo(swX-12,s.y);g.lineTo(swX-12+24*Math.cos(ang),s.y+24*Math.sin(ang));g.stroke();g.lineCap='butt';
+        rr(g,cardX,s.y-19,184,38,9);g.fillStyle=hl?'#2a2f3a':C.card;g.fill();
+        txt(g,s.name,cardX+12,s.y-7,s.on?C.text:C.faint,12,true);txt(g,s.on?'процессор '+s.cpu+'%, '+s.why:'остановлено',cardX+12,s.y+9,s.on?C.muted:C.faint,10.5);
+        const gain=Math.round(level*90*(1/(drain()-(s.on?s.cpu*1.6:0))-1/drain())*60);if(hl&&s.on)txt(g,'+'+gain+' мин',cardX+176,s.y-7,C.acc2,10.5,true,'right')});
+      for(const p of pulses)if(p.s){const[x,y]=at(path(p.s),p.u);g.fillStyle=C.acc;g.fillRect(x-2,y-2,4,4)}
+      for(const s of sparks){g.fillStyle=rgba(C.pale,clamp(s.l*2.5,0,1));g.fillRect(s.x,s.y,2.5,2.5)}
+      // шкала времени
+      const ty=H-50,tx0=bx,tx1=W-20;g.strokeStyle=rgba(C.faint,.6);g.lineWidth=1;g.beginPath();g.moveTo(tx0,ty);g.lineTo(tx1,ty);g.stroke();
+      for(let h=0;h<=6;h++){const x=tx0+(tx1-tx0)*h/6;g.fillStyle=C.faint;g.fillRect(x,ty-3,1,6);txt(g,clock(now+h*60),x,ty+14,C.faint,10,false,'center')}
+      const mk=tx0+(tx1-tx0)*clamp(shownH/6,0,1);g.fillStyle=charging?C.acc2:C.acc;g.beginPath();g.arc(mk,ty,6,0,7);g.fill();
+      txt(g,(charging?'полная в ':'сядет в ')+clock(now+shownH*60),clamp(mk,60,W-60),ty-16,C.text,12.5,true,'center');
+      txt(g,'щелчок по программе - разомкнуть её провод; по клемме батареи - зарядка',W-12,H-10,C.faint,10.5,false,'right')}}
+}
+
+// ---------- 6. Версии ----------
+function S_vers(W,H){
+  const rows=[['Python','3.10.11','3.13.1',['3.10','3.11','3.12','3.13'],'поддержка до 10.2026'],['Node.js','20.11.0','22.12.0',['20','21','22'],''],['CMake','3.28.1','3.31.2',['3.28','3.29','3.30','3.31'],''],['Git','2.47.1','2.47.1',['2.47'],''],['MSYS2','17 пакетов','обновить',[],'']];
+  const CH='0123456789.абвгдежзиклмнопрст';let t=0,hot=-1;
+  const R=rows.map((r,i)=>({name:r[0],from:r[1],to:r[2],train:r[3],eol:r[4],up:r[1]!==r[2],at:.3+i*.3}));
+  return{update(dt){t+=dt},
+    move(x,y){hot=R.findIndex((r,i)=>Math.abs(y-(34+i*56))<24)},click(){const r=R[hot];if(r)r.at=t},
+    draw(g){const bx0=100,cell=15;R.forEach((r,i)=>{const y=34+i*56,p=clamp((t-r.at)/.8,0,1);const on=hot===i;if(on){rr(g,8,y-22,W-16,46,8);g.fillStyle='#181b24';g.fill()}
+      txt(g,r.name,20,y-7,C.text,13,true);txt(g,r.up?'было '+r.from:'свежая',20,y+10,C.faint,10);
+      const n=9;for(let k=0;k<n;k++){const kk=clamp(p*1.7-k*.07,0,1);const ch=kk>=1?(r.to[k]||' '):kk<=0?(r.from[k]||' '):CH[Math.floor(Math.random()*CH.length)];
+        const x=bx0+k*(cell+1);const fl=kk>0&&kk<1?Math.abs(Math.cos(kk*Math.PI*3)):1;g.fillStyle=C.card;rr(g,x,y-14+14*(1-fl),cell,28*fl,3);g.fill();g.fillStyle='rgba(0,0,0,.4)';g.fillRect(x,y-.5,cell,1);if(fl>.3)txt(g,ch,x+cell/2,y,kk>=1?(r.up?C.text:C.muted):C.muted,12,true,'center')}
+      const tx=bx0+n*(cell+1)+18,tw=W-tx-26,a=ease((t-r.at-.6)/.6);
+      if(r.train.length>1){g.strokeStyle=rgba(C.faint,.6);g.lineWidth=1;g.beginPath();g.moveTo(tx,y);g.lineTo(tx+tw*a,y);g.stroke();
+        r.train.forEach((v,k)=>{const x=tx+tw*k/(r.train.length-1)*a;const last=k===r.train.length-1,first=k===0;g.fillStyle=last?C.acc:first?C.pale:C.faint;g.beginPath();g.arc(x,y,last||first?5:3.5,0,7);g.fill();if(a>.9)txt(g,v,x,y-13,last?C.acc:first?C.pale:C.faint,9.5,last||first,'center')});
+        const n1=r.train.length-1;if(a>.9)txt(g,n1+(n1===1?' версия позади':' версии позади'),tx+tw/2,y+13,C.muted,10,false,'center')}
+      else if(!r.up){g.fillStyle=C.acc2;g.beginPath();g.arc(tx+8,y,5,0,7);g.fill();txt(g,'последняя',tx+20,y,C.acc2,10.5)}
+      else{rr(g,tx,y-11,92,22,11);g.fillStyle=rgba(C.acc,.2);g.fill();txt(g,'обновить',tx+46,y,C.acc,11,true,'center')}
+      if(r.eol&&a>.9){const pu=.6+.4*Math.sin(t*4);rr(g,20,y+17,140,15,7);g.fillStyle=rgba(C.acc,.25*pu+.1);g.fill();txt(g,r.eol,90,y+24.5,C.acc,9.5,true,'center')}});
+      txt(g,'щёлкни по строке - перещёлкнуть заново',W-12,H-10,C.faint,11,false,'right')}}
+}
+
+const D=[
+ ['Сеть: живой маршрут','раздел «Сеть», карточка обрыва','Пакеты бегут по узлам, звенья греются от задержки.',
+  ['<b>Звено краснеет и толстеет</b>, когда задержка растёт; наведи - график последних секунд со всплесками','<b>Смена выхода Happ</b> (у тебя часто): узел переворачивается, FI - SE - US, задержка прыгает и успокаивается','<b>Обрыв</b>: звено рвётся посередине, концы искрят, между ними проскакивает дуга, запросы копятся у разрыва («ждут ответа: N»); «Починить» - концы свариваются, очередь разом уходит дальше, по маршруту пробегает огонёк проверки'],S_route],
+ ['Порты: кабели','вкладка «Порты», сектор «Порты»','Порт - гнездо, программа - карточка, между ними провисший кабель.',
+  ['<b>Выдернуть жестом</b>: тянешь штекер, кабель тянется за мышью; далеко отпустил - процесс завершён, рядом - защёлкнулся обратно','<b>Ток по кабелю</b> бежит со скоростью трафика','<b>Забытый сервер</b>: серый кабель в пыли и подпись «11 ч без дела»'],S_ports],
+ ['Автозагрузка: дорожка входа','вкладка «Автозагрузка»','Программы - бусины на дорожке от входа до готового стола.',
+  ['<b>Значки программ висят на дорожке</b>, как подвески на гирлянде, и покачиваются; тяжёлые прогибают её (в программе - настоящие значки из exe)','<b>«Повторить вход»</b>: луч проходит по дорожке, бусины вспыхивают в момент запуска, в конце развевается флажок','<b>Щелчок</b> - бусина спрыгивает в «выключено», внизу итог: на сколько быстрее вход и сколько памяти освободилось'],S_start],
+ ['Память: колба','сектор «Процессы», «Состояние»','Колба памяти, программы - слои жидкости.',
+  ['<b>Утечка</b>: из крана капает, слой Code растёт на глазах','<b>Предел</b>: выше пунктира не влезает - переливается в маленькую колбу «подкачка»','<b>Щелчок</b> по слою - программа закрывается, слой выкипает; <b>потяни колбу вбок</b> - жидкость плеснёт'],S_mem],
+ ['Батарея: куда уходит заряд','сектор «Фон»','Энергия течёт из батареи по проводам к фоновым программам; толщина провода и частота импульсов - нагрузка.',
+  ['<b>Рубильник на каждой ветке</b>: щелчок по программе размыкает её провод с искрой, импульсы до неё больше не доходят','<b>Шкала времени</b>: «сядет в 22:21»; каждый разомкнутый провод двигает метку вправо, при наведении видно «+N мин»','<b>Зарядка</b> (щелчок по клемме батареи): заряд течёт снизу по кабелю, метка «полная в»'],S_battery],
+ ['Версии: табло и поезд релизов','сектор «Версии», недельная проверка','Табло перещёлкивается на свежую версию.',
+  ['<b>Поезд релизов</b>: точки от твоей версии до последней - видно, насколько отстал','<b>Конец поддержки</b>: у Python 3.10 мигает «поддержка до 10.2026»','<b>Свежие</b> отмечены спокойно, без шума'],S_vers],
+];
+const stages=[];
+D.forEach((d,i)=>{const el=document.createElement('div');el.className='dir';
+  el.innerHTML=`<h2><b>${i+1}</b>${d[0]}<span>${d[1]}</span></h2><p>${d[2]}</p><ul>${d[3].map(s=>'<li>'+s+'</li>').join('')}</ul><div class="bar"><button>Ещё раз</button></div><canvas></canvas>`;
+  document.getElementById('grid').appendChild(el);const cv=el.querySelector('canvas');const st={cv,g:cv.getContext('2d'),make:d[4],vis:false};stages.push(st);
+  const restart=()=>{st.W=cv.clientWidth;st.H=cv.clientHeight;st.scene=st.make(st.W,st.H)};
+  el.querySelector('button').onclick=restart;
+  const pos=e=>{const r=cv.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top]};
+  cv.onmousemove=e=>st.scene.move&&st.scene.move(...pos(e));cv.onmouseleave=()=>st.scene.move&&st.scene.move(-99,-99);
+  cv.onmousedown=e=>st.scene.down&&st.scene.down(...pos(e));
+  cv.onmouseup=e=>st.scene.up&&st.scene.up(...pos(e));
+  cv.onclick=e=>st.scene.click&&st.scene.click(...pos(e));
+  window.addEventListener('mouseup',e=>{if(e.target!==cv&&st.scene.up)st.scene.up(-999,-999)});
+  new IntersectionObserver(es=>{const v=es[0].isIntersecting;if(v&&!st.vis)restart();st.vis=v}).observe(cv);
+  restart()});
+let last=performance.now();
+function frame(now){const dt=Math.min(.033,(now-last)/1000);last=now;
+  for(const st of stages){if(!st.vis)continue;const dpr=devicePixelRatio||1,W=st.cv.clientWidth,H=st.cv.clientHeight;
+    if(st.cv.width!==Math.round(W*dpr)){st.cv.width=Math.round(W*dpr);st.cv.height=Math.round(H*dpr)}
+    if(W!==st.W)st.scene=st.make(st.W=W,st.H=H);
+    st.g.setTransform(dpr,0,0,dpr,0,0);st.g.clearRect(0,0,W,H);st.scene.update(dt);st.scene.draw(st.g)}
+  requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

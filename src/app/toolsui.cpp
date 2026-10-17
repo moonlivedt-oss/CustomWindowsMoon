@@ -1276,13 +1276,6 @@ Item SecurityItem() {
             Act(Short(NoExe(s.name), 14), L"tools-bug.png", L"sec-find:" + std::to_wstring(i),
                 Level(s.score) + what + L". " + s.why + L". " + Short(s.path, 90) + L". 2 клика - что с этим сделать"));
     }
-    if (checked && g_finds.empty())
-        item.children.push_back(
-            Act(L"Чисто", L"tools-shield.png", L"",
-                checkedNote + L". Без подписи " + std::to_wstring(sec.unsignedCount) +
-                    L" - это обычно (свои сборки, мелкие программы); странными они становятся по месту и имени"));
-    if (!checked)
-        item.children.push_back(Act(L"Проверка", L"tools-shield.png", L"", L"Первая проверка подписей идёт в фоне"));
     item.children.push_back(Act(L"Заново", L"tools-scan.png", L"sec-rescan",
                                 L"Ещё раз проверить запущенное, автозапуск и реестр; итог - карточкой"));
     item.children.push_back(Act(L"Списком", L"tools-shield.png", L"studio:6",
@@ -1297,8 +1290,7 @@ Item SecurityItem() {
                                       L"Windows - закрыли окно, и всё, что он сделал, исчезло"
                                     : L"Песочница Windows выключена: 2 клика - как включить"));
     item.children.push_back(Act(L"Камера и микрофон", L"tools-privacy.png", L"sec-privacy",
-                                L"Кто и когда брал камеру, микрофон и геопозицию (Windows записывает сама). Снимок "
-                                L"и починка Windows - в секторе «Починка»"));
+                                L"Кто и когда брал камеру, микрофон и геопозицию (Windows записывает сама)"));
     g_secApps = tools::SecurityApps(g_cfg->securityDir);
     for (size_t i = 0; i < g_secApps.size(); ++i) {
         Item a = Act(g_secApps[i].name, L"", L"sec-app:" + std::to_wstring(i), g_secApps[i].exe);
@@ -1315,7 +1307,7 @@ Item RecoveryItem() {
     // «Восстановление» в боковой сектор кольца не влезает даже мелким шрифтом - на кольце «Починка»
     Item item = Act(L"Починка", L"rec-kit.png", L"",
                     broken.empty() ? L"Восстановление: починить Windows, точки восстановления, Центр обновления, "
-                                     L"Проводник, особая загрузка, офлайн-проверка"
+                                     L"Проводник, особая загрузка, офлайн-проверка. Сломанного вирусами нет"
                                    : L"Испорчено вирусами или программами: " + std::to_wstring(broken.size()) +
                                          L". Ниже - вернуть и починить остальное");
     if (!broken.empty()) {
@@ -1328,17 +1320,12 @@ Item RecoveryItem() {
     item.children.push_back(Act(L"Починить Windows", L"tools-repair.png", L"rec-repair",
                                 L"DISM восстановит хранилище из Windows Update, потом SFC сверит системные файлы - "
                                 L"одним заданием, ход в карточке (до часа, нужен интернет и права)"));
-    item.children.push_back(Act(L"Снимок", L"tools-snapshot.png", L"sec-restore",
-                                L"Точка восстановления системы - перед драйвером, правками реестра или починкой; "
-                                L"нужны права"));
-    item.children.push_back(Act(L"Откатить", L"tools-snapshot.png", L"rec-rstrui",
-                                L"«Восстановление системы»: точки с датами и откат к одной из них"));
+    item.children.push_back(Act(L"Точки", L"tools-snapshot.png", L"rec-points",
+                                L"Точки восстановления: создать новую (перед драйвером, правками реестра или "
+                                L"починкой) или откатиться к прежней"));
     item.children.push_back(Act(L"Центр обновления", L"rec-update.png", L"rec-wu",
                                 L"Обновления зависли или не ставятся: остановить службы, убрать кэш загрузок и "
                                 L"catroot2 (в копию .old), запустить заново. Спрошу"));
-    if (broken.empty())
-        item.children.push_back(Act(L"Всё на месте", L"rec-unbreak.png", L"rec-unbreak",
-                                    L"Диспетчер задач, regedit, запуск .exe и .bat, Shell и Userinit - как в Windows"));
     item.children.push_back(Act(L"Проводник", L"rec-explorer.png", L"rec-explorer",
                                 L"Значки «поехали» или эскизы старые: очистить их кэш и перезапустить Проводник"));
     item.children.push_back(Act(L"Особая загрузка", L"rec-boot.png", L"rec-boot",
@@ -1392,8 +1379,6 @@ Item SystemItem(const Scan& scan) {
                  ? L"Последнее установлено " + FtText(g_updates.lastOk, false) + L": " + Short(g_updates.lastTitle, 80)
                  : std::wstring(L"Установленных за последнее время нет")) +
                 (failed.empty() ? L"" : L". Не установились за 30 дней: " + failed) + L". 2 клика - Центр обновления"));
-    } else if (scan.devices.empty() && !g_scanAt) {
-        item.children.push_back(Act(L"Считаю", L"tools-box.png", L"", L"Обновления и устройства считаются в фоне"));
     }
     for (size_t i = 0; i < g_devs.size() && i < 4; ++i)
         item.children.push_back(Act(Short(g_devs[i].name, 14), L"tools-devices.png", L"sys-dev",
@@ -1442,8 +1427,6 @@ Item GitItem(const Scan& scan) {
         item.children.push_back(
             Act(label, L"tools-git.png", L"git:" + std::to_wstring(i), note + L". 2 клика - терминал в папке"));
     }
-    if (g_scanAt && g_git.empty())
-        item.children.push_back(Act(L"Чисто", L"tools-git.png", L"", L"Незакоммиченного и неотправленного нет"));
     return item;
 }
 
@@ -1586,8 +1569,6 @@ void ShowRing(RadialMenu& menu) {
                                             (p.idleDays ? Days(p.idleDays) + L" не было" : std::wstring(L"сегодня")) +
                                             L". 2 клика - удалить (спрошу)"));
     }
-    if (projects.children.empty())
-        projects.children.push_back(Act(L"Чисто", L"tools-box.png", L"", L"Искал в папках из колец"));
     ring.push_back(projects);
 
     // PATH: проблемы, конфликты версий и что найдётся первым
@@ -1676,8 +1657,7 @@ void ShowRing(RadialMenu& menu) {
         ports.children.push_back(Act(L"Старые " + std::to_wstring(g_oldPorts.size()), L"tools-clean.png", L"ports-old",
                                      L"Серверы разработки, работающие дольше 6 часов - скорее всего забытые с прошлого "
                                      L"раза. 2 клика - завершить (спрошу)"));
-    if (ports.children.empty())
-        ports.children.push_back(Act(L"Свободно", L"tools-ports.png", L"studio:3", L"Порты разработки никто не занял"));
+    if (ports.children.empty()) ports.note = L"Порты разработки свободны: ни один сервер проекта не слушает";
     ring.push_back(ports);
 
     // процессы: память и самые тяжёлые программы
@@ -1724,9 +1704,6 @@ void ShowRing(RadialMenu& menu) {
                                      L" (память " + tools::Bytes(cm.phys) + L" + подкачка " +
                                      tools::Bytes(tools::PagefileBytes()) + L"), пик с загрузки " +
                                      tools::Bytes(cm.peak) + L". 2 клика - настройки подкачки"));
-    procs.children.push_back(
-        Act(L"Колба", L"tools-mem.png", L"studio:4",
-            L"Память колбой в студии: слои программ, утечки, перелив в подкачку; щелчок по слою - закрыть"));
     ring.push_back(procs);
 
     // фон: батарея, кто ест процессор без окна, кто качает, что мешает сну
@@ -1761,11 +1738,9 @@ void ShowRing(RadialMenu& menu) {
                                       L", память " + tools::Bytes(g_hogs[i].mem) + L". 2 клика - закрыть (спрошу)"));
     }
     if (!hogsReady)
-        bg.children.push_back(Act(L"Собираю", L"tools-box.png", L"",
-                                  L"Процессор в фоне считается за 10 минут, история копится с запуска RadialMenu"));
+        bg.note += L". Процессор в фоне считается за 10 минут с запуска RadialMenu";
     else if (g_hogs.empty())
-        bg.children.push_back(Act(L"Тихо", L"tools-box.png", L"",
-                                  L"За 10 минут ни одна программа без окна не съела больше 1% процессора"));
+        bg.note += L". За 10 минут ни одна программа без окна не съела больше 1% процессора";
     bg.children.push_back(Act(L"Кто качает", L"tools-ports.png", L"net-top",
                               std::wstring(L"Трафик по программам за 3 секунды (TCP; QUIC браузеров не видно). ") +
                                   speed + (net::AdminReady() ? L"" : L". Нужна задача с правами (спрошу)")));
@@ -1781,9 +1756,6 @@ void ShowRing(RadialMenu& menu) {
         bg.children.push_back(Act(L"Будят " + std::to_wstring(g_wake.size()), L"tools-battery.png", L"wake",
                                   L"Могут разбудить из сна: " + list + L". 2 клика - Диспетчер устройств"));
     }
-    bg.children.push_back(
-        Act(L"Провода", L"tools-battery.png", L"studio:4",
-            L"Батарея в студии: ветки к фоновым программам, рубильник - закрыть, «сядет в» сдвигается"));
     ring.push_back(bg);
 
     // автозагрузка: что включено и сколько памяти держит
@@ -1834,7 +1806,9 @@ void ShowRing(RadialMenu& menu) {
     groups.push_back(group(L"Место", L"tools-disk.png", L"Диски, очистка, мусор проектов. " + ring[CLEAN].note,
                            {DISKS, CLEAN, PROJECTS}, 1, L"Что занимает место: соты по папкам, кэши"));
     groups.push_back(group(L"Память", L"tools-mem.png", L"Процессы, фон, автозагрузка. " + ring[PROCS].note,
-                           {PROCS, BG, STARTS}, 4, L"Колба памяти и батарея в студии"));
+                           {PROCS, BG, STARTS}, 4,
+                           L"Колба памяти (слои программ, утечки, подкачка) и батарея (ветки к фоновым программам) в "
+                           L"студии"));
     groups.push_back(group(L"Разработка", L"tools-git.png",
                            L"Git, PATH, порты, терминал, кто держит файл. " + ring[GIT].note,
                            {GIT, PATH, PORTS, TERM, LOCK}, 0, L"PATH и переменные, порты, версии в студии"));
@@ -2043,9 +2017,6 @@ void Run(const std::wstring& key) {
         SecurityAction(s);
         return;
     }
-    if (key == L"syspath-clean")
-        return RunJob(L"Системный PATH",
-                      [](const tools::Log& log, std::wstring&) { return net::RunAdmin(net::JOB_SYSPATH_CLEAN, log); });
     if (key == L"path-add") {
         std::wstring p = tools::ClipboardPath();
         if (p.empty() || !(GetFileAttributesW(p.c_str()) & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -2364,7 +2335,7 @@ void Run(const std::wstring& key) {
         return;
     }
     // ---------------- восстановление ----------------
-    if (key == L"rec-repair" || key == L"sec-repair") {
+    if (key == L"rec-repair") {
         Ask(
             L"Починить Windows?",
             L"Сначала DISM сверит хранилище компонентов с Windows Update (до получаса, нужен интернет), потом SFC "
@@ -2378,11 +2349,19 @@ void Run(const std::wstring& key) {
             nullptr, 30000, Toast::G_INFO);
         return;
     }
-    if (key == L"rec-rstrui") {
-        if ((INT_PTR)ShellExecuteW(nullptr, L"open", Sys32(L"rstrui.exe").c_str(), nullptr, Sys32(L"").c_str(),
-                                   SW_SHOWNORMAL) <= 32)
-            g_card.Show(BoostCard::DONE, L"Не открылось", L"Восстановление системы выключено или нет прав.", Theme(), 0,
-                        Toast::G_WARN);
+    if (key == L"rec-points") {
+        Ask(
+            L"Точки восстановления",
+            L"«Создать» - снимок системных файлов и реестра сейчас (нужны права). «Откатить» - окно «Восстановление "
+            L"системы»: точки с датами, откат к одной из них.",
+            L"Создать", L"Откатить", [] { Run(L"sec-restore"); },
+            [] {
+                if ((INT_PTR)ShellExecuteW(nullptr, L"open", Sys32(L"rstrui.exe").c_str(), nullptr, Sys32(L"").c_str(),
+                                           SW_SHOWNORMAL) <= 32)
+                    g_card.Show(BoostCard::DONE, L"Не открылось", L"Восстановление системы выключено или нет прав.",
+                                Theme(), 0, Toast::G_WARN);
+            },
+            30000, Toast::G_INFO);
         return;
     }
     if (key == L"rec-wu") {
