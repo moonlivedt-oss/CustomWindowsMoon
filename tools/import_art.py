@@ -85,11 +85,9 @@ SHEETS = {
         "tools-ok",
         "tools-wait",
     ],
-    # набор 3: сектор «Восстановление» (свой Recovery Kit)
+    # набор 3: сектор «Восстановление» (свой Recovery Kit); починка и точки - нынешние tools-repair, tools-snapshot
     "sheet-recovery.png": [
         "rec-kit",
-        "rec-repair",
-        "rec-restore",
         "rec-update",
         "rec-unbreak",
         "rec-explorer",
@@ -101,15 +99,15 @@ SHEETS = {
         "tools-privacy",
         "tools-certs",
         "tools-origin",
+        "tools-firewall",
+        "tools-sign",
         "tools-reboot",
-        "tools-winupdate",
         "tools-devices",
         "tools-temp",
         "tools-report",
         "tools-git",
         "tools-containers",
-        "tools-unreal",
-        "tools-backup",
+        "tools-leftovers",
     ],
     # кольцо «Сеть»
     "sheet-net.png": [
@@ -137,7 +135,7 @@ GRIDS = {
     "sheet-guard.png": (3, 2),
     "sheet-net.png": (5, 2),
     "sheet-guard2.png": (4, 2),
-    "sheet-recovery.png": (4, 2),
+    "sheet-recovery.png": (3, 2),
     "sheet-tools2.png": (4, 3),
 }
 
