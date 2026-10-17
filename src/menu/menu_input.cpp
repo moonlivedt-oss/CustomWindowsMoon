@@ -203,7 +203,7 @@ void RadialMenu::OnRightClick() {
     POINT p;
     GetCursorPos(&p);
     Hit h = HitTest(p);
-    if (h.sub >= 0 && subItems_[h.sub]->dir) {
+    if (h.sub >= 0 && subItems_[h.sub]->CanDrill()) {
         Drill(*subItems_[h.sub]);
     } else if (h.root >= 0 && (*ring_)[h.root].dir && !(*ring_)[h.root].HasRing()) {
         hoverRoot_ = h.root;
@@ -222,7 +222,7 @@ void RadialMenu::OnWheel(int delta) {
     POINT p;
     GetCursorPos(&p);
     Hit h = HitTest(p);
-    if (delta > 0 && h.sub >= 0 && subItems_[h.sub]->dir)
+    if (delta > 0 && h.sub >= 0 && subItems_[h.sub]->CanDrill())
         Drill(*subItems_[h.sub]);
     else if (delta < 0)
         Back();
@@ -285,7 +285,7 @@ void RadialMenu::EndGrab() {
     }
     grabSpun_ = false;
     double fling = std::clamp(grabVel_ * 140, -4.0, 4.0);  // отпустили на ходу - докручивается
-    if (GetTickCount64() - grabT_ > 90) fling = 0;            // остановились перед отпусканием
+    if (GetTickCount64() - grabT_ > 90) fling = 0;         // остановились перед отпусканием
     if (g == 0)
         rootRotTo_ = std::round(rootRot_ + fling);
     else
@@ -305,10 +305,14 @@ void RadialMenu::OnClick(POINT p) {
         ActivateHover();
         return;
     }
+    if (hit.sub >= 0 && subItems_[hit.sub]->Nested()) {  // группа утилит: внутрь одним щелчком, это не действие
+        Drill(*subItems_[hit.sub]);
+        return;
+    }
     std::wstring key = ItemKey(HoveredItem());
     int dx = GetSystemMetrics(SM_CXDOUBLECLK), dy = GetSystemMetrics(SM_CYDOUBLECLK);
-    if (!key.empty() && key == clickKey_ && now - clickT_ <= GetDoubleClickTime() &&
-        std::abs(p.x - clickPt_.x) <= dx && std::abs(p.y - clickPt_.y) <= dy) {
+    if (!key.empty() && key == clickKey_ && now - clickT_ <= GetDoubleClickTime() && std::abs(p.x - clickPt_.x) <= dx &&
+        std::abs(p.y - clickPt_.y) <= dy) {
         clickKey_.clear();
         ActivateHover();
         return;
@@ -324,8 +328,9 @@ void RadialMenu::Activate(const Item& it) {
         TurnPage(1);
         return;
     }
-    if (it.special == 3) {  // действие сети: делает main, меню только гаснет
-        if (it.path.empty()) return;  // группа (DNS, пинг): действия - во втором кольце
+    if (it.special == 3) {                  // действие сети: делает main, меню только гаснет
+        if (it.Nested()) return Drill(it);  // группа утилит во втором кольце: её пункты - на его месте
+        if (it.path.empty()) return;        // группа (DNS, пинг): действия - во втором кольце
         std::wstring key = it.path;
         StopHooks();
         Launch();

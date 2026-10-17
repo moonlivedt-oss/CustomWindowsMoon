@@ -21,6 +21,9 @@ struct Item {
     std::vector<Item> children;
 
     bool HasRing() const { return expand || !children.empty(); }
+    // пункт второго кольца со своими пунктами (группа утилит): щелчок - зайти внутрь, как в папку
+    bool Nested() const { return !dir && special == 3 && !children.empty(); }
+    bool CanDrill() const { return dir || Nested(); }
 };
 
 struct Config {

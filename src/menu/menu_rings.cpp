@@ -173,7 +173,8 @@ void RadialMenu::RebuildSub() {
         kbSel_ = std::clamp(kbSel_, 0, std::max(0, (int)list.size() - 1));
     } else if (mode_ == Mode::Root && (subParent_ >= 0 || !navStack_.empty())) {
         if (!navStack_.empty()) {
-            list = ListFolder(navStack_.back().full, true);
+            const Item& top = navStack_.back();
+            list = top.dir ? ListFolder(top.full, true) : top.children;
         } else {
             const Item& root = (*ring_)[subParent_];
             list = root.children;
@@ -198,7 +199,7 @@ void RadialMenu::RebuildSub() {
 }
 
 void RadialMenu::Drill(Item folder) {
-    if (!folder.dir) return;
+    if (!folder.CanDrill()) return;
     if (mode_ == Mode::Search) {
         // папка из найденного: второе кольцо - её содержимое, «назад» до конца - к первому кольцу
         mode_ = Mode::Root;

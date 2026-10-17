@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кольцо утилит: наброски</title>
+<style>
+:root{--bg:#0b0c10;--card:#12141c;--card2:#1c1f2a;--card3:#232733;--text:#eef0f5;--muted:#9aa3b4;--faint:#5b6272;--acc:#c8323f;--acc2:#8fa3bf;--warn:#e0a14a;--ok:#78cda0;--ring:#15171f;--ring2:#1a1d27;--line:#2a2e3c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif;padding:28px 16px 60px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:24px;margin:0 0 4px}
+h3{font-size:18px;margin:34px 0 6px}
+.lead{color:var(--muted);margin:0 0 22px;max-width:940px}
+.lead b{color:var(--text)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:18px}
+.dir{background:var(--card);border:1px solid #232634;border-radius:14px;padding:16px 16px 14px;display:flex;flex-direction:column}
+.dir h2{margin:0;font-size:17px;display:flex;gap:10px;align-items:baseline}
+.dir h2 b{color:var(--acc);font-size:13px}
+.dir p{margin:4px 0 8px;color:var(--muted)}
+.dir ul{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
+.dir li b{color:var(--text);font-weight:600}
+.stage{position:relative;border-radius:10px;background:#0f1016;user-select:none;aspect-ratio:1/1;width:100%}
+.stage svg{width:100%;height:100%;display:block}
+.tip{min-height:44px;margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--card2);color:var(--muted);font-size:12.5px}
+.tip b{color:var(--text)}
+.crumb{font-size:12px;color:var(--faint);margin-top:6px;min-height:18px}
+.bar{display:flex;gap:6px;margin:6px 0 10px;flex-wrap:wrap}
+.btn{background:var(--card2);color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
+.btn:hover{color:var(--text)}
+.btn.on{background:var(--acc);border-color:var(--acc);color:#fff}
+table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #22252f;vertical-align:top}
+th{color:var(--faint);font-weight:600}
+td{color:var(--muted)}
+td b{color:var(--text)}
+.foot{margin-top:28px;color:var(--muted);max-width:940px}
+.foot b{color:var(--text)}
+/* кольцо */
+.sec{cursor:pointer}
+.sec path{transition:fill .15s}
+.lbl{font-size:12.5px;font-weight:600;fill:#e9ecf2;pointer-events:none;text-anchor:middle}
+.lbl.s{font-size:11px;font-weight:500;fill:#c3c9d5}
+.lbl.dim{fill:#6c7384}
+.badge text{font-size:10.5px;font-weight:700;fill:#fff;text-anchor:middle;pointer-events:none}
+.hubt{font-size:12px;fill:#c3c9d5;text-anchor:middle;pointer-events:none}
+.hubt.b{font-size:13px;font-weight:700;fill:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Кольцо «Утилиты»: как разобрать 15 секторов</h1>
+<p class="lead">Сейчас в первом кольце 15 секторов по 24 градуса: подписи режутся («Восстано...», «Автозагр...»), глаз не
+цепляется ни за что. Ниже три способа, все живые: <b>наведите</b> на сектор - откроется второе кольцо,
+<b>щёлкните</b> - пройти глубже (там, где есть куда), щелчок по середине - назад. Данные - с этого ПК (находки
+«Защиты», RadialMenu с неотправленными коммитами, 6,3 ГБ кэшей).</p>
+
+<div class="grid">
+  <div class="dir">
+    <h2><b>A</b> Шесть групп</h2>
+    <p>Первое кольцо - 6 групп по смыслу, второе - утилиты группы, щелчок по утилите - её пункты. Середина - студия.</p>
+    <div class="stage" id="wA"></div>
+    <div class="crumb" id="cA"></div>
+    <div class="tip" id="tA">Наведите на сектор.</div>
+    <ul>
+      <li><b>Место</b>: Диски, Очистка, Проекты</li>
+      <li><b>Память</b>: Процессы, Фон, Автозагрузка</li>
+      <li><b>Разработка</b>: Git, PATH, Порты, Терминал, Кто держит</li>
+      <li><b>Защита</b>, <b>Восстановление</b>, <b>Система</b> - как сейчас</li>
+    </ul>
+  </div>
+  <div class="dir">
+    <h2><b>B</b> Группы + «Важное»</h2>
+    <p>Как A, но первым сектором - «Важное»: 3-6 дел со всех утилит, которые стоит сделать сейчас. Значки-счётчики
+      на группах показывают, где что-то есть; спокойные группы - приглушены.</p>
+    <div class="stage" id="wB"></div>
+    <div class="crumb" id="cB"></div>
+    <div class="tip" id="tB">Наведите на сектор.</div>
+    <ul>
+      <li>Открыл кольцо - сразу видно «перезагрузка», «17 коммитов», «6,3 ГБ», не надо обходить сектора</li>
+      <li>Пусто - сектор «Важное» показывает «Всё спокойно» и ведёт в студию</li>
+    </ul>
+  </div>
+  <div class="dir">
+    <h2><b>C</b> Восемь секторов, без третьего уровня</h2>
+    <p>Слить родственное: 8 крупных секторов, всё остальное - во втором кольце (длиннее, с прокруткой).
+      Меньше всего правок в коде меню.</p>
+    <div class="stage" id="wC"></div>
+    <div class="crumb" id="cC"></div>
+    <div class="tip" id="tC">Наведите на сектор.</div>
+    <ul>
+      <li><b>Память</b> = Процессы + Фон, <b>Разработка</b> = Git + Порты + Терминал + Кто держит</li>
+      <li><b>Восстановление</b> + <b>Система</b> = «Windows»</li>
+      <li>Второе кольцо у «Очистки» - до 14 пунктов, листается колесом</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Сравнение</h3>
+<table>
+  <tr><th></th><th>A Шесть групп</th><th>B Группы + «Важное»</th><th>C Восемь секторов</th></tr>
+  <tr><td>Секторов в первом кольце</td><td><b>6</b> (по 60°)</td><td><b>7</b></td><td><b>8</b></td></tr>
+  <tr><td>До «Очистить всё»</td><td>навести «Место» - щёлкнуть «Очистка» - «Всё сразу»</td><td>«Важное» - «Очистить 6,3 ГБ» (2 движения)</td><td>навести «Место» - «Всё сразу»</td></tr>
+  <tr><td>Видно, где проблемы</td><td>счётчики на группах</td><td><b>сразу, списком</b></td><td>счётчики на секторах</td></tr>
+  <tr><td>Что менять в меню</td><td>третий уровень: «щёлкнуть пункт с детьми» = пройти внутрь (как папка)</td><td>то же + сбор «Важного» в toolsui</td><td>почти ничего: только сгруппировать пункты</td></tr>
+  <tr><td>Риск</td><td>утилиты на шаг глубже</td><td>«Важное» надо держать коротким</td><td>длинные вторые кольца</td></tr>
+</table>
+
+<p class="foot">Моя рекомендация - <b>B</b>: большинство раз кольцо открывают не «выбрать утилиту», а «сделать то,
+о чём оно уже знает». Группы при этом остаются для всего остального. Третий уровень меню нужен и для A, и для B -
+он же пригодится в кольце «Сеть». Можно взять A сейчас и добавить «Важное» следующим шагом.</p>
+</div>
+
+<script>
+const I = n => '../icons/' + n + '.png';
+// ---------------- данные (как на этом ПК) ----------------
+const T = {
+  disks: {name:'Диски', icon:'tools-disk', note:'Место, здоровье SSD, что выросло за неделю', children:[
+    {name:'C: 84 ГБ', icon:'tools-disk', note:'Свободно 84 ГБ из 476 ГБ (17%). 2 клика - что занимает'},
+    {name:'D: 312 ГБ', icon:'tools-disk', note:'Свободно 312 ГБ из 931 ГБ'},
+    {name:'Здоровье', icon:'tools-health', note:'Износ, температура и часы SSD'},
+    {name:'+2,1 ГБ Загрузки', icon:'tools-update', note:'Выросло за неделю'}]},
+  clean: {name:'Очистка', icon:'tools-clean', badge:{n:'6,3 ГБ',l:'info'}, note:'Можно освободить 6,3 ГБ: кэши, временные, старое Unreal, корзина', children:[
+    {name:'Всё сразу 6,3 ГБ', icon:'tools-clean', note:'Кэши и временные файлы, кроме шейдеров'},
+    {name:'Unreal: старое', icon:'tools-clean', note:'Не открывалось 30 дней'},
+    {name:'Docker и WSL', icon:'tools-containers', note:'Почистить Docker или сжать диски'},
+    {name:'Хвост Opera', icon:'tools-leftovers', note:'Программы нет, папку не открывали 140 дней'},
+    {name:'Корзина 1,2 ГБ', icon:'tools-clean', note:'Очистить насовсем'},
+    {name:'Дубли', icon:'tools-dup', note:'Одинаковые файлы от 20 МБ'}]},
+  projects: {name:'Проекты', icon:'tools-projects', note:'Мусор сборки: node_modules, Intermediate, build', children:[
+    {name:'Давние 3,4 ГБ', icon:'tools-clean', note:'Проекты без правок 60+ дней'},
+    {name:'game_3 1,1 ГБ', icon:'tools-clean', note:'Unreal: промежуточные'},
+    {name:'site 640 МБ', icon:'tools-clean', note:'node_modules'}]},
+  procs: {name:'Процессы', icon:'tools-procs', note:'Свободно 5,1 ГБ из 16 ГБ; самые тяжёлые программы', children:[
+    {name:'chrome 2,4 ГБ', icon:'tools-box', note:'31 процесс'},
+    {name:'Code 1,3 ГБ', icon:'tools-box', note:'12 процессов'},
+    {name:'Подкачка', icon:'tools-mem', note:'Настройки файла подкачки'},
+    {name:'Колба', icon:'tools-mem', note:'Память колбой в студии'}]},
+  bg: {name:'Фон', icon:'tools-bg', note:'Что работает без окна и тратит батарею', children:[
+    {name:'Батарея 78%', icon:'tools-battery', note:'От сети, износ 11%'},
+    {name:'Кто качает', icon:'tools-ports', note:'Трафик по программам'},
+    {name:'Мешает сну', icon:'tools-battery', note:'Кто не даёт уснуть'}]},
+  start: {name:'Автозагрузка', icon:'tools-start', note:'6 программ при входе, держат 410 МБ', children:[
+    {name:'Steam 120 МБ', icon:'tools-box', note:'Выключить (спрошу)'},
+    {name:'Discord 180 МБ', icon:'tools-box', note:'Выключить (спрошу)'},
+    {name:'Start11', icon:'tools-box', note:'Выключить (спрошу)'}]},
+  git: {name:'Git', icon:'tools-git', badge:{n:2,l:'info'}, note:'С правками: 1, не отправлено в GitHub: 1', children:[
+    {name:'RadialMenu +17', icon:'tools-git', note:'Коммитов не в GitHub: 17. 2 клика - терминал'},
+    {name:'TestMenuMoon', icon:'tools-git', note:'Изменено файлов: 3'}]},
+  path: {name:'PATH', icon:'tools-path', note:'Чисто; какая команда найдётся первой', children:[
+    {name:'python', icon:'tools-env', note:'C:\\Python314\\python.exe'},
+    {name:'g++', icon:'tools-env', note:'D:\\msys64\\ucrt64\\bin\\g++.exe'},
+    {name:'Версии', icon:'tools-update', note:'Что вышло новее'},
+    {name:'Добавить', icon:'tools-path', note:'Папку из буфера'}]},
+  ports: {name:'Порты', icon:'tools-ports', note:'Кто занял порты разработки', children:[
+    {name:'5173 site', icon:'tools-ports', note:'node.exe, Vite'},
+    {name:'3000 api', icon:'tools-ports', note:'node.exe'}]},
+  term: {name:'Терминал', icon:'tools-env', note:'Терминал в папке Проводника с окружением проекта'},
+  lock: {name:'Кто держит', icon:'tools-lock', note:'Кто не даёт удалить файл из буфера'},
+  sec: {name:'Защита', icon:'tools-shield', badge:{n:4,l:'warn'}, note:'Странного: 4. Проверено 99 программ', children:[
+    {name:'javaw', icon:'tools-firewall', note:'Брандмауэр: программа из папки пользователя принимает входящие'},
+    {name:'MoonLiveDz', icon:'tools-certs', note:'Незнакомый корневой сертификат'},
+    {name:'VSCodeCssAutoheal', icon:'tools-bug', note:'Задача запускает скрипт'},
+    {name:'Заново', icon:'tools-scan', note:'Проверить ещё раз'},
+    {name:'Списком', icon:'tools-shield', note:'Все находки в студии'},
+    {name:'Kaspersky', icon:'tools-shield', note:'Полная проверка'},
+    {name:'Песочница', icon:'tools-sandbox', note:'exe из буфера - в одноразовую Windows'},
+    {name:'Камера', icon:'tools-privacy', note:'Кто брал камеру и микрофон'}]},
+  rec: {name:'Восстановление', icon:'rec-kit', note:'Починить Windows, точки, Центр обновления...', children:[
+    {name:'Починить', icon:'tools-repair', note:'DISM, потом SFC, одним заданием'},
+    {name:'Снимок', icon:'tools-snapshot', note:'Точка восстановления'},
+    {name:'Откатить', icon:'tools-snapshot', note:'Восстановление системы'},
+    {name:'Обновления', icon:'rec-update', note:'Сбросить Центр обновления'},
+    {name:'Всё на месте', icon:'rec-unbreak', note:'Сломанного вирусами нет'},
+    {name:'Проводник', icon:'rec-explorer', note:'Кэш значков, перезапуск'},
+    {name:'Особая загрузка', icon:'rec-boot', note:'Меню восстановления'},
+    {name:'Офлайн', icon:'rec-offline', note:'Проверка до загрузки'},
+    {name:'Не грузится?', icon:'rec-kit', note:'Памятка'}]},
+  sys: {name:'Система', icon:'tools-reboot', badge:{n:1,l:'warn'}, note:'Стоит посмотреть: 1', children:[
+    {name:'Перезагрузка', icon:'tools-reboot', note:'Обновления Windows ждут перезагрузки'},
+    {name:'Обновления', icon:'tools-update', note:'Последнее 14.10.2026'},
+    {name:'Устройства', icon:'tools-devices', note:'Ошибок нет'},
+    {name:'Видеокарта', icon:'tools-temp', note:'Температура сейчас'},
+    {name:'Износ батареи', icon:'tools-battery', note:'79,7 из 90 Вт*ч'},
+    {name:'Отчёт', icon:'tools-report', note:'Всё о системе одним текстом'}]},
+};
+const group = (name, icon, note, kids) => {
+  const b = kids.reduce((a, k) => a + (k.badge && typeof k.badge.n === 'number' ? k.badge.n : 0), 0);
+  const warn = kids.some(k => k.badge && k.badge.l === 'warn');
+  return {name, icon, note, children:kids, badge: b ? {n:b, l: warn ? 'warn' : 'info'} : kids.find(k => k.badge) ? {n:'!', l:'info'} : null};
+};
+const G = {
+  place: group('Место', 'tools-disk', 'Диски, очистка, мусор проектов', [T.disks, T.clean, T.projects]),
+  mem: group('Память', 'tools-mem', 'Процессы, фон, автозагрузка', [T.procs, T.bg, T.start]),
+  dev: group('Разработка', 'tools-git', 'Git, PATH, порты, терминал, кто держит файл', [T.git, T.path, T.ports, T.term, T.lock]),
+};
+const ringA = [G.place, G.mem, G.dev, T.sec, T.rec, T.sys];
+const important = {name:'Важное', icon:'tools-ok', badge:{n:4,l:'warn'}, note:'Что стоит сделать сейчас - со всех утилит', children:[
+  {name:'Перезагрузить', icon:'tools-reboot', note:'Обновления Windows ждут перезагрузки. «Завершение работы» не поможет', hot:true},
+  {name:'RadialMenu +17', icon:'tools-git', note:'17 коммитов не в GitHub'},
+  {name:'Очистить 6,3 ГБ', icon:'tools-clean', note:'Кэши и временные файлы'},
+  {name:'Защита: 4', icon:'tools-bug', note:'Брандмауэр, сертификат, задача - посмотреть списком'}]};
+const ringB = [important, G.place, G.mem, G.dev, T.sec, T.rec, T.sys].map(x => ({...x, dim: !x.badge}));
+const flat = (name, icon, note, kids) => ({name, icon, note, children: kids.flatMap(k => k.children ? k.children : [k]),
+  badge: kids.find(k => k.badge) ? kids.find(k => k.badge).badge : null});
+const ringC = [
+  flat('Место', 'tools-disk', 'Диски и очистка', [T.disks, T.clean]),
+  T.projects,
+  flat('Память', 'tools-mem', 'Процессы и фон', [T.procs, T.bg]),
+  T.start,
+  flat('Разработка', 'tools-git', 'Git, порты, терминал, кто держит', [T.git, T.ports, T.term, T.lock]),
+  T.path,
+  T.sec,
+  flat('Windows', 'rec-kit', 'Восстановление и система', [T.sys, T.rec]),
+];
+
+// ---------------- кольцо ----------------
+const NS = 'http://www.w3.org/2000/svg';
+const C = 300, R0 = 62, R1 = 172, R2 = 182, R3 = 278;
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const pt = (r, a) => [C + r * Math.sin(a), C - r * Math.cos(a)];
+function arc(r0, r1, a0, a1) {
+  const big = a1 - a0 > Math.PI ? 1 : 0;
+  const [x0, y0] = pt(r1, a0), [x1, y1] = pt(r1, a1), [x2, y2] = pt(r0, a1), [x3, y3] = pt(r0, a0);
+  return `M${x0},${y0} A${r1},${r1} 0 ${big} 1 ${x1},${y1} L${x2},${y2} A${r0},${r0} 0 ${big} 0 ${x3},${y3} Z`;
+}
+function wrapText(s, max) {
+  if (s.length <= max) return [s];
+  const w = s.split(' ');
+  if (w.length > 1) { const h = Math.ceil(w.length / 2); return [w.slice(0, h).join(' '), w.slice(h).join(' ')]; }
+  return [s.slice(0, max - 1) + '…'];
+}
+
+function Wheel(id, ring, deep) {
+  const host = document.getElementById('w' + id), tip = document.getElementById('t' + id), crumb = document.getElementById('c' + id);
+  const svg = el('svg', {viewBox:'0 0 600 600'}, host);
+  const st = {stack: [], hover: -1, sub: -1, open: 0};
+  const cur = () => st.stack.length ? st.stack[st.stack.length - 1].children : ring;
+  function say(n) { tip.innerHTML = n ? `<b>${n.name}</b> - ${n.note || ''}${n.children && deep ? ' <span style="color:#5b6272">(щелчок - внутрь)</span>' : ''}` : 'Наведите на сектор.'; }
+  function draw() {
+    svg.innerHTML = '';
+    const items = cur(), n = items.length, step = 2 * Math.PI / n, gap = 0.012;
+    // фон колец
+    el('circle', {cx:C, cy:C, r:R1 + 3, fill:'#0c0d12'}, svg);
+    const open = st.open >= 0 ? items[st.open] : null;
+    // второе кольцо
+    if (open && open.children) {
+      const kids = open.children, m = kids.length;
+      const sstep = Math.min(step * 1.0, 2 * Math.PI / Math.max(m, 1), Math.PI / 6.5);
+      const mid = st.open * step, a0 = mid - sstep * m / 2;
+      kids.forEach((k, j) => {
+        const g = el('g', {class:'sec'}, svg);
+        const s0 = a0 + j * sstep + gap, s1 = a0 + (j + 1) * sstep - gap;
+        const hot = st.sub === j;
+        el('path', {d:arc(R2, R3, s0, s1), fill: hot ? '#3a2330' : k.hot ? '#33222a' : '#1c202b', stroke: hot ? '#c8323f' : '#2e3344'}, g);
+        const am = (s0 + s1) / 2, [ix, iy] = pt((R2 + R3) / 2 - 10, am);
+        el('image', {href:I(k.icon), x:ix - 17, y:iy - 22, width:34, height:34}, g);
+        const [tx, ty] = pt((R2 + R3) / 2 + 26, am);
+        wrapText(k.name, 13).forEach((line, li, arr) => { const t = el('text', {x:tx, y:ty + li * 12 - (arr.length - 1) * 6 + 4, class:'lbl s'}, g); t.textContent = line; });
+        g.onmouseenter = () => { say(k); if (st.sub !== j) { st.sub = j; draw(); } };
+        g.onclick = () => { if (k.children && deep) { st.stack.push(open); st.open = j; st.sub = -1; draw(); } };
+      });
+    }
+    // первое кольцо
+    items.forEach((it, i) => {
+      const g = el('g', {class:'sec'}, svg);
+      const a0 = i * step - step / 2 + gap, a1 = (i + 1) * step - step / 2 - gap;
+      const hot = st.open === i;
+      el('path', {d:arc(R0, R1, a0, a1), fill: hot ? '#33232d' : it.dim ? '#161821' : '#1f2330', stroke: hot ? '#c8323f' : '#2e3344'}, g);
+      const am = i * step, [ix, iy] = pt(R0 + 50, am);
+      el('image', {href:I(it.icon), x:ix - 21, y:iy - 21, width:42, height:42, opacity: it.dim ? .55 : 1}, g);
+      const [tx, ty] = pt(R1 - 22, am);
+      const max = n > 10 ? 9 : 14;
+      wrapText(it.name, max).forEach((line, li, arr) => { const t = el('text', {x:tx, y:ty + li * 13 - (arr.length - 1) * 6.5 + 4, class:'lbl' + (it.dim ? ' dim' : '')}, g); t.textContent = line; });
+      if (it.badge) {
+        const bx = ix + 22, by = iy - 18;  // у правого верхнего угла значка
+        const txt = String(it.badge.n), w = Math.max(18, txt.length * 7 + 8);
+        const b = el('g', {class:'badge'}, g);
+        el('rect', {x:bx - w / 2, y:by - 9, width:w, height:18, rx:9, fill: it.badge.l === 'warn' ? '#c8323f' : '#4b5670'}, b);
+        const t = el('text', {x:bx, y:by + 4}, b); t.textContent = txt;
+      }
+      g.onmouseenter = () => { say(it); if (st.open !== i) { st.open = i; st.sub = -1; draw(); } };
+      g.onclick = () => { if (it.children && deep && st.stack.length === 0 && it.children.some(c => c.children)) { st.stack.push(it); st.open = 0; st.sub = -1; draw(); } };
+    });
+    // середина
+    const hub = el('g', {class:'sec'}, svg);
+    el('circle', {cx:C, cy:C, r:R0 - 6, fill:'#1b1e28', stroke:'#c8323f', 'stroke-width':2}, hub);
+    if (st.stack.length) {
+      el('image', {href:I('back'), x:C - 16, y:C - 26, width:32, height:32}, hub);
+      const t = el('text', {x:C, y:C + 22, class:'hubt'}, hub); t.textContent = st.stack[st.stack.length - 1].name;
+      hub.onclick = () => { st.stack.pop(); st.open = -1; st.sub = -1; draw(); };
+    } else {
+      el('image', {href:I('rail-tools'), x:C - 20, y:C - 30, width:40, height:40}, hub);
+      const t = el('text', {x:C, y:C + 24, class:'hubt'}, hub); t.textContent = 'студия';
+      hub.onclick = () => {};
+    }
+    hub.onmouseenter = () => say(st.stack.length ? {name:'Назад', note:'к ' + (st.stack.length > 1 ? st.stack[st.stack.length - 2].name : 'группам')} : {name:'Все утилиты', note:'открыть студию'});
+    crumb.textContent = 'Утилиты' + st.stack.map(s => ' / ' + s.name).join('');
+  }
+  draw();
+}
+Wheel('A', ringA, true);
+Wheel('B', ringB, true);
+Wheel('C', ringC, false);
+</script>
+</body>
+</html>
