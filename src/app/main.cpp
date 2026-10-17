@@ -372,7 +372,7 @@ void OfferRestore() {
 void BoostAfterGame() {
     boost::Settings s = boost::Load(BoostDir());
     boost::GameTweaks(s, false);
-    if (g_cfg.boostAfter && s.purge) boost::RunPurge();
+    if (g_cfg.boostAfter && s.purge) boost::RunPurge(s);
     OfferRestore();
 }
 

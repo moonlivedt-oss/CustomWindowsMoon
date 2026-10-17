@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 
+#include "core/elevate.h"
 #include "core/text.h"
 #include "tools/tools.h"
 
@@ -264,7 +265,12 @@ int CleanSystemPath(const Log& log) {
         log(L"В системном PATH мёртвых папок и дублей нет.");
         return 0;
     }
-    SaveText(BackupDir() + L"\\system-" + Stamp() + L".txt", old);
+    // копия системного PATH - в папке помощника (Program Files\MoonRadial\data): сюда пишет процесс с правами,
+    // а в папке пользователя подложенная ссылка перенаправила бы его запись
+    std::wstring adminDir = elevate::DataDir() + L"\\path-backups";
+    CreateDirectoryW(elevate::DataDir().c_str(), nullptr);
+    CreateDirectoryW(adminDir.c_str(), nullptr);
+    SaveText(adminDir + L"\\system-" + Stamp() + L".txt", old);
     HKEY k;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kSysEnv, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) {
         log(L"Нет прав на системный PATH.");

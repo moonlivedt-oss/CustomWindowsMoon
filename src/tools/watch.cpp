@@ -60,7 +60,17 @@ int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs) 
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = si.hStdError = wr;
     PROCESS_INFORMATION pi{};
-    std::vector<wchar_t> line(cmdline.begin(), cmdline.end());
+    // короткое имя (powercfg.exe) - только из System32: иначе Windows ищет его и рядом с exe, и в текущей папке,
+    // а часть команд выполняет процесс с правами
+    std::wstring cmd = cmdline;
+    size_t sp = cmd.find(L' ');
+    if (!cmd.empty() && cmd[0] != L'"' && cmd.substr(0, sp).find(L'\\') == std::wstring::npos) {
+        wchar_t sys[MAX_PATH] = {};
+        GetSystemDirectoryW(sys, MAX_PATH);
+        cmd = L"\"" + std::wstring(sys) + L"\\" + cmd.substr(0, sp) + L"\"" +
+              (sp == std::wstring::npos ? L"" : cmd.substr(sp));
+    }
+    std::vector<wchar_t> line(cmd.begin(), cmd.end());
     line.push_back(0);
     BOOL ok =
         CreateProcessW(nullptr, line.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);

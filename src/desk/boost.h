@@ -58,7 +58,7 @@ double AvailMb(int* usedPercent = nullptr);
 // Очистка памяти с правами администратора.
 bool PurgeTaskExists();
 bool SetupPurgeTask();             // создать задачу (Windows спросит разрешение)
-bool RunPurge();                   // запустить задачу без запросов; false - задачи нет
+bool RunPurge(const Settings& s);   // запустить задачу без запросов (области - из s); false - не готова
 int PurgeMain(const Settings& s);  // RadialMenu.exe --purge: сама очистка, уже с правами
 
 }  // namespace boost

@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 
+#include "core/elevate.h"
 #include "core/files.h"
 #include "core/text.h"
 
@@ -16,7 +17,6 @@ namespace boost {
 
 namespace {
 
-constexpr wchar_t kTask[] = L"MoonRadial\\RadialMenuPurge";
 
 std::wstring ReadText(const std::wstring& file) {
     HANDLE f =
@@ -303,7 +303,7 @@ Result Free(const Settings& s, const std::wstring& dir, const std::vector<Group>
             CloseHandle(f);
         }
     }
-    if (s.purge) RunPurge();
+    if (s.purge) RunPurge(s);
     Sleep(600);  // память освобождается не мгновенно
     r.freedMb = std::max(0.0, AvailMb() - before);
     return r;
@@ -360,39 +360,18 @@ void GameTweaks(const Settings& s, bool on) {
     }
 }
 
-bool PurgeTaskExists() {
-    HKEY k;
-    std::wstring key =
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tree\\" + std::wstring(kTask);
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, key.c_str(), 0, KEY_READ, &k) != ERROR_SUCCESS) return false;
-    RegCloseKey(k);
-    return true;
-}
+// Задача с наивысшими правами (core/elevate): запускает помощника из Program Files, а не exe из папки пользователя.
+// Готова - только если помощник свежий: после пересборки задача ждёт «Пересоздать», а не запускает старую копию.
+bool PurgeTaskExists() { return elevate::TaskReady(elevate::TASK_PURGE); }
 
-bool SetupPurgeTask() {
-    wchar_t exe[MAX_PATH];
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    // задача с наивысшими правами для текущего пользователя; запускается только по требованию
-    std::wstring args = L"/Create /TN \"" + std::wstring(kTask) + L"\" /TR \"\\\"" + exe +
-                        L"\\\" --purge\" /SC ONCE /ST 00:00 /SD 01/01/2030 /RL HIGHEST /F";
-    SHELLEXECUTEINFOW sei{sizeof(sei)};
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"runas";
-    sei.lpFile = L"schtasks.exe";
-    sei.lpParameters = args.c_str();
-    sei.nShow = SW_HIDE;
-    if (!ShellExecuteExW(&sei)) return false;
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, 20000);
-        CloseHandle(sei.hProcess);
-    }
-    return PurgeTaskExists();
-}
+bool SetupPurgeTask() { return elevate::Setup(elevate::TASK_PURGE); }
 
-bool RunPurge() {
-    if (!PurgeTaskExists()) return false;
-    RunHidden(L"schtasks.exe /Run /TN \"" + std::wstring(kTask) + L"\"");
-    return true;
+bool RunPurge(const Settings& s) {
+    if (!PurgeTaskExists()) return false;  // сама по себе (после игры) не спрашивает UAC - пропускает
+    std::wstring areas;
+    for (const std::wstring& a : s.areas) areas += (areas.empty() ? L"" : L",") + a;
+    elevate::Put(L"PurgeAreas", areas);  // помощник не читает настроек из папки пользователя
+    return elevate::Run(elevate::TASK_PURGE);
 }
 
 int PurgeMain(const Settings& s) {

@@ -1,5 +1,6 @@
 // Починка. Без прав: системный прокси, PAC/WPAD, переменные окружения, кэш DNS.
-// С правами - через задачу планировщика: задание кладётся файлом, задача выполняет его и пишет журнал.
+// С правами - через задачу планировщика (core/elevate): задание - строкой в HKCU, задача запускает помощника из
+// Program Files и пишет журнал в его папку data; бэкапы процесса с правами - там же, не в папке пользователя.
 #include "net/net_internal.h"
 
 #include <shellapi.h>
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 
+#include "core/elevate.h"
 #include "core/perf.h"
 #include "core/text.h"
 #include "tools/tools.h"
@@ -16,15 +18,22 @@ namespace net {
 namespace {
 
 constexpr wchar_t kInet[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
-constexpr wchar_t kTask[] = L"MoonRadial\\RadialMenuNet";
 
 const wchar_t* const kJobKeys[kJobs] = {L"smart",  L"winhttp",     L"routes",       L"ip",         L"vpn",
                                         L"dns-cf", L"dns-google",  L"dns-auto",     L"fw-restore", L"adapter",
                                         L"deep",   L"disk-health", L"syspath-clean",
                                         L"net-top", L"power",      L"restore-point"};
 
-std::wstring JobFile() { return DataDir() + L"\\job.txt"; }
-std::wstring ResultFile() { return DataDir() + L"\\job-result.txt"; }
+std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
+
+// Бэкапы hosts и брандмауэра: их пишет и читает только процесс с правами - в папке, куда пишут администраторы.
+// Импорт брандмауэра из папки пользователя дал бы любой программе пользователя открыть порты чужими руками.
+std::wstring AdminBackupDir() {
+    std::wstring d = elevate::DataDir() + L"\\backups";
+    CreateDirectoryW(elevate::DataDir().c_str(), nullptr);
+    CreateDirectoryW(d.c_str(), nullptr);
+    return d;
+}
 
 std::string ReadAll(const std::wstring& path) {
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -122,57 +131,37 @@ void FlushDns(const Log& log) {
 
 // ---- задача планировщика ----
 
-bool AdminReady() {
-    std::wstring key =
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tree\\" + std::wstring(kTask);
-    HKEY k;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, key.c_str(), 0, KEY_READ, &k) != ERROR_SUCCESS) return false;
-    RegCloseKey(k);
-    return true;
-}
+bool AdminReady() { return elevate::TaskReady(elevate::TASK_NET); }
 
-bool SetupAdmin() {
-    wchar_t exe[MAX_PATH];
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    // запускается только по требованию: дата старта - далёкое будущее
-    std::wstring args = L"/Create /TN \"" + std::wstring(kTask) + L"\" /TR \"\\\"" + exe +
-                        L"\\\" --net-job\" /SC ONCE /ST 00:00 /SD 01/01/2030 /RL HIGHEST /F";
-    SHELLEXECUTEINFOW sei{sizeof(sei)};
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"runas";
-    sei.lpFile = L"schtasks.exe";
-    sei.lpParameters = args.c_str();
-    sei.nShow = SW_HIDE;
-    if (!ShellExecuteExW(&sei)) return false;
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, 20000);
-        CloseHandle(sei.hProcess);
-    }
-    return AdminReady();
-}
+bool SetupAdmin() { return elevate::Setup(elevate::TASK_NET); }
 
 bool RunAdmin(Job j, const Log& log, int timeoutMs) {
     if (j < 0 || j >= kJobs) return false;
     if (!AdminReady()) {
-        log(L"Нужны права администратора: один раз создаю задачу, Windows спросит разрешение.");
+        log(elevate::TaskExists(elevate::TASK_NET)
+                ? L"Помощник с правами устарел или стоит не там - обновляю его, Windows спросит разрешение."
+                : L"Нужны права администратора: один раз создаю задачу, Windows спросит разрешение.");
         if (!SetupAdmin()) {
             log(L"Разрешение не дано - это действие пропущено.");
             return false;
         }
     }
-    DeleteFileW(ResultFile().c_str());
-    WriteAll(JobFile(), Narrow(kJobKeys[j]));
-    std::wstring out;
-    if (Exec(L"schtasks.exe", L"/Run /TN \"" + std::wstring(kTask) + L"\"", &out, 15000) != 0) {
+    // метка запуска: журнал в папке помощника остаётся от прошлого раза, чужой не читаем
+    wchar_t nonce[48];
+    swprintf(nonce, 48, L"%lu-%llu", GetCurrentProcessId(), (unsigned long long)GetTickCount64());
+    elevate::Put(L"NetJob", std::wstring(kJobKeys[j]) + L" " + nonce);
+    if (!elevate::Run(elevate::TASK_NET)) {
         log(L"Задача с правами не запустилась.");
         return false;
     }
+    std::wstring head = std::wstring(L"#run ") + nonce + L"\n";
     // журнал задачи приходит файлом: читаем по мере появления строк
-    size_t shown = 0;
+    size_t shown = head.size();
     ULONGLONG t0 = GetTickCount64();
     while ((int)(GetTickCount64() - t0) < timeoutMs) {
         Sleep(200);
         std::wstring all = Widen(ReadAll(ResultFile()));
+        if (all.compare(0, head.size(), head) != 0) continue;
         size_t end;
         while ((end = all.find(L'\n', shown)) != std::wstring::npos) {
             std::wstring line = Trim(all.substr(shown, end - shown));
@@ -207,10 +196,12 @@ void DeleteStaleRoutes(const Log& log) {
 void CleanHosts(const Log& log) {
     std::vector<std::wstring> bad = SuspiciousHosts();
     if (bad.empty()) return;
-    wchar_t path[MAX_PATH];
-    ExpandEnvironmentStringsW(L"%SystemRoot%\\System32\\drivers\\etc\\hosts", path, MAX_PATH);
+    // путь - от системы, не из переменных окружения: их задаёт пользователь, а пишет сюда процесс с правами
+    wchar_t sys[MAX_PATH] = {};
+    GetSystemDirectoryW(sys, MAX_PATH);
+    std::wstring path = std::wstring(sys) + L"\\drivers\\etc\\hosts";
     std::string raw = ReadAll(path);
-    WriteAll(BackupDir() + L"\\hosts-" + Stamp() + L".txt", raw);
+    WriteAll(AdminBackupDir() + L"\\hosts-" + Stamp() + L".txt", raw);
     std::string kept;
     int removed = 0;
     size_t pos = 0;
@@ -284,7 +275,7 @@ bool Job_(Job j, const Log& log) {
             for (const FwRule& f : FirewallBlocks())
                 if (f.vpn) names.push_back(f.name);
             if (!names.empty()) {
-                std::wstring file = BackupDir() + L"\\firewall-" + Stamp() + L".wfw";
+                std::wstring file = AdminBackupDir() + L"\\firewall-" + Stamp() + L".wfw";
                 int code = Exec(L"netsh.exe", L"advfirewall export " + Q(file), &out);
                 log(Okish(code, out) ? L"Бэкап брандмауэра сохранён." : L"Бэкап брандмауэра не получился - продолжаю.");
                 int n = RemoveFirewallRules(names);
@@ -319,7 +310,7 @@ bool Job_(Job j, const Log& log) {
             std::wstring best;
             FILETIME bestT{};
             WIN32_FIND_DATAW fd;
-            HANDLE h = FindFirstFileW((BackupDir() + L"\\firewall-*.wfw").c_str(), &fd);
+            HANDLE h = FindFirstFileW((AdminBackupDir() + L"\\firewall-*.wfw").c_str(), &fd);
             if (h != INVALID_HANDLE_VALUE) {
                 do
                     if (CompareFileTime(&fd.ftLastWriteTime, &bestT) > 0) {
@@ -333,7 +324,7 @@ bool Job_(Job j, const Log& log) {
                 log(L"Бэкапов брандмауэра нет.");
                 return false;
             }
-            int code = Exec(L"netsh.exe", L"advfirewall import " + Q(BackupDir() + L"\\" + best), &out);
+            int code = Exec(L"netsh.exe", L"advfirewall import " + Q(AdminBackupDir() + L"\\" + best), &out);
             log(Okish(code, out) ? L"Брандмауэр возвращён из " + best + L"." : L"Вернуть брандмауэр не удалось.");
             return Okish(code, out);
         }
@@ -372,7 +363,8 @@ bool Job_(Job j, const Log& log) {
                 L"try { Checkpoint-Computer -Description 'MoonRadial' -RestorePointType MODIFY_SETTINGS "
                 L"-ErrorAction Stop } catch { 'error: ' + $_.Exception.Message; exit 2 }; "
                 L"$a=@(Get-ComputerRestorePoint).Count; if ($a -gt $b) { 'created' } else { 'skipped' }\"";
-            int code = Exec(L"powershell.exe", ps, &out, 300000);
+            // powershell лежит не в самой System32, а Exec берёт только оттуда: с коротким именем задача не запускалась
+            int code = Exec(L"WindowsPowerShell\\v1.0\\powershell.exe", ps, &out, 300000);
             if (out.find(L"created") != std::wstring::npos) {
                 log(L"Точка восстановления создана.");
                 return true;
@@ -401,9 +393,12 @@ bool Job_(Job j, const Log& log) {
 
 int AdminMain() {
     InitSockets();
-    std::wstring key = Trim(Widen(ReadAll(JobFile())));
-    DeleteFileW(JobFile().c_str());  // задание одноразовое
-    std::string log;
+    // задание: «ключ метка» из HKCU, одноразовое; журнал - в папку помощника, начинается с метки
+    std::wstring req = Trim(elevate::Take(L"NetJob"));
+    size_t sp = req.find(L' ');
+    std::wstring key = req.substr(0, sp), nonce = sp == std::wstring::npos ? L"" : req.substr(sp + 1);
+    CreateDirectoryW(elevate::DataDir().c_str(), nullptr);
+    std::string log = "#run " + Narrow(nonce) + "\n";
     auto flush = [&] { WriteAll(ResultFile(), log); };
     Log add = [&](const std::wstring& s) {
         log += Narrow(s) + "\n";

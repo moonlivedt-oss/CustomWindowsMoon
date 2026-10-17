@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "core/config.h"
+#include "core/elevate.h"
 #include "core/filedlg.h"
 #include "core/files.h"
 #include "core/text.h"
@@ -622,9 +623,15 @@ bool Run(int& exitCode) {
         std::wstring msg;
         exitCode = startbg::Apply(CurrentTheme(LoadOwnConfig()), msg) ? 0 : 1;
     } else if (Has(args, L"--purge")) {  // очистка памяти; запускает задача планировщика с правами
-        exitCode = boost::PurgeMain(boost::Load(boost::Dir(LoadOwnConfig().boostDir)));
+        // какие области чистить - из запроса в HKCU; PurgeMain знает только свои имена, прочее пропускает
+        boost::Settings s;
+        s.areas = Split(elevate::Take(L"PurgeAreas"), L',');
+        s.areas.erase(std::remove(s.areas.begin(), s.areas.end(), std::wstring()), s.areas.end());
+        exitCode = boost::PurgeMain(s);
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
+    } else if (Value(args, L"--install-helper", v)) {  // уже с правами: помощник в Program Files и задача
+        exitCode = elevate::InstallMain(v);
     } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--studio-snap") - args.begin();
