@@ -630,8 +630,6 @@ bool Run(int& exitCode) {
         exitCode = boost::PurgeMain(s);
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
-    } else if (Value(args, L"--install-helper", v)) {  // уже с правами: помощник в Program Files и задача
-        exitCode = elevate::InstallMain(v);
     } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--studio-snap") - args.begin();

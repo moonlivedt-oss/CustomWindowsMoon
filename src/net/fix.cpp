@@ -19,10 +19,10 @@ namespace {
 
 constexpr wchar_t kInet[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
-const wchar_t* const kJobKeys[kJobs] = {L"smart",  L"winhttp",     L"routes",       L"ip",         L"vpn",
-                                        L"dns-cf", L"dns-google",  L"dns-auto",     L"fw-restore", L"adapter",
-                                        L"deep",   L"disk-health", L"syspath-clean",
-                                        L"net-top", L"power",      L"restore-point"};
+const wchar_t* const kJobKeys[kJobs] = {L"smart",         L"winhttp", L"routes",     L"ip",
+                                        L"vpn",           L"dns-cf",  L"dns-google", L"dns-auto",
+                                        L"fw-restore",    L"adapter", L"deep",       L"disk-health",
+                                        L"syspath-clean", L"net-top", L"power",      L"restore-point"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -137,7 +137,9 @@ bool SetupAdmin() { return elevate::Setup(elevate::TASK_NET); }
 
 bool RunAdmin(Job j, const Log& log, int timeoutMs) {
     if (j < 0 || j >= kJobs) return false;
-    if (!AdminReady()) {
+    // задачу уже не пускал антивирус: не ставить её заново после каждой пересборки, а сразу одно окно UAC
+    bool blocked = elevate::Blocked(elevate::TASK_NET);
+    if (!blocked && !AdminReady()) {
         log(elevate::TaskExists(elevate::TASK_NET)
                 ? L"Помощник с правами устарел или стоит не там - обновляю его, Windows спросит разрешение."
                 : L"Нужны права администратора: один раз создаю задачу, Windows спросит разрешение.");
@@ -150,9 +152,16 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs) {
     wchar_t nonce[48];
     swprintf(nonce, 48, L"%lu-%llu", GetCurrentProcessId(), (unsigned long long)GetTickCount64());
     elevate::Put(L"NetJob", std::wstring(kJobKeys[j]) + L" " + nonce);
-    if (!elevate::Run(elevate::TASK_NET)) {
-        log(L"Задача с правами не запустилась.");
-        return false;
+    if (blocked || !elevate::Run(elevate::TASK_NET)) {
+        if (!blocked) {
+            elevate::SetBlocked(elevate::TASK_NET, true);
+            log(L"Задача с правами не запускается (похоже, её не пускает антивирус) - дальше каждое такое действие "
+                L"спросит разрешение.");
+        }
+        if (!elevate::RunOnce(elevate::TASK_NET)) {
+            log(L"Разрешение не дано - это действие пропущено.");
+            return false;
+        }
     }
     std::wstring head = std::wstring(L"#run ") + nonce + L"\n";
     // журнал задачи приходит файлом: читаем по мере появления строк

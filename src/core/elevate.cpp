@@ -2,9 +2,11 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <sddl.h>
 #include <shlobj.h>
 #include <knownfolders.h>
 
+#include <cwchar>
 #include <vector>
 
 namespace elevate {
@@ -14,13 +16,12 @@ namespace {
 constexpr wchar_t kKey[] = L"Software\\MoonRadial";
 
 struct TaskInfo {
-    const wchar_t* name;   // имя в планировщике
-    const wchar_t* arg;    // что выполняет помощник
-    const wchar_t* which;  // как её назвать в --install-helper
+    const wchar_t* name;  // имя в планировщике
+    const wchar_t* arg;   // что выполняет помощник
 };
 const TaskInfo kTasks[] = {
-    {L"MoonRadial\\RadialMenuNet", L"--net-job", L"net"},
-    {L"MoonRadial\\RadialMenuPurge", L"--purge", L"purge"},
+    {L"MoonRadial\\RadialMenuNet", L"--net-job"},
+    {L"MoonRadial\\RadialMenuPurge", L"--purge"},
 };
 
 std::wstring ThisExe() {
@@ -119,11 +120,28 @@ bool TaskRunsHelper(const TaskInfo& t) {
     return !_wcsicmp(tag(L"Command").c_str(), HelperExe().c_str()) && tag(L"Arguments") == t.arg;
 }
 
-bool Create(const TaskInfo& t) {
-    // запускается только по требованию: дата старта - далёкое будущее
-    std::wstring args = L"/Create /TN \"" + std::wstring(t.name) + L"\" /TR \"\\\"" + HelperExe() + L"\\\" " + t.arg +
-                        L"\" /SC ONCE /ST 00:00 /SD 01/01/2030 /RL HIGHEST /F";
-    return Sys(L"schtasks.exe", args, nullptr, 20000) == 0;
+// SID текущего пользователя строкой (S-1-5-21-...): ему - право запускать задачи
+std::wstring UserSid() {
+    std::wstring out;
+    HANDLE tok = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) return out;
+    DWORD size = 0;
+    GetTokenInformation(tok, TokenUser, nullptr, 0, &size);
+    std::vector<BYTE> buf(size);
+    LPWSTR str = nullptr;
+    if (size && GetTokenInformation(tok, TokenUser, buf.data(), size, &size) &&
+        ConvertSidToStringSidW(((TOKEN_USER*)buf.data())->User.Sid, &str)) {
+        out = str;
+        LocalFree(str);
+    }
+    CloseHandle(tok);
+    return out;
+}
+
+// schtasks /Create для задачи: запускается только по требованию, дата старта - далёкое будущее
+std::wstring CreateCmd(const TaskInfo& t) {
+    return L"schtasks /Create /TN \"" + std::wstring(t.name) + L"\" /TR \"\\\"" + HelperExe() + L"\\\" " + t.arg +
+           L"\" /SC ONCE /ST 00:00 /SD 01/01/2030 /RL HIGHEST /F >nul";
 }
 
 }  // namespace
@@ -136,7 +154,27 @@ std::wstring HelperDir() {
     return dir.empty() ? L"" : dir + L"\\MoonRadial";
 }
 
-std::wstring HelperExe() { return HelperDir() + L"\\RadialMenu.exe"; }
+// У каждой сборки своё имя помощника - по содержимому exe. Заменить файл на месте удаётся не всегда (помощник
+// выполняет задание, или его держит антивирус), а новое имя ставится всегда; старые копии убираются, когда можно.
+std::wstring HelperExe() {
+    static std::wstring name;
+    if (name.empty()) {
+        unsigned long long h = 1469598103934665603ULL;  // FNV-1a по байтам exe
+        HANDLE f = CreateFileW(ThisExe().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                               OPEN_EXISTING, 0, nullptr);
+        if (f != INVALID_HANDLE_VALUE) {
+            std::vector<unsigned char> buf(1 << 20);
+            DWORD got = 0;
+            while (ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got)
+                for (DWORD i = 0; i < got; ++i) h = (h ^ buf[i]) * 1099511628211ULL;
+            CloseHandle(f);
+        }
+        wchar_t b[32];
+        swprintf(b, 32, L"RadialMenu-%012llx.exe", h & 0xFFFFFFFFFFFFULL);
+        name = b;
+    }
+    return HelperDir() + L"\\" + name;
+}
 
 std::wstring DataDir() { return HelperDir() + L"\\data"; }
 
@@ -148,20 +186,85 @@ bool TaskExists(Task t) {
 
 bool TaskReady(Task t) { return !HelperDir().empty() && SameFile(ThisExe(), HelperExe()) && TaskRunsHelper(kTasks[t]); }
 
+// Ставит системный cmd с правами, а не сам RadialMenu.exe: Касперский останавливает программу, которая кладёт
+// свой exe в Program Files и тут же заводит на него задачу с наивысшими правами (так выглядит закрепление
+// вредоноса). Нужная задача - всегда, остальные - только если уже были; потом убрать прежние копии помощника.
 bool Setup(Task t) {
-    std::wstring exe = ThisExe(), args = std::wstring(L"--install-helper ") + kTasks[t].which;
+    std::wstring dir = HelperDir(), data = DataDir(), helper = HelperExe();
+    if (dir.empty()) return false;
+    std::wstring name = helper.substr(dir.size() + 1);
+    std::wstring cmd = L"/s /c \"(if not exist \"" + dir + L"\" mkdir \"" + dir + L"\") & (if not exist \"" + data +
+                       L"\" mkdir \"" + data + L"\") & (if not exist \"" + helper + L"\" copy /y \"" + ThisExe() +
+                       L"\" \"" + helper + L"\" >nul)";
+    for (int i = 0; i < (int)(sizeof(kTasks) / sizeof(kTasks[0])); ++i)
+        if (i == t)
+            cmd += L" && " + CreateCmd(kTasks[i]);
+        else
+            cmd += L" & (schtasks /Query /TN \"" + std::wstring(kTasks[i].name) + L"\" >nul 2>&1 && " +
+                   CreateCmd(kTasks[i]) + L")";
+    // Задачу, созданную администратором, пользователь без прав может только читать, а запуск отвечает «параметр
+    // задан неверно». Право «читать и запускать» (не «менять»: иначе любая программа пользователя переписала бы
+    // задачу с правами) - явно, через планировщик.
+    std::wstring sid = UserSid(), names;
+    for (const TaskInfo& ti : kTasks) {
+        std::wstring n = ti.name;
+        names += (names.empty() ? L"'" : L",'") + n.substr(n.find(L'\\') + 1) + L"'";
+    }
+    if (!sid.empty())
+        cmd += L" & \"" + System32(L"WindowsPowerShell\\v1.0\\powershell.exe") +
+               L"\" -NoProfile -NonInteractive -Command \"$s=New-Object -ComObject Schedule.Service;$s.Connect();"
+               L"$f=$s.GetFolder('\\MoonRadial');foreach($n in @(" +
+               names + L")){try{$f.GetTask($n).SetSecurityDescriptor('D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FRFX;;;" + sid +
+               L")',0)}catch{}}\" >nul 2>&1";
+    cmd += L" & (for %f in (\"" + dir + L"\\RadialMenu*.exe*\") do @if /i not \"%~nxf\"==\"" + name +
+           L"\" del /f /q \"%~f\" >nul 2>&1)\"";
+    std::wstring shell = System32(L"cmd.exe");
     SHELLEXECUTEINFOW sei{sizeof(sei)};
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
     sei.lpVerb = L"runas";
-    sei.lpFile = exe.c_str();
-    sei.lpParameters = args.c_str();
+    sei.lpFile = shell.c_str();
+    sei.lpParameters = cmd.c_str();
     sei.nShow = SW_HIDE;
     if (!ShellExecuteExW(&sei)) return false;
     if (sei.hProcess) {
         WaitForSingleObject(sei.hProcess, 60000);
         CloseHandle(sei.hProcess);
     }
-    return TaskReady(t);
+    bool ok = TaskReady(t);
+    if (ok) SetBlocked(t, false);  // задачу поставили заново - пусть попробует снова (антивирус мог передумать)
+    return ok;
+}
+
+// отметка «задачу не пускает антивирус» - в HKCU: подделать её можно только в сторону лишних запросов UAC
+std::wstring BlockedName(Task t) {
+    std::wstring n = kTasks[t].name;
+    return L"TaskBlocked-" + n.substr(n.find(L'\\') + 1);
+}
+
+bool Blocked(Task t) {
+    DWORD v = 0, size = sizeof(v);
+    return RegGetValueW(HKEY_CURRENT_USER, kKey, BlockedName(t).c_str(), RRF_RT_REG_DWORD, nullptr, &v, &size) ==
+               ERROR_SUCCESS &&
+           v;
+}
+
+void SetBlocked(Task t, bool on) {
+    DWORD v = on ? 1 : 0;
+    if (on)
+        RegSetKeyValueW(HKEY_CURRENT_USER, kKey, BlockedName(t).c_str(), REG_DWORD, &v, sizeof(v));
+    else
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, kKey, BlockedName(t).c_str());
+}
+
+bool RunOnce(Task t) {
+    // помощник, если он свежий; иначе сам exe - под UAC это решение пользователя, а не тихое повышение
+    std::wstring exe = SameFile(ThisExe(), HelperExe()) ? HelperExe() : ThisExe();
+    SHELLEXECUTEINFOW sei{sizeof(sei)};
+    sei.lpVerb = L"runas";
+    sei.lpFile = exe.c_str();
+    sei.lpParameters = kTasks[t].arg;
+    sei.nShow = SW_HIDE;
+    return ShellExecuteExW(&sei) != FALSE;
 }
 
 bool Run(Task t) {
@@ -180,35 +283,6 @@ std::wstring Take(const wchar_t* name) {
     if (RegGetValueW(HKEY_CURRENT_USER, kKey, name, RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS) v = buf;
     RegDeleteKeyValueW(HKEY_CURRENT_USER, kKey, name);
     return v;
-}
-
-int InstallMain(const std::wstring& which) {
-    int want = -1;
-    for (int i = 0; i < (int)(sizeof(kTasks) / sizeof(kTasks[0])); ++i)
-        if (which == kTasks[i].which) want = i;
-    std::wstring dir = HelperDir();
-    if (want < 0 || dir.empty()) return 2;
-    CreateDirectoryW(dir.c_str(), nullptr);
-    DWORD a = GetFileAttributesW(dir.c_str());
-    if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) || (a & FILE_ATTRIBUTE_REPARSE_POINT)) return 3;
-    // копия рядом, потом подмена: помощник может как раз выполнять задание - тогда подождать
-    std::wstring tmp = HelperExe() + L".new";
-    bool copied = false;
-    for (int i = 0; i < 40 && !copied; ++i) {
-        copied = CopyFileW(ThisExe().c_str(), tmp.c_str(), FALSE) &&
-                 MoveFileExW(tmp.c_str(), HelperExe().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-        if (!copied) Sleep(250);
-    }
-    if (!copied) {
-        DeleteFileW(tmp.c_str());
-        return 4;
-    }
-    CreateDirectoryW(DataDir().c_str(), nullptr);
-    // нужная задача - всегда, остальные - только если уже были: старые смотрели на exe в папке пользователя
-    bool ok = true;
-    for (int i = 0; i < (int)(sizeof(kTasks) / sizeof(kTasks[0])); ++i)
-        if (i == want || TaskExists((Task)i)) ok = Create(kTasks[i]) && ok;
-    return ok ? 0 : 5;
 }
 
 }  // namespace elevate

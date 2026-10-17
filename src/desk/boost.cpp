@@ -362,7 +362,7 @@ void GameTweaks(const Settings& s, bool on) {
 
 // Задача с наивысшими правами (core/elevate): запускает помощника из Program Files, а не exe из папки пользователя.
 // Готова - только если помощник свежий: после пересборки задача ждёт «Пересоздать», а не запускает старую копию.
-bool PurgeTaskExists() { return elevate::TaskReady(elevate::TASK_PURGE); }
+bool PurgeTaskExists() { return !elevate::Blocked(elevate::TASK_PURGE) && elevate::TaskReady(elevate::TASK_PURGE); }
 
 bool SetupPurgeTask() { return elevate::Setup(elevate::TASK_PURGE); }
 
@@ -371,7 +371,11 @@ bool RunPurge(const Settings& s) {
     std::wstring areas;
     for (const std::wstring& a : s.areas) areas += (areas.empty() ? L"" : L",") + a;
     elevate::Put(L"PurgeAreas", areas);  // помощник не читает настроек из папки пользователя
-    return elevate::Run(elevate::TASK_PURGE);
+    if (elevate::Run(elevate::TASK_PURGE)) return true;
+    // антивирус не пускает задачу: после игры UAC не спрашиваем, а в студии карточка снова предложит «Настроить»
+    elevate::Take(L"PurgeAreas");
+    elevate::SetBlocked(elevate::TASK_PURGE, true);
+    return false;
 }
 
 int PurgeMain(const Settings& s) {
