@@ -129,6 +129,20 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.boostRestore = ParseBool(val);
             else if (key == L"boost_after")
                 cfg.boostAfter = ParseBool(val);
+            else if (key == L"boost_eco")
+                cfg.boostEco = ParseBool(val);
+            else if (key == L"boost_keep_fast")
+                cfg.boostKeepFast = val;
+            else if (key == L"boost_quiet")
+                cfg.boostQuiet = ParseBool(val);
+            else if (key == L"boost_islc")
+                cfg.boostIslc = ParseBool(val);
+            else if (key == L"boost_gpu")
+                cfg.boostGpu = ParseBool(val);
+            else if (key == L"boost_summary")
+                cfg.boostSummary = ParseBool(val);
+            else if (key == L"dev_watch")
+                cfg.devWatch = ParseBool(val);
             else if (key == L"net_watch")
                 cfg.netWatch = ParseBool(val);
             else if (key == L"net_exit")
@@ -365,6 +379,17 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"boost_offer = " << (c.boostOffer ? 1 : 0) << L"\n";
     o << L"boost_restore = " << (c.boostRestore ? 1 : 0) << L"\n";
     o << L"boost_after = " << (c.boostAfter ? 1 : 0) << L"\n";
+    o << L"# в игре: boost_eco - игре высокий приоритет, окнам в фоне экономия (кроме boost_keep_fast),\n"
+         L"# boost_quiet - уведомления молчат, boost_islc - чистить раздутый кэш ожидания, boost_gpu - проверить,\n"
+         L"# на какой видеокарте игра, boost_summary - итог после игры; dev_watch - в Unreal следить за\n"
+         L"# видеопамятью, шейдерами и сборками\n";
+    o << L"boost_eco = " << (c.boostEco ? 1 : 0) << L"\n";
+    o << L"boost_keep_fast = " << c.boostKeepFast << L"\n";
+    o << L"boost_quiet = " << (c.boostQuiet ? 1 : 0) << L"\n";
+    o << L"boost_islc = " << (c.boostIslc ? 1 : 0) << L"\n";
+    o << L"boost_gpu = " << (c.boostGpu ? 1 : 0) << L"\n";
+    o << L"boost_summary = " << (c.boostSummary ? 1 : 0) << L"\n";
+    o << L"dev_watch = " << (c.devWatch ? 1 : 0) << L"\n";
     o << L"# сеть: net_watch - следить за интернетом (при обрыве карточка «Починить?»), net_exit - сообщать о смене\n"
          L"# выходного узла, net_game - при запуске игры проверить маршрут и пинг, net_interval - период проверки, с\n";
     o << L"net_watch = " << (c.netWatch ? 1 : 0) << L"\n";

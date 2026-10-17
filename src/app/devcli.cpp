@@ -22,6 +22,8 @@
 #include "desk/boost.h"
 #include "desk/gamemode.h"
 #include "desk/lockscreen.h"
+#include "desk/gameboost.h"
+#include "desk/modefx.h"
 #include "desk/ocr.h"
 #include "desk/startbg.h"
 #include "desk/whreg.h"
@@ -749,6 +751,30 @@ bool Run(int& exitCode) {
             toolsui::PrimeSecurityForSnapshot();
         }
         exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
+    } else if (Has(args, L"--modefx-film")) {  // --modefx-film game|dev on|off out.png: кадры анимации режима
+        Gdip gdip;
+        size_t i = std::find(args.begin(), args.end(), L"--modefx-film") - args.begin();
+        bool game = i + 1 >= args.size() || args[i + 1] != L"dev", on = i + 2 >= args.size() || args[i + 2] != L"off";
+        std::vector<std::wstring> chips =
+            game ? (on ? std::vector<std::wstring>{L"Красота выключена", L"Обои на паузе", L"Таймер 0.5 мс",
+                                                   L"Игре высокий приоритет", L"Фон в экономии: 4",
+                                                   L"Уведомления молчат"}
+                       : std::vector<std::wstring>{L"Красота вернулась", L"Обои снова идут", L"Приоритеты как были"})
+                 : (on ? std::vector<std::wstring>{L"Обои на паузе", L"Видеопамять", L"Шейдеры", L"Сборки UBT"}
+                       : std::vector<std::wstring>{L"Обои снова идут", L"Фон как был"});
+        std::wstring title = game ? (on ? L"Игровой режим: NFS14" : L"Игровой режим выключен")
+                                  : (on ? L"Режим разработки: Unreal Editor" : L"Режим разработки выключен");
+        exitCode = ModeFx::Film(game ? ModeFx::GAME : ModeFx::DEV, on, title, chips, CurrentTheme(LoadOwnConfig()),
+                                i + 3 < args.size() ? args[i + 3] : ExeDir() + L"\\modefx_film.png");
+    } else if (Has(args, L"--boost-diag")) {  // видеокарты, профили, история сессий -> boost_out.txt
+        std::wstring o;
+        for (const gboost::Adapter& a : gboost::Adapters())
+            o += L"adapter: " + a.name + L" vram=" + std::to_wstring((int)a.vramMb) +
+                 (a.integrated ? L" (встроенная)" : L"") + L"\n";
+        for (const gboost::Session& s : gboost::History(10))
+            o += L"session: " + s.name + L" " + std::to_wstring(s.ms / 60000) + L" мин\n";
+        WriteOut(L"boost_out.txt", o);
+        exitCode = 0;
     } else if (Has(args, L"--scene-film")) {  // --scene-film clean|guard|guard0 out.png: лист кадров живой сцены
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--scene-film") - args.begin();

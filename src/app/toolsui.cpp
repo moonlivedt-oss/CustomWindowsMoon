@@ -422,6 +422,7 @@ bool g_dev = false;
 struct GpuStats {
     int max = 0, samples = 0, thermal = 0, power = 0;
 } g_gpu;
+bool g_ddcAsk = false;     // Unreal закрыт: спросить про старый DDC, если он большой
 ULONGLONG g_devEnded = 0;  // когда закрылся Unreal: через 2 минуты - смотреть хвосты
 std::set<std::wstring> g_leakWarned;
 ULONGLONG g_commitWarned = 0, g_proactiveAt = 0;
@@ -510,8 +511,8 @@ DWORD WINAPI WatchLoop(void*) {
             lastIn = in, lastOut = out, lastAt = now;
             PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
             ++n;
-            nextFull = now + 60000;
-            tools::RecordBattery();  // износ по дням и сколько времени на зарядке
+            nextFull = now + (g_game ? 300000 : 60000);  // в игре реже: и так ни о чём не спросим
+            tools::RecordBattery();                      // износ по дням и сколько времени на зарядке
         }
         if (quickAt && now >= quickAt) {
             quickAt = 0;
@@ -695,6 +696,20 @@ void TryProactive() {
             40000, Toast::G_WARN);
         return;
     }
+    if (g_ddcAsk && !g_dev) {
+        g_ddcAsk = false;
+        AcquireSRWLockShared(&g_scanLock);
+        ULONGLONG old = g_scan.ddcOld;
+        ReleaseSRWLockShared(&g_scanLock);
+        if (old > 5ull * 1024 * 1024 * 1024) {
+            Ask(
+                L"Почистить старый кэш Unreal?",
+                tools::Bytes(old) +
+                    L" в DDC не открывалось больше месяца. Unreal пересоберёт нужное сам, когда понадобится.",
+                L"Почистить", L"Оставить", [] { Run(L"ddc-trim"); }, nullptr, 30000, Toast::G_INFO);
+            return;
+        }
+    }
     // Windows ждёт перезагрузки: смотреть раз в 10 минут, говорить один раз за загрузку
     if (now - g_started > 5 * 60 * 1000 && (!g_rebootAt || now - g_rebootAt > 10 * 60 * 1000)) {
         g_rebootAt = now;
@@ -719,6 +734,7 @@ void TryProactive() {
         ULONGLONG mem = 0;
         for (const tools::Leftover& t : tools::BuildLeftovers(procs))
             if (t.why.find(L"Unreal") != std::wstring::npos) tails.push_back(t), mem += t.mem;
+        g_ddcAsk = true;  // следующим заходом - старый кэш Unreal
         if (tails.empty()) return;
         Ask(
             L"Unreal закрыт, а его процессы остались",

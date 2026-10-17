@@ -40,6 +40,7 @@ double TotalMb(const std::vector<Group>& g);
 
 struct Result {
     int closed = 0;
+    int slept = 0;                     // усыплено (gboost::Soften), не закрыто
     double freedMb = 0;                // сколько стало свободнее
     std::vector<std::wstring> reopen;  // что можно вернуть после игры
 };
@@ -57,6 +58,7 @@ double AvailMb(int* usedPercent = nullptr);
 // Очистка памяти с правами администратора.
 bool PurgeTaskExists();
 bool SetupPurgeTask();             // создать задачу (Windows спросит разрешение)
+bool RunPurgeAreas(const std::vector<std::wstring>& areas);  // то же с явными областями
 bool RunPurge(const Settings& s);  // запустить задачу без запросов (области - из s); false - не готова
 int PurgeMain(const Settings& s);  // RadialMenu.exe --purge: сама очистка, уже с правами
 
