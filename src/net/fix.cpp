@@ -19,11 +19,11 @@ namespace {
 
 constexpr wchar_t kInet[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
-const wchar_t* const kJobKeys[kJobs] = {L"smart",         L"winhttp", L"routes",     L"ip",
-                                        L"vpn",           L"dns-cf",  L"dns-google", L"dns-auto",
-                                        L"fw-restore",    L"adapter", L"deep",       L"disk-health",
-                                        L"syspath-clean", L"net-top", L"power",      L"restore-point",
-                                        L"path-acl"};
+const wchar_t* const kJobKeys[kJobs] = {
+    L"smart",      L"winhttp",       L"routes",   L"ip",     L"vpn",         L"dns-cf",        L"dns-google",
+    L"dns-auto",   L"fw-restore",    L"adapter",  L"deep",   L"disk-health", L"syspath-clean", L"net-top",
+    L"power",      L"restore-point", L"path-acl", L"repair", L"wu-reset",    L"unbreak",       L"defender-offline",
+    L"vhd-compact"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -397,6 +397,16 @@ bool Job_(Job j, const Log& log) {
         }
         case JOB_PATH_ACL:
             return tools::FixPathAclAdminMain(log) >= 0;
+        case JOB_REPAIR:
+            return tools::RepairWindowsAdminMain(log);
+        case JOB_WU_RESET:
+            return tools::ResetWindowsUpdateAdminMain(log);
+        case JOB_UNBREAK:
+            return tools::FixBrokenAdminMain(log) >= 0;
+        case JOB_DEFENDER_OFFLINE:
+            return tools::DefenderOfflineAdminMain(log);
+        case JOB_VHD_COMPACT:
+            return tools::CompactVhdAdminMain(log) > 0;
         case JOB_DEEP: {
             int a = Exec(L"netsh.exe", L"winsock reset", &out);
             int b = Exec(L"netsh.exe", L"int ip reset", &out);

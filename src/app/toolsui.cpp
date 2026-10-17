@@ -51,6 +51,9 @@ std::vector<tools::DupGroup> g_dupList;     // что показано в кол
 std::vector<tools::Suspect> g_finds;        // «Защита»: что показано в кольце
 std::vector<tools::StartItem> g_secStarts;  // автозагрузка на момент проверки (номера из Suspect::start)
 std::vector<tools::SecurityApp> g_secApps;
+std::vector<tools::VirtualDisk> g_vhd;      // «Docker и WSL» в «Очистке»
+std::vector<tools::Leftover2> g_leftovers;  // хвосты удалённых программ (номера left:i)
+std::vector<tools::GitRepo> g_git;          // кольцо Git (номера git:i)
 
 // «Защита»: проверка подписей - секунды при первом разе, дальше из кэша; в фоне раз в полчаса.
 SRWLOCK g_secLock = SRWLOCK_INIT;
@@ -72,6 +75,12 @@ struct Scan {
     ULONGLONG ddcOld = 0;  // кэш Unreal, не открывавшийся 30 дней
     tools::Driver driver;
     std::vector<tools::ToolVersion> versions;  // раз в неделю отдельно, как драйвер
+    // система и разработка: всё это секунды, поэтому тоже в фоне
+    std::vector<tools::GitRepo> git;
+    std::vector<tools::VirtualDisk> vhd;
+    std::vector<tools::Leftover2> leftovers;
+    std::vector<tools::DeviceProblem> devices;
+    tools::UpdateInfo updates;
 };
 SRWLOCK g_scanLock = SRWLOCK_INIT;
 Scan g_scan;
@@ -239,6 +248,13 @@ void RefreshScan() {
             }
             tools::RecordSizes(names, bytes);
             s.growth = tools::WeekGrowth(7);
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);  // история обновлений - через COM
+            s.git = tools::GitRepos(*r);
+            s.vhd = tools::VirtualDisks();
+            s.leftovers = tools::AppLeftovers();
+            s.devices = tools::DeviceProblems();
+            s.updates = tools::WindowsUpdates();
+            CoUninitialize();
             AcquireSRWLockExclusive(&g_scanLock);
             s.driver = g_scan.driver;  // драйвер и версии проверяются отдельно
             s.versions = g_scan.versions;
@@ -341,7 +357,12 @@ double g_netDown = 0, g_netUp = 0;  // байт/с за последнюю ми�
 HANDLE g_watchStop = nullptr, g_watchThread = nullptr;
 constexpr UINT kWatchTag = 0x5F;  // wParam у WM_TOOLS_JOB: новый снимок слежки
 
-bool g_game = false, g_dev = false;
+volatile bool g_game = false;
+bool g_dev = false;
+// видеокарта за игру: собирает поток слежки, итог - карточкой после игры
+struct GpuStats {
+    int max = 0, samples = 0, thermal = 0, power = 0;
+} g_gpu;
 ULONGLONG g_devEnded = 0;  // когда закрылся Unreal: через 2 минуты - смотреть хвосты
 std::set<std::wstring> g_leakWarned;
 ULONGLONG g_commitWarned = 0, g_proactiveAt = 0;
@@ -400,7 +421,7 @@ DWORD WINAPI WatchLoop(void*) {
         FindFirstChangeNotificationW(etc, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
     if (hosts != INVALID_HANDLE_VALUE) waits.push_back(hosts);
 
-    ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0, nextFull = 0, quickAt = 0;
+    ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0, nextFull = 0, quickAt = 0, gpuAt = 0;
     int n = 0;
     for (;;) {
         ULONGLONG now = GetTickCount64();
@@ -431,13 +452,28 @@ DWORD WINAPI WatchLoop(void*) {
             PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
             ++n;
             nextFull = now + 60000;
+            tools::RecordBattery();  // износ по дням и сколько времени на зарядке
         }
         if (quickAt && now >= quickAt) {
             quickAt = 0;
             QuickPass();
         }
+        // в игре - видеокарта раз в 10 секунд: максимум температуры и сколько упиралась в перегрев
+        if (g_game && now >= gpuAt) {
+            gpuAt = now + 10000;
+            tools::GpuSample g = tools::GpuNow();
+            if (g.ok) {
+                AcquireSRWLockExclusive(&g_watchLock);
+                g_gpu.max = std::max(g_gpu.max, g.temp);
+                g_gpu.samples++;
+                g_gpu.thermal += g.thermal;
+                g_gpu.power += g.powerCap;
+                ReleaseSRWLockExclusive(&g_watchLock);
+            }
+        }
         now = GetTickCount64();
         ULONGLONG due = quickAt ? std::min(quickAt, nextFull) : nextFull;
+        if (g_game) due = std::min(due, gpuAt);
         DWORD wait = due > now ? (DWORD)std::min<ULONGLONG>(due - now, 60000) : 0;
         DWORD r = WaitForMultipleObjects((DWORD)waits.size(), waits.data(), FALSE, wait);
         if (r == WAIT_OBJECT_0 || r == WAIT_FAILED) break;  // выход
@@ -786,9 +822,20 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
     g_watchThread = CreateThread(nullptr, 0, WatchLoop, nullptr, 0, nullptr);
 }
 
+void GameGpuSummary();
+
 void OnModes(bool game, bool dev) {
     if (g_dev && !dev) g_devEnded = GetTickCount64();  // Unreal закрыт: через пару минут - не остались ли воркеры
     if (dev) g_devEnded = 0;
+    if (game && !g_game) {  // игра началась: замеры видеокарты с нуля
+        AcquireSRWLockExclusive(&g_watchLock);
+        g_gpu = {};
+        ReleaseSRWLockExclusive(&g_watchLock);  // первый замер - когда слежка проснётся (не дольше минуты)
+    }
+    if (!game && g_game) {
+        g_game = false;
+        GameGpuSummary();
+    }
     g_game = game;
     g_dev = dev;
 }
@@ -1195,6 +1242,23 @@ void ShowRing(RadialMenu& menu) {
         clean.children.push_back(
             Act(L"Корзина " + tools::Bytes(bin), L"tools-clean.png", L"bin",
                 Plural((int)binItems, L"объект", L"объекта", L"объектов") + L". Очистить насовсем (спрошу ещё раз)"));
+    // Docker и WSL: их диски только растут, место внутри освобождается, а файл - нет
+    g_vhd = scan.vhd;
+    ULONGLONG vhdTotal = 0;
+    for (const tools::VirtualDisk& v : g_vhd) vhdTotal += v.bytes;
+    if (vhdTotal > 2ull * 1024 * 1024 * 1024)
+        clean.children.push_back(Act(L"Docker и WSL " + tools::Bytes(vhdTotal), L"tools-containers.png", L"vhd",
+                                     L"Диски Docker и WSL: " + Short(g_vhd[0].name, 20) + L" " +
+                                         tools::Bytes(g_vhd[0].bytes) +
+                                         L" и др. 2 клика - почистить Docker или сжать диски"));
+    // хвосты программ, которых больше нет
+    g_leftovers = scan.leftovers;
+    for (size_t i = 0; i < g_leftovers.size() && i < 6; ++i)
+        clean.children.push_back(
+            Act(L"Хвост " + Short(g_leftovers[i].name, 12) + L" " + tools::Bytes(g_leftovers[i].bytes),
+                L"tools-leftovers.png", L"left:" + std::to_wstring(i),
+                g_leftovers[i].path + L": такой программы больше нет, папку не открывали " +
+                    Days(g_leftovers[i].idleDays) + L". 2 клика - в Корзину (спрошу)"));
     AcquireSRWLockShared(&g_scanLock);
     std::vector<tools::DupGroup> dups = g_dups;
     bool dupsKnown = g_dupsAt != 0;
@@ -2263,6 +2327,23 @@ void CleanProjectList(const std::vector<tools::ProjectJunk>& list) {
         g_scanAt = 0;
         return freed > 0;
     });
+}
+
+// Игра закончилась: как жила видеокарта (замеры раз в 10 секунд из слежки).
+void GameGpuSummary() {
+    AcquireSRWLockShared(&g_watchLock);
+    GpuStats g = g_gpu;
+    ReleaseSRWLockShared(&g_watchLock);
+    if (g.samples < 6) return;  // меньше минуты - не о чем говорить
+    int hot = g.thermal * 100 / g.samples, power = g.power * 100 / g.samples;
+    if (g.max < 80 && hot < 5) return;  // всё спокойно - карточку не показываем
+    g_card.Show(BoostCard::DONE, L"Видеокарта в игре: до " + std::to_wstring(g.max) + L" °C",
+                hot >= 5
+                    ? L"Упиралась в перегрев " + std::to_wstring(hot) +
+                          L"% времени - частота падала. Помогут подставка, чистка вентиляторов и режим "
+                          L"«Турбо» в Armoury Crate."
+                    : L"Горячо, но без торможения. Ограничение по питанию: " + std::to_wstring(power) + L"% времени.",
+                Theme(), 20000, Toast::G_INFO);
 }
 
 }  // namespace toolsui

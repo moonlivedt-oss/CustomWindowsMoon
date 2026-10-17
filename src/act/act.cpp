@@ -324,6 +324,113 @@ int Recycle(const std::vector<std::wstring>& paths) {
     return rc == 0 ? 0 : 1;
 }
 
+// Хвосты удалённых программ - в Корзину. Список считает RadialMenu; здесь заново проверяется место: только папки
+// прямо в AppData\Roaming или AppData\Local, не ссылки, не служебные папки Windows и программ разработки.
+int RecycleLeftovers(const std::vector<std::wstring>& paths) {
+    wchar_t roam[MAX_PATH] = {}, local[MAX_PATH] = {};
+    ExpandEnvironmentStringsW(L"%APPDATA%", roam, MAX_PATH);
+    ExpandEnvironmentStringsW(L"%LOCALAPPDATA%", local, MAX_PATH);
+    static const wchar_t* kKeep[] = {L"microsoft", L"packages", L"temp",    L"programs",  L"moondesk", L"nvidia",
+                                     L"google",    L"mozilla",  L"windows", L"kaspersky", L"npm",      L"docker"};
+    std::wstring list;
+    int ok = 0;
+    for (const std::wstring& p : paths) {
+        size_t cut = p.find_last_of(L'\\');
+        std::wstring parent = cut == std::wstring::npos ? L"" : p.substr(0, cut), leaf = Lower(p.substr(cut + 1));
+        DWORD a = GetFileAttributesW(p.c_str());
+        bool place = !_wcsicmp(parent.c_str(), roam) || !_wcsicmp(parent.c_str(), local);
+        bool keep = leaf.empty();
+        for (const wchar_t* k : kKeep) keep |= leaf.rfind(k, 0) == 0;
+        if (!place || keep || a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) ||
+            (a & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            Out(L"Пропускаю: " + p);
+            continue;
+        }
+        list += p;
+        list.push_back(L'\0');
+        ++ok;
+    }
+    if (!ok) {
+        Out(L"@moved=0");
+        return 1;
+    }
+    list.push_back(L'\0');
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = FO_DELETE;
+    op.pFrom = list.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int rc = SHFileOperationW(&op);
+    if (rc != 0 || op.fAnyOperationsAborted) ok = 0;
+    Out(rc == 0 ? L"В Корзине папок: " + std::to_wstring(ok)
+                : L"Корзина не приняла (код " + std::to_wstring(rc) + L")");
+    Out(L"@moved=" + std::to_wstring(ok));
+    return ok ? 0 : 1;
+}
+
+// Сбросить Проводник: закрыть, удалить кэш значков и эскизов, запустить заново. Окна Проводника закроются.
+int ExplorerReset() {
+    DWORD mySession = 0;
+    ProcessIdToSessionId(GetCurrentProcessId(), &mySession);
+    auto killAll = [&] {
+        int n = 0;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        PROCESSENTRY32W pe{sizeof(pe)};
+        for (BOOL ok = Process32FirstW(snap, &pe); snap != INVALID_HANDLE_VALUE && ok; ok = Process32NextW(snap, &pe)) {
+            DWORD s = 0;
+            if (_wcsicmp(pe.szExeFile, L"explorer.exe") != 0 || !ProcessIdToSessionId(pe.th32ProcessID, &s) ||
+                s != mySession)
+                continue;
+            if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pe.th32ProcessID)) {
+                if (TerminateProcess(h, 1)) ++n, WaitForSingleObject(h, 3000);
+                CloseHandle(h);
+            }
+        }
+        if (snap != INVALID_HANDLE_VALUE) CloseHandle(snap);
+        return n;
+    };
+    Out(L"Закрываю Проводник...");
+    killAll();
+    wchar_t local[MAX_PATH] = {};
+    ExpandEnvironmentStringsW(L"%LOCALAPPDATA%", local, MAX_PATH);
+    std::wstring dir = std::wstring(local) + L"\\Microsoft\\Windows\\Explorer";
+    int removed = 0;
+    // Windows перезапускает Проводник сам: файлы кэша снова заняты - несколько попыток
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        for (const wchar_t* mask : {L"\\iconcache_*.db", L"\\thumbcache_*.db"}) {
+            WIN32_FIND_DATAW fd;
+            HANDLE h = FindFirstFileW((dir + mask).c_str(), &fd);
+            if (h == INVALID_HANDLE_VALUE) continue;
+            do removed += DeleteFileW((dir + L"\\" + fd.cFileName).c_str()) ? 1 : 0;
+            while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+        removed += DeleteFileW((std::wstring(local) + L"\\IconCache.db").c_str()) ? 1 : 0;
+        if (attempt < 3) {
+            Sleep(400);
+            killAll();
+        }
+    }
+    Sleep(1500);
+    // если Windows не подняла Проводник сама - запустить
+    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    if (!tray) {
+        wchar_t win[MAX_PATH] = {};
+        GetWindowsDirectoryW(win, MAX_PATH);
+        std::wstring exe = std::wstring(win) + L"\\explorer.exe";
+        STARTUPINFOW si{sizeof(si)};
+        PROCESS_INFORMATION pi{};
+        std::vector<wchar_t> cmd(exe.begin(), exe.end());
+        cmd.push_back(0);
+        if (CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+    }
+    Out(L"Удалено файлов кэша: " + std::to_wstring(removed) + L". Значки и эскизы соберутся заново.");
+    Out(L"@ok=1");
+    return 0;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -343,6 +450,9 @@ int wmain(int argc, wchar_t** argv) {
     if (cmd == L"recycle" && a.size() >= 2) return Recycle(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"recycle-dup" && a.size() >= 3)
         return RecycleDup(a[1], std::vector<std::wstring>(a.begin() + 2, a.end()));
+    if (cmd == L"recycle-leftover" && a.size() >= 2)
+        return RecycleLeftovers(std::vector<std::wstring>(a.begin() + 1, a.end()));
+    if (cmd == L"explorer-reset") return ExplorerReset();
     if (cmd == L"empty-bin") {
         bool ok =
             SUCCEEDED(SHEmptyRecycleBinW(nullptr, nullptr, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND));

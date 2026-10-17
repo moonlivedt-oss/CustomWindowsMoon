@@ -239,7 +239,10 @@ enum FindKind {
     FIND_PATH,
     FIND_SVC,
     FIND_WMI,
-    FIND_SELF
+    FIND_SELF,
+    FIND_CERT,
+    FIND_FW,
+    kFindKinds
 };
 struct Suspect {
     FindKind kind = FIND_PROC;
@@ -281,6 +284,97 @@ void CheckWmi(std::vector<Suspect>& out);       // подписки WMI, зап�
 void CheckSelf(std::vector<Suspect>& out);      // свои exe изменились после сборки
 std::wstring IntegrityRecord(const std::wstring& exePath);  // файл-отметка сборки для exe
 int FixPathAclAdminMain(const Log& log);  // в процессе с правами: закрыть запись в папки системного PATH
+// ---------------- восстановление (recovery.cpp) ----------------
+enum BrokenKind {
+    BROKEN_TASKMGR,
+    BROKEN_REGEDIT,
+    BROKEN_CMD,
+    BROKEN_ASSOC,
+    BROKEN_SHELL,
+    BROKEN_SHELL_USER,
+    BROKEN_USERINIT,
+    BROKEN_IFEO
+};
+struct Broken {
+    int id = 0;
+    std::wstring what, where, value;  // что сломано, ключ реестра, нынешнее значение
+    bool admin = false;               // чинится только с правами (HKLM)
+};
+std::vector<Broken> FindBroken();  // то, что ломают вирусы: политики, запуск .exe, Shell, Userinit, IFEO
+int FixBrokenUser(const std::vector<Broken>& list, const Log& log);  // HKCU - без прав
+int FixBrokenAdminMain(const Log& log);                              // HKLM - в процессе с правами
+std::vector<std::wstring> PendingReboot();         // почему Windows ждёт перезагрузки (пусто - не ждёт)
+bool RestartToRecovery();                          // перезагрузка в меню особой загрузки (спросит UAC)
+bool RepairWindowsAdminMain(const Log& log);       // DISM RestoreHealth, потом SFC
+bool ResetWindowsUpdateAdminMain(const Log& log);  // службы, SoftwareDistribution, catroot2
+bool DefenderOfflineAdminMain(const Log& log);     // автономная проверка Defender (перезагрузит)
+
+// ---------------- приватность и доверие (privacy.cpp) ----------------
+struct PrivacyUse {
+    std::wstring capability, app, path, signer;  // «камера», имя программы, путь (у обычных программ)
+    ULONGLONG start = 0, stop = 0;               // FILETIME последнего начала и конца
+    bool inUse = false, unsignedApp = false;
+};
+std::vector<PrivacyUse> PrivacyUses();              // камера, микрофон, геопозиция: кто и когда (сейчас - первыми)
+void CheckCerts(std::vector<Suspect>& out);         // незнакомые корневые сертификаты (FIND_CERT)
+void CheckFirewall(std::vector<Suspect>& out);      // входящие разрешения для программ из папок пользователя
+std::wstring FileOrigin(const std::wstring& path);  // откуда скачан файл (метка Zone.Identifier), пусто - неизвестно
+
+// ---------------- система (sysinfo.cpp) ----------------
+struct DeviceProblem {
+    std::wstring name, text;
+    unsigned long code = 0;
+    bool disabled = false;  // выключено вручную - не ошибка
+};
+std::vector<DeviceProblem> DeviceProblems();
+struct GpuSample {
+    bool ok = false;
+    int temp = 0, load = 0;
+    double watts = 0;
+    bool thermal = false, powerCap = false;  // упирается в температуру / в питание
+};
+GpuSample GpuNow();  // nvidia-smi: секунда-две, из рабочего потока
+struct BatteryTrend {
+    ULONGLONG designed = 0, now = 0, monthAgo = 0;  // мВт*ч
+    int monthDays = 0;
+    bool mostlyAc = false;                          // последние две недели почти всё время на зарядке
+    std::vector<std::pair<int, ULONGLONG>> points;  // день -> ёмкость
+};
+void RecordBattery();  // раз в минуту из слежки
+BatteryTrend BatteryHistory();
+struct UpdateInfo {
+    bool ok = false;
+    ULONGLONG lastOk = 0;  // FILETIME последнего успешного обновления
+    std::wstring lastTitle;
+    std::vector<std::wstring> failed;  // не установились за 30 дней
+};
+UpdateInfo WindowsUpdates();  // история Центра обновления, из рабочего потока
+std::wstring SystemReport();  // отчёт о системе текстом, секунды
+
+// ---------------- разработка (devtools2.cpp) ----------------
+struct GitRepo {
+    std::wstring path, name, branch;
+    int changed = 0, ahead = 0, behind = 0;
+    bool noUpstream = false;
+};
+std::vector<GitRepo> GitRepos(const std::vector<std::wstring>& roots);  // секунды: git status по каждому
+struct VirtualDisk {
+    std::wstring path, name;
+    ULONGLONG bytes = 0;
+    bool docker = false;
+};
+std::vector<VirtualDisk> VirtualDisks();  // диски WSL и Docker Desktop
+int CompactVhdAdminMain(const Log& log);  // в процессе с правами: diskpart compact
+struct Leftover2 {
+    std::wstring path, name;
+    ULONGLONG bytes = 0;
+    int idleDays = 0;
+};
+// папки в AppData от программ, которых больше нет: не трогались idleDays дней и больше minBytes
+std::vector<Leftover2> AppLeftovers(int idleDays = 90, ULONGLONG minBytes = 50ull * 1024 * 1024);
+int RecycleLeftovers(const std::vector<std::wstring>& paths, const Log& log);  // через RadialTools.exe
+bool ResetExplorer(const Log& log);                                            // через RadialTools.exe
+
 // Песочница Windows (sandbox.cpp): одноразовая Windows для незнакомой программы.
 bool SandboxAvailable();    // компонент «Песочница Windows» включён
 void OpenSandboxFeature();  // окно «Компоненты Windows», где её включают

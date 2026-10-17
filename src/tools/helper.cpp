@@ -171,6 +171,24 @@ int RecycleDuplicates(const std::wstring& keep, const std::vector<std::wstring>&
     return moved;
 }
 
+int RecycleLeftovers(const std::vector<std::wstring>& paths, const Log& log) {
+    int moved = 0;
+    for (size_t i = 0; i < paths.size(); i += 30) {
+        std::wstring args = L"recycle-leftover";
+        for (size_t j = i; j < paths.size() && j < i + 30; ++j) args += L" " + Quote(paths[j]);
+        std::map<std::wstring, std::wstring> r;
+        RunTools(args, log, &r);
+        moved += _wtoi(r[L"moved"].c_str());
+    }
+    return moved;
+}
+
+bool ResetExplorer(const Log& log) {
+    std::map<std::wstring, std::wstring> r;
+    RunTools(L"explorer-reset", log, &r, 60000);
+    return r[L"ok"] == L"1";
+}
+
 bool EmptyRecycleBin() {
     std::map<std::wstring, std::wstring> r;
     RunTools(L"empty-bin", nullptr, &r);
