@@ -412,7 +412,7 @@ void Tick() {
         GetSystemTimeAsFileTime(&ft);
         ULONGLONG wall = (((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 10000000;
         if (wall - lowAt > 6 * 3600)
-            for (const tools::Volume& v : tools::Volumes())
+            for (const tools::Volume& v : tools::VolumesCached())
                 if (v.type == DRIVE_FIXED && tools::DiskWarn(v) && Lower(v.root.substr(0, 1)) == L"c") {
                     Put(L"low_at", std::to_wstring(wall));
                     RunClean(L"мало места на " + v.root.substr(0, 2), false);

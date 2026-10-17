@@ -22,7 +22,8 @@ constexpr wchar_t kInet[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Inte
 const wchar_t* const kJobKeys[kJobs] = {L"smart",         L"winhttp", L"routes",     L"ip",
                                         L"vpn",           L"dns-cf",  L"dns-google", L"dns-auto",
                                         L"fw-restore",    L"adapter", L"deep",       L"disk-health",
-                                        L"syspath-clean", L"net-top", L"power",      L"restore-point"};
+                                        L"syspath-clean", L"net-top", L"power",      L"restore-point",
+                                        L"path-acl"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -394,6 +395,8 @@ bool Job_(Job j, const Log& log) {
                 L". Возможно, на C: выключена «Защита системы».");
             return false;
         }
+        case JOB_PATH_ACL:
+            return tools::FixPathAclAdminMain(log) >= 0;
         case JOB_DEEP: {
             int a = Exec(L"netsh.exe", L"winsock reset", &out);
             int b = Exec(L"netsh.exe", L"int ip reset", &out);

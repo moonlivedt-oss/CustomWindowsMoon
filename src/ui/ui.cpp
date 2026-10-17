@@ -33,7 +33,8 @@ void Ui::OnMouseMove(int x, int y) {
         hotSince_ = GetTickCount64();
         hotChanged_ = true;
     }
-    if (h != hot_ || (down_ && active_) || (h && std::find(prevTrack_.begin(), prevTrack_.end(), h) != prevTrack_.end())) {
+    if (h != hot_ || (down_ && active_) ||
+        (h && std::find(prevTrack_.begin(), prevTrack_.end(), h) != prevTrack_.end())) {
         hot_ = h;
         repaint_ = true;
     }
@@ -465,6 +466,11 @@ void Ui::End() {
     rclicked_ = 0;
     dbl_ = 0;
     g_ = nullptr;
+    // значки оболочки грузятся в потоке: пока ждём - редкие кадры, пришли - перерисовать
+    if (icons_.Arrived())
+        repaint_ = true;
+    else if (icons_.Waiting())
+        tick_ = true;
 }
 
 bool Ui::Scaled() const {

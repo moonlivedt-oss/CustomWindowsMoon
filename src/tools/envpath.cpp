@@ -37,16 +37,64 @@ std::wstring RegRaw(HKEY root, const wchar_t* key, const wchar_t* name, DWORD* t
 // переменную, заведённую позже (%JAVA_HOME%), его окружение не знает - такая папка выглядела бы мёртвой и
 // «Почистить» убрала бы её из PATH. systemOnly - только системные переменные (для процесса с правами: окружение
 // пользователя ему не указ).
+// Окружение из реестра собирается одним блоком (CreateEnvironmentBlock, миллисекунды) и живёт 5 секунд:
+// студия читает PATH каждые полминуты, а в нём десятки папок.
+struct EnvSnap {
+    std::map<std::wstring, std::wstring> vars;  // имя в нижнем регистре -> значение
+    ULONGLONG at = 0;
+    bool ok = false;
+};
+SRWLOCK g_envLock = SRWLOCK_INIT;
+EnvSnap g_env[2];  // 0 - пользователя, 1 - только системное
+
 std::wstring ExpandFresh(const std::wstring& s, bool systemOnly) {
     if (s.find(L'%') == std::wstring::npos) return s;
-    HANDLE tok = nullptr;
-    if (!systemOnly && !OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &tok)) tok = nullptr;
-    wchar_t buf[4096];
-    BOOL ok = (systemOnly || tok) && ExpandEnvironmentStringsForUserW(tok, s.c_str(), buf, 4096);
-    if (tok) CloseHandle(tok);
-    if (ok) return buf;
-    DWORD n = ExpandEnvironmentStringsW(s.c_str(), buf, 4096);
-    return n && n <= 4096 ? std::wstring(buf) : s;
+    EnvSnap snap;
+    AcquireSRWLockExclusive(&g_envLock);
+    EnvSnap& e = g_env[systemOnly ? 1 : 0];
+    ULONGLONG now = GetTickCount64();
+    if (!e.at || now - e.at > 5000) {
+        e = {};
+        e.at = now;
+        HANDLE tok = nullptr;
+        if (!systemOnly && !OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &tok)) tok = nullptr;
+        void* block = nullptr;
+        if ((systemOnly || tok) && CreateEnvironmentBlock(&block, tok, FALSE) && block) {
+            for (const wchar_t* p = (const wchar_t*)block; *p; p += wcslen(p) + 1) {
+                const wchar_t* eq = wcschr(p + 1, L'=');  // «=C:=C:\» - служебные, имя с «=» в начале
+                if (eq) e.vars[Lower(std::wstring(p, eq - p))] = eq + 1;
+            }
+            DestroyEnvironmentBlock(block);
+            e.ok = true;
+        }
+        if (tok) CloseHandle(tok);
+    }
+    snap = e;
+    ReleaseSRWLockExclusive(&g_envLock);
+    if (!snap.ok) {
+        wchar_t buf[4096];
+        DWORD n = ExpandEnvironmentStringsW(s.c_str(), buf, 4096);
+        return n && n <= 4096 ? std::wstring(buf) : s;
+    }
+    // %ИМЯ% -> значение; незнакомое остаётся как есть (так же делает Windows)
+    std::wstring out;
+    for (size_t i = 0; i < s.size();) {
+        size_t a = s.find(L'%', i), b = a == std::wstring::npos ? a : s.find(L'%', a + 1);
+        if (b == std::wstring::npos) {
+            out += s.substr(i);
+            break;
+        }
+        out += s.substr(i, a - i);
+        auto it = snap.vars.find(Lower(s.substr(a + 1, b - a - 1)));
+        if (it != snap.vars.end()) {
+            out += it->second;
+            i = b + 1;
+        } else {
+            out += L'%';
+            i = a + 1;
+        }
+    }
+    return out;
 }
 
 std::wstring Expand(const std::wstring& s) { return ExpandFresh(s, false); }
@@ -253,6 +301,13 @@ bool RestoreUserPath(const std::wstring& backupFile, const Log& log) {
         return false;
     }
     return WriteUserPath(SplitPath(v), log);
+}
+
+std::vector<std::pair<std::wstring, std::wstring>> SystemPathEntries() {
+    std::vector<std::pair<std::wstring, std::wstring>> out;
+    for (const std::wstring& p : SplitPath(RegRaw(HKEY_LOCAL_MACHINE, kSysEnv, L"Path")))
+        out.push_back({p, ExpandFresh(p, true)});
+    return out;
 }
 
 int CleanSystemPath(const Log& log) {

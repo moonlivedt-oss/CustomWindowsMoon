@@ -374,7 +374,7 @@ void Studio::ToolsPage(const RectF& r) {
             toolsWhich_ = tools::WhichAll();
             toolsEnv_ = tools::ReadEnv();
         } else if (toolsTab_ == 1) {
-            toolsVols_ = tools::Volumes();
+            toolsVols_ = tools::VolumesCached(3000);
             if (toolsPhys_.empty()) LoadPhysAsync();
             // размеры кэшей - сами, один раз при входе на вкладку (считаются в фоне)
             if (toolsJunk_.empty() && !toolsJunkAsked_ && !(toolsJob_ && !toolsJob_->done)) {

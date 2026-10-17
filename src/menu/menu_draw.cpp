@@ -27,6 +27,29 @@
 using namespace Gdiplus;
 using namespace menu_detail;
 
+namespace {
+
+// Отрезки строки y, лежащие в кольце r0..r1 вокруг (cx, cy) и внутри [lo, hi): без углов квадрата и без дырки.
+template <class F>
+void AnnulusSpans(double cx, double cy, int y, double r0, double r1, int lo, int hi, F&& fn) {
+    double dy = y + 0.5 - cy;
+    if (std::fabs(dy) >= r1) return;
+    double ho = std::sqrt(r1 * r1 - dy * dy);
+    int a = std::max(lo, (int)std::floor(cx - ho)), b = std::min(hi, (int)std::ceil(cx + ho) + 1);
+    if (r0 > 0 && std::fabs(dy) < r0) {
+        double hh = std::sqrt(r0 * r0 - dy * dy);
+        int c = std::max(a, (int)std::ceil(cx - hh)), d = std::min(b, (int)std::floor(cx + hh));
+        if (c < d) {
+            if (a < c) fn(a, c);
+            if (d < b) fn(d, b);
+            return;
+        }
+    }
+    if (a < b) fn(a, b);
+}
+
+}  // namespace
+
 // Снимок того, что под меню, уменьшенный в 4 раза, размытый и растянутый обратно: из него делается «стекло».
 // Всё на своих простых циклах: StretchBlt с экрана и растягивание GDI+ стоили по 10 мс каждое.
 void RadialMenu::CaptureBackdrop() {
@@ -130,7 +153,7 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         bool ok = false;
     };
     std::vector<Shape> shapes(secs.size());
-    double reach = 0;
+    double reach = 0, hole = 1e9;
     bool masked = false;
     for (size_t k = 0; k < secs.size(); ++k) {
         const Sector& s = secs[k];
@@ -149,21 +172,64 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         if (s.appear > 0.5) {
             masked = true;
             reach = std::max(reach, sh.rOut);
+            hole = std::min(hole, ri);
         }
+    }
+    // Покрытие секторов лежит в кольце hole..reach: строки обходятся только там - без углов квадрата и без
+    // дырки в середине. Чистка, заливка и наложение идут по одним и тем же отрезкам строки.
+    auto spans = [&](int y, int lo, int hi, auto&& fn) { AnnulusSpans(cx, cy, y, hole - 3, reach + 3, lo, hi, fn); };
+
+    // Кольцо, которое не меняется (водят по другому кольцу), не рисуется заново: его пиксели берутся из прошлого
+    // кадра. Под кольцом только подложка, а кольца друг друга не касаются (между r2 и r3 зазор), поэтому
+    // кусок кадра в его полосе зависит лишь от подложки и состояния секторов - это и есть ключ.
+    RingCache& rc = ringCache_[!secs.empty() && secs[0].ring.sub ? 1 : 0];
+    const bool glassOn = !blurPx_.empty(), hexOn = hexOn_ && !hexPx_.empty();
+    std::vector<double> key = {baseNow_.ext,        baseNow_.catcherR, (double)baseNow_.color, clip ? 1.0 : 0.0,
+                               glassOn ? 1.0 : 0.0, hexOn ? 1.0 : 0.0, (double)geo_.w,         (double)geo_.h};
+    bool still = true;
+    double bandLo = 1e9, bandHi = 0;
+    ULONGLONG nowMs = GetTickCount64();
+    for (const Sector& s : secs) {
+        // значок под курсором играет анимацию около секунды - такой кадр не повторяется
+        if (s.hot && nowMs - hoverT_ < 1500) still = false;
+        if (hexOn && s.hl > 0.02) {  // приподнятая сота идёт за курсором
+            hex::Cell c = hex::At(cursorLocal_.x, cursorLocal_.y, 13 * geo_.k);
+            key.insert(key.end(), {(double)c.q, (double)c.r});
+        }
+        key.insert(key.end(), {s.a0, s.a1, s.ring.rIn, s.ring.rOut, (double)s.ring.iconPx, s.hl,
+                               s.appear, s.active ? 1.0 : 0.0, s.hue, s.hot ? 1.0 : 0.0,
+                               (double)std::hash<std::wstring>()(s.it->name + L"|" + s.it->full)});
+        bandLo = std::min(bandLo, s.ring.rIn);
+        bandHi = std::max(bandHi, s.ring.rOut);
+    }
+    // полоса кольца с запасом под выдвинутый сектор и светящуюся кромку
+    bandLo -= 4;
+    bandHi += 3.5 * geo_.k + 2.5 * gap + 6;
+    const size_t total = (size_t)geo_.w * geo_.h;
+    auto* px = static_cast<uint32_t*>(bits_);
+    auto band = [&](auto&& fn) {
+        int ya = std::max(0, (int)(cy - bandHi)), yb = std::min(geo_.h, (int)(cy + bandHi) + 1);
+        for (int y = ya; y < yb; ++y)
+            AnnulusSpans(cx, cy, y, bandLo, bandHi, 0, geo_.w,
+                         [&](int a, int b) { fn((size_t)y * geo_.w + a, b - a); });
+    };
+    if (still && rc.ok && rc.key == key && rc.px.size() == total) {
+        PERF_SCOPE("menu.r.Cached");
+        band([&](size_t at, int n) { memcpy(px + at, rc.px.data() + at, (size_t)n * 4); });
+        return;
     }
 
     // Стекло и соты: маска всех проявившихся секторов одной сплошной заливкой, дальше проход по пикселям.
     // Слои те же, что были у заливок TextureBrush: стекло под градиентом, соты над ним.
-    const bool glassOn = !blurPx_.empty(), hexOn = hexOn_ && !hexPx_.empty();
     masked = masked && (glassOn || hexOn);
     int x0 = 0, x1 = 0, y0 = 0, y1 = 0;
-    auto* px = static_cast<uint32_t*>(bits_);
     if (masked) {
         PERF_SCOPE("menu.r.Mask");
         x0 = std::max(0, (int)(cx - reach - 3)), x1 = std::min(geo_.w, (int)(cx + reach + 4));
         y0 = std::max(0, (int)(cy - reach - 3)), y1 = std::min(geo_.h, (int)(cy + reach + 4));
         maskPx_.resize((size_t)geo_.w * geo_.h);
-        for (int y = y0; y < y1; ++y) memset(&maskPx_[(size_t)y * geo_.w + x0], 0, (size_t)(x1 - x0) * 4);
+        for (int y = y0; y < y1; ++y)
+            spans(y, x0, x1, [&](int a, int b) { memset(&maskPx_[(size_t)y * geo_.w + a], 0, (size_t)(b - a) * 4); });
         Bitmap mb(geo_.w, geo_.h, geo_.w * 4, PixelFormat32bppPARGB, (BYTE*)maskPx_.data());
         Graphics mg(&mb);
         mg.SetSmoothingMode(g.GetSmoothingMode());
@@ -177,10 +243,12 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         for (int y = y0; y < y1; ++y) {
             size_t row = (size_t)y * geo_.w;
             const uint32_t* m = &maskPx_[row];
-            for (int x = x0; x < x1; ++x) {
-                uint32_t cov = m[x] >> 24;
-                if (cov) px[row + x] = Over(px[row + x], src[row + x], cov);
-            }
+            spans(y, x0, x1, [&](int a, int b) {
+                for (int x = a; x < b; ++x) {
+                    uint32_t cov = m[x] >> 24;
+                    if (cov) px[row + x] = Over(px[row + x], src[row + x], cov);
+                }
+            });
         }
     };
     if (masked && glassOn) {
@@ -256,6 +324,14 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         DrawLabel(g, s.ring, s.a0, s.a1, *s.it, s.hl, s.appear);
     }
     blitOk_ = false;
+    // кольцо, которое второй кадр подряд не меняется, запоминаем: дальше оно будет копироваться
+    if (still && rc.last == key) {
+        rc.px.resize(total);
+        band([&](size_t at, int n) { memcpy(rc.px.data() + at, px + at, (size_t)n * 4); });
+        rc.key = key;
+        rc.ok = true;
+    }
+    rc.last = std::move(key);
 }
 // Плашка с текстом у края экрана: путь вверху, поиск и подсказки внизу.
 void RadialMenu::DrawPill(Graphics& g, const std::wstring& text, const std::wstring& iconFile, double y, double alpha,
@@ -359,6 +435,17 @@ void RadialMenu::PaintBase(double ext, double catcherR) {
     };
     // внутри тени прозрачность постоянна, корень нужен только в полосе мягкого края
     const uint32_t full = pack(peak);
+    BaseKey key{ext, catcherR, peak, center_.x, center_.y, geo_.w, geo_.h, full};
+    baseNow_ = key;
+    const size_t count = (size_t)geo_.w * geo_.h;
+    if (key == baseCached_ && baseCache_.size() == count) {
+        memcpy(px, baseCache_.data(), count * 4);
+        return;
+    }
+    // кэш заводим, только когда размер устоялся (второй кадр подряд с тем же ключом): во время раскрытия
+    // каждый кадр новый, и копия была бы лишней работой
+    const bool keep = key == baseLast_;
+    baseLast_ = key;
     const double ext2 = ext * ext, outer2 = outer * outer;
     for (int y = 0; y < geo_.h; ++y) {
         uint32_t* row = px + (size_t)y * geo_.w;
@@ -385,10 +472,15 @@ void RadialMenu::PaintBase(double ext, double catcherR) {
             row[x] = pack(a);
         }
     }
+    if (keep) {
+        baseCache_.assign(px, px + count);
+        baseCached_ = key;
+    }
 }
 
 void RadialMenu::Render() {
     PERF_SCOPE("menu.Render");
+    ++frames_;
     ULONGLONG now = GetTickCount64();
     double openT = (now - tOpen_) / fx::Dur(kOpenMs);
     double openE = EaseOut(openT);
@@ -415,8 +507,7 @@ void RadialMenu::Render() {
         PaintBase(full_ ? geo_.r2 * grow : ext, ext + 10);  // заменяет и очистку кадра
     }
     {
-        POINT cp;
-        GetCursorPos(&cp);
+        POINT cp = CursorPt();
         cursorLocal_ = {cp.x - origin_.x, cp.y - origin_.y};
     }
     Bitmap surface(geo_.w, geo_.h, geo_.w * 4, PixelFormat32bppPARGB, (BYTE*)bits_);

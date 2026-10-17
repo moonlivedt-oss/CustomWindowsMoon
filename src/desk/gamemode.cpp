@@ -5,6 +5,7 @@
 #include <tlhelp32.h>
 
 #include "core/config.h"
+#include "core/procsnap.h"
 #include "core/text.h"
 
 namespace {
@@ -150,8 +151,7 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
         name = L"полноэкранная игра";
         return true;
     }
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return false;
+    auto procs = procsnap::Get();
     // маски поменяли в студии - уже открытые процессы проверяются заново
     std::wstring masks = cfg.games + L"\x1" + cfg.gamesSkip + L"\x1" + cfg.devApps;
     if (masks != masks_) {
@@ -161,8 +161,7 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
     std::map<DWORD, Seen> seen;
     DWORD self = GetCurrentProcessId();
     bool found = false;
-    PROCESSENTRY32W pe{sizeof(pe)};
-    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+    for (const PROCESSENTRY32W& pe : *procs) {
         DWORD pid = pe.th32ProcessID;
         if (pid == self || pid <= 4) continue;
         auto it = games_.find(pid);
@@ -182,7 +181,6 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
             name = game;
         }
     }
-    CloseHandle(snap);
     games_.swap(seen);
     return found;
 }

@@ -54,6 +54,7 @@ struct Volume {
     UINT type = 0;  // DRIVE_FIXED, DRIVE_REMOVABLE...
 };
 std::vector<Volume> Volumes();
+std::vector<Volume> VolumesCached(DWORD maxAgeMs = 30000);  // для основного потока: снимок, свежий - в фоне
 
 struct Physical {
     std::wstring name;
@@ -228,20 +229,31 @@ enum SignState { SIGN_NOFILE, SIGN_OK, SIGN_NONE, SIGN_UNTRUSTED, SIGN_BAD };
 SignState CheckSign(const std::wstring& path, std::wstring* signer = nullptr);  // кэш по пути, размеру и времени
 
 constexpr int kSuspectScore = 3;  // с какого счёта показывать; 6 и выше - «опасно»
-enum FindKind { FIND_PROC, FIND_AUTO, FIND_REG, FIND_TASK, FIND_EXT, FIND_NET };
+enum FindKind {
+    FIND_PROC,
+    FIND_AUTO,
+    FIND_REG,
+    FIND_TASK,
+    FIND_EXT,
+    FIND_NET,
+    FIND_PATH,
+    FIND_SVC,
+    FIND_WMI,
+    FIND_SELF
+};
 struct Suspect {
     FindKind kind = FIND_PROC;
-    DWORD pid = 0;          // процесс; 0 - запись автозапуска или реестра
-    std::wstring name;      // svchost.exe, имя записи автозапуска, «Shell»
-    std::wstring path;      // файл (для реестра - значение)
-    std::wstring where;     // откуда запись: «Run (пользователь)», ключ реестра
-    std::wstring parent;    // кто запустил процесс
-    std::wstring signer;    // издатель из подписи
+    DWORD pid = 0;        // процесс; 0 - запись автозапуска или реестра
+    std::wstring name;    // svchost.exe, имя записи автозапуска, «Shell»
+    std::wstring path;    // файл (для реестра - значение)
+    std::wstring where;   // откуда запись: «Run (пользователь)», ключ реестра
+    std::wstring parent;  // кто запустил процесс
+    std::wstring signer;  // издатель из подписи
     SignState sign = SIGN_NOFILE;
-    bool net = false;       // есть соединения в сеть
-    int start = -1;         // номер в SecurityScan::starts (для автозапуска)
-    int score = 0;          // сумма признаков
-    std::wstring why;       // признаки через «; »
+    bool net = false;  // есть соединения в сеть
+    int start = -1;    // номер в SecurityScan::starts (для автозапуска)
+    int score = 0;     // сумма признаков
+    std::wstring why;  // признаки через «; »
 };
 struct SecurityScan {
     std::vector<Suspect> procs, autos, hijacks;  // по убыванию счёта
@@ -249,21 +261,44 @@ struct SecurityScan {
     std::vector<Suspect> exts;                   // расширения Chrome/Edge не из магазина (path - папка)
     std::vector<Suspect> nets;                   // hosts и DNS
     int tasksChecked = 0, extsChecked = 0;
-    std::vector<StartItem> starts;               // вся автозагрузка на момент проверки
-    int processes = 0, autoruns = 0;             // сколько проверено
-    int unsignedCount = 0;                       // запущенных программ без подписи (разных файлов)
+    std::vector<StartItem> starts;    // вся автозагрузка на момент проверки
+    int processes = 0, autoruns = 0;  // сколько проверено
+    int unsignedCount = 0;            // запущенных программ без подписи (разных файлов)
 };
 SecurityScan ScanSecurity();  // секунды при первом разе (подписи), потом из кэша; из рабочего потока
+// Только сеть (hosts, DNS, прокси) - для мгновенной проверки, когда эти настройки поменялись.
+std::vector<Suspect> ScanNetwork();
+
+// Системная часть «Защиты» (syscheck.cpp): находки - в SecurityScan::hijacks.
+struct PathAcl {
+    std::wstring raw, dir;  // как записано в PATH и после подстановки
+    bool exists = false, windows = false, writable = false;
+};
+std::vector<PathAcl> SystemPathAcl();  // папки системного PATH, куда (или где создать которые) может писать кто угодно
+void CheckPathAcl(std::vector<Suspect>& out);
+void CheckServices(std::vector<Suspect>& out);  // службы: путь без кавычек, файл или папка открыты на запись
+void CheckWmi(std::vector<Suspect>& out);       // подписки WMI, запускающие команды и скрипты
+void CheckSelf(std::vector<Suspect>& out);      // свои exe изменились после сборки
+std::wstring IntegrityRecord(const std::wstring& exePath);  // файл-отметка сборки для exe
+int FixPathAclAdminMain(const Log& log);  // в процессе с правами: закрыть запись в папки системного PATH
+// Песочница Windows (sandbox.cpp): одноразовая Windows для незнакомой программы.
+bool SandboxAvailable();    // компонент «Песочница Windows» включён
+void OpenSandboxFeature();  // окно «Компоненты Windows», где её включают
+// файл - внутрь только для чтения (папка, если программе нужны DLL рядом, иначе копия), сеть по выбору
+bool RunInSandbox(const std::wstring& file, bool network, std::wstring& err);
+std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring& err);  // только .wsb
+// системный PATH: как записано и после подстановки системных переменных
+std::vector<std::pair<std::wstring, std::wstring>> SystemPathEntries();
 std::wstring FileSha256(const std::wstring& path);  // в common.cpp: VirusTotal по хэшу, сверка дубликатов
 bool SetTaskEnabled(const std::wstring& taskPath, bool on, const Log& log);  // своя задача; чужая - нужны права
-std::wstring AntivirusUi();  // avpui.exe Касперского, пусто - нет
+std::wstring AntivirusUi();                                                  // avpui.exe Касперского, пусто - нет
 struct SecurityApp {
     std::wstring name, exe;
 };
 std::vector<SecurityApp> SecurityApps(const std::wstring& dir);  // exe из папки и подпапок (кроме установщиков)
-std::wstring StartExe(const StartItem& it);  // какой exe запускает запись автозагрузки
+std::wstring StartExe(const StartItem& it);                      // какой exe запускает запись автозагрузки
 const std::vector<std::wstring>& SystemExeNames();  // svchost.exe, lsass.exe...: под них маскируются чаще всего
-bool InWindowsDir(const std::wstring& path);         // файл прямо в Windows, System32, SysWOW64 (или их wbem)
+bool InWindowsDir(const std::wstring& path);        // файл прямо в Windows, System32, SysWOW64 (или их wbem)
 // Имя системного процесса, но файл не в папке Windows: такой не защищён от завершения.
 bool SystemImposter(const std::wstring& fullPath);
 
@@ -280,8 +315,9 @@ struct ProcInfo {
 };
 std::vector<ProcInfo> Processes();  // этого входа (службы и чужие сеансы без прав не видны)
 int ProcessMinutes(DWORD pid);      // сколько минут работает процесс, -1 - не узнать
-ULONGLONG PrivateBytes(HANDLE h);  // личная память процесса, как столбец «Память» в Диспетчере задач
-// запустить консольную программу без окна и забрать вывод (UTF-8 или кодировка консоли); код выхода, -1 - не запустилась
+ULONGLONG PrivateBytes(HANDLE h);   // личная память процесса, как столбец «Память» в Диспетчере задач
+// запустить консольную программу без окна и забрать вывод (UTF-8 или кодировка консоли); код выхода, -1 - не
+// запустилась
 int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs);
 
 class ProcHistory {
@@ -302,7 +338,7 @@ public:
         ULONGLONG mem = 0;
     };
     std::vector<Hog> CpuHogs(int minutes, bool backgroundOnly) const;  // по программам, самые прожорливые первыми
-    bool Ready(int minutes) const;  // история уже покрывает столько минут
+    bool Ready(int minutes) const;                                     // история уже покрывает столько минут
 
 private:
     struct Sample {

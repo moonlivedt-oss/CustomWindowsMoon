@@ -103,7 +103,7 @@ void Studio::StatePage(const RectF& r) {
     ULONGLONG now = GetTickCount64();
     if (!stateAt_ || now - stateAt_ > 3000) {
         stateAt_ = now;
-        stateVols_ = tools::Volumes();
+        stateVols_ = tools::VolumesCached(3000);
         stateMem_ = tools::Memory();
         stateApps_ = tools::HeavyApps(4);
         homeAuto_ = AutostartOn();

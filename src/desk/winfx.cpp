@@ -261,6 +261,7 @@ void WindowFx::Tick() {
             it = IsWindow(it->first) ? std::next(it) : states_.erase(it);
     }
     if (show_ <= 0) return;
+    fx::Active();
     float target = now < until_ ? 1.0f : 0.0f;
     float before = show_;
     show_ = target > show_ ? std::min(1.0f, show_ + fx::Step(0.16f)) : std::max(0.0f, show_ - fx::Step(0.07f));

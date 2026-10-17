@@ -135,7 +135,13 @@ bool EnablePrivilege(const wchar_t* name) {
 
 // во время игры: таймер и приоритеты, которые потом вернуть
 bool g_timer = false;
-std::map<DWORD, DWORD> g_priorities;
+// номер процесса -> прежний приоритет и время создания: номер может достаться новому процессу, пока идёт игра
+std::map<DWORD, std::pair<DWORD, ULONGLONG>> g_priorities;
+
+ULONGLONG Created(HANDLE h) {
+    FILETIME c{}, e{}, k{}, u{};
+    return GetProcessTimes(h, &c, &e, &k, &u) ? ((ULONGLONG)c.dwHighDateTime << 32 | c.dwLowDateTime) : 0;
+}
 
 }  // namespace
 
@@ -323,7 +329,8 @@ void GameTweaks(const Settings& s, bool on) {
                 if (HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
                                            pe.th32ProcessID)) {
                     DWORD old = GetPriorityClass(h);
-                    if (old && SetPriorityClass(h, BELOW_NORMAL_PRIORITY_CLASS)) g_priorities[pe.th32ProcessID] = old;
+                    if (old && SetPriorityClass(h, BELOW_NORMAL_PRIORITY_CLASS))
+                        g_priorities[pe.th32ProcessID] = {old, Created(h)};
                     CloseHandle(h);
                 }
             }
@@ -332,9 +339,9 @@ void GameTweaks(const Settings& s, bool on) {
     } else {
         if (g_timer && setRes) setRes(5000, FALSE, &cur);
         g_timer = false;
-        for (auto& [pid, old] : g_priorities)
-            if (HANDLE h = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid)) {
-                SetPriorityClass(h, old);
+        for (auto& [pid, was] : g_priorities)
+            if (HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+                if (Created(h) == was.second) SetPriorityClass(h, was.first);  // тот же процесс, а не тёзка по номеру
                 CloseHandle(h);
             }
         g_priorities.clear();

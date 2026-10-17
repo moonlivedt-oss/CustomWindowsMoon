@@ -46,6 +46,50 @@ std::vector<Volume> Volumes() {
     return out;
 }
 
+namespace {
+SRWLOCK g_volLock = SRWLOCK_INIT;
+std::vector<Volume> g_vols;
+ULONGLONG g_volAt = 0;
+volatile LONG g_volBusy = 0;
+}  // namespace
+
+// Спящий жёсткий диск или флешка отвечают на GetVolumeInformation секундами: основной поток берёт последний
+// снимок, а свежий собирает свой поток. Первый раз - сразу, иначе показать нечего.
+std::vector<Volume> VolumesCached(DWORD maxAgeMs) {
+    AcquireSRWLockShared(&g_volLock);
+    std::vector<Volume> v = g_vols;
+    ULONGLONG at = g_volAt;
+    ReleaseSRWLockShared(&g_volLock);
+    ULONGLONG now = GetTickCount64();
+    if (!at) {
+        v = Volumes();
+        AcquireSRWLockExclusive(&g_volLock);
+        g_vols = v;
+        g_volAt = GetTickCount64();
+        ReleaseSRWLockExclusive(&g_volLock);
+        return v;
+    }
+    if (now - at > maxAgeMs && InterlockedCompareExchange(&g_volBusy, 1, 0) == 0) {
+        HANDLE th = CreateThread(
+            nullptr, 0,
+            [](void*) -> DWORD {
+                std::vector<Volume> fresh = Volumes();
+                AcquireSRWLockExclusive(&g_volLock);
+                g_vols = std::move(fresh);
+                g_volAt = GetTickCount64();
+                ReleaseSRWLockExclusive(&g_volLock);
+                InterlockedExchange(&g_volBusy, 0);
+                return 0;
+            },
+            nullptr, 0, nullptr);
+        if (th)
+            CloseHandle(th);
+        else
+            InterlockedExchange(&g_volBusy, 0);
+    }
+    return v;
+}
+
 bool DiskWarn(const Volume& v) { return v.total && v.free * 10 < v.total && v.free < 20ull * 1024 * 1024 * 1024; }
 
 std::vector<Physical> PhysicalDisks() {

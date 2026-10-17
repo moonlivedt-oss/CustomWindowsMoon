@@ -84,7 +84,8 @@ std::vector<boost::Group> g_boostGroups;  // что предложили зак�
 std::vector<std::wstring> g_boostClosed;  // что закрыли - вернуть после игры
 bool g_boostBusy = false;
 HPOWERNOTIFY g_displayNotify = nullptr, g_acdcNotify = nullptr;
-int g_cfgCheck = 0;
+ULONGLONG g_cfgCheckAt = 0;
+UINT g_pollMs = 20;
 Config g_cfg;
 std::wstring g_cfgPath;
 FILETIME g_cfgTime{};
@@ -152,11 +153,12 @@ void MaskAlt() {
     SendInput(2, in, sizeof(INPUT));
 }
 
-void Poll() {
+void PollWork() {
     bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
     // radial.cfg мог поменяться не через студию: раз в секунду проверяем, чтобы углы и плашка подхватили правку
-    if (++g_cfgCheck >= 50 && !g_menu.IsOpen()) {
-        g_cfgCheck = 0;
+    ULONGLONG nowMs = GetTickCount64();
+    if (nowMs - g_cfgCheckAt >= 1000 && !g_menu.IsOpen()) {
+        g_cfgCheckAt = nowMs;
         FILETIME ft = FileTime(g_cfgPath);
         if (CompareFileTime(&g_cfgTime, &ft) != 0) Reload();
         // ночной режим включается и выключается по часам
@@ -209,6 +211,29 @@ void Poll() {
 
     MaskAlt();
     g_menu.Show(&g_cfg, pt, r, left, MonitorDpi(mon));
+}
+
+// Курсор у края монитора (40 px): там углы, кольца и панель «Сейчас играет» - отклик нужен быстрый.
+bool NearEdge() {
+    POINT pt;
+    GetCursorPos(&pt);
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), &mi);
+    const RECT& r = mi.rcMonitor;
+    const LONG m = 40;
+    return pt.x < r.left + m || pt.x >= r.right - m || pt.y < r.top + m || pt.y >= r.bottom - m;
+}
+
+// Опрос раз в 20 мс стоил ~8 мс процессора в секунду всегда. В покое (Alt не нажат, курсор не у края, ничего не
+// движется) хватает 100 мс; как только что-то началось - снова 20 мс.
+void Poll() {
+    PollWork();
+    bool fast = fx::TakeActive() || (GetAsyncKeyState(VK_MENU) & 0x8000) || g_menu.IsOpen() || NearEdge();
+    UINT want = fast ? 20 : 100;
+    if (want != g_pollMs) {
+        g_pollMs = want;
+        SetTimer(g_wnd, kPollTimer, want, nullptr);
+    }
 }
 
 // Кольцо открытых окон вокруг курсора (Alt + ` или горячий угол).

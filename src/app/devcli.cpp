@@ -26,7 +26,9 @@
 #include "desk/startbg.h"
 #include "desk/whreg.h"
 #include "gfx/color.h"
+#include "core/perf.h"
 #include "gfx/scene.h"
+#include "menu/menu.h"
 #include "net/net.h"
 #include "studio/studio.h"
 #include "tools/tools.h"
@@ -290,17 +292,17 @@ int SecDiag() {
     tools::ScanSecurity();
     ULONGLONG t2 = GetTickCount64();
     std::wstring s = L"Проверено процессов " + std::to_wstring(r.processes) + L", записей автозапуска " +
-                     std::to_wstring(r.autoruns) + L", без подписи (разных файлов) " + std::to_wstring(r.unsignedCount) +
-                     L"; первый раз " + std::to_wstring(t1 - t0) + L" мс, из кэша " + std::to_wstring(t2 - t1) +
-                     L" мс" + nl;
+                     std::to_wstring(r.autoruns) + L", без подписи (разных файлов) " +
+                     std::to_wstring(r.unsignedCount) + L"; первый раз " + std::to_wstring(t1 - t0) + L" мс, из кэша " +
+                     std::to_wstring(t2 - t1) + L" мс" + nl;
     auto dump = [&](const wchar_t* title, const std::vector<tools::Suspect>& v) {
         s += nl + title + L" (" + std::to_wstring(v.size()) + L"):" + nl;
         for (const tools::Suspect& x : v)
-            s += L"  [" + std::to_wstring(x.score) + L"] " + x.name + (x.pid ? L" pid " + std::to_wstring(x.pid) : L"") +
-                 L" | " + x.path + L" | " + x.why + (x.signer.empty() ? L"" : L" | подпись " + x.signer) +
-                 (x.where.empty() ? L"" : L" | " + x.where) + nl;
+            s += L"  [" + std::to_wstring(x.score) + L"] " + x.name +
+                 (x.pid ? L" pid " + std::to_wstring(x.pid) : L"") + L" | " + x.path + L" | " + x.why +
+                 (x.signer.empty() ? L"" : L" | подпись " + x.signer) + (x.where.empty() ? L"" : L" | " + x.where) + nl;
     };
-    dump(L"Реестр", r.hijacks);
+    dump(L"Реестр и система: PATH, службы, WMI, свои exe", r.hijacks);
     dump(L"Процессы", r.procs);
     dump(L"Автозапуск", r.autos);
     dump((L"Задачи планировщика, проверено " + std::to_wstring(r.tasksChecked)).c_str(), r.tasks);
@@ -322,12 +324,14 @@ int SecDiag() {
         std::wstring signer;
         tools::SignState st = tools::CheckSign(std::wstring(p, n), &signer);
         static const wchar_t* kState[] = {L"нет файла", L"ok", L"НЕТ ПОДПИСИ", L"недоверенная", L"ИСПОРЧЕНА"};
-        s += L"  " + std::wstring(kState[st]) + L"  " + std::wstring(p, n) + (signer.empty() ? L"" : L"  <" + signer + L">") +
+        s += L"  " + std::wstring(kState[st]) + L"  " + std::wstring(p, n) +
+             (signer.empty() ? L"" : L"  <" + signer + L">") +
              (tools::SystemImposter(std::wstring(p, n)) ? L"  САМОЗВАНЕЦ" : L"") + nl;
     }
     if (snap != INVALID_HANDLE_VALUE) CloseHandle(snap);
     s += nl + L"Программы из папки защиты:" + nl;
-    for (const tools::SecurityApp& a : tools::SecurityApps(LoadOwnConfig().securityDir)) s += L"  " + a.name + L" = " + a.exe + nl;
+    for (const tools::SecurityApp& a : tools::SecurityApps(LoadOwnConfig().securityDir))
+        s += L"  " + a.name + L" = " + a.exe + nl;
     s += L"Антивирус: " + tools::AntivirusUi() + nl;
     s += L"SHA-256 RadialMenu.exe: " + tools::FileSha256(ExeDir() + L"\\RadialMenu.exe") + nl;
     WriteOut(L"sec_out.txt", s);
@@ -355,8 +359,9 @@ int WatchDiag(bool slow) {
     for (const tools::Leftover& l : tools::BuildLeftovers(ps))
         s += L"  " + l.name + L" pid " + std::to_wstring(l.pid) + L" " + tools::Bytes(l.mem) + L" - " + l.why + nl;
     tools::CommitInfo c = tools::Commit();
-    s += nl + L"Выделено " + tools::Bytes(c.total) + L" из " + tools::Bytes(c.limit) + L", пик " + tools::Bytes(c.peak) +
-         L", память " + tools::Bytes(c.phys) + L", подкачка ~" + tools::Bytes(tools::PagefileBytes()) + nl;
+    s += nl + L"Выделено " + tools::Bytes(c.total) + L" из " + tools::Bytes(c.limit) + L", пик " +
+         tools::Bytes(c.peak) + L", память " + tools::Bytes(c.phys) + L", подкачка ~" +
+         tools::Bytes(tools::PagefileBytes()) + nl;
     tools::BatteryInfo b = tools::Battery();
     s += nl + L"Батарея: есть " + std::to_wstring(b.present) + L", сеть " + std::to_wstring(b.ac) + L", заряд " +
          std::to_wstring(b.percent) + L"%, осталось " + std::to_wstring(b.minutesLeft) + L" мин, паспорт " +
@@ -379,7 +384,8 @@ int WatchDiag(bool slow) {
         s += nl + L"Версии:" + nl;
         for (const tools::ToolVersion& v : tools::ToolVersions())
             s += L"  " + v.name + L" " + v.installed + L" (" + v.path + L")" + (v.newer ? L"  -> " + v.note : L"") +
-                 (v.train.empty() ? L"" : L"  поезд " + std::to_wstring(v.train.size())) + (v.eol.empty() ? L"" : L"  " + v.eol) + nl;
+                 (v.train.empty() ? L"" : L"  поезд " + std::to_wstring(v.train.size())) +
+                 (v.eol.empty() ? L"" : L"  " + v.eol) + nl;
         s += L"  за " + std::to_wstring(GetTickCount64() - t0) + L" мс" + nl;
         t0 = GetTickCount64();
         volatile long seen = 0;
@@ -419,16 +425,17 @@ int WatchSelftest() {
         tools::ProcInfo d = a;
         d.pid = 400, d.name = L"busy.exe", d.mem = 50 * MB, d.cpu = (ULONGLONG)m * 60 * 10000000ull / 4;
         tools::ProcInfo e = a;
-        e.pid = 500, e.name = L"game.exe", e.mem = 50 * MB, e.cpu = (ULONGLONG)m * 60 * 10000000ull / 2, e.window = true;
+        e.pid = 500, e.name = L"game.exe", e.mem = 50 * MB, e.cpu = (ULONGLONG)m * 60 * 10000000ull / 2,
+        e.window = true;
         ps = {a, b, c, d, e};
         h.Feed(ps, 1000000 + m * MIN);
     }
     std::vector<tools::ProcHistory::Leak> leaks = h.Leaks();
-    check(leaks.size() == 1 && leaks[0].pid == 100, L"утечка найдена только у leaky.exe (найдено " +
-                                                      std::to_wstring(leaks.size()) + L")");
+    check(leaks.size() == 1 && leaks[0].pid == 100,
+          L"утечка найдена только у leaky.exe (найдено " + std::to_wstring(leaks.size()) + L")");
     if (!leaks.empty())
-        check(leaks[0].minutes >= 55 && leaks[0].minutes <= 90, L"окно сравнения 55-90 минут: " +
-                                                                    std::to_wstring(leaks[0].minutes));
+        check(leaks[0].minutes >= 55 && leaks[0].minutes <= 90,
+              L"окно сравнения 55-90 минут: " + std::to_wstring(leaks[0].minutes));
     check(h.Ready(10) && h.Ready(80), L"история готова");
     SYSTEM_INFO si;
     GetSystemInfo(&si);
@@ -455,10 +462,10 @@ int WatchSelftest() {
     std::vector<tools::ProcInfo> ps = {
         P(10, 1, L"explorer.exe", now - 5 * hour),
         P(11, 10, L"ShaderCompileWorker.exe", now - hour),
-        P(12, 999, L"cl.exe", now - hour),           // родителя нет
-        P(13, 10, L"node.exe", now - hour),          // родитель жив
-        P(14, 999, L"node.exe", now - hour, true),   // сирота, но с окном
-        P(15, 16, L"clangd.exe", now - hour),        // номер родителя достался более новому процессу
+        P(12, 999, L"cl.exe", now - hour),          // родителя нет
+        P(13, 10, L"node.exe", now - hour),         // родитель жив
+        P(14, 999, L"node.exe", now - hour, true),  // сирота, но с окном
+        P(15, 16, L"clangd.exe", now - hour),       // номер родителя достался более новому процессу
         P(16, 10, L"notepad.exe", now - 60000000ull),
         P(17, 999, L"ninja.exe", now - 60000000ull),  // сирота, но работает меньше 10 минут
     };
@@ -474,8 +481,7 @@ int WatchSelftest() {
           L"с открытым редактором воркер не хвост: " + names);
     check(tools::SystemImposter(L"C:\\Users\\x\\AppData\\svchost.exe") &&
               !tools::SystemImposter(L"C:\\Windows\\System32\\svchost.exe") &&
-              !tools::SystemImposter(L"C:\\Windows\\explorer.exe") &&
-              !tools::SystemImposter(L"D:\\x\\notepad.exe"),
+              !tools::SystemImposter(L"C:\\Windows\\explorer.exe") && !tools::SystemImposter(L"D:\\x\\notepad.exe"),
           L"самозванцы по пути");
     WriteOut(L"selftest_out.txt", s);
     return fails;
@@ -583,8 +589,37 @@ int SceneFilm(const std::wstring& what, const std::wstring& out) {
     auto* codecs = (ImageCodecInfo*)buf.data();
     GetImageEncoders(num, size, codecs);
     for (UINT i = 0; i < num; ++i)
-        if (!wcscmp(codecs[i].MimeType, L"image/png")) return sheet.Save(out.c_str(), &codecs[i].Clsid, nullptr) == Ok ? 0 : 1;
+        if (!wcscmp(codecs[i].MimeType, L"image/png"))
+            return sheet.Save(out.c_str(), &codecs[i].Clsid, nullptr) == Ok ? 0 : 1;
     return 1;
+}
+
+// --ring-bench [мс]: кольцо левого края рисуется в скрытом окне, курсор водится по секторам; время по частям -
+// в profile.log, итог - в bench_out.txt. Для сравнения до и после оптимизаций отрисовки.
+int RingBench(int ms) {
+    SetEnvironmentVariableW(L"RADIAL_PROFILE", L"1");
+    OleInitialize(nullptr);
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    int code = 1;
+    {
+        Gdip gdip;
+        Config cfg = LoadOwnConfig();
+        RadialMenu menu;
+        if (menu.Create(GetModuleHandleW(nullptr))) {
+            UINT dpi = GetDpiForSystem();
+            while (!menu.Prewarm(&cfg, dpi, 1000)) {}
+            ULONGLONG t0 = GetTickCount64();
+            int frames = menu.Bench(&cfg, dpi, ms);
+            WriteOut(L"bench_out.txt", L"кадров " + std::to_wstring(frames) + L" за " +
+                                           std::to_wstring(GetTickCount64() - t0) + L" мс, расхождение кэша колец: " +
+                                           std::to_wstring(menu.BenchDiff()) + L" пикс.\r\n");
+            code = frames > 0 ? 0 : 1;
+        }
+        perf::Flush();
+        // итог записан; окно с целью перетаскивания и кэши значков GDI+ разбирать незачем - замер окончен
+        TerminateProcess(GetCurrentProcess(), (UINT)code);
+    }
+    return code;
 }
 
 // Очистка всего, что пересоздаётся быстро (как «Всё сразу» в кольце): кэши шейдеров и Unreal не трогаются.
@@ -640,7 +675,8 @@ bool Run(int& exitCode) {
         if (const char* sc = getenv("RADIAL_SCENE"))
             if (!strcmp(sc, "clean")) CloseHandle(CreateThread(nullptr, 0, FakeClean, nullptr, 0, nullptr));
         static Config snapCfg;
-        if (page == 10 && !getenv("RADIAL_NOPRIME")) {  // RADIAL_NOPRIME - снять, как выглядит подсчёт  // «Состояние»: размеры считаются заранее, как в работающей программе
+        if (page == 10 && !getenv("RADIAL_NOPRIME")) {  // RADIAL_NOPRIME - снять, как выглядит подсчёт  // «Состояние»:
+                                                        // размеры считаются заранее, как в работающей программе
             snapCfg = LoadOwnConfig();
             toolsui::PrimeForSnapshot(&snapCfg);
         }
@@ -650,6 +686,13 @@ bool Run(int& exitCode) {
         size_t i = std::find(args.begin(), args.end(), L"--scene-film") - args.begin();
         exitCode = SceneFilm(i + 1 < args.size() ? args[i + 1] : L"clean",
                              i + 2 < args.size() ? args[i + 2] : ExeDir() + L"\\scene_film.png");
+    } else if (Value(args, L"--sandbox-wsb", v)) {  // собрать .wsb для файла, не запуская песочницу
+        std::wstring err, path = tools::SandboxConfig(v, false, err);
+        WriteOut(L"sandbox_out.txt", path.empty() ? L"error: " + err : path);
+        exitCode = path.empty() ? 1 : 0;
+    } else if (Has(args, L"--ring-bench")) {
+        size_t i = std::find(args.begin(), args.end(), L"--ring-bench") - args.begin();
+        exitCode = RingBench(i + 1 < args.size() ? std::max(500, _wtoi(args[i + 1].c_str())) : 4000);
     } else if (Has(args, L"--clean")) {  // очистить кэши и временные файлы, итог в clean_out.txt
         exitCode = Clean();
     } else if (Has(args, L"--autostart-on")) {  // включить запуск вместе с Windows, как пункт трея

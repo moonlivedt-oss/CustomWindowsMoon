@@ -41,12 +41,87 @@ bool Under(const std::wstring& lowerPath, const std::wstring& lowerDir) {
 // ---------------- подписи ----------------
 
 struct SignCache {
-    ULONGLONG stamp = 0, size = 0;
+    ULONGLONG stamp = 0, size = 0, fid = 0;  // время изменения, размер, номер файла на томе
     SignState state = SIGN_NOFILE;
     std::wstring signer;
 };
 SRWLOCK g_signLock = SRWLOCK_INIT;
 std::map<std::wstring, SignCache> g_signs;  // путь в нижнем регистре -> последняя проверка
+bool g_signsLoaded = false, g_signsDirty = false;
+
+// Номер файла на томе: подменённый файл (удалили и положили новый с тем же именем, размером и временем)
+// получает новый номер, и кэш его не узнает.
+ULONGLONG FileId(const std::wstring& path) {
+    HANDLE f = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    BY_HANDLE_FILE_INFORMATION bi{};
+    ULONGLONG id = GetFileInformationByHandle(f, &bi) ? ((ULONGLONG)bi.nFileIndexHigh << 32 | bi.nFileIndexLow) : 0;
+    CloseHandle(f);
+    return id;
+}
+
+// Кэш подписей переживает перезапуск: первая проверка после входа не ждёт 10+ секунд WinVerifyTrust.
+// Файл зашифрован DPAPI на этого пользователя - чужая программа не впишет себе «подписан» простой правкой текста.
+std::wstring SignCacheFile() { return DataDir() + L"\\signs.bin"; }
+
+void LoadSigns() {  // под замком
+    g_signsLoaded = true;
+    HANDLE f = CreateFileW(SignCacheFile().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    std::string raw;
+    char buf[65536];
+    DWORD got = 0;
+    while (raw.size() < 16u * 1024 * 1024 && ReadFile(f, buf, sizeof(buf), &got, nullptr) && got) raw.append(buf, got);
+    CloseHandle(f);
+    DATA_BLOB in{(DWORD)raw.size(), (BYTE*)raw.data()}, out{};
+    if (raw.empty() || !CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out))
+        return;
+    std::wstring text = Widen(std::string((const char*)out.pbData, out.cbData));
+    LocalFree(out.pbData);
+    for (const std::wstring& line : Split(text, L'\n')) {
+        std::vector<std::wstring> p;
+        size_t a = 0;
+        for (size_t b; (b = line.find(L'\t', a)) != std::wstring::npos; a = b + 1) p.push_back(line.substr(a, b - a));
+        p.push_back(line.substr(a));
+        if (p.size() != 6) continue;
+        SignCache c;
+        c.stamp = _wcstoui64(p[1].c_str(), nullptr, 10);
+        c.size = _wcstoui64(p[2].c_str(), nullptr, 10);
+        c.fid = _wcstoui64(p[3].c_str(), nullptr, 10);
+        int st = _wtoi(p[4].c_str());
+        if (st < SIGN_NOFILE || st > SIGN_BAD || !c.fid) continue;
+        c.state = (SignState)st;
+        c.signer = p[5];
+        g_signs[p[0]] = c;
+    }
+}
+
+void SaveSigns() {
+    AcquireSRWLockExclusive(&g_signLock);
+    std::wstring text;
+    if (g_signsDirty)
+        for (const auto& [path, c] : g_signs)
+            if (c.fid && c.state != SIGN_NOFILE)
+                text += path + L"\t" + std::to_wstring(c.stamp) + L"\t" + std::to_wstring(c.size) + L"\t" +
+                        std::to_wstring(c.fid) + L"\t" + std::to_wstring((int)c.state) + L"\t" + c.signer + L"\n";
+    bool dirty = g_signsDirty;
+    g_signsDirty = false;
+    ReleaseSRWLockExclusive(&g_signLock);
+    if (!dirty) return;
+    std::string bytes = Narrow(text);
+    DATA_BLOB in{(DWORD)bytes.size(), (BYTE*)bytes.data()}, out{};
+    if (!CryptProtectData(&in, L"MoonRadial signs", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return;
+    std::wstring tmp = SignCacheFile() + L".tmp";
+    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        DWORD put = 0;
+        BOOL ok = WriteFile(f, out.pbData, out.cbData, &put, nullptr);
+        CloseHandle(f);
+        if (ok) MoveFileExW(tmp.c_str(), SignCacheFile().c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+    LocalFree(out.pbData);
+}
 
 std::wstring SignerName(HANDLE state) {
     CRYPT_PROVIDER_DATA* pd = WTHelperProvDataFromStateData(state);
@@ -443,7 +518,13 @@ struct Bstr {
     std::wstring str() const { return b ? std::wstring(b, SysStringLen(b)) : L""; }
 };
 
-void WalkTasks(ITaskFolder* folder, std::vector<Suspect>& out, int& checked, const std::wstring& ownDir) {
+std::string ReadSmall(const std::wstring& path);
+
+// Задачи, которые уже видели: ключ (путь задачи и команда) -> день, когда появилась (0 - была до первой проверки).
+using TaskSeen = std::map<std::wstring, int>;
+
+void WalkTasks(ITaskFolder* folder, std::vector<Suspect>& out, int& checked, const std::wstring& ownDir, TaskSeen& seen,
+               bool baseline, int today) {
     IRegisteredTaskCollection* tasks = nullptr;
     if (SUCCEEDED(folder->GetTasks(TASK_ENUM_HIDDEN, &tasks))) {
         LONG n = 0;
@@ -485,7 +566,13 @@ void WalkTasks(ITaskFolder* folder, std::vector<Suspect>& out, int& checked, con
                             bool own = Dir(lp) == ownDir && LeafOf(lp) == L"radialmenu.exe";
                             if (!s.path.empty() && !own) JudgeFile(s);
                             if (s.sign == SIGN_NOFILE && s.score <= 1) s.score = 0;  // мёртвая задача - не опасна
-                            s.parent = Trim(cmd);                                    // для карточки: полная команда
+                            // новая задача (неделя с появления): вместе со скриптом или без подписи - повод взглянуть
+                            std::wstring tkey = Lower(s.where) + L"|" + Lower(Trim(cmd));
+                            auto known = seen.find(tkey);
+                            if (known == seen.end()) known = seen.emplace(tkey, baseline ? today : 0).first;
+                            if (known->second && today - known->second < 7 && s.score > 0 && !own)
+                                Flag(s, 2, L"задача появилась недавно");
+                            s.parent = Trim(cmd);  // для карточки: полная команда
                             if (s.score >= kSuspectScore) out.push_back(s);
                             ex->Release();
                         }
@@ -506,7 +593,7 @@ void WalkTasks(ITaskFolder* folder, std::vector<Suspect>& out, int& checked, con
         for (LONG i = 1; i <= n; ++i) {
             ITaskFolder* f = nullptr;
             if (SUCCEEDED(subs->get_Item(Var(i), &f))) {
-                WalkTasks(f, out, checked, ownDir);
+                WalkTasks(f, out, checked, ownDir, seen, baseline, today);
                 f->Release();
             }
         }
@@ -528,12 +615,33 @@ ITaskService* TaskService() {
 void CheckTasks(std::vector<Suspect>& out, int& checked, const std::wstring& ownDir) {
     ITaskService* svc = TaskService();
     if (!svc) return;
+    // список виденных задач - в tasks.tsv: первый раз только запоминаем, дальше новые отмечаются неделю
+    std::wstring file = DataDir() + L"\\tasks.tsv";
+    TaskSeen seen;
+    std::string raw = ReadSmall(file);
+    bool baseline = !raw.empty();
+    for (const std::wstring& line : Split(Widen(raw), L'\n')) {
+        size_t tab = line.rfind(L'\t');
+        if (tab != std::wstring::npos) seen[line.substr(0, tab)] = _wtoi(line.c_str() + tab + 1);
+    }
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    int today = (int)((((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime) / (24ull * 3600 * 10000000));
     ITaskFolder* root = nullptr;
     if (SUCCEEDED(svc->GetFolder(Bstr(L"\\").b, &root))) {
-        WalkTasks(root, out, checked, ownDir);
+        WalkTasks(root, out, checked, ownDir, seen, baseline, today);
         root->Release();
     }
     svc->Release();
+    std::wstring text;
+    for (const auto& [k, day] : seen) text += k + L"\t" + std::to_wstring(day) + L"\n";
+    std::string bytes = Narrow(text);
+    HANDLE f = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        DWORD put = 0;
+        WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr);
+        CloseHandle(f);
+    }
 }
 
 // ---------------- расширения браузеров ----------------
@@ -806,16 +914,18 @@ SignState CheckSign(const std::wstring& path, std::wstring* signer) {
     ULONGLONG stamp = ((ULONGLONG)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
     ULONGLONG size = ((ULONGLONG)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
     std::wstring key = Lower(path);
-    AcquireSRWLockShared(&g_signLock);
+    ULONGLONG fid = FileId(path);
+    AcquireSRWLockExclusive(&g_signLock);
+    if (!g_signsLoaded) LoadSigns();
     auto it = g_signs.find(key);
-    bool hit = it != g_signs.end() && it->second.stamp == stamp && it->second.size == size;
+    bool hit = it != g_signs.end() && it->second.stamp == stamp && it->second.size == size && it->second.fid == fid;
     SignCache c = hit ? it->second : SignCache{};
-    ReleaseSRWLockShared(&g_signLock);
+    ReleaseSRWLockExclusive(&g_signLock);
     if (hit) {
         if (signer) *signer = c.signer;
         return c.state;
     }
-    c = SignCache{stamp, size, SIGN_NONE, L""};
+    c = SignCache{stamp, size, fid, SIGN_NONE, L""};
     WINTRUST_FILE_INFO fi{sizeof(fi)};
     fi.pcwszFilePath = path.c_str();
     WINTRUST_DATA wd{};
@@ -828,9 +938,16 @@ SignState CheckSign(const std::wstring& path, std::wstring* signer) {
     }
     AcquireSRWLockExclusive(&g_signLock);
     g_signs[key] = c;
+    g_signsDirty = true;
     ReleaseSRWLockExclusive(&g_signLock);
     if (signer) *signer = c.signer;
     return c.state;
+}
+
+std::vector<Suspect> ScanNetwork() {
+    std::vector<Suspect> out;
+    CheckNetwork(out);
+    return out;
 }
 
 SecurityScan ScanSecurity() {
@@ -906,6 +1023,10 @@ SecurityScan ScanSecurity() {
         if (s.score >= kSuspectScore) r.autos.push_back(s);
     }
     CheckRegistry(r.hijacks);
+    CheckPathAcl(r.hijacks);
+    CheckServices(r.hijacks);
+    CheckWmi(r.hijacks);
+    CheckSelf(r.hijacks);
     r.hijacks.erase(
         std::remove_if(r.hijacks.begin(), r.hijacks.end(), [](const Suspect& s) { return s.score < kSuspectScore; }),
         r.hijacks.end());
@@ -919,6 +1040,7 @@ SecurityScan ScanSecurity() {
     std::stable_sort(r.tasks.begin(), r.tasks.end(), byScore);
     std::stable_sort(r.exts.begin(), r.exts.end(), byScore);
     std::stable_sort(r.nets.begin(), r.nets.end(), byScore);
+    SaveSigns();
     return r;
 }
 

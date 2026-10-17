@@ -6,6 +6,7 @@
 #include <cmath>
 #include <vector>
 
+#include "core/fx.h"
 #include "core/mem.h"
 #include "core/night.h"
 #include "gfx/color.h"
@@ -107,6 +108,7 @@ void Toast::Tick() {
     double dt = std::min<double>(100, (double)(now - last_));
     last_ = now;
     if (!wnd_ || (!open_ && appear_ <= 0)) return;
+    fx::Active();  // карточка на экране: таймер ухода и пружина идут от тактов опроса
 
     bool anim = false;
     // таймер стоит, пока на карточку смотрят или тянут её

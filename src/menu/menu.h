@@ -30,12 +30,16 @@ public:
     // Кольцо «Сеть» (действие угла): пункты - действия (special 3, ключ в path), сверху строка состояния.
     void ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi);
     std::function<void(const std::wstring& key)> onNet;  // выбрали действие сети
-    std::function<std::wstring()> netStatus;            // строка состояния для кольца сети
+    std::function<std::wstring()> netStatus;             // строка состояния для кольца сети
     void Close();
     bool IsOpen() const { return open_; }
     // Заранее грузит значки, чтобы первое открытие не подтормаживало. Работает порциями не дольше budgetMs,
     // чтобы не замораживать программу; true - всё загружено.
     bool Prewarm(const Config* cfg, UINT dpi, int budgetMs = 8);
+    // Замер кадра без показа (--ring-bench): кольцо левого края, курсор водится по первому и второму кольцу
+    // ms миллисекунд, окно остаётся скрытым. Возвращает число кадров; время по частям - в profile.log.
+    int Bench(const Config* cfg, UINT dpi, int ms);
+    int BenchDiff() const { return benchDiff_; }  // пикселей, где кадр из кэша колец не совпал (-1 - кэш не включился)
     void ResetIcons() {
         icons_.Clear();
         composed_.clear();
@@ -75,9 +79,13 @@ private:
     void StopHooks();
     void Tick();
     void Hide();
-    void Launch();  // открыли пункт: выбранный сектор вспыхивает волной, меню гаснет, клики проходят насквозь
+    void Launch();           // открыли пункт: выбранный сектор вспыхивает волной, меню гаснет, клики проходят насквозь
     double CloseMs() const;  // сколько гаснет: после запуска дольше, чтобы прошла волна
-    void Start();  // общее начало показа: сброс состояния, первый кадр, перехватчики
+    // общее начало показа: сброс состояния, первый кадр, перехватчики; live = false - без окна и перехвата (замер)
+    void Start(bool live = true);
+    POINT CursorPt() const;  // курсор; при замере - подставной
+    const POINT* fakeCursor_ = nullptr;
+    int frames_ = 0;                                   // отрисовано кадров (для замера)
     void PlaceAround(POINT cursor, const RECT& work);  // окно-квадрат с центром у курсора
 
     // ввод
@@ -144,10 +152,9 @@ private:
     double RootHue(int root) const;  // свой оттенок у каждой группы, сдвиг в градусах
     // значок пункта; папки без своего значка - значок проекта или папка со значком типа
     Gdiplus::Bitmap* ItemIcon(const Item& it, int px);
-    void DrawIcon(Gdiplus::Graphics& g, Gdiplus::Bitmap* icon, const Item& it, double x, double y, double sz,
-                  double hl, double appear, bool hot);
-    void DrawLabel(Gdiplus::Graphics& g, const Ring& r, double a0, double a1, const Item& it, double hl,
-                   double appear);
+    void DrawIcon(Gdiplus::Graphics& g, Gdiplus::Bitmap* icon, const Item& it, double x, double y, double sz, double hl,
+                  double appear, bool hot);
+    void DrawLabel(Gdiplus::Graphics& g, const Ring& r, double a0, double a1, const Item& it, double hl, double appear);
     double FitWidth(const Ring& r, double a0, double a1, double rad, double halfH, double& x, double& y) const;
     struct LabelFit {
         std::wstring text;  // строки через \n, уже сокращённые
@@ -208,8 +215,29 @@ private:
     // стоила по 0.35 мс на сектор, проход по пикселям под маской - доли миллисекунды на всё кольцо
     std::vector<uint32_t> blurPx_;
     std::vector<uint32_t> hexPx_;   // сотовое стекло: тонкие грани поверх секторов
-    bool blitOk_ = false;  // Blit разрешён: рисуется кольцо без клипа
+    bool blitOk_ = false;           // Blit разрешён: рисуется кольцо без клипа
     std::vector<uint32_t> maskPx_;  // покрытие секторов кольца (альфа), рисуется GDI+ сплошной заливкой
+    // подложка (тень и ловушка кликов) зависит только от размера кольца: пока он стоит, кадр начинается с копии
+    struct BaseKey {
+        double ext = -1, catcherR = -1, peak = 0;
+        LONG cx = 0, cy = 0;
+        int w = 0, h = 0;
+        uint32_t color = 0;
+        bool operator==(const BaseKey& o) const {
+            return ext == o.ext && catcherR == o.catcherR && peak == o.peak && cx == o.cx && cy == o.cy && w == o.w &&
+                   h == o.h && color == o.color;
+        }
+    };
+    std::vector<uint32_t> baseCache_;
+    BaseKey baseCached_, baseLast_, baseNow_;
+    // неподвижное кольцо (водят по другому) копируется из прошлого кадра: ключ - подложка и состояние секторов
+    struct RingCache {
+        std::vector<double> key, last;
+        std::vector<uint32_t> px;
+        bool ok = false;
+    };
+    int benchDiff_ = -1;
+    RingCache ringCache_[2];  // 0 - первое кольцо, 1 - второе
     int hexW_ = 0, hexH_ = 0;
     bool hexOn_ = false;
     POINT cursorLocal_{};  // курсор в координатах окна (для приподнятой соты)
@@ -229,8 +257,8 @@ private:
     HTHUMBNAIL thumb_ = nullptr;  // миниатюра DWM наведённого окна
     HWND thumbWin_ = nullptr;
     HWND dialog_ = nullptr;  // диалог «Открыть/Сохранить», который был впереди, когда открылось меню
-    POINT origin_{};              // левый верхний угол окна на экране
-    POINT center_{};              // центр колец в координатах окна
+    POINT origin_{};         // левый верхний угол окна на экране
+    POINT center_{};         // центр колец в координатах окна
     ULONGLONG tOpen_ = 0, tSub_ = 0, tClose_ = 0, tLast_ = 0;
     bool altWasDown_ = false;
     bool demo_ = false;
@@ -265,9 +293,9 @@ private:
         std::unique_ptr<Gdiplus::Bitmap> bmp;
         int w = 0, h = 0;
     };
-    std::map<std::wstring, LabelBmp> labels_;               // подписи с тенью, рисуются один раз
-    std::map<std::wstring, float> textW_;                   // ширина строк в пикселях
-    std::map<std::wstring, LabelFit> labelFit_;             // раскладка подписей по сектору и имени
+    std::map<std::wstring, LabelBmp> labels_;                            // подписи с тенью, рисуются один раз
+    std::map<std::wstring, float> textW_;                                // ширина строк в пикселях
+    std::map<std::wstring, LabelFit> labelFit_;                          // раскладка подписей по сектору и имени
     std::map<std::wstring, std::unique_ptr<Gdiplus::Bitmap>> composed_;  // папка + значок типа
 
     std::wstring query_;

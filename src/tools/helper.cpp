@@ -2,6 +2,7 @@
 // Строки журнала передаются в log по мере появления, итог - строка «@ключ=значение».
 #include <windows.h>
 
+#include <algorithm>
 #include <map>
 
 #include "core/files.h"
@@ -67,13 +68,34 @@ int RunTools(const std::wstring& args, const Log& log, std::map<std::wstring, st
             }
         }
     };
-    while (ReadFile(rd, chunk, sizeof(chunk), &got, nullptr) && got) {
-        buf.append(chunk, got);
-        flush(false);
+    // читаем, пока есть что, но не дольше timeoutMs: зависший RadialTools не должен подвесить кольцо навсегда
+    ULONGLONG until = GetTickCount64() + timeoutMs;
+    bool timedOut = false;
+    for (;;) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr)) break;  // RadialTools закрыл свой конец
+        if (avail) {
+            if (!ReadFile(rd, chunk, std::min<DWORD>(avail, sizeof(chunk)), &got, nullptr) || !got) break;
+            buf.append(chunk, got);
+            flush(false);
+            continue;
+        }
+        if (WaitForSingleObject(pi.hProcess, 50) == WAIT_OBJECT_0) {
+            while (PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr) && avail &&
+                   ReadFile(rd, chunk, std::min<DWORD>(avail, sizeof(chunk)), &got, nullptr) && got)
+                buf.append(chunk, got);
+            break;
+        }
+        if (GetTickCount64() > until) {
+            timedOut = true;
+            TerminateProcess(pi.hProcess, 1);
+            break;
+        }
     }
     flush(true);
     CloseHandle(rd);
-    WaitForSingleObject(pi.hProcess, timeoutMs);
+    if (timedOut && log) log(L"RadialTools.exe не уложился во время и остановлен.");
+    WaitForSingleObject(pi.hProcess, 5000);
     DWORD code = 1;
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hProcess);

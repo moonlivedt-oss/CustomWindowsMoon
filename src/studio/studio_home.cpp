@@ -557,7 +557,7 @@ void Studio::HomePage(const RectF& r) {
     ULONGLONG now = GetTickCount64();
     if (!homeAt_ || now - homeAt_ > 30000) {
         homeAt_ = now;
-        homeVols_ = tools::Volumes();
+        homeVols_ = tools::VolumesCached();
         homePathBad_ = 0;
         for (const tools::PathEntry& e : tools::ReadPath()) homePathBad_ += e.dead || e.dup;
         homeAuto_ = AutostartOn();

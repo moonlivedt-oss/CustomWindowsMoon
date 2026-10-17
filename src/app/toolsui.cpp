@@ -346,38 +346,117 @@ ULONGLONG g_devEnded = 0;  // когда закрылся Unreal: через 2 �
 std::set<std::wstring> g_leakWarned;
 ULONGLONG g_commitWarned = 0, g_proactiveAt = 0;
 
+std::vector<tools::Suspect> g_netAlerts;  // новое в hosts, DNS, прокси - ждёт карточки
+std::set<std::wstring> g_netKnown;        // что уже видели (ключ находки)
+
+std::wstring NetKey(const tools::Suspect& s) { return s.name + L"|" + s.path; }
+
+// Мгновенная часть слежки: поменялись прокси, DNS адаптеров, hosts или Run - сразу сравнить с тем, что было.
+void QuickPass() {
+    std::vector<tools::Suspect> nets = tools::ScanNetwork();
+    std::vector<tools::StartItem> fresh = tools::NewStartupItems();
+    AcquireSRWLockExclusive(&g_watchLock);
+    for (const tools::Suspect& s : nets)
+        if (s.score >= tools::kSuspectScore && g_netKnown.insert(NetKey(s)).second) g_netAlerts.push_back(s);
+    g_newStarts.insert(g_newStarts.end(), fresh.begin(), fresh.end());
+    bool any = !g_netAlerts.empty() || !fresh.empty();
+    ReleaseSRWLockExclusive(&g_watchLock);
+    if (any) PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
+}
+
 DWORD WINAPI WatchLoop(void*) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0;
+    // что уже было до запуска - не новость
+    for (const tools::Suspect& s : tools::ScanNetwork()) g_netKnown.insert(NetKey(s));
+    // уведомления об изменениях: ключи реестра и папка с hosts. Каждое срабатывание взводится заново.
+    struct Key {
+        HKEY root;
+        const wchar_t* path;
+        HKEY h = nullptr;
+        HANDLE ev = nullptr;
+    } keys[] = {
+        {HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"},
+        {HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces"},
+        {HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"},
+        {HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce"},
+    };
+    auto arm = [](Key& k) {
+        if (k.h)
+            RegNotifyChangeKeyValue(k.h, TRUE, REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET, k.ev,
+                                    TRUE | REG_NOTIFY_THREAD_AGNOSTIC);
+    };
+    std::vector<HANDLE> waits{g_watchStop};
+    for (Key& k : keys) {
+        if (RegOpenKeyExW(k.root, k.path, 0, KEY_NOTIFY, &k.h) != ERROR_SUCCESS) k.h = nullptr;
+        k.ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        arm(k);
+        if (k.h && k.ev) waits.push_back(k.ev);
+    }
+    wchar_t etc[MAX_PATH] = {};
+    GetSystemDirectoryW(etc, MAX_PATH);
+    wcscat_s(etc, L"\\drivers\\etc");
+    HANDLE hosts =
+        FindFirstChangeNotificationW(etc, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
+    if (hosts != INVALID_HANDLE_VALUE) waits.push_back(hosts);
+
+    ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0, nextFull = 0, quickAt = 0;
     int n = 0;
-    do {
-        std::vector<tools::ProcInfo> ps = tools::Processes();
-        ULONGLONG in = 0, out = 0, now = GetTickCount64();
-        tools::NetCounters(in, out);
-        tools::CommitInfo c = tools::Commit();
-        std::vector<tools::StartItem> fresh;
-        if (n % 5 == 0) fresh = tools::NewStartupItems();
-        std::vector<std::wstring> wake;
-        bool wakeNew = n % 30 == 0;
-        if (wakeNew) wake = tools::WakeDevices();
-        AcquireSRWLockExclusive(&g_watchLock);
-        g_hist.Feed(ps, now);
-        g_procs = std::move(ps);
-        g_leaks = g_hist.Leaks();
-        g_commit = c;
-        if (lastAt && in >= lastIn && out >= lastOut && now > lastAt) {
-            double dt = (now - lastAt) / 1000.0;
-            g_netDown = (in - lastIn) / dt;
-            g_netUp = (out - lastOut) / dt;
+    for (;;) {
+        ULONGLONG now = GetTickCount64();
+        if (now >= nextFull) {
+            std::vector<tools::ProcInfo> ps = tools::Processes();
+            ULONGLONG in = 0, out = 0;
+            tools::NetCounters(in, out);
+            tools::CommitInfo c = tools::Commit();
+            std::vector<tools::StartItem> fresh;
+            if (n % 5 == 0) fresh = tools::NewStartupItems();
+            std::vector<std::wstring> wake;
+            bool wakeNew = n % 30 == 0;
+            if (wakeNew) wake = tools::WakeDevices();
+            AcquireSRWLockExclusive(&g_watchLock);
+            g_hist.Feed(ps, now);
+            g_procs = std::move(ps);
+            g_leaks = g_hist.Leaks();
+            g_commit = c;
+            if (lastAt && in >= lastIn && out >= lastOut && now > lastAt) {
+                double dt = (now - lastAt) / 1000.0;
+                g_netDown = (in - lastIn) / dt;
+                g_netUp = (out - lastOut) / dt;
+            }
+            g_newStarts.insert(g_newStarts.end(), fresh.begin(), fresh.end());
+            if (wakeNew) g_wakeCache = std::move(wake);
+            ReleaseSRWLockExclusive(&g_watchLock);
+            lastIn = in, lastOut = out, lastAt = now;
+            PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
+            ++n;
+            nextFull = now + 60000;
         }
-        g_newStarts.insert(g_newStarts.end(), fresh.begin(), fresh.end());
-        if (wakeNew) g_wakeCache = std::move(wake);
-        ReleaseSRWLockExclusive(&g_watchLock);
-        lastIn = in, lastOut = out, lastAt = now;
-        PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
-        ++n;
-    } while (WaitForSingleObject(g_watchStop, 60000) == WAIT_TIMEOUT);
+        if (quickAt && now >= quickAt) {
+            quickAt = 0;
+            QuickPass();
+        }
+        now = GetTickCount64();
+        ULONGLONG due = quickAt ? std::min(quickAt, nextFull) : nextFull;
+        DWORD wait = due > now ? (DWORD)std::min<ULONGLONG>(due - now, 60000) : 0;
+        DWORD r = WaitForMultipleObjects((DWORD)waits.size(), waits.data(), FALSE, wait);
+        if (r == WAIT_OBJECT_0 || r == WAIT_FAILED) break;  // выход
+        if (r > WAIT_OBJECT_0 && r < WAIT_OBJECT_0 + waits.size()) {
+            HANDLE h = waits[r - WAIT_OBJECT_0];
+            if (h == hosts)
+                FindNextChangeNotification(hosts);
+            else
+                for (Key& k : keys)
+                    if (k.ev == h) arm(k);
+            // правки обычно идут пачкой (установщик пишет несколько значений): ждём, пока утихнет
+            quickAt = GetTickCount64() + 1500;
+        }
+    }
+    for (Key& k : keys) {
+        if (k.h) RegCloseKey(k.h);
+        if (k.ev) CloseHandle(k.ev);
+    }
+    if (hosts != INVALID_HANDLE_VALUE) FindCloseChangeNotification(hosts);
     CoUninitialize();
     return 0;
 }
@@ -442,6 +521,8 @@ void OpenPagefile() {
                 Theme(), 30000, Toast::G_INFO);
 }
 
+void SecurityAction(const tools::Suspect& s);
+
 // По одной карточке: новый автозапуск, утечка, память на пределе, хвосты Unreal. Не в игре и не поверх другой.
 void TryProactive() {
     ULONGLONG now = GetTickCount64();
@@ -453,8 +534,15 @@ void TryProactive() {
     std::vector<tools::ProcHistory::Leak> leaks = g_leaks;
     tools::CommitInfo c = g_commit;
     std::vector<tools::ProcInfo> procs = g_dev || !g_devEnded ? std::vector<tools::ProcInfo>{} : g_procs;
+    bool haveNet = !g_netAlerts.empty();
+    tools::Suspect netFind = haveNet ? g_netAlerts.front() : tools::Suspect{};
+    if (haveNet) g_netAlerts.erase(g_netAlerts.begin());
     ReleaseSRWLockExclusive(&g_watchLock);
     g_proactiveAt = now;
+    if (haveNet) {  // hosts, DNS или прокси только что поменялись - сказать сразу, а не через полчаса
+        SecurityAction(netFind);
+        return;
+    }
     if (haveStart) {
         Ask(
             L"Новое в автозапуске: " + st.name,
@@ -722,6 +810,34 @@ void CopyText(const std::wstring& s) {
 }
 
 // Отчёт VirusTotal по хэшу: сам файл никуда не уходит, открывается только страница.
+// Незнакомый файл - в Песочницу Windows: сначала без сети (так безопаснее), с сетью - по второй кнопке.
+// Песочница выключена - сказать, где включить.
+void OpenInSandbox(const std::wstring& file) {
+    if (!tools::SandboxAvailable()) {
+        Ask(
+            L"Песочница Windows выключена",
+            L"Включается в «Компоненты Windows» - «Песочница Windows» (нужны права и перезагрузка; Windows Pro "
+            L"у вас есть, виртуализация в BIOS тоже нужна).",
+            L"Компоненты", L"Понятно", [] { tools::OpenSandboxFeature(); }, nullptr, 30000, Toast::G_INFO);
+        return;
+    }
+    std::wstring name = file.substr(file.find_last_of(L'\\') + 1);
+    auto run = [file](bool net) {
+        std::wstring err;
+        if (tools::RunInSandbox(file, net, err))
+            g_card.Show(BoostCard::DONE, L"Песочница открывается",
+                        L"Секунд 10-20. Файл внутри - только для чтения; закроете окно - всё, что программа сделала, "
+                        L"исчезнет.",
+                        Theme(), 12000, Toast::G_OK);
+        else
+            g_card.Show(BoostCard::DONE, L"Песочница: не вышло", err, Theme(), 0, Toast::G_WARN);
+    };
+    Ask(
+        L"Открыть в песочнице: " + name,
+        L"Одноразовая Windows в окне. Без сети программа не скачает ничего и никуда не отправит; с сетью - как обычно.",
+        L"Без сети", L"С сетью", [run] { run(false); }, [run] { run(true); }, 30000, Toast::G_INFO);
+}
+
 void OpenVirusTotal(const std::wstring& path) {
     RunJob(L"VirusTotal", [path](const tools::Log& log, std::wstring& res) {
         log(L"Считаю SHA-256 файла...");
@@ -836,6 +952,75 @@ void SecurityAction(const tools::Suspect& s) {
             nullptr, 30000, Toast::G_WARN);
         return;
     }
+    if (s.kind == tools::FIND_PATH) {
+        // папка PATH открыта на запись: права закрывает задача с правами (копия прав - в бэкапах помощника);
+        // папки нет - её убирает «Почистить системный PATH»
+        bool missing = GetFileAttributesW(s.path.c_str()) == INVALID_FILE_ATTRIBUTES;
+        std::wstring dir = s.path;
+        Ask(
+            Level(s.score) + L"PATH открыт на запись", s.path + L": " + s.why + L". Нужны права - Windows спросит.",
+            missing ? L"Убрать из PATH" : L"Закрыть запись", L"Показать",
+            [missing] {
+                RunJob(missing ? L"Системный PATH" : L"Права папок PATH",
+                       [missing](const tools::Log& log, std::wstring&) {
+                           bool ok = net::RunAdmin(missing ? net::JOB_SYSPATH_CLEAN : net::JOB_PATH_ACL, log);
+                           g_secAt = 0;  // перепроверить
+                           return ok;
+                       });
+            },
+            [dir, missing] {
+                if (!missing) ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            },
+            30000, Toast::G_WARN);
+        return;
+    }
+    if (s.kind == tools::FIND_SVC) {
+        std::wstring where = s.where, path = s.path;
+        Ask(
+            Level(s.score) + L"служба " + s.name,
+            s.why + L". Файл: " + path +
+                L". Чинить - права папки службы или "
+                L"переустановка программы; ключ службы скопирую для regedit.",
+            L"Открыть regedit", file ? L"VirusTotal" : L"Понятно",
+            [where] {
+                CopyText(where);
+                ShellExecuteW(nullptr, L"open", L"regedit.exe", nullptr, nullptr, SW_SHOWNORMAL);
+            },
+            [path, file] {
+                if (file) OpenVirusTotal(path);
+            },
+            30000, Toast::G_WARN);
+        return;
+    }
+    if (s.kind == tools::FIND_WMI) {
+        // имя подписки - в команду удаления: её выполняет пользователь сам, в PowerShell от администратора
+        std::wstring name = s.name.rfind(L"WMI: ", 0) == 0 ? s.name.substr(5) : s.name;
+        std::wstring cls = s.where.substr(s.where.find(L", ") + 2);
+        std::wstring cmd = L"Get-CimInstance -Namespace root/subscription -ClassName " + cls +
+                           L" | Where-Object Name -eq '" + name + L"' | Remove-CimInstance";
+        Ask(
+            Level(s.score) + s.name, s.why + L". Выполняет: " + Short(s.path, 140), L"Скопировать удаление", L"Понятно",
+            [cmd] {
+                CopyText(cmd);
+                g_card.Show(BoostCard::DONE, L"Команда в буфере",
+                            L"Вставьте её в PowerShell, запущенный от администратора. Если подписку ставили вы сами - "
+                            L"не удаляйте.",
+                            Theme(), 15000, Toast::G_INFO);
+            },
+            nullptr, 30000, Toast::G_WARN);
+        return;
+    }
+    if (s.kind == tools::FIND_SELF) {
+        Ask(
+            Level(s.score) + s.name + L" изменён", s.why + L".", L"Kaspersky", L"Понятно",
+            [] {
+                std::wstring av = tools::AntivirusUi();
+                ShellExecuteW(nullptr, L"open", av.empty() ? L"windowsdefender://threat/" : av.c_str(), nullptr,
+                              nullptr, SW_SHOWNORMAL);
+            },
+            nullptr, 30000, Toast::G_WARN);
+        return;
+    }
     // находка в реестре: исправляется с правами, сам не трогаю
     std::wstring where = s.where;
     Ask(
@@ -879,7 +1064,8 @@ Item SecurityItem() {
     for (size_t i = 0; i < g_finds.size() && i < 12; ++i) {
         const tools::Suspect& s = g_finds[i];
         static const wchar_t* kWhat[] = {
-            L"процесс", L"автозапуск", L"реестр", L"задача планировщика", L"расширение браузера", L"сеть"};
+            L"процесс", L"автозапуск", L"реестр", L"задача планировщика", L"расширение браузера",
+            L"сеть",    L"PATH",       L"служба", L"подписка WMI",        L"сам RadialMenu"};
         std::wstring what = kWhat[s.kind];
         item.children.push_back(
             Act(Short(NoExe(s.name), 14), L"tools-bug.png", L"sec-find:" + std::to_wstring(i),
@@ -898,6 +1084,11 @@ Item SecurityItem() {
     item.children.push_back(Act(av.empty() ? L"Defender" : L"Kaspersky", L"tools-shield.png", L"sec-av",
                                 av.empty() ? L"Открыть «Защиту от вирусов» Windows - там полная и офлайн-проверка"
                                            : L"Открыть Kaspersky - там полная проверка компьютера"));
+    item.children.push_back(Act(L"Песочница", L"tools-shield.png", L"sec-sandbox",
+                                tools::SandboxAvailable()
+                                    ? L"Скопируйте exe в Проводнике (Ctrl+C) и 2 клика: он откроется в одноразовой "
+                                      L"Windows - закрыли окно, и всё, что он сделал, исчезло"
+                                    : L"Песочница Windows выключена: 2 клика - как включить"));
     item.children.push_back(Act(L"Снимок", L"tools-snapshot.png", L"sec-restore",
                                 L"Точка восстановления системы - перед драйвером, правками реестра или "
                                 L"«Починить Windows»; нужны права"));
@@ -932,7 +1123,7 @@ void ShowRing(RadialMenu& menu) {
     std::wstring status;
     // диски: место, здоровье, рост за неделю, драйвер
     Item disks = Act(L"Диски", L"tools-disk.png", L"", L"Место на дисках, здоровье, что выросло за неделю");
-    for (const tools::Volume& v : tools::Volumes()) {
+    for (const tools::Volume& v : tools::VolumesCached()) {
         std::wstring letter = v.root.substr(0, 2);
         int pct = v.total ? (int)(v.free * 100 / v.total) : 0;
         disks.children.push_back(
@@ -1741,6 +1932,18 @@ void Run(const std::wstring& key) {
             [run] { run(L"DISM", L"dism.exe", L"/Online /Cleanup-Image /RestoreHealth"); }, 30000, Toast::G_INFO);
         return;
     }
+    if (key == L"sec-sandbox") {
+        std::wstring file = tools::ClipboardPath();
+        DWORD a = file.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(file.c_str());
+        if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) {
+            g_card.Show(BoostCard::DONE, L"Песочница: какой файл?",
+                        L"Выделите exe (или установщик) в Проводнике, нажмите Ctrl+C и выберите «Песочницу» снова.",
+                        Theme(), 12000, Toast::G_INFO);
+            return;
+        }
+        OpenInSandbox(file);
+        return;
+    }
     if (key.rfind(L"sec-app:", 0) == 0) {
         size_t i = idx(8, g_secApps.size());
         if (i == (size_t)-1) return;
@@ -1762,8 +1965,16 @@ void Run(const std::wstring& key) {
             name + (st == tools::SIGN_BAD ? L": подпись повреждена" : L": без проверенной подписи"),
             exe + (st == tools::SIGN_BAD
                        ? L" изменён после подписи - его лучше удалить и скачать заново."
-                       : L". Издатель не подтверждён: перед запуском стоит сверить хэш на VirusTotal."),
-            L"Запустить", L"VirusTotal", launch, [exe] { OpenVirusTotal(exe); }, 30000, Toast::G_WARN);
+                       : L". Издатель не подтверждён: сначала стоит открыть его в песочнице или сверить хэш на "
+                         L"VirusTotal."),
+            L"Запустить", tools::SandboxAvailable() ? L"Песочница" : L"VirusTotal", launch,
+            [exe] {
+                if (tools::SandboxAvailable())
+                    OpenInSandbox(exe);
+                else
+                    OpenVirusTotal(exe);
+            },
+            30000, Toast::G_WARN);
         return;
     }
     if (key.rfind(L"sec-find:", 0) == 0) {
@@ -1910,7 +2121,7 @@ void Tick() {
     }
     if (!g_cfg->toolsDiskWarn || now - g_diskCheck < 10 * 60 * 1000) return;
     g_diskCheck = now;
-    for (const tools::Volume& v : tools::Volumes()) {
+    for (const tools::Volume& v : tools::VolumesCached()) {
         if (v.type != DRIVE_FIXED) continue;
         if (!tools::DiskWarn(v)) {
             g_warned.erase(v.root);  // место вернулось - в следующий раз снова скажем

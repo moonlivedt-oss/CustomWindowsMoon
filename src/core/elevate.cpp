@@ -60,10 +60,30 @@ int Sys(const wchar_t* exe, const std::wstring& args, std::wstring* out, DWORD t
     std::string raw;
     char buf[4096];
     DWORD got = 0;
-    while (ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got) raw.append(buf, got);
+    // вывод читаем без блокировки: зависший schtasks не держит программу дольше timeoutMs
+    ULONGLONG until = GetTickCount64() + timeoutMs;
+    for (;;) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr)) break;
+        if (avail) {
+            if (!ReadFile(rd, buf, avail < sizeof(buf) ? avail : sizeof(buf), &got, nullptr) || !got) break;
+            raw.append(buf, got);
+            continue;
+        }
+        if (WaitForSingleObject(pi.hProcess, 30) == WAIT_OBJECT_0) {
+            while (PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr) && avail &&
+                   ReadFile(rd, buf, avail < sizeof(buf) ? avail : sizeof(buf), &got, nullptr) && got)
+                raw.append(buf, got);
+            break;
+        }
+        if (GetTickCount64() > until) {
+            TerminateProcess(pi.hProcess, 1);
+            break;
+        }
+    }
     CloseHandle(rd);
     DWORD code = (DWORD)-1;
-    if (WaitForSingleObject(pi.hProcess, timeoutMs) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+    if (WaitForSingleObject(pi.hProcess, 1000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     if (out) {

@@ -200,7 +200,86 @@ void RadialMenu::PlaceAround(POINT cursor, const RECT& work) {
     center_ = {half, half};
 }
 
-void RadialMenu::Start() {
+POINT RadialMenu::CursorPt() const {
+    POINT p{};
+    if (fakeCursor_)
+        p = *fakeCursor_;
+    else
+        GetCursorPos(&p);
+    return p;
+}
+
+int RadialMenu::Bench(const Config* cfg, UINT dpi, int ms) {
+    Config quiet = *cfg;
+    quiet.sounds = false;
+    bool leftEdge = !quiet.left.empty();
+    const auto& ring = quiet.RingFor(leftEdge);
+    if (ring.empty()) return 0;
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    demo_ = true;  // курсор не уводит меню
+    cfg_ = &quiet;
+    ring_ = &ring;
+    geo_ = MakeGeo(dpi / 96.0 * quiet.scale);
+    EnsureSurface();
+    left_ = leftEdge;
+    full_ = winMode_ = netMode_ = false;
+    int cy = (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2;
+    origin_ = {left_ ? mi.rcMonitor.left : mi.rcMonitor.right - geo_.w, cy - geo_.h / 2};
+    center_ = {left_ ? 0 : geo_.w, geo_.h / 2};
+    POINT fake{origin_.x + center_.x, origin_.y + center_.y};
+    fakeCursor_ = &fake;
+    frames_ = 0;
+    // значки оболочки догружаются в потоке: замеряем кадр, а не Проводник
+    for (ULONGLONG t = GetTickCount64(); !icons_.Idle() && GetTickCount64() - t < 15000;) Sleep(20);
+    Start(false);
+    ULONGLONG t0 = GetTickCount64();
+    for (ULONGLONG now = t0; now - t0 < (ULONGLONG)ms; now = GetTickCount64()) {
+        // полсекунды курсор идёт дугой по первому кольцу, следующие полсекунды - по второму
+        double ph = ((now - t0) % 1000) / 1000.0, back = ((now - t0) / 1000) % 2 ? -1 : 1;
+        bool outer = ph >= 0.5;
+        double t = (outer ? ph - 0.5 : ph) * 2;
+        double r = outer ? (geo_.r3 + geo_.r4) / 2 : (geo_.r1 + geo_.r2) / 2;
+        double rel = back * (-0.8 + 1.6 * t) * Span() * kPi / 180;
+        double dir = left_ ? 1 : -1;
+        fake = {origin_.x + center_.x + (LONG)(dir * r * std::cos(rel)),
+                origin_.y + center_.y + (LONG)(r * std::sin(rel))};
+        Tick();
+        Sleep(10);
+    }
+    int n = frames_;
+    {                                       // кадр из кэша колец должен совпасть с нарисованным заново
+        hoverT_ = GetTickCount64() - 5000;  // анимация значка под курсором закончилась
+        Render();
+        Render();  // второй одинаковый кадр - кольца запомнены
+        Render();  // этот - из кэша
+        const size_t total = (size_t)geo_.w * geo_.h;
+        std::vector<uint32_t> cached((uint32_t*)bits_, (uint32_t*)bits_ + total);
+        bool used = ringCache_[0].ok || ringCache_[1].ok;
+        for (RingCache& c : ringCache_) c = {};
+        Render();
+        int diff = 0;
+        for (size_t i = 0; i < total; ++i) diff += cached[i] != ((uint32_t*)bits_)[i];
+        benchDiff_ = used ? diff : -1;
+    }
+    {  // последний кадр - картинкой рядом с exe: глазами проверить, что кэш колец ничего не испортил
+        Bitmap frame(geo_.w, geo_.h, geo_.w * 4, PixelFormat32bppPARGB, (BYTE*)bits_);
+        UINT num = 0, size = 0;
+        GetImageEncodersSize(&num, &size);
+        std::vector<BYTE> buf(size);
+        auto* codecs = (ImageCodecInfo*)buf.data();
+        GetImageEncoders(num, size, codecs);
+        for (UINT i = 0; i < num; ++i)
+            if (!wcscmp(codecs[i].MimeType, L"image/png"))
+                frame.Save((ExeDir() + L"\\bench_ring.png").c_str(), &codecs[i].Clsid, nullptr);
+    }
+    Hide();
+    fakeCursor_ = nullptr;
+    cfg_ = cfg;
+    return n;
+}
+
+void RadialMenu::Start(bool live) {
     const auto& ring = *ring_;
     mode_ = Mode::None;
     hoverRoot_ = hoverSub_ = subParent_ = pendingRoot_ = -1;
@@ -232,7 +311,7 @@ void RadialMenu::Start() {
     closing_ = false;
     altWasDown_ = GetAsyncKeyState(VK_MENU) & 0x8000;
     reached_ = false;
-    if (altWasDown_) {
+    if (altWasDown_ && live) {
         // отпускание Alt больше ничего не открывает и уйдёт окну под меню - а там включит строку меню;
         // пустое нажатие, пока Alt ещё зажат, это гасит
         INPUT in[2]{};
@@ -247,6 +326,7 @@ void RadialMenu::Start() {
     CaptureBackdrop();  // до показа окна, чтобы в снимок не попало само меню
     EnsureHexGlass();
     Render();
+    if (!live) return;
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetTimer(hwnd_, kTimer, 10, nullptr);
@@ -299,6 +379,9 @@ void RadialMenu::Hide() {
     ShowWindow(hwnd_, SW_HIDE);
     blurPx_ = {};
     maskPx_ = {};
+    baseCache_ = {};
+    baseCached_ = baseLast_ = baseNow_ = {};
+    for (RingCache& c : ringCache_) c = {};
     searchPool_.clear();
     searchPool_.shrink_to_fit();
     labels_.clear();  // подписи и ширины строк соберутся заново при следующем открытии
@@ -317,8 +400,7 @@ void RadialMenu::Tick() {
         return;
     }
 
-    POINT pt;
-    GetCursorPos(&pt);
+    POINT pt = CursorPt();
     Hit h = HitTest(pt);
     if (!closing_) {
         // Перетаскивание без нажатых кнопок - значит, оно оборвалось, не дойдя до Drop или DragLeave.
@@ -372,6 +454,9 @@ void RadialMenu::Tick() {
         for (size_t i = 0; i < v.size(); ++i) {
             double d = (((int)i == hot) - v[i]) * rate;
             v[i] += d;
+            // подсветка доходит до конца ровно, а не бесконечно малыми шагами: неподвижный сектор рисуется
+            // одинаково от кадра к кадру (кэш колец), а значок без подсветки - копией 1:1, без масштаба
+            if (std::fabs(((int)i == hot) - v[i]) < 0.002) v[i] = ((int)i == hot);
             moved = std::max(moved, std::fabs(d));
         }
     };
@@ -389,12 +474,16 @@ void RadialMenu::Tick() {
     } else if (grabSpun_) {
         moved = 1;
     }
-    bool anim = closing_ || now - hoverT_ < 1100 || now - tOpen_ < fx::Dur(kOpenMs + kStaggerMs * hlRoot_.size() + 200) ||
+    bool anim = closing_ || now - hoverT_ < 1100 ||
+                now - tOpen_ < fx::Dur(kOpenMs + kStaggerMs * hlRoot_.size() + 200) ||
                 (mode_ != Mode::None && now - tSub_ < fx::Dur(kSubMs + kSubWaveMs * subItems_.size()) + 30);
     static std::wstring lastHint;
     double ha = 0;
     std::wstring hint = BottomHint(ha) + L"\x1" + TopHint();
-    if (anim || moved > 0.001 || hint != lastHint) Render();
+    bool icons = icons_.Arrived();  // значок оболочки догрузился в потоке - показать
+    if (icons)
+        for (RingCache& c : ringCache_) c.ok = false;  // в запомненном кольце его ещё нет
+    if (anim || moved > 0.001 || hint != lastHint || icons) Render();
     lastHint = hint;
 }
 

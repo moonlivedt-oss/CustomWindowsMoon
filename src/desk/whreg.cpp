@@ -3,6 +3,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include <memory>
 #include <vector>
 
 namespace whreg {
@@ -254,11 +255,68 @@ bool LogonCrisp() {
            v != 0;
 }
 
+// .reg лежит в %APPDATA%: пока на экране вопрос UAC, другая программа могла бы подменить его своим содержимым -
+// и regedit с правами внёс бы чужое. Поэтому файл держим открытым без права записи до конца импорта, а перед
+// запуском сверяем: только разделы, которые пишет сама программа (настройки модов Windhawk и фон экрана входа).
 void Run(const std::wstring& regFile) {
     if (regFile.empty()) return;
-    // regedit сам попросит права администратора и подтверждение
-    std::wstring args = L"\"" + regFile + L"\"";
-    ShellExecuteW(nullptr, L"open", L"regedit.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    HANDLE lock = CreateFileW(regFile.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (lock == INVALID_HANDLE_VALUE) return;
+    std::wstring text;
+    {
+        std::string raw(1 << 20, '\0');
+        DWORD got = 0;
+        ReadFile(lock, raw.data(), (DWORD)raw.size(), &got, nullptr);
+        raw.resize(got);
+        if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFF && (unsigned char)raw[1] == 0xFE)
+            text.assign((const wchar_t*)(raw.data() + 2), (raw.size() - 2) / 2);
+    }
+    bool ok = text.rfind(L"Windows Registry Editor Version 5.00", 0) == 0;
+    for (size_t at = text.find(L"\n["); ok && at != std::wstring::npos; at = text.find(L"\n[", at + 1)) {
+        std::wstring sec = text.substr(at + 2, text.find(L']', at) - at - 2);
+        ok = sec.rfind(std::wstring(kMods), 0) == 0 ||
+             sec == L"HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\System";
+    }
+    if (!ok) {
+        CloseHandle(lock);
+        return;  // файл не наш - не импортируем
+    }
+    // regedit сам попросит права администратора и подтверждение; путь - из папки Windows, не по поиску
+    wchar_t win[MAX_PATH] = {};
+    GetWindowsDirectoryW(win, MAX_PATH);
+    std::wstring exe = std::wstring(win) + L"\\regedit.exe", args = L"\"" + regFile + L"\"";
+    SHELLEXECUTEINFOW sei{sizeof(sei)};
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"open";
+    sei.lpFile = exe.c_str();
+    sei.lpParameters = args.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&sei) || !sei.hProcess) {
+        CloseHandle(lock);
+        return;
+    }
+    // замок снимаем, когда regedit закончит (или через 5 минут, если его окно так и висит)
+    struct Box {
+        HANDLE proc, lock;
+    };
+    auto* box = new Box{sei.hProcess, lock};
+    HANDLE th = CreateThread(
+        nullptr, 0,
+        [](void* p) -> DWORD {
+            std::unique_ptr<Box> b((Box*)p);
+            WaitForSingleObject(b->proc, 5 * 60 * 1000);
+            CloseHandle(b->proc);
+            CloseHandle(b->lock);
+            return 0;
+        },
+        box, 0, nullptr);
+    if (th) {
+        CloseHandle(th);
+    } else {
+        CloseHandle(sei.hProcess);
+        CloseHandle(lock);
+        delete box;
+    }
 }
 
 }  // namespace whreg

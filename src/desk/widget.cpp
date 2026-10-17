@@ -445,6 +445,7 @@ void MediaWidget::Tick(const Config& cfg, bool blocked) {
         lastSecond_ = sec;
         dirty_ = true;
     }
+    if (slide_ > 0 || edgeSince_) fx::Active();  // панель на экране или курсор ждёт у нижнего края
     if (slide_ <= 0) {
         if (IsWindowVisible(wnd_)) {
             ShowWindow(wnd_, SW_HIDE);

@@ -51,6 +51,24 @@ ULONGLONG NowStamp() {
 
 constexpr ULONGLONG kDay = 24ull * 3600 * 10000000;
 
+// Первый мегабайт двух файлов совпадает: разные файлы обычно расходятся уже в начале, и полный SHA-256 гигабайтного
+// установщика не нужен.
+bool SameHead(const std::wstring& a, const std::wstring& b) {
+    auto head = [](const std::wstring& p) {
+        std::string s(1 << 20, '\0');
+        HANDLE f = CreateFileW(p.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                               OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        if (f == INVALID_HANDLE_VALUE) return std::string();
+        DWORD got = 0;
+        if (!ReadFile(f, s.data(), (DWORD)s.size(), &got, nullptr)) got = 0;
+        CloseHandle(f);
+        s.resize(got);
+        return s;
+    };
+    std::string x = head(a);
+    return !x.empty() && x == head(b);
+}
+
 }  // namespace
 
 std::wstring DataDir() {
@@ -454,7 +472,8 @@ std::vector<DownloadJunk> FindDownloadJunk(int days) {
                 std::wstring orig = s.substr(0, br) + e;
                 auto it = sizeByName.find(orig);
                 // одинаковый размер - ещё не копия (две версии документа бывают одного размера): сверяем содержимое
-                if (it != sizeByName.end() && it->second == f.bytes) {
+                if (it != sizeByName.end() && it->second == f.bytes &&
+                    SameHead(dir + L"\\" + f.name, dir + L"\\" + orig)) {
                     std::wstring a = FileSha256(dir + L"\\" + f.name), b = FileSha256(dir + L"\\" + orig);
                     if (!a.empty() && a == b) why = L"копия";
                 }

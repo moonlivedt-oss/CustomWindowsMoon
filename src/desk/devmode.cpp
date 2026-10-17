@@ -2,6 +2,7 @@
 
 #include <tlhelp32.h>
 
+#include "core/procsnap.h"
 #include "core/config.h"
 #include "core/text.h"
 #include "desk/gamemode.h"
@@ -45,8 +46,7 @@ void DevMode::Recover() {
 }
 
 bool DevMode::Detect(const Config& cfg, std::wstring& name) {
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return false;
+    auto procs = procsnap::Get();
     if (cfg.devApps != masks_) {  // маски поменяли - открытые процессы проверяются заново
         masks_ = cfg.devApps;
         seen_.clear();
@@ -54,8 +54,7 @@ bool DevMode::Detect(const Config& cfg, std::wstring& name) {
     bool byPath = masks_.find(L'\\') != std::wstring::npos;  // путь спрашиваем, только если маска с папкой
     std::map<DWORD, Seen> seen;
     bool found = false;
-    PROCESSENTRY32W pe{sizeof(pe)};
-    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+    for (const PROCESSENTRY32W& pe : *procs) {
         DWORD pid = pe.th32ProcessID;
         if (pid <= 4) continue;
         auto it = seen_.find(pid);
@@ -72,7 +71,6 @@ bool DevMode::Detect(const Config& cfg, std::wstring& name) {
             name = app;
         }
     }
-    CloseHandle(snap);
     seen_.swap(seen);
     return found;
 }

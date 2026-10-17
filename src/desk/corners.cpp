@@ -417,6 +417,7 @@ void HotCorners::Tick(const Config& cfg, bool blocked) {
         levelShow_ = now < levelUntil_ ? std::min(1.0f, levelShow_ + fx::Step(0.2f)) : std::max(0.0f, levelShow_ - fx::Step(0.08f));
     }
 
+    if (corner_ >= 0 || progress_ > 0 || flash_ > 0 || levelShow_ > 0) fx::Active();  // курсор в углу или свечение
     if (progress_ <= 0 && flash_ <= 0 && levelShow_ <= 0) {
         Hide();
         return;

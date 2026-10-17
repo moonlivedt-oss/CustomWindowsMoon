@@ -85,6 +85,7 @@ void BatteryGlow::Tick(const Config& cfg) {
         Hide();
         return;
     }
+    fx::Active();
     if (now - lastFrame_ < kFrameMs) return;
     lastFrame_ = now;
     // дыхание: медленный синус, период около 2.6 с
