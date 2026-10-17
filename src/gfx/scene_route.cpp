@@ -54,10 +54,25 @@ bool RouteScene::Draw(Graphics& g, const RectF& r, float k, const Palette& p, co
         nodes_[i].y = base + (i % 2 ? -20 * k : 14 * k);
     }
     auto ms = [&](int link) { return link < (int)d.hist.size() ? Last(d.hist[link]) : -1.0f; };
+    // новые замеры приходят каждые полторы секунды: оживать на них целиком - значит не засыпать никогда.
+    // Сцена играет, только если звено заметно изменилось (или кончилась проверка); иначе - один кадр
     if (d.gen != gen_) {
         gen_ = d.gen;
-        Wake(4);
+        std::vector<float> now;
+        for (const auto& h : d.hist) now.push_back(Last(h));
+        bool changed = now.size() != seen_.size();
+        for (size_t i = 0; !changed && i < now.size(); ++i) {
+            float a = now[i], b = seen_[i];
+            changed = (a < 0) != (b < 0) || std::fabs(a - b) > std::max(15.0f, 0.3f * std::max(a, b));
+        }
+        seen_ = now;
+        if (changed)
+            Wake(4);
+        else
+            fresh_ = true;
     }
+    if (wasChecking_ && !d.checking) Wake(4);
+    wasChecking_ = d.checking;
     // выход туннеля сменился: узел переворачивается, на середине поворота - новый код
     for (int i = 0; i < n; ++i) {
         Node& nd = nodes_[i];
@@ -135,7 +150,8 @@ bool RouteScene::Draw(Graphics& g, const RectF& r, float k, const Palette& p, co
         }
         flowing = true;
         float m = ms(q.seg);
-        q.u += dt * (1.7f / (1 + std::max(0.0f, m < 0 ? 10 : m) / 30)) * (q.rush ? 3 : 1);
+        q.u += dt * (1.7f / (1 + std::max(0.0f, m < 0 ? 10 : m) / 30)) *
+               (q.rush || !Awake() ? 3 : 1);  // сцена отыграла - пакеты в пути спешат, а не ползут ещё полминуты
         if (broken_ == q.seg + 1 && q.u >= kCut - 0.03f) {
             q.wait = true;
             q.u = kCut - 0.05f - std::min(0.12f, queue * 0.004f);
@@ -352,7 +368,9 @@ bool RouteScene::Draw(Graphics& g, const RectF& r, float k, const Palette& p, co
     Label(g, L"квадрат - запрос, ромб - DNS", RectF(ox + 8 * k, oy + 4 * k, W / 2, 16 * k), p.faint, 10.5f * k);
     g.Restore(gs);
 
-    bool moving = flowing || !sparks_.empty() || weld_ >= 0 || pulse_ >= 0 || d.checking || (Awake() && !game_);
+    bool moving =
+        flowing || !sparks_.empty() || weld_ >= 0 || pulse_ >= 0 || d.checking || (Awake() && !game_) || fresh_;
+    fresh_ = false;
     for (const Node& nd : nodes_) moving = moving || nd.flip >= 0 || nd.flash > 0;
     return moving && !game_;
 }

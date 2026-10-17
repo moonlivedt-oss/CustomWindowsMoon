@@ -116,6 +116,15 @@ bool PortsScene::Draw(Graphics& g, const RectF& r, float k, const Palette& p, co
         if (std::fabs(w.ty - w.y) > 0.3f || std::fabs(w.vy) > 0.5f) moving = true;
         w.flow += dt * (0.2f + std::min(4, w.d.conns) * 0.35f);
         w.snap = std::max(0.0f, w.snap - dt);
+        // висящий кабель сам не замирает: тяжесть и связи спорят на доли пикселя, и сцена рисовала бы
+        // 30 кадров в секунду без конца. Две секунды без дела (не тянут, не отпустили, строка на месте,
+        // концы те же) - кабель замирает, пока его снова не тронут
+        bool dragged = drag_ >= 0 && &rows_[drag_] == &w;
+        bool busy = dragged || w.cut || w.snap > 0 || std::fabs(w.ty - w.y) > 0.3f || std::fabs(w.vy) > 0.5f ||
+                    w.sx != sx || w.cx != cx;
+        w.still = busy ? 0 : w.still + dt;
+        w.sx = sx, w.cx = cx;
+        if (w.still > 2 && !game_) continue;
         int steps = game_ ? 40 : 1;  // в игровом режиме кабель сразу провисает как надо
         for (int s = 0; s < steps; ++s) Rope(w, game_ ? 0.033f : dt, sx, cx);
         float motion = 0;

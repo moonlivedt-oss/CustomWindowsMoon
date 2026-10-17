@@ -15,8 +15,8 @@
 namespace scene {
 
 using Gdiplus::Color;
-using Gdiplus::RectF;
 using Gdiplus::PointF;
+using Gdiplus::RectF;
 
 struct Palette {
     Color text, muted, faint, accent, accent2, gold, card;
@@ -210,7 +210,8 @@ private:
     std::vector<Dot> sparks_;
     int gen_ = -1, broken_ = -1, weldLink_ = -1, hotLink_ = -1, hotNode_ = -1;
     float spawn_ = 0, weld_ = -1, pulse_ = -1;
-    bool fix_ = false, fixing_ = false;
+    bool fix_ = false, fixing_ = false, fresh_ = false, wasChecking_ = false;
+    std::vector<float> seen_;  // последние замеры звеньев, на которые сцена уже откликнулась
     RectF btn_{};
 };
 
@@ -235,6 +236,7 @@ private:
         PortData d;
         std::vector<Dot> pts;  // x, y - сейчас; px, py - кадр назад
         float y = 0, vy = 0, ty = 0, flow = 0, snap = 0, gone = 0, led = 1;
+        float still = 0, sx = 0, cx = 0;  // сколько кабель висит без дела; концы, при которых он успокоился
         bool cut = false, seen = false;
     };
     void Rope(Row& w, float dt, float sx, float cx);
