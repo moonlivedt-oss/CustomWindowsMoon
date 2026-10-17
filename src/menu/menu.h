@@ -33,6 +33,7 @@ public:
     std::function<std::wstring()> netStatus;             // строка состояния для кольца сети
     void Close();
     bool IsOpen() const { return open_; }
+    void Guard();  // раз в секунду: закрытое кольцо не остаётся видимым, оборванное угасание доводится до конца
     // Заранее грузит значки, чтобы первое открытие не подтормаживало. Работает порциями не дольше budgetMs,
     // чтобы не замораживать программу; true - всё загружено.
     bool Prewarm(const Config* cfg, UINT dpi, int budgetMs = 8);

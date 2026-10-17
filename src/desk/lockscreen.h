@@ -50,6 +50,7 @@ public:
     bool ScreenOff();             // угол «выключить экран»: схлопнуть портал и погасить экран; false - без перехода
     void OnDisplay(bool on);      // экран включился или погас (GUID_CONSOLE_DISPLAY_STATE)
     void OnPower(WPARAM event);   // сон и пробуждение (WM_POWERBROADCAST)
+    void Guard();                 // раз в секунду: окно не висит над столом, если переход оборвался
 
 private:
     static LRESULT CALLBACK Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp);
@@ -78,6 +79,7 @@ private:
     bool bootPortal_ = true, wakePortal_ = true;
     ULONGLONG holdAt_ = 0;  // когда картинка встала (ввод позже - значит проснулись)
     ULONGLONG t0_ = 0;
+    ULONGLONG pushAt_ = 0;  // когда выведен последний кадр
     bool demo_ = false;
     bool portal_ = true, sounds_ = true, sounded_ = false;
     ThemeInfo theme_{};

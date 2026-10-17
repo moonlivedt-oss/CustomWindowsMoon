@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include <wtsapi32.h>
+
 #include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -25,6 +27,18 @@ constexpr double kCurtainMs = 300, kFadeMs = 720, kFadeDelayMs = 120;
 constexpr double kPortalMs = 1900, kPortalCloseMs = 950;
 
 Reveal* g_reveal = nullptr;
+
+// Заблокирован ли сеанс на самом деле; не удалось узнать - считаем, что да, и ничего не трогаем.
+bool SessionLocked() {
+    WTSINFOEXW* info = nullptr;
+    DWORD bytes = 0;
+    if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSSessionInfoEx,
+                                     reinterpret_cast<LPWSTR*>(&info), &bytes))
+        return true;
+    bool locked = !info || info->Level != 1 || info->Data.WTSInfoExLevel1.SessionFlags != WTS_SESSIONSTATE_UNLOCK;
+    WTSFreeMemory(info);
+    return locked;
+}
 
 }  // namespace
 
@@ -147,13 +161,15 @@ void Reveal::AimAtCursor() {
 }
 
 void Reveal::Push(BYTE alpha) {
+    if (state_ == IDLE || !memDC_) return;  // переход уже закончен: окно не показываем
+    pushAt_ = GetTickCount64();
     HDC scr = GetDC(nullptr);
     POINT pos{mon_.left, mon_.top}, src{0, 0};
     SIZE size{mon_.right - mon_.left, mon_.bottom - mon_.top};
     BLENDFUNCTION bf{AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA};
     UpdateLayeredWindow(wnd_, scr, &pos, &size, memDC_, &src, 0, &bf, ULW_ALPHA);
     ReleaseDC(nullptr, scr);
-    ShowWindow(wnd_, SW_SHOWNOACTIVATE);
+    if (!IsWindowVisible(wnd_)) ShowWindow(wnd_, SW_SHOWNOACTIVATE);
     SetWindowPos(wnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
@@ -205,8 +221,8 @@ void Reveal::OnDisplay(bool on) {
 void Reveal::OnPower(WPARAM event) {
     if (event == PBT_APMSUSPEND) {
         if (!enabled_ || !wakePortal_ || fx::Game() || state_ != IDLE || !Prepare()) return;
-        Push(255);  // перед сном: после пробуждения стол откроется порталом
         Await();
+        Push(255);  // перед сном: после пробуждения стол откроется порталом
     } else if (event == PBT_APMRESUMEAUTOMATIC || event == PBT_APMRESUMESUSPEND) {
         if (state_ == HOLD && waitWake_) SetTimer(wnd_, kWakeTimer, 900, nullptr);
     }
@@ -219,11 +235,29 @@ void Reveal::OnSession(WPARAM code) {
         if (state_ == HOLD || !enabled_ || fx::Game()) return;
         KillTimer(wnd_, kTimer);
         if (!Prepare()) return;
-        Push(255);  // за экраном блокировки: на стол его не видно
         state_ = HOLD;
+        holdAt_ = GetTickCount64();
+        Push(255);  // за экраном блокировки: на стол его не видно
     } else if (code == WTS_SESSION_UNLOCK) {
         if (state_ == HOLD) Open();
     }
+}
+
+void Reveal::Guard() {
+    if (!wnd_) return;
+    ULONGLONG now = GetTickCount64();
+    if (state_ == IDLE) {
+        if (IsWindowVisible(wnd_)) Hide();
+        return;
+    }
+    if (state_ == HOLD) {
+        // картинка стоит, а сеанс не заблокирован: блокировка не случилась или вход прошёл без уведомления
+        if (now - holdAt_ < 5000 || SessionLocked()) return;
+        locked_ = false;
+        if (!waitWake_) Open();  // ждущую пробуждения раскроет ввод
+        return;
+    }
+    if (now - pushAt_ > 3000) Hide();  // кадры перестали приходить: анимация оборвалась
 }
 
 void Reveal::LockWithCurtain() {
@@ -290,6 +324,7 @@ void Reveal::Tick() {
         } else if (el >= d) {
             KillTimer(wnd_, kTimer);
             state_ = HOLD;
+            holdAt_ = GetTickCount64();
             if (!LockWorkStation()) {
                 state_ = FADE;  // не заблокировалось - убрать занавес
                 t0_ = GetTickCount64();

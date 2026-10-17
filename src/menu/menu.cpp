@@ -390,6 +390,15 @@ void RadialMenu::Hide() {
     mem::TrimSoon();  // в покое память не держим
 }
 
+void RadialMenu::Guard() {
+    if (!hwnd_) return;
+    if (!open_) {
+        if (IsWindowVisible(hwnd_)) ShowWindow(hwnd_, SW_HIDE);
+    } else if (closing_ && GetTickCount64() - tClose_ >= CloseMs() + 1000) {
+        Hide();
+    }
+}
+
 void RadialMenu::Tick() {
     PERF_SCOPE("menu.Tick");
     ULONGLONG now = GetTickCount64();

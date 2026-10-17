@@ -85,6 +85,7 @@ std::vector<std::wstring> g_boostClosed;  // что закрыли - верну�
 bool g_boostBusy = false;
 HPOWERNOTIFY g_displayNotify = nullptr, g_acdcNotify = nullptr;
 ULONGLONG g_cfgCheckAt = 0;
+ULONGLONG g_guardAt = 0;  // когда последний раз проверяли, не висят ли скрытые окна
 UINT g_pollMs = 20;
 Config g_cfg;
 std::wstring g_cfgPath;
@@ -155,8 +156,13 @@ void MaskAlt() {
 
 void PollWork() {
     bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
-    // radial.cfg мог поменяться не через студию: раз в секунду проверяем, чтобы углы и плашка подхватили правку
     ULONGLONG nowMs = GetTickCount64();
+    if (nowMs - g_guardAt >= 1000) {
+        g_guardAt = nowMs;
+        g_menu.Guard();
+        g_reveal.Guard();
+    }
+    // radial.cfg мог поменяться не через студию: раз в секунду проверяем, чтобы углы и плашка подхватили правку
     if (nowMs - g_cfgCheckAt >= 1000 && !g_menu.IsOpen()) {
         g_cfgCheckAt = nowMs;
         FILETIME ft = FileTime(g_cfgPath);
@@ -417,7 +423,7 @@ void OnDevMode(bool on) {
 void OnGameMode(bool on) {
     fx::SetGame(on);
     g_frame.Suspend(on);
-    llmouse::Suspend(on);  // перехват мыши снят: каждое движение мыши не ходит через нас
+    llmouse::Suspend(on);            // перехват мыши снят: каждое движение мыши не ходит через нас
     autos::OnModes(on, g_dev.On());  // питание: в игре - производительность
     toolsui::OnModes(on, g_dev.On());
     UpdateTrayTip();
@@ -772,10 +778,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
         EditorGoTools(page, scan);
     });
-    autos::Init(inst, g_wnd, &g_cfg, g_cfgPath, [] { Reload(); }, [](int, const std::wstring& focus) {
-        OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
-        EditorGoState(focus);
-    });
+    autos::Init(
+        inst, g_wnd, &g_cfg, g_cfgPath, [] { Reload(); },
+        [](int, const std::wstring& focus) {
+            OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
+            EditorGoState(focus);
+        });
     corners::SetTools([] {
         if (g_menu.IsOpen()) return;
         toolsui::ShowRing(g_menu);
