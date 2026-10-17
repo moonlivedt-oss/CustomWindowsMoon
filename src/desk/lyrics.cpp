@@ -145,7 +145,9 @@ struct Parser {
             v.type = Json::Num;
             char* end = nullptr;
             v.n = strtod(t.c_str() + i, &end);
-            i = end ? (size_t)(end - t.c_str()) : i + 1;
+            // не число (мусор в ответе): шаг вперёд обязателен, иначе массив разбирался бы вечно
+            size_t next = end ? (size_t)(end - t.c_str()) : i;
+            i = next > i ? next : i + 1;
         }
         return v;
     }

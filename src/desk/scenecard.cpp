@@ -91,7 +91,7 @@ void SceneCard::Paint(Graphics& g, const RectF& body) {
     click_ = false;
 }
 
-int SceneCard::HitContent(const PointF& p) const { return SceneRect(Body()).Contains(p) ? H_SCENE : H_NONE; }
+int SceneCard::HitContent(const PointF& p) const { return SceneRect(Body()).Contains(p) ? (int)H_SCENE : (int)H_NONE; }
 
 void SceneCard::Click(int id) {
     if (id != H_SCENE) return;

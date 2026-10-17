@@ -101,8 +101,7 @@ Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key,
     return it;
 }
 
-void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work,
-            bool quiet = false) {
+void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work, bool quiet = false) {
     if (g_busy) {
         g_card.Show(BoostCard::DONE, L"Подождите", L"Предыдущее действие ещё идёт.", Theme());
         return;
@@ -193,6 +192,13 @@ std::wstring KnownFolder(REFKNOWNFOLDERID id) {
     if (SUCCEEDED(SHGetKnownFolderPath(id, 0, nullptr, &p))) out = p;
     CoTaskMemFree(p);
     return out;
+}
+
+// Полный путь в System32 (пустое имя - сама папка): с правами запускаем только так.
+std::wstring Sys32(const wchar_t* name) {
+    wchar_t sys[MAX_PATH] = {};
+    GetSystemDirectoryW(sys, MAX_PATH);
+    return *name ? std::wstring(sys) + L"\\" + name : std::wstring(sys);
 }
 
 // Фоновый подсчёт: кэши, кэш Unreal, мусор проектов, конфликты PATH; заодно - снимок размеров для «роста».
@@ -1159,8 +1165,9 @@ void ShowRing(RadialMenu& menu) {
                                      L" (память " + tools::Bytes(cm.phys) + L" + подкачка " +
                                      tools::Bytes(tools::PagefileBytes()) + L"), пик с загрузки " +
                                      tools::Bytes(cm.peak) + L". 2 клика - настройки подкачки"));
-    procs.children.push_back(Act(L"Колба", L"tools-mem.png", L"studio:4",
-                                 L"Память колбой в студии: слои программ, утечки, перелив в подкачку; щелчок по слою - закрыть"));
+    procs.children.push_back(
+        Act(L"Колба", L"tools-mem.png", L"studio:4",
+            L"Память колбой в студии: слои программ, утечки, перелив в подкачку; щелчок по слою - закрыть"));
     ring.push_back(procs);
 
     // фон: батарея, кто ест процессор без окна, кто качает, что мешает сну
@@ -1215,8 +1222,9 @@ void ShowRing(RadialMenu& menu) {
         bg.children.push_back(Act(L"Будят " + std::to_wstring(g_wake.size()), L"tools-battery.png", L"wake",
                                   L"Могут разбудить из сна: " + list + L". 2 клика - Диспетчер устройств"));
     }
-    bg.children.push_back(Act(L"Провода", L"tools-battery.png", L"studio:4",
-                              L"Батарея в студии: ветки к фоновым программам, рубильник - закрыть, «сядет в» сдвигается"));
+    bg.children.push_back(
+        Act(L"Провода", L"tools-battery.png", L"studio:4",
+            L"Батарея в студии: ветки к фоновым программам, рубильник - закрыть, «сядет в» сдвигается"));
     ring.push_back(bg);
 
     // автозагрузка: что включено и сколько памяти держит
@@ -1690,7 +1698,8 @@ void Run(const std::wstring& key) {
                     L"-ErrorAction Stop; Write-Host 'Готово (если точка уже была меньше суток назад, Windows "
                     L"новую не создаёт).' } catch { Write-Host ('Не получилось: ' + $_.Exception.Message) }; "
                     L"Read-Host 'Enter - закрыть'\"";
-                if ((INT_PTR)ShellExecuteW(nullptr, L"runas", L"powershell.exe", ps, nullptr, SW_SHOWNORMAL) <= 32)
+                std::wstring sys = Sys32(L""), exe = Sys32(L"WindowsPowerShell\\v1.0\\powershell.exe");
+                if ((INT_PTR)ShellExecuteW(nullptr, L"runas", exe.c_str(), ps, sys.c_str(), SW_SHOWNORMAL) <= 32)
                     g_card.Show(BoostCard::DONE, L"Не запустилось", L"Без прав администратора точку не создать.",
                                 Theme(), 0, Toast::G_WARN);
             });
@@ -1715,9 +1724,11 @@ void Run(const std::wstring& key) {
         return;
     }
     if (key == L"sec-repair") {
-        auto run = [](const wchar_t* title, const wchar_t* cmd) {
-            std::wstring args = std::wstring(L"/k title ") + title + L" & " + cmd;
-            HINSTANCE r = ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+        // всё полными путями из System32: процесс с правами не должен найти одноимённый exe в текущей папке
+        auto run = [](const wchar_t* title, const wchar_t* exe, const wchar_t* args) {
+            std::wstring line = std::wstring(L"/k title ") + title + L" & \"" + Sys32(exe) + L"\" " + args;
+            HINSTANCE r = ShellExecuteW(nullptr, L"runas", Sys32(L"cmd.exe").c_str(), line.c_str(), Sys32(L"").c_str(),
+                                        SW_SHOWNORMAL);
             if ((INT_PTR)r <= 32)
                 g_card.Show(BoostCard::DONE, L"Не запустилось", L"Без прав администратора проверка не идёт.", Theme(),
                             0, Toast::G_WARN);
@@ -1726,16 +1737,33 @@ void Run(const std::wstring& key) {
             L"Починить системные файлы?",
             L"SFC сверит файлы Windows и заменит испорченные (минут 10-15). Если SFC не справится - DISM "
             L"восстановит хранилище из Windows Update (минут 20, нужен интернет), потом снова SFC.",
-            L"SFC", L"DISM", [run] { run(L"SFC", L"sfc /scannow"); },
-            [run] { run(L"DISM", L"DISM /Online /Cleanup-Image /RestoreHealth"); }, 30000, Toast::G_INFO);
+            L"SFC", L"DISM", [run] { run(L"SFC", L"sfc.exe", L"/scannow"); },
+            [run] { run(L"DISM", L"dism.exe", L"/Online /Cleanup-Image /RestoreHealth"); }, 30000, Toast::G_INFO);
         return;
     }
     if (key.rfind(L"sec-app:", 0) == 0) {
         size_t i = idx(8, g_secApps.size());
         if (i == (size_t)-1) return;
-        std::wstring exe = g_secApps[i].exe, dir = exe.substr(0, exe.find_last_of(L'\\'));
-        if ((INT_PTR)ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL) <= 32)
-            g_card.Show(BoostCard::DONE, L"Не запустилось", exe, Theme(), 0, Toast::G_WARN);
+        std::wstring exe = g_secApps[i].exe, name = g_secApps[i].name;
+        auto launch = [exe] {
+            std::wstring dir = exe.substr(0, exe.find_last_of(L'\\'));
+            if ((INT_PTR)ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL) <= 32)
+                g_card.Show(BoostCard::DONE, L"Не запустилось", exe, Theme(), 0, Toast::G_WARN);
+        };
+        // папка защиты - обычная папка пользователя: туда может лечь и чужой exe. Подписанное доверенным
+        // издателем запускается сразу, остальное - только после вопроса
+        std::wstring signer;
+        tools::SignState st = tools::CheckSign(exe, &signer);
+        if (st == tools::SIGN_OK) {
+            launch();
+            return;
+        }
+        Ask(
+            name + (st == tools::SIGN_BAD ? L": подпись повреждена" : L": без проверенной подписи"),
+            exe + (st == tools::SIGN_BAD
+                       ? L" изменён после подписи - его лучше удалить и скачать заново."
+                       : L". Издатель не подтверждён: перед запуском стоит сверить хэш на VirusTotal."),
+            L"Запустить", L"VirusTotal", launch, [exe] { OpenVirusTotal(exe); }, 30000, Toast::G_WARN);
         return;
     }
     if (key.rfind(L"sec-find:", 0) == 0) {
@@ -1973,13 +2001,6 @@ void Demo(int what) {
         },
         what == 1 ? (void*)1 : nullptr, 0, nullptr);
     if (th) CloseHandle(th);
-}
-
-void CleanQuick() {
-    AcquireSRWLockShared(&g_scanLock);
-    g_junk = g_scan.junk.empty() ? tools::FindJunk(false) : g_scan.junk;
-    ReleaseSRWLockShared(&g_scanLock);
-    Run(L"clean-all");
 }
 
 void TrimDdc() { Run(L"ddc-trim"); }

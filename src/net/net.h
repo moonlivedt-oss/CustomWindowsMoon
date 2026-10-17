@@ -120,7 +120,6 @@ enum Job {
     JOB_RESTORE_POINT,  // утилиты: создать точку восстановления системы
     kJobs
 };
-const wchar_t* JobKey(Job j);
 bool AdminReady();  // задача есть
 bool SetupAdmin();  // создать задачу (Windows спросит разрешение)
 bool RunAdmin(Job j, const Log& log, int timeoutMs = 90000);

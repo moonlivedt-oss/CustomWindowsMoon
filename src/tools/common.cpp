@@ -134,11 +134,11 @@ bool ProtectedExe(const std::wstring& exe) {
 
 const std::vector<std::wstring>& SystemExeNames() {
     static const std::vector<std::wstring> names = {
-        L"svchost.exe",   L"csrss.exe",       L"lsass.exe",         L"services.exe",   L"smss.exe",
-        L"wininit.exe",   L"winlogon.exe",    L"dwm.exe",           L"conhost.exe",    L"rundll32.exe",
-        L"taskhostw.exe", L"spoolsv.exe",     L"sihost.exe",        L"dllhost.exe",    L"ctfmon.exe",
-        L"runtimebroker.exe", L"wmiprvse.exe", L"audiodg.exe",      L"explorer.exe",   L"fontdrvhost.exe",
-        L"searchindexer.exe", L"lsaiso.exe",  L"regsvr32.exe",      L"userinit.exe"};
+        L"svchost.exe",       L"csrss.exe",    L"lsass.exe",    L"services.exe", L"smss.exe",
+        L"wininit.exe",       L"winlogon.exe", L"dwm.exe",      L"conhost.exe",  L"rundll32.exe",
+        L"taskhostw.exe",     L"spoolsv.exe",  L"sihost.exe",   L"dllhost.exe",  L"ctfmon.exe",
+        L"runtimebroker.exe", L"wmiprvse.exe", L"audiodg.exe",  L"explorer.exe", L"fontdrvhost.exe",
+        L"searchindexer.exe", L"lsaiso.exe",   L"regsvr32.exe", L"userinit.exe"};
     return names;
 }
 
@@ -453,7 +453,11 @@ std::vector<DownloadJunk> FindDownloadJunk(int days) {
             if (br != std::wstring::npos && s.back() == L')') {
                 std::wstring orig = s.substr(0, br) + e;
                 auto it = sizeByName.find(orig);
-                if (it != sizeByName.end() && it->second == f.bytes) why = L"копия";
+                // одинаковый размер - ещё не копия (две версии документа бывают одного размера): сверяем содержимое
+                if (it != sizeByName.end() && it->second == f.bytes) {
+                    std::wstring a = FileSha256(dir + L"\\" + f.name), b = FileSha256(dir + L"\\" + orig);
+                    if (!a.empty() && a == b) why = L"копия";
+                }
             }
         }
         if (why.empty()) continue;

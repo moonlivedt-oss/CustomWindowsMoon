@@ -17,7 +17,6 @@ namespace boost {
 
 namespace {
 
-
 std::wstring ReadText(const std::wstring& file) {
     HANDLE f =
         CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -121,20 +120,6 @@ std::wstring Description(const std::wstring& path) {
     wchar_t* val = nullptr;
     if (!VerQueryValueW(data.data(), key, (void**)&val, &len) || !val || !len) return {};
     return Trim(val);
-}
-
-void RunHidden(const std::wstring& cmdline, DWORD* exitCode = nullptr) {
-    std::wstring cmd = cmdline;
-    STARTUPINFOW si{sizeof(si)};
-    PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
-        return;
-    if (exitCode) {
-        WaitForSingleObject(pi.hProcess, 15000);
-        GetExitCodeProcess(pi.hProcess, exitCode);
-    }
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
 }
 
 bool EnablePrivilege(const wchar_t* name) {
@@ -307,10 +292,6 @@ Result Free(const Settings& s, const std::wstring& dir, const std::vector<Group>
     Sleep(600);  // память освобождается не мгновенно
     r.freedMb = std::max(0.0, AvailMb() - before);
     return r;
-}
-
-std::vector<std::wstring> LoadSession(const std::wstring& dir) {
-    return dir.empty() ? std::vector<std::wstring>{} : GetStrings(ReadText(dir + L"\\boost.session.json"), L"paths");
 }
 
 void ClearSession(const std::wstring& dir) {

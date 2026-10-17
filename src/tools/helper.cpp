@@ -12,7 +12,13 @@ namespace tools {
 
 namespace {
 
-std::wstring Quote(const std::wstring& s) { return L"\"" + s + L"\""; }
+// Аргумент в кавычках по правилам CommandLineToArgvW: «D:\» без удвоения черты перед кавычкой съел бы её
+// и склеил аргумент со следующими.
+std::wstring Quote(const std::wstring& s) {
+    std::wstring o = L"\"" + s;
+    for (size_t i = s.size(); i > 0 && s[i - 1] == L'\\'; --i) o += L'\\';
+    return o + L"\"";
+}
 
 // Запустить RadialTools.exe и дождаться: журнал - в log, итоговые пары - в res. Код выхода, -1 - не запустился.
 int RunTools(const std::wstring& args, const Log& log, std::map<std::wstring, std::wstring>* res,

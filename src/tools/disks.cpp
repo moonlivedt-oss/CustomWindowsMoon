@@ -134,6 +134,7 @@ std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* canc
                                   const std::function<void(const std::vector<FolderSize>&)>& partial) {
     PERF_SCOPE("tools.ScanSizes");
     std::wstring dir = dirIn;
+    if (dir.empty()) return {};
     while (dir.size() > 3 && dir.back() == L'\\') dir.pop_back();
     if (dir.size() == 2) dir += L"\\";  // «C:» -> «C:\»
     std::wstring base = dir.back() == L'\\' ? dir.substr(0, dir.size() - 1) : dir;

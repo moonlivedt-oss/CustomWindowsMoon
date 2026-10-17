@@ -550,7 +550,6 @@ void Studio::HomeShelf(const RectF& r, double t) {
 
 void Studio::HomePage(const RectF& r) {
     LaneTick();
-    const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(in, L"Обзор", L"Программа на твоём экране: кольца у краёв, углы в углах, тема на обоях и рамке окна.");
 

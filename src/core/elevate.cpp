@@ -6,6 +6,7 @@
 #include <shlobj.h>
 #include <knownfolders.h>
 
+#include <atomic>
 #include <cwchar>
 #include <vector>
 
@@ -184,7 +185,19 @@ bool TaskExists(Task t) {
     return Sys(L"schtasks.exe", L"/Query /TN \"" + std::wstring(kTasks[t].name) + L"\"", nullptr, 15000) == 0;
 }
 
-bool TaskReady(Task t) { return !HelperDir().empty() && SameFile(ThisExe(), HelperExe()) && TaskRunsHelper(kTasks[t]); }
+// Проверка дорогая (два прохода по exe и запуск schtasks), а студия и кольцо утилит спрашивают её при каждой
+// отрисовке: ответ помним 30 секунд, Setup сбрасывает.
+std::atomic<ULONGLONG> g_readyAt[2];
+std::atomic<bool> g_ready[2];
+
+bool TaskReady(Task t) {
+    ULONGLONG now = GetTickCount64(), at = g_readyAt[t];
+    if (at && now - at < 30000) return g_ready[t];
+    bool ok = !HelperDir().empty() && SameFile(ThisExe(), HelperExe()) && TaskRunsHelper(kTasks[t]);
+    g_ready[t] = ok;
+    g_readyAt[t] = GetTickCount64();
+    return ok;
+}
 
 // Ставит системный cmd с правами, а не сам RadialMenu.exe: Касперский останавливает программу, которая кладёт
 // свой exe в Program Files и тут же заводит на него задачу с наивысшими правами (так выглядит закрепление
@@ -212,7 +225,8 @@ bool Setup(Task t) {
     }
     if (!sid.empty())
         cmd += L" & \"" + System32(L"WindowsPowerShell\\v1.0\\powershell.exe") +
-               L"\" -NoProfile -NonInteractive -Command \"$s=New-Object -ComObject Schedule.Service;$s.Connect();"
+               L"\" -NoProfile -NonInteractive -Command \"$env:PSModulePath=$PSHOME+'\\Modules';"
+               L"$s=New-Object -ComObject Schedule.Service;$s.Connect();"
                L"$f=$s.GetFolder('\\MoonRadial');foreach($n in @(" +
                names + L")){try{$f.GetTask($n).SetSecurityDescriptor('D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FRFX;;;" + sid +
                L")',0)}catch{}}\" >nul 2>&1";
@@ -230,6 +244,7 @@ bool Setup(Task t) {
         WaitForSingleObject(sei.hProcess, 60000);
         CloseHandle(sei.hProcess);
     }
+    for (auto& a : g_readyAt) a = 0;  // задачи пересозданы - старый ответ недействителен
     bool ok = TaskReady(t);
     if (ok) SetBlocked(t, false);  // задачу поставили заново - пусть попробует снова (антивирус мог передумать)
     return ok;

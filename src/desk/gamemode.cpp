@@ -4,9 +4,6 @@
 #include <shlwapi.h>
 #include <tlhelp32.h>
 
-
-
-
 #include "core/config.h"
 #include "core/text.h"
 
@@ -94,7 +91,10 @@ std::wstring WallpaperEngine() {
 }
 
 void WallpaperControl(const std::wstring& exe, const wchar_t* what) {
-    if (exe.empty()) return;
+    // путь приходит и из gamemode.ini / devmode.ini в %APPDATA% (откат после падения): запускаем только сам
+    // Wallpaper Engine, а не что угодно, что туда запишут
+    std::wstring leaf = FileName(exe);
+    if (_wcsicmp(leaf.c_str(), L"wallpaper64.exe") != 0 && _wcsicmp(leaf.c_str(), L"wallpaper32.exe") != 0) return;
     std::wstring cmd = L"\"" + exe + L"\" -control " + what;
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
@@ -223,7 +223,6 @@ void GameMode::SetManual(bool on, const Config& cfg) {
     misses_ = kLeaveMisses;
     lastCheck_ = 0;
     Update(cfg, on);
-
 }
 
 void GameMode::Update(const Config& cfg, bool want) {

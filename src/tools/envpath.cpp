@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <shlwapi.h>
+#include <userenv.h>
 
 #include <algorithm>
 #include <map>
@@ -32,11 +33,23 @@ std::wstring RegRaw(HKEY root, const wchar_t* key, const wchar_t* name, DWORD* t
     return s;
 }
 
-std::wstring Expand(const std::wstring& s) {
+// Подстановка по переменным из реестра, а не по окружению процесса: RadialMenu работает с момента входа, и
+// переменную, заведённую позже (%JAVA_HOME%), его окружение не знает - такая папка выглядела бы мёртвой и
+// «Почистить» убрала бы её из PATH. systemOnly - только системные переменные (для процесса с правами: окружение
+// пользователя ему не указ).
+std::wstring ExpandFresh(const std::wstring& s, bool systemOnly) {
+    if (s.find(L'%') == std::wstring::npos) return s;
+    HANDLE tok = nullptr;
+    if (!systemOnly && !OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &tok)) tok = nullptr;
     wchar_t buf[4096];
+    BOOL ok = (systemOnly || tok) && ExpandEnvironmentStringsForUserW(tok, s.c_str(), buf, 4096);
+    if (tok) CloseHandle(tok);
+    if (ok) return buf;
     DWORD n = ExpandEnvironmentStringsW(s.c_str(), buf, 4096);
     return n && n <= 4096 ? std::wstring(buf) : s;
 }
+
+std::wstring Expand(const std::wstring& s) { return ExpandFresh(s, false); }
 
 std::wstring Norm(std::wstring p) {
     p = Lower(Trim(p));
@@ -253,7 +266,12 @@ int CleanSystemPath(const Log& log) {
     std::wstring v;
     int removed = 0;
     for (const std::wstring& p : SplitPath(old)) {
-        std::wstring full = Expand(p);
+        std::wstring full = ExpandFresh(p, true);
+        // переменная не раскрылась без окружения пользователя (%USERPROFILE%) - не судим, оставляем как есть
+        if (full.find(L'%') != std::wstring::npos) {
+            v += (v.empty() ? L"" : L";") + p;
+            continue;
+        }
         if (!IsDir(full) || !seen.insert(Norm(full)).second) {
             ++removed;
             log((IsDir(full) ? L"Дубль: " : L"Нет папки: ") + p);

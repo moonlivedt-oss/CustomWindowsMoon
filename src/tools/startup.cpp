@@ -14,7 +14,7 @@ namespace tools {
 namespace {
 
 constexpr wchar_t kApproved[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\";
-enum Kind { RUN_USER, RUN_MACHINE, RUN_MACHINE32, FOLDER_USER, FOLDER_COMMON, TASK };
+enum Kind { RUN_USER, RUN_MACHINE, RUN_MACHINE32, FOLDER_USER, FOLDER_COMMON, TASK, RUN_ONCE };
 
 struct ComScope {
     HRESULT hr;
@@ -212,6 +212,11 @@ std::vector<StartItem> StartupItems() {
     ReadRun(HKEY_CURRENT_USER, run, 0, RUN_USER, L"Run, пользователь", L"Run", out);
     ReadRun(HKEY_LOCAL_MACHINE, run, KEY_WOW64_64KEY, RUN_MACHINE, L"Run, компьютер", L"Run", out);
     ReadRun(HKEY_LOCAL_MACHINE, run, KEY_WOW64_32KEY, RUN_MACHINE32, L"Run, компьютер (32 бита)", L"Run32", out);
+    // RunOnce: выполнится при следующем входе и сотрётся - любимое место закрепления вредоносов, «Защита» смотрит и
+    // сюда; переключать нечего (Диспетчер задач их тоже не показывает)
+    constexpr wchar_t once[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
+    ReadRun(HKEY_CURRENT_USER, once, 0, RUN_ONCE, L"RunOnce, пользователь", L"RunOnce", out);
+    ReadRun(HKEY_LOCAL_MACHINE, once, KEY_WOW64_64KEY, RUN_ONCE, L"RunOnce, компьютер", L"RunOnce", out);
     ReadFolder(FOLDERID_Startup, FOLDER_USER, L"Папка «Автозагрузка»", out);
     ReadFolder(FOLDERID_CommonStartup, FOLDER_COMMON, L"Общая папка «Автозагрузка»", out);
     ITaskService* svc = nullptr;

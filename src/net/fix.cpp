@@ -39,11 +39,13 @@ std::string ReadAll(const std::wstring& path) {
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_EXISTING, 0, nullptr);
     if (f == INVALID_HANDLE_VALUE) return {};
-    std::string s(64 * 1024, '\0');
+    // целиком: hosts со списками блокировок бывает в мегабайты, а CleanHosts записывает прочитанное обратно -
+    // с прежним пределом 64 КБ хвост файла пропадал
+    std::string s;
+    char buf[65536];
     DWORD got = 0;
-    ReadFile(f, s.data(), (DWORD)s.size(), &got, nullptr);
+    while (s.size() < 64u * 1024 * 1024 && ReadFile(f, buf, sizeof(buf), &got, nullptr) && got) s.append(buf, got);
     CloseHandle(f);
-    s.resize(got);
     return s;
 }
 
@@ -71,8 +73,6 @@ std::wstring Stamp() {
 }
 
 }  // namespace
-
-const wchar_t* JobKey(Job j) { return j >= 0 && j < kJobs ? kJobKeys[j] : L""; }
 
 // ---- без прав ----
 
@@ -210,6 +210,11 @@ void CleanHosts(const Log& log) {
     GetSystemDirectoryW(sys, MAX_PATH);
     std::wstring path = std::wstring(sys) + L"\\drivers\\etc\\hosts";
     std::string raw = ReadAll(path);
+    // не прочитался (занят) или слишком велик - не трогать: иначе записали бы пустой или обрезанный hosts
+    if (raw.empty() || raw.size() >= 64u * 1024 * 1024) {
+        log(L"hosts не прочитался целиком - оставлен как есть.");
+        return;
+    }
     WriteAll(AdminBackupDir() + L"\\hosts-" + Stamp() + L".txt", raw);
     std::string kept;
     int removed = 0;
@@ -367,8 +372,11 @@ bool Job_(Job j, const Log& log) {
             return true;
         case JOB_RESTORE_POINT: {
             // сравниваем число точек до и после: Windows молча пропускает, если точка была меньше суток назад
+            // модули - только системные: PSModulePath берётся из переменных пользователя, и модуль, подложенный в
+            // Документы, выполнился бы с правами администратора
             std::wstring ps =
-                L"-NoProfile -ExecutionPolicy Bypass -Command \"$b=@(Get-ComputerRestorePoint).Count; "
+                L"-NoProfile -ExecutionPolicy Bypass -Command \"$env:PSModulePath=$PSHOME+'\\Modules'; "
+                L"$b=@(Get-ComputerRestorePoint).Count; "
                 L"try { Checkpoint-Computer -Description 'MoonRadial' -RestorePointType MODIFY_SETTINGS "
                 L"-ErrorAction Stop } catch { 'error: ' + $_.Exception.Message; exit 2 }; "
                 L"$a=@(Get-ComputerRestorePoint).Count; if ($a -gt $b) { 'created' } else { 'skipped' }\"";

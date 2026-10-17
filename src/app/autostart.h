@@ -9,5 +9,7 @@ void SetAutostart(bool on);
 // Самовосстановление возвращает автозапуск, только если его хотели, а не включает сам.
 int AutostartWanted();
 void SetAutostartWanted(bool on);
+// Автозапуск на месте, но выключен руками: задача отключена в планировщике или запись Run - в Диспетчере задач.
+bool AutostartDisabledByUser();
 // После старта: перенести запись из Run в планировщик и поправить путь, если exe переехал.
 void AutostartRefresh();

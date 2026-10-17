@@ -45,7 +45,6 @@ struct Result {
 };
 // Закрыть (мягко, потом добить), записать boost.session.json, сжать рабочие наборы. Блокирует - звать из потока.
 Result Free(const Settings& s, const std::wstring& dir, const std::vector<Group>& groups);
-std::vector<std::wstring> LoadSession(const std::wstring& dir);  // пути из boost.session.json
 void ClearSession(const std::wstring& dir);
 void Reopen(const std::vector<std::wstring>& paths);
 
@@ -58,7 +57,7 @@ double AvailMb(int* usedPercent = nullptr);
 // Очистка памяти с правами администратора.
 bool PurgeTaskExists();
 bool SetupPurgeTask();             // создать задачу (Windows спросит разрешение)
-bool RunPurge(const Settings& s);   // запустить задачу без запросов (области - из s); false - не готова
+bool RunPurge(const Settings& s);  // запустить задачу без запросов (области - из s); false - не готова
 int PurgeMain(const Settings& s);  // RadialMenu.exe --purge: сама очистка, уже с правами
 
 }  // namespace boost

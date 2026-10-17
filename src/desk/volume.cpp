@@ -141,7 +141,6 @@ float MasterImpl(float delta, bool set) {
 
 }  // namespace
 
-float Master() { return MasterImpl(0, false); }
 float AddMaster(float delta) { return MasterImpl(delta, true); }
 float App(const std::wstring& aumid) { return AppImpl(aumid, 0, false); }
 float AddApp(const std::wstring& aumid, float delta) { return AppImpl(aumid, delta, true); }

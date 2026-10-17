@@ -221,6 +221,12 @@ void SetAutostartWanted(bool on) {
     RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\MoonRadial", L"AutostartWanted", REG_DWORD, &v, sizeof(v));
 }
 
+bool AutostartDisabledByUser() {
+    int t = TaskState();
+    if (t != 0) return t < 0;
+    return !RunValue().empty() && DisabledByTaskManager();
+}
+
 void SetAutostart(bool on) {
     SetAutostartWanted(on);
     if (on) {

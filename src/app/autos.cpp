@@ -214,6 +214,12 @@ void Repair() {
     // автозапуск: возвращаем, только если его хотели (последнее включение из меню или студии)
     int wanted = AutostartWanted();
     if (wanted < 0 && AutostartOn()) SetAutostartWanted(true), wanted = 1;  // включён до появления этой отметки
+    // выключили в Диспетчере задач или планировщике - это решение пользователя, а не поломка: не спорить с ним
+    // (программа, которая сама включает себя обратно, ведёт себя как вредонос - и антивирус так и решит)
+    if (wanted == 1 && !AutostartOn() && AutostartDisabledByUser()) {
+        SetAutostartWanted(false), wanted = 0;
+        Note(L"Автозапуск выключен в Диспетчере задач или планировщике - не возвращаю");
+    }
     if (wanted == 1 && !AutostartOn()) {
         SetAutostart(true);
         if (AutostartOn()) {

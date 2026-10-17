@@ -96,7 +96,16 @@ int Clean(const std::wstring& name) {
         if (j.name != name) continue;
         if (j.path.size() < 8) break;
         Del d;
-        if (_wcsicmp(j.path.c_str(), tools::TempDir().c_str()) == 0) d.newer = NowStamp() - kDay;
+        if (_wcsicmp(j.path.c_str(), tools::TempDir().c_str()) == 0) {
+            // %TEMP% задаёт пользователь: если он указывает не на папку Temp (D:\, профиль), чистить нельзя
+            std::wstring leaf = Lower(j.path.substr(j.path.find_last_of(L'\\') + 1));
+            if (leaf != L"temp" && leaf != L"tmp") {
+                Out(L"%TEMP% указывает на " + j.path + L" - это не папка временных файлов, не трогаю.");
+                Out(L"@freed=0");
+                return 1;
+            }
+            d.newer = NowStamp() - kDay;
+        }
         Out(L"Чищу: " + j.name + L"...");
         ULONGLONG freed = DeleteContents(j.path, d);
         Out(j.name + L": освобождено " + tools::Bytes(freed) +
@@ -153,11 +162,6 @@ std::wstring ExePath(HANDLE h) {
     DWORD n = MAX_PATH * 2;
     if (!QueryFullProcessImageNameW(h, 0, buf, &n)) return L"";
     return std::wstring(buf, n);
-}
-
-std::wstring ExeName(HANDLE h) {
-    std::wstring p = ExePath(h);
-    return p.substr(p.find_last_of(L'\\') + 1);
 }
 
 int Kill(DWORD pid, const std::wstring& expect) {
@@ -280,7 +284,8 @@ int RecycleDup(const std::wstring& keep, const std::vector<std::wstring>& copies
     op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
     int rc = SHFileOperationW(&op);
     if (rc != 0 || op.fAnyOperationsAborted) ok = 0;
-    Out(rc == 0 ? L"В Корзине: " + std::to_wstring(ok) : L"Корзина не приняла файлы (код " + std::to_wstring(rc) + L")");
+    Out(rc == 0 ? L"В Корзине: " + std::to_wstring(ok)
+                : L"Корзина не приняла файлы (код " + std::to_wstring(rc) + L")");
     Out(L"@moved=" + std::to_wstring(ok));
     return ok ? 0 : 1;
 }

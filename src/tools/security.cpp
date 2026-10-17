@@ -481,7 +481,9 @@ void WalkTasks(ITaskFolder* folder, std::vector<Suspect>& out, int& checked, con
                             s.path = ExeOfCommand(cmd);
                             std::wstring script = ScriptLaunch(cmd);
                             if (!script.empty()) Flag(s, 4, script);
-                            if (!s.path.empty() && Lower(Dir(s.path)) != ownDir) JudgeFile(s);
+                            std::wstring lp = Lower(s.path);  // своя задача автозапуска - не находка
+                            bool own = Dir(lp) == ownDir && LeafOf(lp) == L"radialmenu.exe";
+                            if (!s.path.empty() && !own) JudgeFile(s);
                             if (s.sign == SIGN_NOFILE && s.score <= 1) s.score = 0;  // мёртвая задача - не опасна
                             s.parent = Trim(cmd);                                    // для карточки: полная команда
                             if (s.score >= kSuspectScore) out.push_back(s);
@@ -838,6 +840,12 @@ SecurityScan ScanSecurity() {
     wchar_t own[MAX_PATH];
     GetModuleFileNameW(nullptr, own, MAX_PATH);
     std::wstring ownDir = Lower(Dir(own));
+    // своё пропускаем поимённо: вся папка программы - обычная папка пользователя, и exe, подложенный туда,
+    // иначе был бы невидим для проверки
+    auto mine = [&](const std::wstring& lowerPath) {
+        return Dir(lowerPath) == ownDir &&
+               (LeafOf(lowerPath) == L"radialmenu.exe" || LeafOf(lowerPath) == L"radialtools.exe");
+    };
 
     std::map<DWORD, PROCESSENTRY32W> procs;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -862,7 +870,7 @@ SecurityScan ScanSecurity() {
         s.name = pe.szExeFile;
         s.path.assign(p, n);
         std::wstring lp = Lower(s.path);
-        if (Dir(lp) == ownDir) continue;  // RadialMenu и RadialTools
+        if (mine(lp)) continue;
         auto par = procs.find(pe.th32ParentProcessID);
         if (par != procs.end()) s.parent = par->second.szExeFile;
         s.net = net.count(pid) > 0;
@@ -894,7 +902,7 @@ SecurityScan ScanSecurity() {
         }
         std::wstring script = ScriptLaunch(it.command);
         if (!script.empty()) Flag(s, 4, script);
-        if (!s.path.empty() && Dir(Lower(s.path)) != ownDir) JudgeFile(s);
+        if (!s.path.empty() && !mine(Lower(s.path))) JudgeFile(s);
         if (s.score >= kSuspectScore) r.autos.push_back(s);
     }
     CheckRegistry(r.hijacks);
