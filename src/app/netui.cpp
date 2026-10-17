@@ -145,6 +145,8 @@ void ShowRing(RadialMenu& menu) {
                        L"Системный прокси, PAC и WPAD, переменные прокси, кэш DNS"));
     ring.push_back(Act(L"Остатки VPN", L"net-tunnel.png", L"vpn",
                        L"Kill-switch (с бэкапом), зависшие маршруты, MTU, ARP, hosts; нужны права"));
+    ring.push_back(Act(L"Обновить IP", L"net-renew.png", L"ip",
+                       L"Отпустить и заново получить адрес у роутера на физическом адаптере; нужны права"));
     Item dns = Act(L"DNS", L"net-dns.png", L"", L"Сменить DNS адаптера, очистить кэш, найти самый быстрый");
     dns.children = {
         Act(L"Самый быстрый", L"net-ping.png", L"dns-test", L"Замерить Cloudflare, Google, Quad9, Яндекс..."),

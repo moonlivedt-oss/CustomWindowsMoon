@@ -78,6 +78,7 @@ void SecurityAct(const tools::Suspect& s);       // карточка «что с
 void IgnoreFind(const tools::Suspect& s);        // «Это моё»: больше не показывать (ignored.tsv)
 void ClearIgnored();                             // показывать снова всё
 const wchar_t* FindKindName(tools::FindKind k);  // «процесс», «сертификат»...
+const wchar_t* FindKindIcon(tools::FindKind k);  // файл значка в icons: tools-certs.png...
 // Для проверки (WM_APP+58): карточка со сценой на выдуманных данных, ничего не удаляет.
 // 0 - очистка, 1 - защита с находками, 2 - защита, всё чисто
 void Demo(int what);

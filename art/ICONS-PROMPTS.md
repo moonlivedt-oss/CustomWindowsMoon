@@ -199,6 +199,44 @@ Shared style for every object: premium dark fantasy UI icon set in the spirit of
 Avoid: power buttons, microchips, download trays, down arrows, shields, padlocks, monitors, globes, sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, labels, Git logo, Docker whale, Windows logo, NVIDIA logo, brand logos, watermark, signature, background color or scenery, floor, pedestals, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes, two objects that look alike
 ```
 
+---
+
+# Набор 4: группы кольца «Утилиты» и общие значки
+
+После перестановки кольца (шесть групп, art/tools_rings_sketch.html) у трёх групп значок совпадает со значком
+утилиты внутри: «Место» и «Диски» - SSD, «Память» и «Подкачка» - планка памяти, «Разработка» и «Git» - ветка.
+Ещё около десяти пунктов делят метлу-вихрь `tools-clean` и ящик `tools-box`. Набор 4 - один лист на эти
+места; каждый предмет сверен с 89 значками в `icons\`. Код уже знает имена: пока значка нет, остаётся нынешний.
+
+Подключено без генерации: «Корзина» - `recycle`, «Кто качает» - `net-procs`, «Обновить IP» в кольце «Сеть» -
+`net-renew`, находки «Защиты» по виду - `tools-certs`, `tools-firewall`, `tools-path-open`, `tools-service`,
+`tools-wmi`, `tools-integrity`; сам сектор - `tools-wait` (проверяю), `tools-ok` (чисто); «Песочница» -
+`tools-sandbox`; карточка подписи в студии - `tools-sign`; Kaspersky - значок самой программы. Пока без места:
+`tools-sandbox-check`, `tools-origin`, `more`.
+
+| # | имя | где | предмет |
+|---|---|---|---|
+| 1 | `grp-space` | группа «Место» | рулетка |
+| 2 | `grp-memory` | группа «Память» | колба (как колба памяти в студии) |
+| 3 | `grp-dev` | группа «Разработка» | наковальня с молотом |
+| 4 | `tools-studio` | «В студии» в каждой группе | готовальня с циркулем |
+| 5 | `tools-dustpan` | «Всё сразу» в «Очистке» | совок с пылью |
+| 6 | `tools-cache` | каждый кэш в «Очистке» | банка с крышкой, слои внутри |
+| 7 | `tools-archive` | «Unreal: старое» | выдвинутый ящик картотеки |
+| 8 | `tools-shelved` | «Давние» проекты | заклеенная коробка для переезда |
+| 9 | `tools-stale-server` | «Старые» серверы разработки | пыльный блок сервера |
+| 10 | `tools-cable` | «Хвосты сборки» | перерезанный кабель |
+| 11 | `tools-pagefile` | «Подкачка» | воронка, переливающая в канистру |
+| 12 | `tools-alarm` | «Мешает сну», «Будят» | будильник с колокольчиками |
+
+## 14. `sheet-tools3.png`: группы и общие значки, 12 штук, сетка 4 x 3
+
+```
+A premium icon sheet of exactly twelve finely crafted miniature objects on a fully transparent background, arranged in a strict 4 x 3 grid of equal square cells, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a compact graphite tape measure case with a polished silver tape pulled out and curling, fine crimson tick marks along the tape, (2) a round-bottom laboratory flask of frosted glass on a small graphite stand, filled two thirds with glowing crimson liquid in two layers, a silver cork, (3) a small graphite anvil with a polished silver hammer resting on it and a few crimson sparks jumping from the striking face, (4) an open graphite drafting case lined with dark crimson velvet holding a polished silver compass and a slim silver ruler, (5) a graphite dustpan with a silver handle, a small heap of glowing crimson dust inside it, (6) a squat graphite canister with a silver screw lid, a frosted glass window on its side showing stacked crimson layers inside, (7) a graphite filing cabinet drawer pulled half open, old silver-edged index cards inside with one card glowing crimson, (8) a cardboard-shaped moving box made of graphite metal, taped shut with a silver strip and a crimson enamel label plate on the side, (9) a slim graphite server unit with silver vents covered in a fine layer of pale dust, one dim crimson status light, (10) a thick graphite cable cut through the middle, frayed silver wire ends sparking crimson at the cut, (11) a polished silver funnel pouring a thin stream of glowing crimson liquid into a small graphite jerrycan, (12) a small graphite twin-bell alarm clock with silver bells and hammer, the clock face lit faint crimson.
+Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 34 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere.
+Avoid: SSD sticks, memory modules, microchips, branching trees, brooms, swirls, toolboxes, crates with lids open, trash cans, hourglasses, wall clocks with circular arrows, shields, padlocks, spider webs, sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, labels, brand logos, watermark, signature, background color or scenery, floor, pedestals, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes, two objects that look alike
+```
+
 ## Цвет под тему - без новых картинок
 
 Значки нарисованы в багровом под тему «Багровое поле». Перерисовывать их под каждую из 12 тем не нужно:

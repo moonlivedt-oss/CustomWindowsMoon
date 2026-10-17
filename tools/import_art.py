@@ -109,6 +109,21 @@ SHEETS = {
         "tools-containers",
         "tools-leftovers",
     ],
+    # набор 4: группы кольца «Утилиты» и пункты, которые пока делят общий значок
+    "sheet-tools3.png": [
+        "grp-space",
+        "grp-memory",
+        "grp-dev",
+        "tools-studio",
+        "tools-dustpan",
+        "tools-cache",
+        "tools-archive",
+        "tools-shelved",
+        "tools-stale-server",
+        "tools-cable",
+        "tools-pagefile",
+        "tools-alarm",
+    ],
     # кольцо «Сеть»
     "sheet-net.png": [
         "net-check",
@@ -137,6 +152,7 @@ GRIDS = {
     "sheet-guard2.png": (4, 2),
     "sheet-recovery.png": (3, 2),
     "sheet-tools2.png": (4, 3),
+    "sheet-tools3.png": (4, 3),
 }
 
 

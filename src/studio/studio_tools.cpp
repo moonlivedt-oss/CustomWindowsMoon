@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/files.h"
 #include "core/fx.h"
 #include "core/text.h"
 #include "gfx/color.h"
@@ -1118,9 +1119,12 @@ void Studio::ToolsPage(const RectF& r) {
                 bool hot = rowHot(rr);
                 if (hot) ui.Fill(rr, WithAlpha(c.cardHi, 170), ui.S(6));
                 bool danger = s.score >= 6;
-                ui.Text(danger ? L"опасно" : L"странно", RectF(b.X, y + ui.S(2), ui.S(70), ui.S(22)),
+                // значок вида находки (сертификат, брандмауэр, служба...), рядом - насколько серьёзно
+                ui.Icon(ExeDir() + L"\\icons\\" + toolsui::FindKindIcon(s.kind),
+                        RectF(b.X + ui.S(2), y + ui.S(6), ui.S(32), ui.S(32)));
+                ui.Text(danger ? L"опасно" : L"странно", RectF(b.X + ui.S(40), y + ui.S(2), ui.S(70), ui.S(22)),
                         danger ? c.warn : c.gold, 11, true);
-                float tx = b.X + ui.S(76), tw = b.Width - ui.S(76) - (hot ? ui.S(250) : 0);
+                float tx = b.X + ui.S(116), tw = b.Width - ui.S(116) - (hot ? ui.S(250) : 0);
                 std::wstring name = Ellip(s.name, 60);
                 float nw = std::min(tw, ui.Measure(name, 12, true) + ui.S(12));
                 ui.Text(name, RectF(tx, y + ui.S(2), nw, ui.S(22)), c.text, 12, true);
@@ -1151,7 +1155,8 @@ void Studio::ToolsPage(const RectF& r) {
                           L"Чужой файл с этой подписью «Защита» считает подделкой."
                         : L"Своим сертификатом сборка подпишет RadialMenu.exe и RadialTools.exe - у Kaspersky "
                           L"меньше поводов, помощник с правами сверяет подпись. Сертификат доверен только у вас.",
-                    RectF(b.X, b.Y, b.Width - ui.S(220), ui.S(52)), c.muted, 11.5f, false, ui::Left, true);
+                    RectF(b.X + ui.S(52), b.Y, b.Width - ui.S(272), ui.S(52)), c.muted, 11.5f, false, ui::Left, true);
+            ui.Icon(ExeDir() + L"\\icons\\tools-sign.png", RectF(b.X, b.Y + ui.S(4), ui.S(40), ui.S(40)));
             if (!signReady &&
                 ui.Button(ID_TOOLS_SIGN, RectF(b.X + b.Width - ui.S(206), b.Y + ui.S(6), ui.S(206), ui.S(36)),
                           L"Настроить подпись", Kind::Secondary, L"", busy) &&
