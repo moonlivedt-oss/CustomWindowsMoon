@@ -58,6 +58,7 @@ const Action kActions[] = {
     {L"minecraft", L"Кольцо Minecraft"},
     {L"clip", L"Кольцо буфера"},
     {L"layout", L"Кольцо раскладки окон"},
+    {L"sets", L"Рабочие наборы"},
 };
 
 const Action kWheel[] = {
@@ -184,8 +185,16 @@ void (*g_layout)() = nullptr;
 
 void SetLayout(void (*layout)()) { g_layout = layout; }
 
+void (*g_sets)() = nullptr;
+
+void SetSets(void (*sets)()) { g_sets = sets; }
+
 void Run(const std::wstring& a) {
     if (a.empty()) return;
+    if (a == L"sets") {
+        if (g_sets) g_sets();
+        return;
+    }
     if (a == L"layout") {
         if (g_layout) g_layout();
         return;

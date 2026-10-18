@@ -5,6 +5,7 @@
 
 #include <algorithm>
 
+#include "app/worksets.h"
 #include "core/files.h"
 #include "core/macro.h"
 #include "core/text.h"
@@ -246,6 +247,7 @@ void Studio::AppsPage(const RectF& r) {
             }
         });
     }
+    SetsCards(cols, view);
     if (cfg.apps.empty())
         cols.Wide(L"Как это работает", 2.0f, [&](const RectF& b) {
             cols.Note(b, 0,
@@ -256,6 +258,122 @@ void Studio::AppsPage(const RectF& r) {
         });
     pageContentH_ = cols.Height();
     ui.G().Restore(st);
+}
+
+// Рабочие наборы: под кольцами программ, по карточке на набор.
+void Studio::SetsCards(CardColumns& cols, const RectF& view) {
+    const UiColors& c = ui.C();
+    cols.Wide(L"Рабочие наборы", 1.9f, [&](const RectF& b) {
+        if (ui.Button(ID_SET_NEW, RectF(b.GetRight() - ui.S(170), b.Y, ui.S(170), ui.S(36)), L"Новый набор",
+                      Kind::Primary)) {
+            Change();
+            WorkSet w;
+            w.ring.name = L"Проект " + std::to_wstring(cfg.sets.size() + 1);
+            w.layout = L"l:2";
+            cfg.sets.push_back(w);
+            Save();
+        }
+        ui.Text(L"Одним щелчком - VS Code с папкой, терминал с окружением, ссылки и программы, окна - по раскладке.",
+                RectF(b.X, b.Y, b.Width - ui.S(190), ui.S(36)), c.muted, 12);
+        cols.Note(b, 0.9f,
+                  L"Открыть - в кольце «Наборы» (действие угла sets или пункт action:sets) и в палитре («Набор: ...»). "
+                  L"«Закрыть набор» вежливо закрывает только те окна, что открылись при его запуске.",
+                  c.faint);
+    });
+    static const std::vector<std::wstring> kLays = {L"Как откроются", L"Два", L"Три", L"Главное и два", L"Четыре"};
+    static const wchar_t* kLayKeys[] = {L"", L"l:2", L"l:3", L"l:main2", L"l:4"};
+    for (size_t si = 0; si < cfg.sets.size() && si < 20; ++si) {
+        WorkSet& w = cfg.sets[si];
+        int S = (int)si;
+        auto id = [S](int f) { return ID_SET + S * 100 + f; };
+        int n = (int)std::min<size_t>(w.ring.children.size(), 16);
+        cols.Wide(w.ring.name.c_str(), 2.0f + n * 0.88f + 1.0f, [&](const RectF& b) {
+            RectF nr(b.X, b.Y, b.Width * 0.4f, ui.S(36));
+            FieldOrText(
+                id(0), nr, view, w.ring.name,
+                [this, S, id](const std::wstring& s) {
+                    FieldEdit(id(0));
+                    if (S < (int)cfg.sets.size()) cfg.sets[S].ring.name = s;
+                },
+                L"Имя набора");
+            int sel = 0;
+            for (int k = 0; k < 5; ++k)
+                if (w.layout == kLayKeys[k]) sel = k;
+            if (ui.Segmented(id(1), RectF(nr.GetRight() + ui.S(12), b.Y, b.Width - nr.Width - ui.S(12), ui.S(36)),
+                             kLays, sel)) {
+                Change();
+                w.layout = kLayKeys[sel];
+                Save();
+            }
+            float rh = cols.RowH() * 0.88f;
+            for (int j = 0; j < n; ++j) {
+                Item& ch = w.ring.children[j];
+                float y = b.Y + cols.RowH() + j * rh;
+                std::wstring kind = worksets::KindOf(ch.path);
+                if (!kind.empty() && kind[0] != L'V') kind[0] = towupper(kind[0]);
+                ui.Text(kind, RectF(b.X, y, ui.S(170), ui.S(34)), c.muted, 12);
+                RectF pr(b.X + ui.S(176), y, b.Width - ui.S(176) - ui.S(48), ui.S(34));
+                FieldOrText(
+                    id(10 + j * 2), pr, view, ch.path,
+                    [this, S, j, id](const std::wstring& s) {
+                        FieldEdit(id(10 + j * 2));
+                        if (S < (int)cfg.sets.size() && j < (int)cfg.sets[S].ring.children.size())
+                            cfg.sets[S].ring.children[j].path = s;
+                    },
+                    L"code:папка, term:папка, https://..., программа или файл");
+                if (ui.Button(id(11 + j * 2), RectF(b.GetRight() - ui.S(40), y, ui.S(40), ui.S(34)), L"×", Kind::Ghost))
+                    Defer([this, S, j] {
+                        if (S >= (int)cfg.sets.size() || j >= (int)cfg.sets[S].ring.children.size()) return;
+                        Change();
+                        auto& v = cfg.sets[S].ring.children;
+                        v.erase(v.begin() + j);
+                        Save();
+                    });
+            }
+            float y = b.Y + cols.RowH() + n * rh + ui.S(4);
+            auto add = [&](int f, const wchar_t* label, int kind, float x, float bw) {
+                if (n >= 16 || !ui.Button(id(f), RectF(x, y, bw, ui.S(36)), label)) return;
+                Defer([this, S, kind] {
+                    if (S >= (int)cfg.sets.size()) return;
+                    std::wstring path;
+                    if (kind == 0 || kind == 1) {
+                        std::wstring dir = PickPath(true);
+                        if (dir.empty()) return;
+                        path = (kind == 0 ? L"code:" : L"term:") + dir;
+                    } else if (kind == 2) {
+                        path = L"https://";
+                    } else {
+                        path = PickPath(false);
+                        if (path.empty()) return;
+                    }
+                    Change();
+                    Item it;
+                    it.path = path;
+                    std::wstring leaf = path.substr(path.find_last_of(L"\\/:") + 1);
+                    it.name = leaf.empty() ? L"Ссылка" : leaf;
+                    cfg.sets[S].ring.children.push_back(it);
+                    Save();
+                });
+            };
+            float bw = ui.S(118), gx = ui.S(8);
+            add(2, L"+ VS Code", 0, b.X, bw);
+            add(3, L"+ Терминал", 1, b.X + (bw + gx), bw);
+            add(4, L"+ Ссылка", 2, b.X + 2 * (bw + gx), bw);
+            add(5, L"+ Программа", 3, b.X + 3 * (bw + gx), bw);
+            int open = worksets::OpenedCount(S);
+            if (ui.Button(id(6), RectF(b.GetRight() - ui.S(290), y, ui.S(140), ui.S(36)),
+                          open ? L"Закрыть" : L"Открыть", open ? Kind::Secondary : Kind::Primary))
+                Defer([S, open] { open ? worksets::Close(S) : worksets::Open(S); });
+            if (ui.Button(id(7), RectF(b.GetRight() - ui.S(140), y, ui.S(140), ui.S(36)), L"Удалить", Kind::Danger))
+                Defer([this, S] {
+                    if (S >= (int)cfg.sets.size()) return;
+                    Change();
+                    Log(L"Удалён набор: " + cfg.sets[S].ring.name);
+                    cfg.sets.erase(cfg.sets.begin() + S);
+                    Save();
+                });
+        });
+    }
 }
 
 // Сочетание для команды кольца программы (кнопка «Записать»): как у углов, модификаторы копятся.

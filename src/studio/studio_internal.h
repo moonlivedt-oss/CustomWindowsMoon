@@ -239,6 +239,8 @@ enum Id {
     ID_APP_PRESET = 11800,   // +i: заготовка кольца программы
     ID_APP = 12000,          // +кольцо*100 + поле (studio_apps.cpp)
     ID_AID = 16000,          // +поле: «Помощники» (studio_aids.cpp)
+    ID_SET_NEW = 16490,      // «Программы»: новый рабочий набор
+    ID_SET = 16500,          // +набор*100 + поле (studio_apps.cpp)
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -512,6 +514,7 @@ private:
     bool CaptureKey(WPARAM vk);
     bool CaptureAppKey(WPARAM vk);  // сочетание для команды кольца программы
     void AppsPage(const RectF& r);
+    void SetsCards(class CardColumns& cols, const RectF& view);  // рабочие наборы на вкладке «Программы»
     void AidsPage(const RectF& r);
     void KeysPage(const RectF& r);
     void Header(const RectF& r, const std::wstring& title, const std::wstring& sub);

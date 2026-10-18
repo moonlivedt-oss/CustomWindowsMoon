@@ -16,6 +16,7 @@
 #include "app/devcli.h"
 #include "app/netui.h"
 #include "app/palette.h"
+#include "app/worksets.h"
 #include "desk/cliphist.h"
 #include "desk/layout.h"
 #include "app/autos.h"
@@ -1562,6 +1563,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         for (Item& it : layout::Items(L"z|")) out.push_back(std::move(it));
     });
     palette::AddRunner(L"z|", [](const std::wstring& key) { layout::Run(key); });
+    worksets::Init(g_wnd, &g_cfg);
+    corners::SetSets([] { worksets::ShowRing(g_menu); });
+    palette::AddSource([](std::vector<Item>& out) {
+        for (Item& it : worksets::Items(L"w|")) out.push_back(std::move(it));
+    });
+    palette::AddRunner(L"w|", [](const std::wstring& key) { worksets::Run(key); });
     // вошли в Windows только что: стол открывается порталом
     if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
     g_game.onChange = OnGameMode;
