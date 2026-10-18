@@ -296,6 +296,12 @@ void Run(const std::wstring& key) {
     }
     if (key.rfind(L"giant:", 0) == 0) return GiantAct(key.substr(6));
     if (key == L"giants-measure") return GiantsMeasure();
+    if (key == L"balance-restore") {
+        BalanceRestoreAll();
+        g_card.Show(BoostCard::DONE, L"Баланс", L"Всем, кого придерживал, приоритет снова обычный.", Theme(), 6000,
+                    Toast::G_OK);
+        return;
+    }
     if (key == L"net-top" || key == L"power") {
         bool top = key == L"net-top";
         if (!net::AdminReady()) {

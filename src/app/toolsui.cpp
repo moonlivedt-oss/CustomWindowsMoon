@@ -955,6 +955,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
     });
     g_watchStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     g_watchThread = CreateThread(nullptr, 0, WatchLoop, nullptr, 0, nullptr);
+    GuardStart();
     // живой рост: Загрузки и TEMP - чаще всего именно они съедают место незаметно
     tools::LiveStart({{L"Загрузки", KnownFolder(FOLDERID_Downloads)}, {L"TEMP", tools::TempDir()}});
 }
@@ -1204,6 +1205,7 @@ void LiveAlert(ULONGLONG now) {
 
 void Tick() {
     tools::MftSearchForget(120000);  // индекс поиска папок (палитра) не держим без дела
+    GuardTick();
     g_card.Tick();
     SceneCard::Get().Poll();
     SceneCard::Get().Tick();
@@ -1241,6 +1243,7 @@ void Tick() {
 
 void Shutdown() {
     tools::LiveStop();
+    GuardStop();  // приоритеты и запрет сна - как были
     if (g_watchStop) SetEvent(g_watchStop);
     if (g_watchThread) WaitForSingleObject(g_watchThread, 3000), CloseHandle(g_watchThread);
     g_card.Destroy();

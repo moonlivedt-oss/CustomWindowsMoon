@@ -221,6 +221,9 @@ void OpenInSandbox(const std::wstring& file);
 void OpenVirusTotal(const std::wstring& path);
 void SecurityAction(const tools::Suspect& s);
 void TurnOffStart(const tools::StartItem& it);  // выключить запись, если она всё та же (сверка со свежим списком)
+void GuardStart();                              // сторожа процессов (toolsui_guard.cpp): поток раз в 5 с
+void GuardStop();
+void GuardTick();  // из Tick: настройки для потока, журнал и карточки из очереди
 Item SecurityItem();
 Item RecoveryItem();
 Item SystemItem(const Scan& scan);

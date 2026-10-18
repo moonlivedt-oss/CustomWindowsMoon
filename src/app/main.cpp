@@ -184,6 +184,7 @@ void MaskAlt() {
 }
 
 void ShowAvHint();
+void UpdateTrayTip();
 
 void PollWork() {
     bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
@@ -192,6 +193,12 @@ void PollWork() {
         g_guardAt = nowMs;
         g_menu.Guard();
         g_reveal.Guard();
+        static std::wstring awakeWas;  // «не сплю, пока идёт cmake» - в подсказке трея
+        std::wstring awake = toolsui::AwakeReason();
+        if (awake != awakeWas) {
+            awakeWas = awake;
+            UpdateTrayTip();
+        }
     }
     // radial.cfg мог поменяться не через студию: раз в секунду проверяем, чтобы углы и плашка подхватили правку
     if (nowMs - g_cfgCheckAt >= 1000 && !g_menu.IsOpen()) {
@@ -307,6 +314,8 @@ void ShowFromStudio(bool left, HWND studio) {
 std::wstring TrayTip() {
     if (g_game.On()) return L"Radial Menu: игровой режим (" + g_game.Reason() + L")";
     if (g_dev.On()) return L"Radial Menu: режим разработки (" + g_dev.Reason() + L")";
+    std::wstring awake = toolsui::AwakeReason();
+    if (!awake.empty()) return L"Radial Menu: не сплю, пока идёт " + awake;
     return L"Radial Menu: Alt + край экрана";
 }
 
