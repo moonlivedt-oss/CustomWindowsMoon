@@ -997,6 +997,21 @@ bool Run(int& exitCode) {
     } else if (Has(args, L"--ring-bench")) {
         size_t i = std::find(args.begin(), args.end(), L"--ring-bench") - args.begin();
         exitCode = RingBench(i + 1 < args.size() ? std::max(500, _wtoi(args[i + 1].c_str())) : 4000);
+    } else if (Value(args, L"--find-dir", v)) {  // --find-dir <имя>: поиск папок по таблицам MFT -> find_out.txt
+        ULONGLONG t0 = GetTickCount64(), age = 0;
+        std::vector<tools::FoundDir> found;
+        bool any = tools::MftFindDirs(v, 30, found, &age);
+        ULONGLONG t1 = GetTickCount64();
+        std::vector<tools::FoundDir> again;
+        tools::MftFindDirs(v, 30, again, nullptr);  // второй раз - из индекса в памяти
+        ULONGLONG t2 = GetTickCount64();
+        std::wstring o = any ? L"" : L"таблиц MFT нет\r\n";
+        o += L"первый поиск " + std::to_wstring(t1 - t0) + L" мс (с загрузкой), повторный " + std::to_wstring(t2 - t1) +
+             L" мс, таблице " + std::to_wstring(age / 60) + L" мин\r\n";
+        for (const tools::FoundDir& f : found)
+            o += f.path + L"\t" + tools::Bytes(f.bytes) + L"\t" + std::to_wstring(f.files) + L"\r\n";
+        WriteOut(L"find_out.txt", o);
+        exitCode = any ? 0 : 1;
     } else if (Value(args, L"--mft-test", v)) {  // --mft-test <папка>, из консоли администратора -> mft_out.txt
         exitCode = MftTest(v);
     } else if (Has(args, L"--clean")) {  // очистить кэши и временные файлы, итог в clean_out.txt

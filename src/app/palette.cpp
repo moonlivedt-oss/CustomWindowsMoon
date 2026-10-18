@@ -7,7 +7,10 @@
 #include "core/config.h"
 #include "core/files.h"
 #include "core/macro.h"
+#include "core/bg.h"
+#include "core/text.h"
 #include "core/winlist.h"
+#include "tools/tools.h"
 #include "menu/menu.h"
 #include "studio/studio.h"
 
@@ -148,6 +151,28 @@ void Show() {
     }
     for (auto& src : g_sources) src(extra);
     g_menu->onNet = Run;
+    // папки из таблиц MFT - по мере набора; индекс грузится заранее, пока кольцо раскрывается
+    bg::Run([] {
+        std::vector<tools::FoundDir> none;
+        tools::MftFindDirs(L"", 1, none);
+    });
+    g_menu->paletteQuery = [](const std::wstring& q) {
+        std::vector<Item> out;
+        std::vector<tools::FoundDir> found;
+        tools::MftFindDirs(q, 12, found);
+        std::wstring icon = ExeDir() + L"\\icons\\tools-folder-find.png";
+        if (!Exists(icon)) icon = ExeDir() + L"\\icons\\folder.png";
+        for (const tools::FoundDir& f : found) {
+            if (!IsFolder(f.path)) continue;  // таблица старая, папку с тех пор убрали
+            Item it;
+            it.name = L"Папка: " + f.path.substr(f.path.find_last_of(L'\\') + 1);
+            it.path = it.full = f.path;
+            it.dir = true;
+            it.iconFull = icon;
+            out.push_back(std::move(it));
+        }
+        return out;
+    };
     POINT pt;
     GetCursorPos(&pt);
     MONITORINFO mi{sizeof(mi)};

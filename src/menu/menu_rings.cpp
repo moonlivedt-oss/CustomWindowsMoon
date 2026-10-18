@@ -138,6 +138,13 @@ void RadialMenu::RebuildSub() {
         }
         std::stable_sort(found.begin(), found.end(), [](auto& a, auto& b) { return a.first < b.first; });
         for (size_t i = 0; i < found.size() && (int)i < cap; ++i) list.push_back(*found[i].second);
+        if (palette_ && paletteQuery && query_.size() >= 2)
+            for (Item& it : paletteQuery(query_)) {
+                bool dup = false;  // папка уже нашлась в кольцах
+                for (const Item& o : list)
+                    if (!o.full.empty() && _wcsicmp(o.full.c_str(), it.full.c_str()) == 0) dup = true;
+                if (!dup) list.push_back(std::move(it));
+            }
         kbSel_ = std::clamp(kbSel_, 0, std::max(0, (int)list.size() - 1));
     } else if (mode_ == Mode::Root && (subParent_ >= 0 || !navStack_.empty())) {
         if (!navStack_.empty()) {

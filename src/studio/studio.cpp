@@ -633,8 +633,14 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
     if (page == PAGE_TOOLS) {  // RADIAL_SCAN=папка - сразу посчитать, что занимает место (снимок сот)
         const wchar_t* scan = _wgetenv(L"RADIAL_SCAN");
         GoTools(tab, scan ? scan : L"");
+        if (const wchar_t* find = _wgetenv(L"RADIAL_FIND")) {  // поиск папки по таблице MFT (И8)
+            toolsFind_ = find;
+            toolsFindAny_ = tools::MftFindDirs(toolsFind_, 15, toolsFound_, &toolsFindAge_);
+        }
     } else
         GoPage((Page)page);
+    // RADIAL_SCROLL=пиксели - снять страницу прокрученной (карточки ниже края окна)
+    const wchar_t* scrollTo = _wgetenv(L"RADIAL_SCROLL");
     // кадр в HDC, как в окне: появление страницы смешивает карточки средствами GDI
     HDC sdc = GetDC(nullptr);
     HDC mdc = CreateCompatibleDC(sdc);
@@ -651,7 +657,8 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
     do {
         MSG m;
         while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
-        pageAt_ = 0;  // без проступания страницы
+        pageAt_ = 0;                                                        // без проступания страницы
+        if (scrollTo) ui.ScrollTo(ID_PAGE_SCROLL, (float)_wtof(scrollTo));  // высота страницы известна после кадра
         Graphics g(mdc);
         ui.Begin(g, UiPalette(cfg), k);
         Frame((float)w, (float)h);

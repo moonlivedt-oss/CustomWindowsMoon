@@ -335,6 +335,68 @@ MftState MftReady() {
     return elevate::TaskExists(elevate::TASK_NET) ? MFT_OLD : MFT_NONE;
 }
 
+// Индекс для поиска папок (И8): все таблицы томов, имена в нижнем регистре; держится, пока ищут.
+struct SearchVol {
+    wchar_t letter;
+    ULONGLONG stamp = 0, size = 0;
+    TableIndex ix;
+    std::vector<std::wstring> lower;
+};
+std::mutex g_searchLock;
+std::vector<std::unique_ptr<SearchVol>> g_search;
+ULONGLONG g_searchUsed = 0;
+
+bool MftFindDirs(const std::wstring& query, size_t max, std::vector<FoundDir>& out, ULONGLONG* age) {
+    out.clear();
+    std::lock_guard<std::mutex> hold(g_searchLock);
+    g_searchUsed = GetTickCount64();
+    bool any = false;
+    ULONGLONG oldest = 0, now = UnixNow();
+    std::vector<std::pair<int, FoundDir>> all;
+    for (wchar_t l = L'C'; l <= L'Z'; ++l) {
+        std::wstring file = CacheFile(l);
+        ULONGLONG stamp = 0, size = 0;
+        if (!FileStamp(file, stamp, size)) continue;
+        SearchVol* v = nullptr;
+        for (auto& s : g_search)
+            if (s->letter == l) v = s.get();
+        if (v && (v->stamp != stamp || v->size != size)) {
+            g_search.erase(std::remove_if(g_search.begin(), g_search.end(), [&](auto& s) { return s->letter == l; }),
+                           g_search.end());
+            v = nullptr;
+        }
+        if (!v) {
+            auto nv = std::make_unique<SearchVol>();
+            nv->letter = l, nv->stamp = stamp, nv->size = size;
+            if (!IndexTable(ReadFileAll(file), nv->ix)) continue;
+            nv->lower = LowerNames(nv->ix);
+            v = nv.get();
+            g_search.push_back(std::move(nv));
+        }
+        any = true;
+        oldest = std::max(oldest, now > v->ix.head.time ? now - v->ix.head.time : 0);
+        int rank = 0;
+        for (size_t i : FindDirs(v->ix, v->lower, query, max)) {
+            FoundDir f;
+            f.path = PathOf(v->ix, i, std::wstring(1, l) + L":");
+            if (f.path.empty()) continue;
+            f.bytes = v->ix.rows[i].total;
+            f.files = v->ix.rows[i].totalFiles;
+            all.push_back({rank++, f});
+        }
+    }
+    // тома вперемешку по месту в своём списке: лучшие с каждого диска первыми
+    std::stable_sort(all.begin(), all.end(), [](auto& a, auto& b) { return a.first < b.first; });
+    for (size_t i = 0; i < all.size() && out.size() < max; ++i) out.push_back(all[i].second);
+    if (age) *age = oldest;
+    return any;
+}
+
+void MftSearchForget(ULONGLONG idleMs) {
+    std::lock_guard<std::mutex> hold(g_searchLock);
+    if (!g_search.empty() && GetTickCount64() - g_searchUsed > idleMs) g_search.clear();
+}
+
 void MftForget() {
     std::lock_guard<std::mutex> hold(g_loadedLock);
     g_loaded.reset();

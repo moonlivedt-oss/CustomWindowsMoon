@@ -1190,6 +1190,7 @@ void LiveAlert(ULONGLONG now) {
 }
 
 void Tick() {
+    tools::MftSearchForget(120000);  // индекс поиска папок (палитра) не держим без дела
     g_card.Tick();
     SceneCard::Get().Poll();
     SceneCard::Get().Tick();
