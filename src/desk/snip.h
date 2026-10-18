@@ -12,6 +12,12 @@
 
 struct Config;
 
+// Картинка из буфера обмена (CF_DIB) и в PNG - общее со историей буфера (desk/cliphist).
+namespace snipimg {
+std::unique_ptr<Gdiplus::Bitmap> FromDib(const BYTE* dib, SIZE_T size);
+std::vector<uint8_t> ToPng(Gdiplus::Bitmap* b);
+}  // namespace snipimg
+
 // Карточка после снимка области (Win+Shift+S или горячий угол): справа снизу выезжает превью
 // с кнопками «Сохранить» и «Текст»; клик по превью открывает снимок. «Текст» распознаёт снимок встроенным OCR
 // Windows и кладёт текст в буфер обмена. Снимок замечается по буферу обмена: картинку туда

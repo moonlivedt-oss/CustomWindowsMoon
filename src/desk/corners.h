@@ -32,6 +32,7 @@ void SetBoost(void (*boost)());       // boost: карточка «освобо�
 void SetNet(void (*net)());           // net: кольцо «Сеть»
 void SetTools(void (*tools)());       // tools: кольцо «Утилиты»
 void SetMinecraft(void (*mc)());      // minecraft: кольцо сборок Minecraft
+void SetClip(void (*clip)());         // clip: кольцо истории буфера
 // keys:ctrl+shift+esc -> «Ctrl + Shift + Esc»; виртуальная клавиша -> имя для keys:
 std::wstring KeyName(UINT vk);
 // на этом мониторе открыта игра или видео на весь экран

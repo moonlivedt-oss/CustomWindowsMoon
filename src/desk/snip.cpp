@@ -111,6 +111,11 @@ bool CopyText(HWND owner, const std::wstring& s) {
 
 }  // namespace
 
+namespace snipimg {
+std::unique_ptr<Bitmap> FromDib(const BYTE* dib, SIZE_T size) { return ::FromDib(dib, size); }
+std::vector<uint8_t> ToPng(Bitmap* b) { return ::ToPng(b); }
+}  // namespace snipimg
+
 void SnipCard::Create(HINSTANCE inst) {
     CreateWnd(inst, kClass, L"Снимок");
     AddClipboardFormatListener(Wnd());

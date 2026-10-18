@@ -56,6 +56,7 @@ const Action kActions[] = {
     {L"net", L"Кольцо сети"},
     {L"tools", L"Кольцо утилит"},
     {L"minecraft", L"Кольцо Minecraft"},
+    {L"clip", L"Кольцо буфера"},
 };
 
 const Action kWheel[] = {
@@ -174,8 +175,16 @@ void (*g_minecraft)() = nullptr;
 
 void SetMinecraft(void (*mc)()) { g_minecraft = mc; }
 
+void (*g_clip)() = nullptr;
+
+void SetClip(void (*clip)()) { g_clip = clip; }
+
 void Run(const std::wstring& a) {
     if (a.empty()) return;
+    if (a == L"clip") {
+        if (g_clip) g_clip();
+        return;
+    }
     if (a == L"windows") {
         if (g_windowsRing) g_windowsRing();
         return;

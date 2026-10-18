@@ -8,6 +8,7 @@
 
 #include "core/fuzzy.h"
 #include "core/macro.h"
+#include "core/secrets.h"
 #include "core/stroke.h"
 
 namespace {
@@ -93,6 +94,34 @@ void TestFuzzy() {
     CHECK(fuzzy::OtherLayout(L"ghjtrns") == L"проекты" && fuzzy::OtherLayout(L"сеть") == L"ctnm");
 }
 
+void TestSecrets() {
+    CHECK(secrets::Luhn(L"4111111111111111") && !secrets::Luhn(L"4111111111111112"));
+    CHECK(secrets::Kind(L"4111 1111 1111 1111") == L"номер карты");
+    CHECK(secrets::Kind(L"4111-1111-1111-1112").empty());  // контрольная сумма не сошлась
+    CHECK(secrets::Kind(L"+7 912 345 67 89").empty());     // телефон - не карта
+    CHECK(secrets::Kind(L"ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gH3jK") == L"токен GitHub");
+    CHECK(secrets::Kind(L"  sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123  ") == L"ключ Anthropic");
+    CHECK(secrets::Kind(L"AKIAIOSFODNN7EXAMPLE") == L"ключ AWS");
+    CHECK(secrets::Kind(L"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----") ==
+          L"закрытый ключ");
+    CHECK(secrets::Kind(
+              L"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U") ==
+          L"токен (JWT)");
+    CHECK(secrets::Kind(L"password: Hunter2!x") == L"пароль или ключ в строке");
+    CHECK(secrets::Kind(L"пароль = qwerty123") == L"пароль или ключ в строке");
+    CHECK(secrets::Kind(L"Xk9fQ2mZ7pLw4Rt8Vb6Nc3Jh5Gd1Sa0E") == L"похоже на ключ");
+    // не секреты: код, пути, адреса, хэши, GUID, обычный текст
+    CHECK(secrets::Kind(L"const token = getToken();").empty());
+    CHECK(secrets::Kind(L"password = input").empty());
+    CHECK(secrets::Kind(L"D:\\Desktop\\components\\RadialMenu\\src\\core\\secrets.cpp").empty());
+    CHECK(secrets::Kind(L"https://github.com/moonlivedt-oss/TestMenuMoon/pull/12").empty());
+    CHECK(secrets::Kind(L"2308fe0c4e1a9b7d3f5e6a8c0b2d4f6e8a0c2e4f").empty());  // sha коммита
+    CHECK(secrets::Kind(L"3f2504e0-4f89-11d3-9a0c-0305e82c3301").empty());
+    CHECK(secrets::Kind(L"Привет, это просто текст для проверки буфера").empty());
+    CHECK(secrets::Kind(L"SomeVeryLongCamelCaseIdentifierName").empty());  // нет цифр
+    CHECK(secrets::Entropy(L"aaaa") == 0 && secrets::Entropy(L"abcd") > 1.99);
+}
+
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int)) {
@@ -100,4 +129,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestMacro();
     TestStroke();
     TestFuzzy();
+    TestSecrets();
 }

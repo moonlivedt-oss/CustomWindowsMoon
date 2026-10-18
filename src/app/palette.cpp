@@ -20,6 +20,7 @@ const Config* g_cfg = nullptr;
 RadialMenu* g_menu = nullptr;
 std::function<void(int)> g_openPage;
 std::vector<std::function<void(std::vector<Item>&)>> g_sources;
+std::vector<std::pair<std::wstring, std::function<void(const std::wstring&)>>> g_runners;
 std::wstring g_status;  // пусто - палитра в этом процессе не запускалась (снимок студии)
 
 // листья кольца (у них есть ключ действия) - в палитру с приставкой, по которой Run поймёт, чьё это
@@ -53,6 +54,8 @@ void Run(const std::wstring& key) {
     if (key.rfind(L"t|", 0) == 0) return toolsui::Run(key.substr(2));
     if (key.rfind(L"n|", 0) == 0) return netui::Run(key.substr(2));
     if (key.rfind(L"p|", 0) == 0 && g_openPage) return g_openPage(_wtoi(key.c_str() + 2));
+    for (auto& [prefix, run] : g_runners)
+        if (key.rfind(prefix, 0) == 0) return run(key.substr(prefix.size()));
 }
 
 }  // namespace
@@ -65,6 +68,10 @@ void Init(HWND app, const Config* cfg, RadialMenu* menu, std::function<void(int)
 }
 
 void AddSource(std::function<void(std::vector<Item>&)> source) { g_sources.push_back(std::move(source)); }
+
+void AddRunner(const std::wstring& prefix, std::function<void(const std::wstring&)> run) {
+    g_runners.push_back({prefix, std::move(run)});
+}
 
 bool Apply() {
     UnregisterHotKey(g_app, kHotId);

@@ -6,6 +6,7 @@
 
 #include "app/palette.h"
 #include "core/files.h"
+#include "desk/cliphist.h"
 #include "core/text.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -48,8 +49,9 @@ void Studio::AidsPage(const RectF& r) {
                 cfg.paletteKey = s;
             },
             L"alt+space");
-        if (!palette::Status().empty()) cols.Row(b, 2, L"Сейчас: " + palette::Status(), 0.95f);
-        cols.Note(b, 3.0f,
+        bool live = !palette::Status().empty();  // в снимке студии палитра не запускалась
+        if (live) cols.Row(b, 2, L"Сейчас: " + palette::Status(), 0.95f);
+        cols.Note(b, live ? 3.0f : 2.0f,
                   L"Строка поиска по всем пунктам колец, действиям утилит и сети, разделам студии и открытым окнам; "
                   L"Enter - выполнить. Буквы можно пропускать, раскладка не важна: «gc» найдёт «Проверить сеть».",
                   c.faint);
@@ -61,6 +63,30 @@ void Studio::AidsPage(const RectF& r) {
                   L"Зажали Alt у края и сразу махнули мышью в сторону сектора: отпустили Alt над пунктом - он "
                   L"открывается, кольцо можно не ждать. Над группой или папкой кольцо остаётся, дальше - ломаной во "
                   L"второе кольцо. Медленный подход к кольцу работает как раньше.",
+                  c.faint);
+    });
+    cols.Card(L"Буфер обмена", 5.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"История: 30 последних записей");
+        toggle(rr, ID_AID + 3, cfg.clipHistory);
+        rr = cols.Row(b, 1, L"Секреты не запоминать и стирать");
+        toggle(rr, ID_AID + 4, cfg.clipSecrets);
+        rr = cols.Row(b, 2, L"Стирать через " + std::to_wstring(cfg.clipSecretSec) + L" с", 0.5f);
+        int sec = cfg.clipSecretSec;
+        if (ui.Slider(ID_AID + 5, RectF(rr.GetRight() - ui.S(170), rr.Y + ui.S(8), ui.S(170), ui.S(28)), sec, 10, 300,
+                      10)) {
+            Change();
+            cfg.clipSecretSec = sec;
+            Save();
+        }
+        rr = cols.Row(b, 3, L"Сейчас: " + cliphist::Status(), 0.62f);
+        if (ui.Button(ID_AID + 6, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)), L"Забыть всё",
+                      Kind::Secondary))
+            cliphist::Clear();
+        cols.Note(b, 4.0f,
+                  L"Кольцо «Буфер» - действие угла или пункт кольца action:clip, записи есть и в палитре: выбрали - "
+                  L"снова в буфере и вставлены. Хранится только в памяти. Токены (GitHub, AWS, Google, ключи API, "
+                  L"JWT), закрытые ключи, пароли строкой и номера карт не запоминаются и стираются из буфера, если "
+                  L"его не заменили. Что менеджеры паролей помечают «не для истории» - не трогаю.",
                   c.faint);
     });
     pageContentH_ = cols.Height();
