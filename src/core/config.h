@@ -33,7 +33,16 @@ struct AppRing {
     std::wstring exes;
     Item ring;  // имя, значок, пункты: сочетания keys:, макросы macro:, программы, папки, ссылки
 };
-bool ExeMatch(const std::wstring& exePath, const std::wstring& masks);  // имя exe подходит под одну из масок
+bool ExeMatch(const std::wstring& exePath, const std::wstring& masks);
+
+// Рабочий набор: «Проект X» - открыть VS Code с папкой, терминал с окружением, ссылки, программы и разложить окна;
+// «Закрыть набор» - вежливо закрыть то, что он открыл. В radial.cfg - после [@sets]: item = Подпись | что открыть,
+// где что открыть - code:папка (VS Code), term:папка (терминал с окружением), ссылка, файл, программа или папка;
+// layout = l:2 / l:3 / l:main2 / l:4 - как разложить открывшиеся окна (пусто - как откроются).
+struct WorkSet {
+    Item ring;
+    std::wstring layout;
+};  // имя exe подходит под одну из масок
 
 struct Config {
     bool desktopOnly = false;
@@ -151,6 +160,7 @@ struct Config {
     int longMin = 3;  // от скольких минут работы команда считается долгой
     std::vector<Item> left, right;
     std::vector<AppRing> apps;  // кольца программ
+    std::vector<WorkSet> sets;  // рабочие наборы
 
     // Кольцо программы для exe активного окна; nullptr - своего нет.
     const AppRing* AppFor(const std::wstring& exePath) const {

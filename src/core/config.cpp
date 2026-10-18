@@ -58,7 +58,7 @@ bool LoadConfig(const std::wstring& file, Config& out) {
     if (text.size() >= 3 && (unsigned char)text[0] == 0xEF) text.erase(0, 3);  // BOM
 
     Config cfg;
-    enum { kLeft = 1, kRight = 2, kBoth = 3, kApps = 4 };
+    enum { kLeft = 1, kRight = 2, kBoth = 3, kApps = 4, kSets = 8 };
     std::vector<std::pair<int, Item>> items;
     int side = kBoth;
     Item* cur = nullptr;
@@ -82,6 +82,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 side = kBoth;
             else if (low == L"@apps")
                 side = kApps;
+            else if (low == L"@sets")
+                side = kSets;
             else {
                 items.push_back({side, {}});
                 cur = &items.back().second;
@@ -286,8 +288,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
             continue;
         }
         if (!cur) continue;
-        if (key == L"exe" && side == kApps)
-            cur->note = val;  // маски exe кольца программы; до конца разбора лежат в note
+        if ((key == L"exe" && side == kApps) || (key == L"layout" && side == kSets))
+            cur->note = val;  // маски exe кольца программы или раскладка набора; до конца разбора лежат в note
         else if (key == L"icon")
             cur->icon = val;
         else if (key == L"path")
@@ -308,6 +310,14 @@ bool LoadConfig(const std::wstring& file, Config& out) {
     }
     for (auto& [s, it] : items) {
         Resolve(it);
+        if (s == kSets) {
+            WorkSet w;
+            w.layout = it.note;
+            it.note.clear();
+            w.ring = std::move(it);
+            cfg.sets.push_back(std::move(w));
+            continue;
+        }
         if (s == kApps) {
             AppRing a;
             a.exes = it.note;
@@ -510,6 +520,18 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
                 if (!ch.icon.empty()) o << L" | " << ch.icon;
                 o << L"\n";
             }
+        }
+    }
+
+    if (!c.sets.empty()) {
+        o << L"\n# рабочие наборы: item = Подпись | code:папка, term:папка, ссылка, файл или программа;\n"
+             L"# layout = l:2 / l:3 / l:main2 / l:4 - как разложить открывшиеся окна\n";
+        o << L"\n[@sets]\n";
+        for (const WorkSet& w : c.sets) {
+            o << L"\n[" << w.ring.name << L"]\n";
+            if (!w.layout.empty()) o << L"layout = " << w.layout << L"\n";
+            if (!w.ring.icon.empty()) o << L"icon = " << w.ring.icon << L"\n";
+            for (const Item& ch : w.ring.children) o << L"item = " << ch.name << L" | " << ch.path << L"\n";
         }
     }
 
