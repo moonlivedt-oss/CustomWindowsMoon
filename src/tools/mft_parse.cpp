@@ -236,7 +236,7 @@ bool ParseTable(const std::string& text, ULONGLONG rec, TableHead& head, std::ve
         const char* q = text.c_str() + start;
         ULONGLONG r = strtoull(q, &e, 10);
         ULONGLONG parent = strtoull(e, &e, 10);
-        if (r != rec && parent != rec) continue;  // в файле весь том, нужна одна папка и её дети
+        if (rec != kAllDirs && r != rec && parent != rec) continue;  // в файле весь том, нужна одна папка и её дети
         DirRow d;
         d.rec = r;
         d.parent = parent;
@@ -252,6 +252,35 @@ bool ParseTable(const std::string& text, ULONGLONG rec, TableHead& head, std::ve
         rows.push_back(std::move(d));
     }
     return true;
+}
+
+bool IndexTable(const std::string& text, TableIndex& ix) {
+    ix.kids.clear();
+    ix.byRec.clear();
+    if (!ParseTable(text, kAllDirs, ix.head, ix.rows)) return false;
+    ix.byRec.reserve(ix.rows.size());
+    for (size_t i = 0; i < ix.rows.size(); ++i) {
+        ix.byRec[ix.rows[i].rec] = i;
+        ix.kids[ix.rows[i].parent].push_back(i);
+    }
+    return true;
+}
+
+std::vector<DirRow> Slice(const TableIndex& ix, ULONGLONG rec) {
+    std::vector<DirRow> out;
+    auto self = ix.byRec.find(rec);
+    if (self != ix.byRec.end()) out.push_back(ix.rows[self->second]);
+    auto k = ix.kids.find(rec);
+    if (k != ix.kids.end())
+        for (size_t i : k->second)
+            if (ix.rows[i].rec != rec) out.push_back(ix.rows[i]);  // корень тома - сам себе родитель
+    return out;
+}
+
+bool LooseMatch(int mftFiles, ULONGLONG mftBytes, int listFiles, ULONGLONG listBytes) {
+    if (mftFiles != listFiles) return false;
+    if (mftBytes >= listBytes) return true;
+    return listBytes - mftBytes <= listBytes / 100 + 1024 * 1024;
 }
 
 }  // namespace tools::mft_detail

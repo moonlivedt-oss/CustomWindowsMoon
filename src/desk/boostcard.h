@@ -12,6 +12,8 @@ public:
     std::function<void()> onYes;     // «Освободить», «Вернуть», «Починить»
     std::function<void()> onNo;      // вторая кнопка как действие (пусто - просто закрыть); сбрасывается после нажатия
     std::wstring yesLabel, noLabel;  // свои подписи кнопок; пусто - как у Boost
+    float progress = -1;             // WORKING: доля 0..1 - полоска под текстом (ход DISM); -1 - без полоски
+    std::function<void()> onStop;    // WORKING: кнопка «Стоп» (пусто - без кнопки); сбрасывается любым не-WORKING Show
     const BoostCard* below = nullptr;  // устарело: стопку теперь строит Toast
 
     void Create(HINSTANCE inst);
@@ -30,7 +32,8 @@ private:
     void Click(int id) override;
     bool Busy() const override { return mode_ == WORKING; }
     Gdiplus::Color Tone() const override;
-    bool Buttons() const { return mode_ == OFFER || mode_ == RESTORE; }
+    bool Buttons() const { return mode_ == OFFER || mode_ == RESTORE || StopButton(); }
+    bool StopButton() const { return mode_ == WORKING && onStop; }
     std::wstring Label(bool yes) const;
 
     Mode mode_ = OFFER;

@@ -18,6 +18,7 @@
 #include "app/autos.h"
 #include "app/toolsui.h"
 #include "core/bg.h"
+#include "core/crash.h"
 #include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -1166,6 +1167,29 @@ void TrayMenu() {
     DestroyMenu(m);
 }
 
+// Прошлый запуск упал: строка в журнал автоматики и карточка с папкой дампа (core/crash). Раз на каждый дамп.
+void ReportCrashes() {
+    std::vector<crash::Report> rs = crash::Unreported(crash::Dir(), true);
+    if (rs.empty()) return;
+    for (const crash::Report& r : rs)
+        autos::Note(L"Программа падала " + r.when + (r.what.empty() ? L"" : L": " + r.what) + L". Дамп: " + r.dump);
+    const crash::Report& last = rs.back();
+    std::wstring dump = last.dump;
+    g_boostCard.yesLabel = L"Папка";
+    g_boostCard.noLabel = L"Понятно";
+    g_boostCard.onYes = [dump] {
+        ShellExecuteW(nullptr, nullptr, L"explorer.exe", (L"/select,\"" + dump + L"\"").c_str(), nullptr,
+                      SW_SHOWNORMAL);
+    };
+    g_boostCard.onNo = nullptr;
+    g_boostCard.Show(BoostCard::OFFER,
+                     rs.size() == 1 ? L"Программа падала " + last.when
+                                    : L"Программа падала " + std::to_wstring(rs.size()) + L" раза",
+                     (last.what.empty() ? L"" : last.what + L". ") + L"Дамп: " + dump + L" (хранятся последние " +
+                         std::to_wstring(crash::kKeep) + L").",
+                     CurrentTheme(g_cfg), 30000, Toast::G_WARN);
+}
+
 LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_TIMER:
@@ -1177,6 +1201,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             if (wp == kAutostartTimer) {
                 KillTimer(h, kAutostartTimer);
                 AutostartRefresh();
+                ReportCrashes();
             }
             if (wp == kIntroTimer) {
                 KillTimer(h, kIntroTimer);
@@ -1383,6 +1408,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
+    crash::Install();  // первым делом: упадёт хоть что-то дальше - останется дамп
     if (int code = 0; devcli::Run(code)) return code;
     bool wantEditor = devcli::HasFlag(L"--editor");
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\MoonRadialMenu");

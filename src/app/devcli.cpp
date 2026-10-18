@@ -920,6 +920,9 @@ bool Run(int& exitCode) {
         s.areas = Split(elevate::Take(L"PurgeAreas"), L',');
         s.areas.erase(std::remove(s.areas.begin(), s.areas.end(), std::wstring()), s.areas.end());
         exitCode = boost::PurgeMain(s);
+    } else if (Has(args, L"--crash-test")) {  // нарочно упасть: проверить, что дамп и строка ложатся в crash
+        *(volatile int*)nullptr = 0;
+        exitCode = 1;
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
     } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку

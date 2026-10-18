@@ -245,11 +245,7 @@ void Run(const std::wstring& key) {
         Ask(L"Не запускать " + s.name + L" при входе?",
             s.where + (s.memory ? L", держит " + tools::Bytes(s.memory) : L"") +
                 L". Запись не удаляется - включить обратно можно в студии или Диспетчере задач.",
-            L"Выключить", L"Не надо", [s] {
-                std::wstring msg;
-                bool ok = tools::SetStartup(s, false, [&](const std::wstring& t) { msg = t; });
-                g_card.Show(BoostCard::DONE, ok ? L"Автозагрузка" : L"Не получилось", msg, Theme());
-            });
+            L"Выключить", L"Не надо", [s] { TurnOffStart(s); });
         return;
     }
     if (key == L"tails") {
@@ -462,19 +458,23 @@ void Run(const std::wstring& key) {
                 });
             },
             [disks, total] {
-                RunJob(L"Сжатие дисков", [disks, total](const tools::Log& log, std::wstring& res) {
-                    log(L"Закрываю WSL и Docker (wsl --shutdown)...");
-                    std::wstring out;
-                    tools::RunCapture(L"\"" + Sys32(L"wsl.exe") + L"\" --shutdown", out, 60000);
-                    log(L"Сжимаю диски (минуты, зависит от размера)...");
-                    bool ok = net::RunAdmin(net::JOB_VHD_COMPACT, log, 60 * 60 * 1000);
-                    ULONGLONG after = 0;
-                    for (const tools::VirtualDisk& v : tools::VirtualDisks()) after += v.bytes;
-                    res =
-                        after < total ? L"Освобождено " + tools::Bytes(total - after) + L"." : L"Сжимать было нечего.";
-                    g_scanAt = 0;
-                    return ok;
-                });
+                RunJob(
+                    L"Сжатие дисков",
+                    [disks, total](const tools::Log& log, std::wstring& res) {
+                        log(L"Закрываю WSL и Docker (wsl --shutdown)...");
+                        std::wstring out;
+                        tools::RunCapture(L"\"" + Sys32(L"wsl.exe") + L"\" --shutdown", out, 60000);
+                        log(L"Сжимаю диски (минуты, зависит от размера)...");
+                        bool ok = net::RunAdmin(net::JOB_VHD_COMPACT, log, 60 * 60 * 1000, &g_jobCancel);
+                        if (g_jobCancel) return res = L"Остановлено, сжатие доделается в фоне.", false;
+                        ULONGLONG after = 0;
+                        for (const tools::VirtualDisk& v : tools::VirtualDisks()) after += v.bytes;
+                        res = after < total ? L"Освобождено " + tools::Bytes(total - after) + L"."
+                                            : L"Сжимать было нечего.";
+                        g_scanAt = 0;
+                        return ok;
+                    },
+                    false, true);
             },
             30000, Toast::G_INFO);
         return;
@@ -515,9 +515,12 @@ void Run(const std::wstring& key) {
             L"проверит системные файлы. Компьютером можно пользоваться. Перед этим стоит сделать «Снимок».",
             L"Починить", L"Не надо",
             [] {
-                RunJob(L"Починка Windows", [](const tools::Log& log, std::wstring&) {
-                    return net::RunAdmin(net::JOB_REPAIR, log, 90 * 60 * 1000);
-                });
+                RunJob(
+                    L"Починка Windows",
+                    [](const tools::Log& log, std::wstring&) {
+                        return net::RunAdmin(net::JOB_REPAIR, log, 90 * 60 * 1000, &g_jobCancel);
+                    },
+                    false, true);
             },
             nullptr, 30000, Toast::G_INFO);
         return;

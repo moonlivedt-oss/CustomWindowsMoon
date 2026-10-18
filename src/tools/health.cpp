@@ -1,11 +1,11 @@
 // Рост папок за неделю, здоровье SSD раз в неделю, свежий драйвер NVIDIA.
+#include <winsock2.h>  // раньше windows.h: дальше net_internal.h, а winsock2 после windows.h - предупреждение
 #include <windows.h>
 
 #include <algorithm>
 #include <cwctype>
 
 #include <map>
-
 
 #include "core/text.h"
 #include "net/net_internal.h"

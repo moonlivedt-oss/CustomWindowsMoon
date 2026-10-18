@@ -614,6 +614,7 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
     wnd = CreateWindowExW(WS_EX_TOOLWINDOW, kClass, L"Radial Studio snapshot", WS_POPUP, -5000, -5000, w, h, nullptr,
                           nullptr, inst, nullptr);  // не показывается
     ui.Attach(wnd);
+    ui.paintFields = true;
     ov_ = OV_NONE;
     if (page == PAGE_TOOLS) {  // RADIAL_SCAN=папка - сразу посчитать, что занимает место (снимок сот)
         const wchar_t* scan = _wgetenv(L"RADIAL_SCAN");
@@ -978,6 +979,7 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             }
             g_st = nullptr;
             delete this;
+            tools::MftForget();   // разобранная таблица MFT нужна была только для переходов по папкам
             mem::TrimSoon(1500);  // студия закрыта: её страницы и картинки больше не нужны
             return 0;
     }

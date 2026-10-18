@@ -1,5 +1,6 @@
 // Версии инструментов раз в неделю: что найдётся первым в PATH (python, node, cmake, git) против вышедшего
 // (endoflife.date, релизы GitHub), пакеты MSYS2 - через checkupdates (базы пакетов не трогает). Ничего не ставит.
+#include <winsock2.h>  // раньше windows.h: дальше net_internal.h, а winsock2 после windows.h - предупреждение
 #include <windows.h>
 
 #include <algorithm>

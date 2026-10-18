@@ -1,4 +1,5 @@
 // Диски: тома и место, здоровье физических дисков (WMI Storage), что занимает место, кэши и временные файлы.
+#include <winsock2.h>  // раньше windows.h: дальше net_internal.h, а winsock2 после windows.h - предупреждение
 #include <windows.h>
 #include <wbemidl.h>
 #include <oleauto.h>
@@ -187,7 +188,7 @@ std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, std::atomic<bool>* 
     do {
         if (cancel && *cancel) break;
         if (fd.cFileName[0] == L'.' && (!fd.cFileName[1] || (fd.cFileName[1] == L'.' && !fd.cFileName[2]))) continue;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+        if (LinkDir(fd.dwFileAttributes)) continue;  // файлы-ссылки считаем, как MFT и обход
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             FolderSize f;
             f.name = fd.cFileName;

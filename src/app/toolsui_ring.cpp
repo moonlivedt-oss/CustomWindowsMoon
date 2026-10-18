@@ -125,6 +125,22 @@ void OpenVirusTotal(const std::wstring& path) {
     });
 }
 
+void TurnOffStart(const tools::StartItem& it) {
+    // выключаем ровно показанную запись: пока висела карточка, её могли поменять в студии или другой программой
+    std::vector<tools::StartItem> now = tools::StartupItems();
+    const tools::StartItem* cur = tools::FindStart(now, it);
+    if (!cur) {
+        g_card.Show(BoostCard::DONE, it.name + L": запись изменилась",
+                    L"Её уже убрали или поменяли команду. Открой список заново и проверь, что выключать.", Theme(),
+                    9000, Toast::G_INFO);
+        return;
+    }
+    std::wstring msg;
+    bool ok = tools::SetStartup(*cur, false, [&](const std::wstring& t) { msg = t; });
+    g_card.Show(BoostCard::DONE, ok ? L"Автозагрузка" : L"Не получилось",
+                msg + (ok ? L" Включить обратно - в студии или Диспетчере задач." : L""), Theme());
+}
+
 void SecurityAction(const tools::Suspect& s) {
     bool file = !s.path.empty() && GetFileAttributesW(s.path.c_str()) != INVALID_FILE_ATTRIBUTES;
     std::wstring origin = file ? tools::FileOrigin(s.path) : L"";
@@ -184,8 +200,8 @@ void SecurityAction(const tools::Suspect& s) {
             30000, Toast::G_WARN);
         return;
     }
-    if (s.start >= 0 && s.start < (int)g_secStarts.size()) {
-        tools::StartItem it = g_secStarts[s.start];
+    if (s.isStart) {
+        tools::StartItem it = s.startItem;
         std::wstring path = s.path;
         Ask(
             Level(s.score) + it.name + L" при входе", it.where + L": " + Short(it.command, 120) + L". " + s.why,
@@ -194,11 +210,7 @@ void SecurityAction(const tools::Suspect& s) {
                 if (file) OpenVirusTotal(path);
             },
             [it] {
-                if (!it.canToggle) return;
-                std::wstring msg;
-                bool ok = tools::SetStartup(it, false, [&](const std::wstring& t) { msg = t; });
-                g_card.Show(BoostCard::DONE, ok ? L"Автозагрузка" : L"Не получилось",
-                            msg + (ok ? L" Включить обратно - в студии или Диспетчере задач." : L""), Theme());
+                if (it.canToggle) TurnOffStart(it);
             },
             30000, Toast::G_WARN);
         return;
@@ -345,7 +357,6 @@ Item SecurityItem() {
     if (!checked || now - g_secAt > 10 * 60 * 1000) RefreshSecurity();
 
     g_finds = AllFinds(sec);
-    g_secStarts = sec.starts;
     int danger = 0;
     for (const tools::Suspect& s : g_finds) danger += s.score >= kDangerScore;
 

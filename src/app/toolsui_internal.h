@@ -20,6 +20,8 @@
 #include "gfx/scene.h"
 #include "menu/menu.h"
 #include "net/net.h"
+#include "app/autos.h"
+#include "tools/selfwatch.h"
 #include "tools/tools.h"
 
 namespace toolsui {
@@ -29,6 +31,7 @@ constexpr UINT kSecTag = 0x5E;  // wParam у WM_TOOLS_JOB: проверка за
 constexpr int kDdcDays = 30, kIdleDays = 60;
 constexpr UINT kWatchTag = 0x5F;   // wParam у WM_TOOLS_JOB: новый снимок слежки
 constexpr UINT kWeeklyTag = 0x57;  // wParam у WM_TOOLS_JOB: итог недельной проверки
+constexpr UINT kSelfTag = 0x5C;    // wParam у WM_TOOLS_JOB: часовой снимок своей памяти (SelfMsg)
 constexpr UINT kDiskTag = 0x5D;    // wParam у WM_TOOLS_JOB: карточка «Мало места» собрана
 
 // Тяжёлое (обход тысяч файлов, версии программ) считается в фоне раз в полчаса: кольцо открывается сразу
@@ -64,6 +67,7 @@ extern std::function<void(int, const std::wstring&)> g_openStudio;
 extern const Config* g_cfg;
 extern BoostCard g_card;
 extern std::atomic<bool> g_busy;
+extern std::atomic<bool> g_jobCancel;
 extern std::atomic<bool> g_cleanBusy;
 extern ULONGLONG g_diskCheck, g_weeklyCheck;
 extern std::set<std::wstring> g_warned;
@@ -84,7 +88,6 @@ extern std::vector<tools::DupGroup> g_dups;
 extern ULONGLONG g_dupsAt;
 extern std::vector<tools::DupGroup> g_dupList;
 extern std::vector<tools::Suspect> g_finds;
-extern std::vector<tools::StartItem> g_secStarts;
 extern std::vector<tools::SecurityApp> g_secApps;
 extern std::vector<tools::VirtualDisk> g_vhd;
 extern std::vector<tools::Leftover2> g_leftovers;
@@ -130,7 +133,10 @@ extern std::set<std::wstring> g_netKnown;
 ThemeInfo Theme();
 const wchar_t* Have(const wchar_t* want, const wchar_t* now);
 Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key, const std::wstring& note);
-void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work, bool quiet = false);
+// stoppable - в карточке кнопка «Стоп», работа смотрит g_jobCancel (долгие задания с правами: RunAdmin(...,
+// &g_jobCancel))
+void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work, bool quiet = false,
+            bool stoppable = false);
 std::wstring Short(std::wstring s, size_t n);
 void RunClean(const std::wstring& title, const std::vector<tools::Junk>& list);
 std::wstring NoExe(const std::wstring& s);
@@ -212,6 +218,7 @@ void CopyText(const std::wstring& s);
 void OpenInSandbox(const std::wstring& file);
 void OpenVirusTotal(const std::wstring& path);
 void SecurityAction(const tools::Suspect& s);
+void TurnOffStart(const tools::StartItem& it);  // выключить запись, если она всё та же (сверка со свежим списком)
 Item SecurityItem();
 Item RecoveryItem();
 Item SystemItem(const Scan& scan);

@@ -7,6 +7,8 @@ const Config* g_cfg = nullptr;
 BoostCard g_card;
 std::function<void(int, const std::wstring&)> g_openStudio;
 std::atomic<bool> g_busy{false};
+std::atomic<bool> g_jobCancel{false};  // «Стоп» в карточке задачи RunJob (stoppable)
+bool g_jobStoppable = false;           // у текущей задачи есть «Стоп»; только поток окна
 std::atomic<bool> g_cleanBusy{false};  // чистка кэшей: одна на всю программу (см. CleanClaim)
 ULONGLONG g_diskCheck = 0, g_weeklyCheck = 0;
 std::set<std::wstring> g_warned;  // о каком диске уже сказали (пока место не вернётся)
@@ -27,9 +29,8 @@ std::vector<std::wstring> g_wake;
 std::vector<tools::ToolVersion> g_vers;
 std::vector<tools::DupGroup> g_dups;  // под g_scanLock: заполняет поток поиска
 ULONGLONG g_dupsAt = 0;
-std::vector<tools::DupGroup> g_dupList;     // что показано в кольце (номера dup:i)
-std::vector<tools::Suspect> g_finds;        // «Защита»: что показано в кольце
-std::vector<tools::StartItem> g_secStarts;  // автозагрузка на момент проверки (номера из Suspect::start)
+std::vector<tools::DupGroup> g_dupList;  // что показано в кольце (номера dup:i)
+std::vector<tools::Suspect> g_finds;     // «Защита»: что показано в кольце
 std::vector<tools::SecurityApp> g_secApps;
 std::vector<tools::VirtualDisk> g_vhd;      // «Docker и WSL» в «Очистке»
 std::vector<tools::Leftover2> g_leftovers;  // хвосты удалённых программ (номера left:i)
@@ -75,13 +76,22 @@ Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key,
     return it;
 }
 
-void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work, bool quiet) {
+// «Стоп» в карточке хода: каждый показ WORKING ставит кнопку заново (между ними карточку мог занять другой итог)
+void ArmStop() {
+    if (g_jobStoppable && !g_jobCancel) g_card.onStop = [] { g_jobCancel = true; };
+}
+
+void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work, bool quiet,
+            bool stoppable) {
     if (g_busy) {
         g_card.Show(BoostCard::DONE, L"Подождите", L"Предыдущее действие ещё идёт.", Theme());
         return;
     }
     g_busy = true;
+    g_jobCancel = false;
+    g_jobStoppable = stoppable && !quiet;
     if (!quiet) g_card.Show(BoostCard::WORKING, title, L"Начинаю...", Theme());
+    ArmStop();
     bool started = bg::Run([title, work = std::move(work), quiet] {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         std::wstring last;
@@ -96,7 +106,7 @@ void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std
         if (!PostMessageW(g_app, WM_TOOLS_JOB, 0, (LPARAM)m)) delete m;
         CoUninitialize();
     });
-    if (!started) g_busy = false;
+    if (!started) g_busy = false, g_jobStoppable = false;
 }
 
 std::wstring Short(std::wstring s, size_t n) { return s.size() > n ? s.substr(0, n - 1) + L"…" : s; }
@@ -358,20 +368,25 @@ void SysClean() {
         L"Кэш Delivery Optimization и старые версии компонентов Windows (DISM). Установленные обновления остаются, "
         L"последние по-прежнему можно удалить. Нужны права администратора, 10-25 минут.",
         L"Почистить", L"Не надо", [] {
-            RunJob(L"Остатки обновлений", [](const tools::Log& log, std::wstring& res) {
-                ULONGLONG freed = 0;
-                bool ok = net::RunAdmin(
-                    net::JOB_SYS_CLEAN,
-                    [&](const std::wstring& s) {
-                        if (s.rfind(L"@freed=", 0) == 0)
-                            freed = _wcstoui64(s.c_str() + 7, nullptr, 10);
-                        else
-                            log(s);
-                    },
-                    100 * 60 * 1000);  // два замера DISM и сама чистка
-                res = ok ? L"Освобождено " + tools::Bytes(freed) + L"." : L"Не получилось - подробности выше.";
-                return ok;
-            });
+            RunJob(
+                L"Остатки обновлений",
+                [](const tools::Log& log, std::wstring& res) {
+                    ULONGLONG freed = 0;
+                    bool ok = net::RunAdmin(
+                        net::JOB_SYS_CLEAN,
+                        [&](const std::wstring& s) {
+                            if (s.rfind(L"@freed=", 0) == 0)
+                                freed = _wcstoui64(s.c_str() + 7, nullptr, 10);
+                            else
+                                log(s);
+                        },
+                        100 * 60 * 1000, &g_jobCancel);  // два замера DISM и сама чистка
+                    res = ok            ? L"Освобождено " + tools::Bytes(freed) + L"."
+                          : g_jobCancel ? L"Остановлено: DISM доделает чистку в фоне, итог не жду."
+                                        : L"Не получилось - подробности выше.";
+                    return ok;
+                },
+                false, true);
         });
 }
 
@@ -418,6 +433,10 @@ void QuickPass() {
     if (any) PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
 }
 
+struct SelfMsg {
+    std::wstring line, leak;
+};
+
 DWORD WINAPI WatchLoop(void*) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -454,10 +473,19 @@ DWORD WINAPI WatchLoop(void*) {
         FindFirstChangeNotificationW(etc, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
     if (hosts != INVALID_HANDLE_VALUE) waits.push_back(hosts);
 
-    ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0, nextFull = 0, quickAt = 0, gpuAt = 0;
+    ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0, nextFull = 0, quickAt = 0, gpuAt = 0, selfAt = 0;
+    std::vector<tools::SelfSample> self;  // раз в час, за последние сутки с запасом
     int n = 0;
     for (;;) {
         ULONGLONG now = GetTickCount64();
+        if (now >= selfAt) {  // своя память и дескрипторы: в журнал, рост за сутки - карточка (утечка у себя)
+            self.push_back(tools::SampleSelf());
+            if (self.size() > 30) self.erase(self.begin());
+            auto* m = new SelfMsg{tools::SelfLine(self.back()), L""};
+            tools::SelfLeak(self, m->leak);
+            if (!PostMessageW(g_app, WM_TOOLS_JOB, kSelfTag, (LPARAM)m)) delete m;
+            selfAt = now + 3600 * 1000;
+        }
         if (now >= nextFull) {
             std::vector<tools::ProcInfo> ps = tools::Processes();
             ULONGLONG in = 0, out = 0;
@@ -1029,6 +1057,22 @@ void OnJob(WPARAM wp, LPARAM lp) {
             nullptr, 40000, Toast::G_WARN);
         return;
     }
+    if (wp == kSelfTag) {
+        std::unique_ptr<SelfMsg> m((SelfMsg*)lp);
+        autos::Note(m->line);  // журнал пишет поток окна: так строки не перемешаются с остальной автоматикой
+        static ULONGLONG said = 0;
+        ULONGLONG now = GetTickCount64();
+        if (!m->leak.empty() && (!said || now - said > 24 * 3600 * 1000ull) && !g_game) {
+            said = now;
+            autos::Note(L"Похоже на утечку у себя: " + m->leak + L" за сутки");
+            g_card.Show(BoostCard::DONE, L"RadialMenu растёт",
+                        L"За сутки: " + m->leak +
+                            L". Похоже на утечку у себя - перезапуск вернёт память; строки "
+                            L"по часам - в журнале автоматики.",
+                        Theme(), 20000, Toast::G_WARN);
+        }
+        return;
+    }
     if (wp == kWeeklyTag) {
         std::unique_ptr<WeeklyMsg> m((WeeklyMsg*)lp);
         OnWeekly(m.get());
@@ -1066,10 +1110,21 @@ void OnJob(WPARAM wp, LPARAM lp) {
         return;
     }
     if (!m->done) {
-        g_card.Show(BoostCard::WORKING, m->title + L"...", m->text, Theme());
+        // «@pct 45 DISM: 45%» - ход долгого задания с правами: число - в полоску, остальное - строкой
+        float pct = -1;
+        std::wstring text = m->text;
+        if (text.rfind(L"@pct ", 0) == 0) {
+            pct = _wtoi(text.c_str() + 5) / 100.0f;
+            size_t sp = text.find(L' ', 5);
+            text = sp == std::wstring::npos ? L"" : text.substr(sp + 1);
+        }
+        g_card.progress = pct;  // до Show: высота карточки считается с полоской
+        g_card.Show(BoostCard::WORKING, m->title + L"...", text, Theme());
+        ArmStop();
         return;
     }
     g_busy = false;
+    g_jobStoppable = false;
     g_card.Show(BoostCard::DONE, m->ok ? m->title + L": готово" : m->title + L": не получилось", m->text, Theme(),
                 9000);
 }
@@ -1277,9 +1332,7 @@ SecurityView SecurityFinds() {
     v.finds = AllFinds(g_sec);
     v.processes = g_sec.processes;
     v.autoruns = g_sec.autoruns;
-    std::vector<tools::StartItem> starts = g_sec.starts;
     ReleaseSRWLockShared(&g_secLock);
-    g_secStarts = std::move(starts);  // SecurityAct берёт запись автозагрузки по номеру из этой проверки
     v.running = g_secRunning;
     v.ignored = (int)Ignored().size();
     if (!v.checked && !v.running && g_cfg) RefreshSecurity();

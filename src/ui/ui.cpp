@@ -909,6 +909,9 @@ void Ui::Field(int id, const RectF& r, const std::wstring& value, std::function<
         }
     }
     if (!placeholder.empty()) SendMessageW(e.hwnd, EM_SETCUEBANNER, TRUE, (LPARAM)placeholder.c_str());
+    if (paintFields)
+        Text(value.empty() ? placeholder : value, RectF(r.X + S(11), r.Y, r.Width - S(21), r.Height),
+             value.empty() ? c_.faint : c_.text, 13);
 }
 
 }  // namespace ui
