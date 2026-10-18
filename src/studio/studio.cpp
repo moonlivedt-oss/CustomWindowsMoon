@@ -52,14 +52,22 @@ const Group kGroups[] = {
      L"hub.png",
      {{PAGE_STATE, L"Состояние"}, {PAGE_AUTO, L"Автоматика"}, {PAGE_HOME, L"Разделы"}},
      3},
-    {L"Кольца", L"rail-rings.png", L"apps.png", {{PAGE_RINGS, L"Кольца"}, {PAGE_THEMES, L"Темы"}}, 2},
+    {L"Кольца",
+     L"rail-rings.png",
+     L"apps.png",
+     {{PAGE_RINGS, L"Кольца"}, {PAGE_APPS, L"Программы"}, {PAGE_THEMES, L"Темы"}},
+     3},
     {L"Стол",
      L"rail-desk.png",
      L"desktop.png",
      {{PAGE_DESK, L"Углы и панель"}, {PAGE_STYLE, L"Красота"}, {PAGE_SYSTEM, L"Система"}},
      3},
     {L"Сервис", L"rail-tools.png", L"tools-box.png", {{PAGE_NET, L"Сеть"}, {PAGE_TOOLS, L"Утилиты"}}, 2},
-    {L"Настройки", L"rail-behavior.png", L"editor.png", {{PAGE_BEHAVIOR, L"Поведение"}, {PAGE_KEYS, L"Клавиши"}}, 2},
+    {L"Настройки",
+     L"rail-behavior.png",
+     L"editor.png",
+     {{PAGE_BEHAVIOR, L"Поведение"}, {PAGE_AIDS, L"Помощники"}, {PAGE_KEYS, L"Клавиши"}},
+     3},
 };
 constexpr int kGroupCount = sizeof(kGroups) / sizeof(kGroups[0]);
 
@@ -82,11 +90,11 @@ void Studio::Paint() {
     painting_ = true;
     PERF_SCOPE("studio.Paint");
     // по одному имени на каждый раздел из enum Page, в том же порядке
-    static const char* kPageScope[] = {"studio.page.rings", "studio.page.themes", "studio.page.behavior",
-                                       "studio.page.desk",  "studio.page.system", "studio.page.style",
-                                       "studio.page.net",   "studio.page.tools",  "studio.page.home",
-                                       "studio.page.keys",  "studio.page.state",  "studio.page.auto"};
-    static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_AUTO + 1, "имя замера на каждый раздел");
+    static const char* kPageScope[] = {
+        "studio.page.rings", "studio.page.themes", "studio.page.behavior", "studio.page.desk", "studio.page.system",
+        "studio.page.style", "studio.page.net",    "studio.page.tools",    "studio.page.home", "studio.page.keys",
+        "studio.page.state", "studio.page.auto",   "studio.page.apps",     "studio.page.aids"};
+    static_assert(sizeof(kPageScope) / sizeof(kPageScope[0]) == PAGE_AIDS + 1, "имя замера на каждый раздел");
     perf::Scope pageScope(kPageScope[page_]);
     PAINTSTRUCT ps;
     HDC dc = BeginPaint(wnd, &ps);
@@ -325,6 +333,12 @@ void Studio::Frame(float w, float h) {
             break;
         case PAGE_AUTO:
             AutoPage(body);
+            break;
+        case PAGE_APPS:
+            AppsPage(body);
+            break;
+        case PAGE_AIDS:
+            AidsPage(body);
             break;
     }
     if (revealing) {
@@ -914,7 +928,7 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             InvalidateRect(wnd, nullptr, FALSE);
             return 0;
         case WM_SYSKEYDOWN:
-            if (CaptureKey(wp)) return 0;
+            if (CaptureKey(wp) || CaptureAppKey(wp)) return 0;
             // Alt+стрелки двигают сектор
             if (page_ == PAGE_RINGS && ov_ == OV_NONE && (wp == VK_UP || wp == VK_DOWN)) {
                 SectorOp(wp == VK_UP ? OP_UP : OP_DOWN);
@@ -923,7 +937,7 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             }
             break;
         case WM_KEYDOWN: {
-            if (CaptureKey(wp)) return 0;
+            if (CaptureKey(wp) || CaptureAppKey(wp)) return 0;
             bool ctrl = GetKeyState(VK_CONTROL) & 0x8000;
             if (wp == 'Z' && ctrl) {
                 Undo();

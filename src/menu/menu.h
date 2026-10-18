@@ -252,6 +252,7 @@ private:
     bool left_ = true;
     bool full_ = false;           // целое кольцо вокруг курсора
     std::vector<Item> fullRing_;  // секторы обоих краёв для целого кольца
+    std::vector<Item> appRing_;   // кольцо края с кольцом программы первым сектором
     bool winMode_ = false;        // кольцо окон
     std::vector<Item> winRing_;
     bool netMode_ = false;  // кольцо сети

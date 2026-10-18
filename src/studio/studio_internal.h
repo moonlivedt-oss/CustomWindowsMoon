@@ -43,7 +43,9 @@ enum Page {
     PAGE_HOME,
     PAGE_KEYS,
     PAGE_STATE,
-    PAGE_AUTO
+    PAGE_AUTO,
+    PAGE_APPS,  // Кольца / Программы: кольца программ и рабочие наборы
+    PAGE_AIDS   // Настройки / Помощники: палитра, буфер, раскладки, росчерк, сторожа
 };
 enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE };
 
@@ -223,15 +225,20 @@ enum Id {
     ID_LIVE_BATTERY,
     ID_LIVE_VERS,
     ID_TOOLS_VER_CHECK,
-    ID_TOOLS_SEC_KIND,       // вкладка «Защита»: фильтр по виду находок
-    ID_TOOLS_SEC_RESCAN,     // «Проверить заново»
-    ID_TOOLS_SEC_UNHIDE,     // «Показать скрытые»
-    ID_TOOLS_SIGN,           // «Настроить подпись»
-    ID_LANE_BIN,             // «Кольца»: корзина под дорожками
-    ID_TAPE,                 // лента правок
-    ID_ICON_DOCK,            // сетка значков-дока (наведение)
-    ID_FLOW_FILL,            // «Наполнить из папки»
-    ID_FLOW_FILES,           // «И обычные файлы»
+    ID_TOOLS_SEC_KIND,    // вкладка «Защита»: фильтр по виду находок
+    ID_TOOLS_SEC_RESCAN,  // «Проверить заново»
+    ID_TOOLS_SEC_UNHIDE,  // «Показать скрытые»
+    ID_TOOLS_SIGN,        // «Настроить подпись»
+    ID_LANE_BIN,          // «Кольца»: корзина под дорожками
+    ID_TAPE,              // лента правок
+    ID_ICON_DOCK,         // сетка значков-дока (наведение)
+    ID_FLOW_FILL,         // «Наполнить из папки»
+    ID_FLOW_FILES,        // «И обычные файлы»
+    ID_APP_NEW,           // «Программы»: поле своей программы
+    ID_APP_NEW_BTN,
+    ID_APP_PRESET = 11800,   // +i: заготовка кольца программы
+    ID_APP = 12000,          // +кольцо*100 + поле (studio_apps.cpp)
+    ID_AID = 16000,          // +поле: «Помощники» (studio_aids.cpp)
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -503,6 +510,9 @@ private:
     void CornerMenu(int corner, int kind);  // kind: 0 задержка, 1 двойной толчок, 2 колесо
     void SetCorner(int corner, int kind, const std::wstring& val);
     bool CaptureKey(WPARAM vk);
+    bool CaptureAppKey(WPARAM vk);  // сочетание для команды кольца программы
+    void AppsPage(const RectF& r);
+    void AidsPage(const RectF& r);
     void KeysPage(const RectF& r);
     void Header(const RectF& r, const std::wstring& title, const std::wstring& sub);
     RectF Column(const RectF& in, float maxW) const;  // полоса шириной не больше maxW по центру in
@@ -574,6 +584,8 @@ private:
     int ring_ = 0, sel_ = 0, tab_ = 0, tourStep_ = 0;
     int editingField_ = 0;
     int captureCorner_ = -1, captureKind_ = 0;  // ждём сочетание клавиш для угла
+    int captureApp_ = -1, captureCmd_ = -1;     // ждём сочетание для команды кольца программы
+    std::wstring appNewExe_;                    // «Программы»: exe своей программы
     std::shared_ptr<IconJob> iconJob_;
     std::wstring sysStatus_;
     std::shared_ptr<lockscreen::Job> lockJob_;

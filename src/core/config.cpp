@@ -29,6 +29,14 @@ std::wstring ColorText(COLORREF c) {
 
 }  // namespace
 
+bool ExeMatch(const std::wstring& exePath, const std::wstring& masks) {
+    if (exePath.empty()) return false;
+    const wchar_t* name = PathFindFileNameW(exePath.c_str());
+    for (const std::wstring& m : Split(masks, L'|'))
+        if (!m.empty() && PathMatchSpecW(name, m.c_str())) return true;
+    return false;
+}
+
 void Resolve(Item& it) {
     it.full = ExpandPath(it.path);
     it.iconFull = ResolveIcon(it.icon);
@@ -50,7 +58,7 @@ bool LoadConfig(const std::wstring& file, Config& out) {
     if (text.size() >= 3 && (unsigned char)text[0] == 0xEF) text.erase(0, 3);  // BOM
 
     Config cfg;
-    enum { kLeft = 1, kRight = 2, kBoth = 3 };
+    enum { kLeft = 1, kRight = 2, kBoth = 3, kApps = 4 };
     std::vector<std::pair<int, Item>> items;
     int side = kBoth;
     Item* cur = nullptr;
@@ -72,6 +80,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 side = kRight;
             else if (low == L"@both")
                 side = kBoth;
+            else if (low == L"@apps")
+                side = kApps;
             else {
                 items.push_back({side, {}});
                 cur = &items.back().second;
@@ -250,7 +260,9 @@ bool LoadConfig(const std::wstring& file, Config& out) {
             continue;
         }
         if (!cur) continue;
-        if (key == L"icon")
+        if (key == L"exe" && side == kApps)
+            cur->note = val;  // маски exe кольца программы; до конца разбора лежат в note
+        else if (key == L"icon")
             cur->icon = val;
         else if (key == L"path")
             cur->path = val;
@@ -270,6 +282,14 @@ bool LoadConfig(const std::wstring& file, Config& out) {
     }
     for (auto& [s, it] : items) {
         Resolve(it);
+        if (s == kApps) {
+            AppRing a;
+            a.exes = it.note;
+            it.note.clear();
+            a.ring = std::move(it);
+            cfg.apps.push_back(std::move(a));
+            continue;
+        }
         if (s & kLeft) cfg.left.push_back(it);
         if (s & kRight) cfg.right.push_back(it);
     }
@@ -432,6 +452,21 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     };
     ring(L"[@left]", c.left);
     ring(L"[@right]", c.right);
+    if (!c.apps.empty()) {
+        o << L"\n# кольца программ: первым сектором, когда впереди окно этой программы (exe - имена через |);\n"
+             L"# item = Подпись | keys:ctrl+shift+p   или   macro:ctrl+l; wait 200; text адрес; enter\n";
+        o << L"\n[@apps]\n";
+        for (const AppRing& a : c.apps) {
+            o << L"\n[" << a.ring.name << L"]\n";
+            o << L"exe = " << a.exes << L"\n";
+            if (!a.ring.icon.empty()) o << L"icon = " << a.ring.icon << L"\n";
+            for (const Item& ch : a.ring.children) {
+                o << L"item = " << ch.name << L" | " << ch.path;
+                if (!ch.icon.empty()) o << L" | " << ch.icon;
+                o << L"\n";
+            }
+        }
+    }
 
     std::string bytes = Narrow(o.str());
     std::wstring tmp = file + L".tmp";

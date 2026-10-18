@@ -11,6 +11,7 @@
 #include "core/files.h"
 #include "core/perf.h"
 #include "core/project.h"
+#include "core/macro.h"
 #include "core/text.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -427,13 +428,19 @@ RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double 
 // Карточка над кольцом: что это, сколько внутри, когда менялось, где лежит.
 void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below) {
     const Item* it = HoveredItem();
-    if (!it || winMode_ || (it->special && it->special != 3) || alpha <= 0.01) return;
+    if (!it || winMode_ || (it->special && it->special != 3 && it->special != 4) || alpha <= 0.01) return;
     double a = alpha * Clamp01((GetTickCount64() - keyT_ - 120) / 160.0);
     if (a <= 0.01) return;
     std::wstring kind, detail, path;
     if (it->special == 3) {  // действие сети: что сделает
         kind = it->path.empty() ? L"Группа" : L"Действие";
         detail = it->note;
+    } else if (it->special == 4) {
+        kind = L"Кольцо программы";
+        detail = Plural((int)it->children.size(), L"команда", L"команды", L"команд");
+    } else if (macro::Is(it->path)) {
+        kind = L"Нажать";
+        detail = macro::Describe(it->path);
     } else if (it->full.empty()) {
         kind = L"Группа";
         int n = (int)it->children.size();
