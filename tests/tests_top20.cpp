@@ -10,6 +10,7 @@
 #include "core/macro.h"
 #include "core/secrets.h"
 #include "core/stroke.h"
+#include "desk/zones.h"
 
 namespace {
 
@@ -122,6 +123,33 @@ void TestSecrets() {
     CHECK(secrets::Entropy(L"aaaa") == 0 && secrets::Entropy(L"abcd") > 1.99);
 }
 
+void TestZones() {
+    RECT work{0, 0, 1920, 1040}, r{};
+    CHECK(zones::Rect(L"z:left", work, 0, r) && r.left == 0 && r.right == 960 && r.bottom == 1040);
+    CHECK(zones::Rect(L"z:right", work, 8, r) && r.left == 964 && r.right == 1912 && r.top == 8 && r.bottom == 1032);
+    CHECK(zones::Rect(L"z:mid3", work, 0, r) && r.left == 640 && r.right == 1280);
+    CHECK(!zones::Rect(L"z:nope", work, 0, r));
+    RECT off{-1920, 0, 0, 1080};  // монитор слева от основного
+    CHECK(zones::Rect(L"z:br", off, 0, r) && r.left == -960 && r.top == 540 && r.right == 0);
+    auto l = zones::Layout(L"l:main2", work, 0);
+    CHECK(l.size() == 3 && l[0].right == 1152 && l[1].left == 1152 && l[1].bottom == 520 && l[2].top == 520);
+    CHECK(zones::Layout(L"l:4", work, 8).size() == 4 && zones::Layout(L"z:left", work, 0).empty());
+    for (const zones::Zone& z : zones::OneWindow()) CHECK(zones::Rect(z.key, work, 8, r) && r.right > r.left);
+    // Alt + правая: какие края тянуть
+    RECT w{100, 100, 400, 400};
+    int ex = -1, ey = -1;
+    zones::ResizeEdges(w, {110, 110}, ex, ey);
+    CHECK(ex == 0 && ey == 0);
+    zones::ResizeEdges(w, {250, 250}, ex, ey);  // середина - правый нижний угол
+    CHECK(ex == 2 && ey == 2);
+    zones::ResizeEdges(w, {390, 250}, ex, ey);  // правый край, по высоте середина - только ширина
+    CHECK(ex == 2 && ey == 1);
+    RECT n = zones::Resized(w, 0, 1, 250, 40, 100, 100);  // левый край не заходит за минимум
+    CHECK(n.left == 300 && n.top == 100 && n.bottom == 400);
+    n = zones::Resized(w, 2, 2, -20, 30, 100, 100);
+    CHECK(n.right == 380 && n.bottom == 430 && n.left == 100);
+}
+
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int)) {
@@ -130,4 +158,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestStroke();
     TestFuzzy();
     TestSecrets();
+    TestZones();
 }

@@ -47,7 +47,7 @@ set_target_properties(RadialTools PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_L
 # тесты без окон (tests/): правило TEMP, разбор хода чистки, обход папок, разбор MFT, журнал, дампы падений, фоновые
 # задачи; запуск - ctest или build.cmd test
 enable_testing()
-add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.cpp src/core/macro.cpp src/core/stroke.cpp src/core/fuzzy.cpp src/core/secrets.cpp src/tools/common.cpp src/tools/livesize.cpp
+add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.cpp src/core/macro.cpp src/core/stroke.cpp src/core/fuzzy.cpp src/core/secrets.cpp src/desk/zones.cpp src/tools/common.cpp src/tools/livesize.cpp
   src/tools/mft_parse.cpp src/tools/journal.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/tools/selfwatch.cpp)
 target_include_directories(radial_tests PRIVATE src)
 target_compile_definitions(radial_tests PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)

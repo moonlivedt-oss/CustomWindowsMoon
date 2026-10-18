@@ -17,6 +17,7 @@
 #include "app/netui.h"
 #include "app/palette.h"
 #include "desk/cliphist.h"
+#include "desk/layout.h"
 #include "app/autos.h"
 #include "app/toolsui.h"
 #include "core/bg.h"
@@ -207,6 +208,7 @@ void PollWork() {
     g_dev.Tick(g_cfg);
     g_media.Tick(g_cfg, alt || g_menu.IsOpen() || fx::Game());
     g_winfx.Tick();
+    g_winfx.SetBlocked(g_menu.IsOpen() || fx::Game());  // Alt + мышь не мешает кольцу и игре
     g_battery.Tick(g_cfg);
     g_snip.Tick();
     g_boostCard.Tick();
@@ -1554,6 +1556,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         }
     });
     palette::AddRunner(L"b|", [](const std::wstring& n) { cliphist::Use(_wtoi(n.c_str())); });
+    layout::Init(&g_cfg);
+    corners::SetLayout([] { layout::ShowRing(g_menu); });
+    palette::AddSource([](std::vector<Item>& out) {
+        for (Item& it : layout::Items(L"z|")) out.push_back(std::move(it));
+    });
+    palette::AddRunner(L"z|", [](const std::wstring& key) { layout::Run(key); });
     // вошли в Windows только что: стол открывается порталом
     if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
     g_game.onChange = OnGameMode;

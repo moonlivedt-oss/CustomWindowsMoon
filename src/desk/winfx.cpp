@@ -6,11 +6,14 @@
 #include <gdiplus.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 
 #include "core/fx.h"
 #include "core/llmouse.h"
 #include "core/config.h"
+#include "desk/layout.h"
+#include "desk/zones.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 
@@ -20,8 +23,9 @@ namespace {
 
 constexpr wchar_t kClass[] = L"MoonRadialWinFx";
 constexpr UINT WM_FX_WHEEL = WM_APP + 1, WM_FX_PIN = WM_APP + 2;
-constexpr int kStrip = 44;      // высота «верхней полосы» окна, до масштаба
-constexpr BYTE kMinAlpha = 51;  // 20%: совсем невидимое окно потом не найти
+constexpr UINT WM_FX_DRAG = WM_APP + 3, WM_FX_DRAG_MOVE = WM_APP + 4;  // Alt + мышь: начало (wParam - окно), ход
+constexpr int kStrip = 44;                                             // высота «верхней полосы» окна, до масштаба
+constexpr BYTE kMinAlpha = 51;                                         // 20%: совсем невидимое окно потом не найти
 constexpr ULONGLONG kShow = 1300;
 constexpr float kW = 300, kH = 64, kM = 22;   // подсказка и поля под тень
 constexpr DWORD kBorderDefault = 0xFFFFFFFF;  // DWMWA_COLOR_DEFAULT
@@ -29,6 +33,48 @@ constexpr DWORD kBorderAttr = 34;             // DWMWA_BORDER_COLOR (Windows 11)
 
 WindowFx* g_fx = nullptr;
 bool g_swallowMiddleUp = false;  // только поток перехвата
+// Alt + мышь: включено ли (снимок настроек для потока перехвата), заблокировано ли (кольцо, игра), кто тащит
+std::atomic<bool> g_dragOn{true}, g_blocked{false};
+UINT g_dragUp = 0;  // только поток перехвата: какое отпускание съесть (WM_LBUTTONUP / WM_RBUTTONUP), 0 - не тащим
+
+// программы, где Alt + мышь - своё управление (камера, кисть): там не перехватываем
+bool OwnAltMouse(HWND w) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    HANDLE p = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
+    if (!p) return true;  // окно с правами администратора: двигать его всё равно не дадут
+    wchar_t buf[MAX_PATH];
+    DWORD n = MAX_PATH;
+    bool own = false;
+    if (QueryFullProcessImageNameW(p, 0, buf, &n)) {
+        const wchar_t* name = wcsrchr(buf, L'\\');
+        name = name ? name + 1 : buf;
+        for (const wchar_t* m : {L"UnrealEditor.exe", L"UE4Editor.exe", L"blender.exe", L"maya.exe", L"3dsmax.exe",
+                                 L"houdini.exe", L"houdinifx.exe", L"Substance Painter.exe", L"ZBrush.exe",
+                                 L"krita.exe", L"Photoshop.exe", L"Unity.exe", L"godot.exe"})
+            if (!_wcsicmp(name, m)) own = true;
+        if (!_wcsnicmp(name, L"godot", 5)) own = true;
+    }
+    CloseHandle(p);
+    return own;
+}
+
+// окно под курсором для Alt + мышь: верхнее, не стол и не наше, не на весь экран
+HWND DragTarget(POINT pt) {
+    HWND w = WindowFromPoint(pt);
+    if (!w) return nullptr;
+    w = GetAncestor(w, GA_ROOT);
+    wchar_t cls[64];
+    GetClassNameW(w, cls, 64);
+    if (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") || !wcscmp(cls, L"Shell_TrayWnd") ||
+        !wcscmp(cls, L"Shell_SecondaryTrayWnd") || !wcsncmp(cls, L"MoonRadial", 10) ||
+        !wcscmp(cls, L"Windows.UI.Core.CoreWindow"))
+        return nullptr;
+    LONG_PTR st = GetWindowLongPtrW(w, GWL_STYLE);
+    if (!(st & WS_VISIBLE) || IsIconic(w)) return nullptr;
+    if (!IsZoomed(w) && !(st & (WS_CAPTION | WS_THICKFRAME))) return nullptr;  // без рамки: игра, видео, оверлей
+    return OwnAltMouse(w) ? nullptr : w;
+}
 
 void RoundRect(GraphicsPath& p, const RectF& r, float rad) {
     float d = std::min(rad * 2, std::min(r.Width, r.Height));
@@ -80,9 +126,47 @@ void WindowFx::Create(HINSTANCE inst) {
     llmouse::Set(llmouse::WINDOW_FX, OnMouse);
 }
 
+void WindowFx::SetBlocked(bool on) { g_blocked = on; }
+
+void WindowFx::DragBegin(HWND w, POINT at, bool size) {
+    dragWin_ = w;
+    dragAt_ = at;
+    dragSize_ = size;
+    if (IsZoomed(w)) {
+        // развёрнутое окно сначала встаёт обычным, под курсором - в той же доле ширины, где схватили
+        RECT max{};
+        GetWindowRect(w, &max);
+        WINDOWPLACEMENT wp{sizeof(wp)};
+        GetWindowPlacement(w, &wp);
+        RECT n = wp.rcNormalPosition;
+        LONG nw = n.right - n.left, nh = n.bottom - n.top;
+        double fx = (double)(at.x - max.left) / std::max<LONG>(1, max.right - max.left);
+        ShowWindow(w, SW_RESTORE);
+        LONG x = at.x - (LONG)(fx * nw), y = at.y - 16;
+        SetWindowPos(w, nullptr, x, y, nw, nh, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    GetWindowRect(w, &dragFrom_);
+    SetForegroundWindow(w);
+}
+
+void WindowFx::DragMove(POINT pt) {
+    if (!dragWin_ || !IsWindow(dragWin_)) return;
+    int dx = pt.x - dragAt_.x, dy = pt.y - dragAt_.y;
+    if (!dragSize_) {
+        SetWindowPos(dragWin_, nullptr, dragFrom_.left + dx, dragFrom_.top + dy, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+    UINT dpi = GetDpiForWindow(dragWin_);
+    int k = (int)(dpi ? dpi : 96);
+    RECT r = zones::Resized(dragFrom_, dragEx_, dragEy_, dx, dy, 240 * k / 96, 140 * k / 96);
+    SetWindowPos(dragWin_, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 void WindowFx::Apply(const Config& cfg) {
     enabled_ = cfg.winFx;
-    llmouse::Need(llmouse::WINDOW_FX, enabled_ && wnd_);
+    g_dragOn = cfg.winDrag;
+    llmouse::Need(llmouse::WINDOW_FX, (enabled_ || cfg.winDrag) && wnd_);
     theme_ = CurrentTheme(cfg);
     // рамки закреплённых окон перекрасить в новый цвет темы
     for (auto& [w, s] : states_) {
@@ -131,10 +215,30 @@ bool WindowFx::OnMouse(WPARAM wp, const MSLLHOOKSTRUCT& m) {
         g_swallowMiddleUp = false;
         return true;
     }
-    if (wp != WM_MOUSEWHEEL && wp != WM_MBUTTONDOWN) return false;
+    // Alt + левая / правая: тащить окно или менять размер
+    if (g_dragUp) {
+        if (wp == WM_MOUSEMOVE) PostMessageW(g_fx->wnd_, WM_FX_DRAG_MOVE, 0, MAKELPARAM(m.pt.x, m.pt.y));
+        if (wp == g_dragUp) {
+            g_dragUp = 0;
+            PostMessageW(g_fx->wnd_, WM_FX_DRAG, 0, 0);
+            return true;
+        }
+        return wp == WM_LBUTTONDOWN || wp == WM_RBUTTONDOWN;  // вторая кнопка посреди тяги - мимо окна
+    }
     bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
     bool other = (GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_SHIFT)) & 0x8000;
-    if (!alt || other) return false;
+    if ((wp == WM_LBUTTONDOWN || wp == WM_RBUTTONDOWN) && alt && !other && g_dragOn && !g_blocked) {
+        HWND w = DragTarget(m.pt);
+        if (!w) return false;
+        bool size = wp == WM_RBUTTONDOWN;
+        g_dragUp = size ? WM_RBUTTONUP : WM_LBUTTONUP;
+        PostMessageW(g_fx->wnd_, WM_FX_DRAG, (WPARAM)w, MAKELPARAM(m.pt.x, m.pt.y) | 0);
+        if (size) PostMessageW(g_fx->wnd_, WM_FX_DRAG_MOVE, 1, MAKELPARAM(m.pt.x, m.pt.y));  // 1 - тянуть размер
+        MaskAlt();
+        return true;
+    }
+    if (wp != WM_MOUSEWHEEL && wp != WM_MBUTTONDOWN) return false;
+    if (!alt || other || !g_fx->enabled_) return false;
     HWND w = TargetAt(m.pt);
     if (!w) return false;
     if (wp == WM_MOUSEWHEEL) {
@@ -155,6 +259,28 @@ LRESULT CALLBACK WindowFx::Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (g_fx && msg == WM_FX_PIN) {
         g_fx->TogglePin((HWND)wp);
+        return 0;
+    }
+    if (g_fx && msg == WM_FX_DRAG) {
+        POINT at{(short)LOWORD(lp), (short)HIWORD(lp)};
+        if (wp)
+            g_fx->DragBegin((HWND)wp, at, false);
+        else
+            g_fx->dragWin_ = nullptr;  // отпустили
+        return 0;
+    }
+    if (g_fx && msg == WM_FX_DRAG_MOVE) {
+        POINT pt{(short)LOWORD(lp), (short)HIWORD(lp)};
+        if (wp == 1 && g_fx->dragWin_) {  // это Alt + правая: тянуть размер
+            g_fx->dragSize_ = true;
+            zones::ResizeEdges(g_fx->dragFrom_, pt, g_fx->dragEx_, g_fx->dragEy_);
+            return 0;
+        }
+        // сообщения о движении копятся, пока окно двигается: берём только последнее
+        MSG more;
+        while (PeekMessageW(&more, h, WM_FX_DRAG_MOVE, WM_FX_DRAG_MOVE, PM_REMOVE))
+            if (more.wParam == 0) pt = {(short)LOWORD(more.lParam), (short)HIWORD(more.lParam)};
+        g_fx->DragMove(pt);
         return 0;
     }
     return DefWindowProcW(h, msg, wp, lp);

@@ -57,6 +57,7 @@ const Action kActions[] = {
     {L"tools", L"Кольцо утилит"},
     {L"minecraft", L"Кольцо Minecraft"},
     {L"clip", L"Кольцо буфера"},
+    {L"layout", L"Кольцо раскладки окон"},
 };
 
 const Action kWheel[] = {
@@ -179,8 +180,16 @@ void (*g_clip)() = nullptr;
 
 void SetClip(void (*clip)()) { g_clip = clip; }
 
+void (*g_layout)() = nullptr;
+
+void SetLayout(void (*layout)()) { g_layout = layout; }
+
 void Run(const std::wstring& a) {
     if (a.empty()) return;
+    if (a == L"layout") {
+        if (g_layout) g_layout();
+        return;
+    }
     if (a == L"clip") {
         if (g_clip) g_clip();
         return;
