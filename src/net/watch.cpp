@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 
+#include "core/bg.h"
 #include "core/text.h"
 
 namespace net {
@@ -155,9 +156,9 @@ bool PublicV4(DWORD addr) {
     return true;
 }
 
-DWORD WINAPI GameThread(void* p) {
-    std::unique_ptr<GameJob> job((GameJob*)p);
+void GameWork(const GameJob* job) {
     Sleep(20000);  // игра успевает подключиться к серверу
+    if (bg::Quitting()) return;
     InitSockets();
     // соединения игры: какой адрес встречается чаще - тот и сервер
     std::map<std::pair<DWORD, int>, int> seen;
@@ -209,17 +210,13 @@ DWORD WINAPI GameThread(void* p) {
     }
     Remember(L"game", ev->text);
     if (!PostMessageW(job->notify, job->msg, 0, (LPARAM)ev)) delete ev;
-    return 0;
 }
 
 }  // namespace
 
 void CheckGame(const std::vector<DWORD>& pids, const std::wstring& name, HWND notify, UINT msg) {
-    auto* job = new GameJob{pids, name, notify, msg};
-    if (HANDLE th = CreateThread(nullptr, 0, GameThread, job, 0, nullptr))
-        CloseHandle(th);
-    else
-        delete job;
+    GameJob job{pids, name, notify, msg};
+    bg::Run([job] { GameWork(&job); });
 }
 
 }  // namespace net

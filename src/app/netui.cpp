@@ -1,7 +1,9 @@
 #include "app/netui.h"
 
+#include <atomic>
 #include <memory>
 
+#include "core/bg.h"
 #include "core/config.h"
 #include "core/files.h"
 #include "core/text.h"
@@ -20,7 +22,7 @@ const Config* g_cfg = nullptr;
 BoostCard g_card;
 net::Watch g_watch;
 std::function<void()> g_openStudio;
-volatile bool g_busy = false;
+std::atomic<bool> g_busy{false};
 bool g_downShown = false;  // карточка «пропал интернет» была - «вернулся» имеет смысл
 
 struct JobMsg {
@@ -48,36 +50,21 @@ void RunJob(const std::wstring& title, std::function<bool(const net::Log&, std::
     }
     g_busy = true;
     g_card.Show(BoostCard::WORKING, title, L"Начинаю...", Theme());
-    struct Box {
-        std::wstring title;
-        std::function<bool(const net::Log&, std::wstring&)> work;
-    };
-    auto* box = new Box{title, std::move(work)};
-    HANDLE th = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            std::unique_ptr<Box> b((Box*)p);
-            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-            std::wstring last;
-            net::Log log = [&](const std::wstring& s) {
-                last = s;
-                auto* m = new JobMsg{b->title, s, false, false};
-                if (!PostMessageW(g_app, WM_NET_JOB, 0, (LPARAM)m)) delete m;
-            };
-            std::wstring result;
-            bool ok = b->work(log, result);
-            auto* m = new JobMsg{b->title, result.empty() ? last : result, true, ok};
+    bool started = bg::Run([title, work = std::move(work)] {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        std::wstring last;
+        net::Log log = [&](const std::wstring& s) {
+            last = s;
+            auto* m = new JobMsg{title, s, false, false};
             if (!PostMessageW(g_app, WM_NET_JOB, 0, (LPARAM)m)) delete m;
-            CoUninitialize();
-            return 0;
-        },
-        box, 0, nullptr);
-    if (th) {
-        CloseHandle(th);
-    } else {
-        delete box;
-        g_busy = false;
-    }
+        };
+        std::wstring result;
+        bool ok = work(log, result);
+        auto* m = new JobMsg{title, result.empty() ? last : result, true, ok};
+        if (!PostMessageW(g_app, WM_NET_JOB, 0, (LPARAM)m)) delete m;
+        CoUninitialize();
+    });
+    if (!started) g_busy = false;
 }
 
 // Сброс прокси выключит работающий прокси-клиент: если он жив, сначала спросить.

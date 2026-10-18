@@ -7,6 +7,7 @@
 #include <memory>
 #include <sstream>
 
+#include "core/bg.h"
 #include "core/text.h"
 
 namespace lyrics {
@@ -306,9 +307,8 @@ void Fetcher::Request(const std::wstring& artist, const std::wstring& title, int
     if (!have) cache_[key].state = kLoading;
     ReleaseSRWLockExclusive(&mu_);
     if (have) return;
-    auto* job = new Job{this, key, artist, title, durSec, notify, msg};
-    HANDLE t = CreateThread(nullptr, 0, Thread, job, 0, nullptr);
-    if (t) CloseHandle(t);
+    Job job{this, key, artist, title, durSec, notify, msg};
+    bg::Run([job] { Fetch(job); });
 }
 
 Lyrics Fetcher::Get(const std::wstring& artist, const std::wstring& title) {
@@ -319,8 +319,8 @@ Lyrics Fetcher::Get(const std::wstring& artist, const std::wstring& title) {
     return r;
 }
 
-DWORD WINAPI Fetcher::Thread(void* p) {
-    std::unique_ptr<Job> j((Job*)p);
+void Fetcher::Fetch(const Job& job) {
+    const Job* j = &job;
     std::wstring title = Clean(j->title), artist = Clean(j->artist);
     // попытки: как есть; «Исполнитель - Название» из заголовка видео; просто строкой поиска
     std::vector<std::wstring> tries;
@@ -368,7 +368,6 @@ DWORD WINAPI Fetcher::Thread(void* p) {
     j->self->cache_[j->key] = std::move(found);
     ReleaseSRWLockExclusive(&j->self->mu_);
     PostMessageW(j->notify, j->msg, 0, 0);
-    return 0;
 }
 
 }  // namespace lyrics

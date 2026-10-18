@@ -1,6 +1,7 @@
 #pragma once
 // Утилиты: PATH и переменные окружения, диски, автозагрузка, порты и кто держит файл.
 // Всё блокирующее зовётся из рабочих потоков; правки без прав - сразу, с правами - через задачу сети.
+#include <atomic>
 #include <functional>
 #include <map>
 #include <string>
@@ -72,22 +73,73 @@ struct FolderSize {
     std::wstring path, name;
     ULONGLONG bytes = 0;
     int files = 0;
+    bool closed = false;  // посчитано по MFT, а обходу внутрь нет входа (System Volume Information)
 };
 // Что занимает место в папке: размеры вложенных папок (с файлами в корне - отдельной строкой).
 // cancel - выставить в true, чтобы остановить; progress - сколько файлов уже просмотрено.
 // partial - после каждой посчитанной папки: что уже известно (по убыванию), чтобы список рос на глазах.
-std::vector<FolderSize> ScanSizes(const std::wstring& dir, volatile bool* cancel, volatile long* progress,
+std::vector<FolderSize> ScanSizes(const std::wstring& dir, std::atomic<bool>* cancel, std::atomic<long>* progress,
                                   const std::function<void(const std::vector<FolderSize>&)>& partial = nullptr);
+
+// Те же размеры прямым чтением MFT - секунды на весь диск. Только NTFS и только в процессе с правами (том
+// открывает администратор); err - почему не вышло или сводка (записей, мс). Ссылки не раскрываются.
+bool MftSizes(const std::wstring& dir, std::vector<FolderSize>& out, std::wstring& err);
+// Из обычного процесса. Задача с правами за один проход считает все папки тома и кладёт таблицу в папку помощника;
+// пока таблица свежая (5 минут), любая папка этого тома берётся из неё мгновенно. Таблицы нет - задача зовётся (без
+// UAC, только если уже настроена) для диска и папок первого уровня, глубже быстрее обычный обход. Итог сверяется
+// со списком папок (не совпал - false, тогда обычный ScanSizes); note - сводка или почему нет.
+enum MftState { MFT_READY, MFT_NONE, MFT_OLD, MFT_BLOCKED };  // есть, не настроена, устарела, антивирус не пускает
+// reading - true, пока задача читает таблицу (для подписи «Читаю таблицу MFT...»); state - что с задачей с правами,
+// если её пришлось спросить (иначе не трогается).
+bool ScanSizesMft(const std::wstring& dir, std::vector<FolderSize>& out, std::wstring& note,
+                  std::atomic<bool>* reading = nullptr, MftState* state = nullptr);
+// Только из свежей таблицы в кэше, без задачи (для карточек): false - таблицы нет или устарела.
+bool MftCached(const std::wstring& dir, std::vector<FolderSize>& out,
+               bool verify = true);  // verify=false - для разбора
+MftState MftReady();                 // спрашивает планировщик - не из потока окна
+// В процессе с правами: таблица тома, где лежит dir, - в файл кэша; ответ - строка «@mftok» или «@mftfail»
+std::wstring MftAdminMain(const std::wstring& dir);
+
+// Живой рост папок (livesize.cpp): ReadDirectoryChangesW будит поток, размер пересчитывается не чаще раза в минуту и
+// только после изменений. today - с первого замера за сегодня, hour - за последний час (или с запуска, если меньше).
+struct LiveSize {
+    std::wstring name, path;
+    ULONGLONG now = 0;
+    LONGLONG today = 0, hour = 0;
+    bool ready = false;  // первый замер ещё не сделан
+};
+void LiveStart(const std::vector<std::pair<std::wstring, std::wstring>>& folders);  // имя и путь
+void LiveStop();
+std::vector<LiveSize> LiveSizes();  // в процессе с правами: строки «@mft...» для журнала
 
 struct Junk {
     std::wstring name, path;
-    ULONGLONG bytes = 0;
+    ULONGLONG bytes = 0;  // сколько чистка правда удалит (в TEMP - по правилу TempRemovable)
+    ULONGLONG fresh = 0;  // в TEMP: свежее или занятое - чистка оставит, уйдёт в следующие разы
     bool admin = false;
     bool slow = false;  // пересоздаётся дорого (шейдеры): в «Всё сразу» не входит
 };
 std::vector<Junk> FindJunk(bool sizes = true);  // sizes=false - только список, быстро (для кольца)
-ULONGLONG DirBytes(const std::wstring& root, int* files = nullptr, volatile bool* cancel = nullptr,
-                   volatile long* progress = nullptr);
+ULONGLONG DirBytes(const std::wstring& root, int* files = nullptr, std::atomic<bool>* cancel = nullptr,
+                   std::atomic<long>* progress = nullptr);
+// Обход дерева без рекурсии и без захода в ссылки: NtQueryDirectoryFile с большим буфером (запасной путь -
+// FindFirstFileEx). fn получает каждый файл; папки обходятся сами.
+struct WalkFile {
+    DWORD attrs = 0;
+    ULONGLONG size = 0, write = 0, create = 0, access = 0;  // время - FILETIME одним числом
+    const std::wstring* dir = nullptr;                      // папка и имя - живут только на время вызова fn
+    const wchar_t* name = L"";
+    size_t nameLen = 0;
+    std::wstring Path() const { return *dir + L"\\" + std::wstring(name, nameLen); }
+};
+// Можно ли удалить файл из TEMP сейчас (одно правило для подсчёта и для RadialTools):
+// старше 6 часов и никто не держит (занятый не удалится, и обещать его нечестно); кэш разбора clangd
+// (preamble-*.pch, по 30 МБ, остаются после закрытия редактора) - через час, если не держит. Остальное - свежее.
+bool TempRemovable(const WalkFile& f, ULONGLONG now);
+// занят кем-то или удалить его нам нельзя (пробное открытие на удаление без общего доступа)
+bool FileInUse(const std::wstring& path);
+void WalkFiles(const std::wstring& root, const std::function<void(const WalkFile&)>& fn,
+               std::atomic<bool>* cancel = nullptr);
 std::wstring TempDir();
 
 // Кэш Unreal (DDC): общий для всех проектов; файлы, к которым давно не
@@ -106,7 +158,7 @@ struct ProjectJunk {
     ULONGLONG bytes = 0;
     int idleDays = 0;  // сколько дней в проекте ничего не менялось
 };
-std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots, volatile bool* cancel = nullptr);
+std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots, std::atomic<bool>* cancel = nullptr);
 bool IsProjectJunk(const std::wstring& path,
                    std::wstring* kind = nullptr);  // проверка признаков перед удалением
 
@@ -146,6 +198,23 @@ std::vector<Growth> WeekGrowth(int days = 7);           // что выросло
 
 ULONGLONG CleanJunk(const Junk& j,
                     const Log& log);  // удалить содержимое; сколько освобождено
+// Несколько кэшей одним запуском RadialTools: started(i) - взялся за i-й, done(i, байт) - закончил (зовётся для
+// каждого, даже если RadialTools не запустился). Сколько освобождено всего.
+// busy - пути файлов, которые удалить не дали (до 300 на кэш): кто держит - WhoLocksFiles.
+ULONGLONG CleanJunks(const std::vector<Junk>& list, const std::function<void(size_t)>& started,
+                     const std::function<void(size_t, ULONGLONG)>& done, const Log& log,
+                     std::vector<std::wstring>* busy = nullptr);
+// Строка хода «clean» от RadialTools: «#start\t<i>», «#freed\t<i>\t<байт>», «#busy\t<путь>»; иначе - журнал.
+struct CleanLine {
+    enum Kind { LOG, START, FREED, BUSY } kind = LOG;
+    size_t index = (size_t)-1;
+    ULONGLONG bytes = 0;
+    std::wstring text;  // для BUSY - путь
+};
+CleanLine ParseCleanLine(const std::wstring& s);
+// Вывод «DISM /Online /Cleanup-Image /AnalyzeComponentStore»: фактический размер хранилища компонентов (DISM
+// по-английски или по-русски, запятая или точка в числе), 0 - такой строки нет.
+ULONGLONG ParseStoreSize(const std::wstring& dismOut);
 ULONGLONG TrimDdc(int days,
                   const Log& log);  // удалить из кэша Unreal то, что не открывалось days дней
 ULONGLONG CleanProjects(const std::vector<std::wstring>& paths,
@@ -190,6 +259,7 @@ struct Locker {
     std::wstring name;
 };
 std::vector<Locker> WhoLocks(const std::wstring& path);  // кто держит файл или файлы папки (Restart Manager)
+std::vector<Locker> WhoLocksFiles(const std::vector<std::wstring>& files);  // то же для списка файлов, одним запросом
 // завершить процесс; expect - каким exe он должен быть (номер мог достаться
 // другому)
 bool KillPid(DWORD pid, const std::wstring& expect = L"");
@@ -308,6 +378,10 @@ bool RestartToRecovery();                          // перезагрузка �
 bool RepairWindowsAdminMain(const Log& log);       // DISM RestoreHealth, потом SFC
 bool ResetWindowsUpdateAdminMain(const Log& log);  // службы, SoftwareDistribution, catroot2
 bool DefenderOfflineAdminMain(const Log& log);     // автономная проверка Defender (перезагрузит)
+// Кэш Delivery Optimization (раздача обновлений) и вытесненные версии компонентов Windows (DISM
+// StartComponentCleanup без ResetBase - последние обновления по-прежнему можно удалить). Строка «@freed=<байт>» -
+// насколько выросло свободное место на системном диске.
+bool SystemCleanAdminMain(const Log& log);
 
 // ---------------- приватность и доверие (privacy.cpp) ----------------
 struct PrivacyUse {
@@ -505,7 +579,7 @@ struct DupGroup {
 };
 std::vector<std::wstring> DupRoots();  // Загрузки, Рабочий стол, Документы, Видео, Изображения, Музыка
 std::vector<DupGroup> FindDuplicates(const std::vector<std::wstring>& roots, ULONGLONG minBytes,
-                                     volatile bool* cancel = nullptr, volatile long* progress = nullptr);
+                                     std::atomic<bool>* cancel = nullptr, std::atomic<long>* progress = nullptr);
 // копии - в Корзину через RadialTools.exe: он сам сверит размер и SHA-256 с оставляемым файлом
 int RecycleDuplicates(const std::wstring& keep, const std::vector<std::wstring>& copies, const Log& log);
 

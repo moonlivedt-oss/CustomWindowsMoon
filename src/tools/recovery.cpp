@@ -285,6 +285,72 @@ bool ResetWindowsUpdateAdminMain(const Log& log) {
     return ok;
 }
 
+bool SystemCleanAdminMain(const Log& log) {
+    std::wstring win = WinDir(), root = win.substr(0, 3), out;
+    auto freeNow = [&] {
+        ULARGE_INTEGER f{};
+        GetDiskFreeSpaceExW(root.c_str(), &f, nullptr, nullptr);
+        return f.QuadPart;
+    };
+    // Свободное место на диске за 5-20 минут меняют и другие программы (браузер, обновления, подкачка) - итог по
+    // нему шумный. Поэтому замер до и после того, что чистим: размер хранилища компонентов (так его считает сам
+    // DISM) и папки кэша Delivery Optimization. Не удалось замерить - запасной вариант: свободное место.
+    auto storeSize = [&] {
+        std::wstring o;
+        RunCapture(L"dism.exe /Online /Cleanup-Image /AnalyzeComponentStore", o, 15 * 60 * 1000);
+        return ParseStoreSize(o);
+    };
+    // кэш DO: папка службы (Windows 10 1709+), раньше - в SoftwareDistribution
+    auto doSize = [&] {
+        ULONGLONG s = 0;
+        for (const wchar_t* sub : {L"\\ServiceProfiles\\NetworkService\\AppData\\Local\\Microsoft\\Windows\\"
+                                   L"DeliveryOptimization\\Cache",
+                                   L"\\SoftwareDistribution\\DeliveryOptimization"})
+            s += DirBytes(win + sub);
+        return s;
+    };
+    ULONGLONG before = freeNow();
+    wchar_t sys[MAX_PATH] = {};
+    GetSystemDirectoryW(sys, MAX_PATH);
+    log(L"Шаг 1 из 4: замеряю хранилище компонентов (DISM, 1-3 минуты)...");
+    ULONGLONG storeBefore = storeSize(), doBefore = doSize();
+    log(storeBefore ? L"Хранилище компонентов: " + Bytes(storeBefore) + L", кэш Delivery Optimization: " +
+                          Bytes(doBefore) + L"."
+                    : L"DISM не сказал размер хранилища - итог посчитаю по свободному месту.");
+    log(L"Шаг 2 из 4: кэш Delivery Optimization (копии обновлений для раздачи другим компьютерам)...");
+    // модули - только системные: PSModulePath из переменных пользователя выполнил бы подложенный модуль с правами
+    int a = RunCapture(L"\"" + std::wstring(sys) +
+                           L"\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive -Command "
+                           L"\"$env:PSModulePath=$PSHOME+'\\Modules'; Delete-DeliveryOptimizationCache -Force\"",
+                       out, 10 * 60 * 1000);
+    log(a == 0 ? L"Кэш Delivery Optimization очищен." : L"Delivery Optimization: " + Tail(out, 2));
+    log(L"Шаг 3 из 4: DISM убирает вытесненные версии компонентов Windows (5-20 минут)...");
+    int b = RunCapture(L"dism.exe /Online /Cleanup-Image /StartComponentCleanup", out, 60 * 60 * 1000);
+    log(L"DISM: " + (b == 0 ? std::wstring(L"готово") : L"код " + std::to_wstring(b)) + L". " + Tail(out, 2));
+    ULONGLONG after = freeNow();
+    ULONGLONG byDisk = after > before ? after - before : 0, freed = byDisk;
+    if (storeBefore) {
+        log(L"Шаг 4 из 4: замеряю хранилище после чистки...");
+        ULONGLONG storeAfter = storeSize(), doAfter = doSize();
+        if (storeAfter) {
+            ULONGLONG store = storeBefore > storeAfter ? storeBefore - storeAfter : 0;
+            ULONGLONG cache = doBefore > doAfter ? doBefore - doAfter : 0;
+            freed = store + cache;
+            log(L"Хранилище компонентов: " + Bytes(storeBefore) + L" -> " + Bytes(storeAfter) +
+                L", кэш Delivery Optimization: " + Bytes(doBefore) + L" -> " + Bytes(doAfter) + L".");
+            log(L"Освобождено: " + Bytes(freed) + L" (по свободному месту на " + root.substr(0, 2) + L" - " +
+                Bytes(byDisk) + L", там видны и чужие записи на диск).");
+        } else {
+            log(L"Второй замер DISM не удался - итог по свободному месту на " + root.substr(0, 2) + L": " +
+                Bytes(byDisk) + L".");
+        }
+    } else {
+        log(L"Освобождено на " + root.substr(0, 2) + L": " + Bytes(byDisk) + L".");
+    }
+    log(L"@freed=" + std::to_wstring(freed));
+    return a == 0 || b == 0;
+}
+
 bool DefenderOfflineAdminMain(const Log& log) {
     log(L"Запускаю автономную проверку Microsoft Defender: компьютер перезагрузится и проверится до загрузки "
         L"Windows (около 15 минут).");

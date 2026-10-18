@@ -1,13 +1,16 @@
 #include "app/autos.h"
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 
 #include "app/autostart.h"
+#include "core/bg.h"
 #include "core/config.h"
 #include "core/files.h"
 #include "core/text.h"
 #include "core/themes.h"
+#include "tools/journal.h"
 #include "app/toolsui.h"
 #include "desk/boostcard.h"
 #include "desk/scenecard.h"
@@ -24,10 +27,10 @@ std::function<void()> g_reload;
 std::function<void(int, const std::wstring&)> g_openStudio;
 BoostCard g_card;
 ULONGLONG g_started = 0, g_cleanCheck = 0, g_lowCheck = 0, g_repairCheck = 0, g_dlCheck = 0;
-volatile bool g_cleaning = false, g_dlScanning = false;
+std::atomic<bool> g_dlScanning{false};
 bool g_game = false, g_dev = false, g_toolsWarned = false;
 std::vector<tools::DownloadJunk> g_downloads;
-SRWLOCK g_lock = SRWLOCK_INIT;  // журнал и список Загрузок пишутся из потоков
+SRWLOCK g_lock = SRWLOCK_INIT;  // список Загрузок пишется из потоков
 std::wstring g_power, g_repair;
 
 ThemeInfo Theme() { return CurrentTheme(*g_cfg); }
@@ -56,7 +59,8 @@ struct Msg {
     std::wstring text;
     ULONGLONG bytes = 0;
     int count = 0;
-    bool silent = false;  // по расписанию: итог карточкой, но без «работаю»
+    bool silent = false;   // по расписанию: итог карточкой, но без «работаю»
+    std::wstring lockers;  // чистка: кто не дал удалить занятое
 };
 
 void Post(Msg* m) {
@@ -66,49 +70,45 @@ void Post(Msg* m) {
 // ---------------- тихая чистка ----------------
 
 void RunClean(const std::wstring& why, bool silent) {
-    if (g_cleaning) return;
-    g_cleaning = true;
-    // что чистить - сразу, размеры - из последнего фонового подсчёта: по ним сцена рисует полоски
+    if (!toolsui::CleanClaim()) return;  // уже чистит кольцо, студия или прошлый запуск
+    // что чистить - сразу, размеры - из последнего фонового подсчёта: по ним сцена рисует полоски. Если подсчёт
+    // был, пустые кэши и TEMP, где только свежее, пропускаем - запускать ради них RadialTools незачем.
+    toolsui::State snap = toolsui::Snapshot();
     std::vector<tools::Junk> list;
-    std::vector<tools::Junk> sized = toolsui::Snapshot().junk;
     std::vector<scene::CleanItem> items;
     for (tools::Junk& j : tools::FindJunk(false)) {
         if (j.slow) continue;
-        for (const tools::Junk& s : sized)
-            if (s.path == j.path) j.bytes = s.bytes;
+        auto s =
+            std::find_if(snap.junk.begin(), snap.junk.end(), [&](const tools::Junk& x) { return x.path == j.path; });
+        if (s != snap.junk.end()) j.bytes = s->bytes;
+        if (snap.at && !j.bytes) continue;
         items.push_back({j.name, j.bytes});
         list.push_back(j);
     }
+    if (list.empty()) {
+        toolsui::CleanRelease();
+        Post(new Msg{Msg::CLEAN_DONE, why, 0, 0, true});
+        if (!silent)
+            g_card.Show(BoostCard::DONE, L"Чистить нечего",
+                        L"Кэши пустые, а временные файлы свежие или заняты программами - их не трогаю, дойдёт очередь "
+                        L"в следующий раз.",
+                        Theme(), 6000, Toast::G_OK);
+        return;
+    }
     scene::CleanBegin(items);
     if (!silent) SceneCard::Get().Show(SceneCard::CLEAN, L"Тихая чистка", Theme());
-    struct Box {
-        std::wstring why;
-        bool silent;
-        std::vector<tools::Junk> list;
-    };
-    auto* box = new Box{why, silent, list};
-    HANDLE th = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            std::unique_ptr<Box> b((Box*)p);
-            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-            ULONGLONG freed = 0;
-            for (size_t i = 0; i < b->list.size(); ++i) {
-                scene::CleanMark(i, 1);
-                ULONGLONG f = tools::CleanJunk(b->list[i], [](const std::wstring&) {});
-                scene::CleanMark(i, 2, f);
-                freed += f;
-            }
-            scene::CleanEnd();
-            Post(new Msg{Msg::CLEAN_DONE, b->why, freed, 0, b->silent});
-            return 0;
+    bool started = bg::Run(
+        [why, silent, list] {
+            std::wstring who;
+            ULONGLONG freed = toolsui::CleanList(list, nullptr, &who);  // отпускает чистку сама
+            Msg* m = new Msg{Msg::CLEAN_DONE, why, freed, 0, silent};
+            m->lockers = who;
+            Post(m);
         },
-        box, 0, nullptr);
-    if (th) {
-        CloseHandle(th);
-    } else {
-        delete box;
-        g_cleaning = false;
+        THREAD_PRIORITY_BELOW_NORMAL);
+    if (!started) {
+        scene::CleanEnd();
+        toolsui::CleanRelease();
     }
 }
 
@@ -117,54 +117,35 @@ void RunClean(const std::wstring& why, bool silent) {
 void ScanDl(bool offer) {
     if (g_dlScanning || !g_cfg) return;
     g_dlScanning = true;
-    auto* days = new std::pair<int, bool>(g_cfg->downloadsDays, offer);
-    HANDLE th = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            std::unique_ptr<std::pair<int, bool>> a((std::pair<int, bool>*)p);
-            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+    int days = g_cfg->downloadsDays;
+    bool started = bg::Run(
+        [days, offer] {
             CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-            std::vector<tools::DownloadJunk> found = tools::FindDownloadJunk(a->first);
+            std::vector<tools::DownloadJunk> found = tools::FindDownloadJunk(days);
             CoUninitialize();
             AcquireSRWLockExclusive(&g_lock);
             g_downloads = found;
             ReleaseSRWLockExclusive(&g_lock);
             ULONGLONG total = 0;
             for (const tools::DownloadJunk& d : found) total += d.bytes;
-            Post(new Msg{Msg::DOWNLOADS, L"", total, (int)found.size(), !a->second});
+            Post(new Msg{Msg::DOWNLOADS, L"", total, (int)found.size(), !offer});
             g_dlScanning = false;
-            return 0;
         },
-        days, 0, nullptr);
-    if (th) {
-        CloseHandle(th);
-    } else {
-        delete days;
-        g_dlScanning = false;
-    }
+        THREAD_PRIORITY_LOWEST);
+    if (!started) g_dlScanning = false;
 }
 
 void Recycle(std::vector<std::wstring> paths) {
-    auto* box = new std::vector<std::wstring>(std::move(paths));
-    HANDLE th = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            std::unique_ptr<std::vector<std::wstring>> list((std::vector<std::wstring>*)p);
-            ULONGLONG bytes = 0;
-            for (const std::wstring& f : *list) {
-                WIN32_FILE_ATTRIBUTE_DATA a;
-                if (GetFileAttributesExW(f.c_str(), GetFileExInfoStandard, &a))
-                    bytes += ((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow;
-            }
-            int moved = tools::RecycleDownloads(*list, nullptr);
-            Post(new Msg{Msg::RECYCLED, L"", moved ? bytes : 0, moved});
-            return 0;
-        },
-        box, 0, nullptr);
-    if (th)
-        CloseHandle(th);
-    else
-        delete box;
+    bg::Run([list = std::move(paths)] {
+        ULONGLONG bytes = 0;
+        for (const std::wstring& f : list) {
+            WIN32_FILE_ATTRIBUTE_DATA a;
+            if (GetFileAttributesExW(f.c_str(), GetFileExInfoStandard, &a))
+                bytes += ((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+        }
+        int moved = tools::RecycleDownloads(list, nullptr);
+        Post(new Msg{Msg::RECYCLED, L"", moved ? bytes : 0, moved});
+    });
 }
 
 // ---------------- питание ----------------
@@ -264,77 +245,24 @@ void Repair() {
 }  // namespace
 
 // ---------------- журнал ----------------
+// Два файла: journal.tsv дописывается, а перевалив за 64 КБ, становится
+// journal.old.tsv (прежний старый уходит). Раньше при переполнении весь файл
+// перечитывался и переписывался под замком - теперь только переименование.
 
 void Note(const std::wstring& text) {
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t when[32];
     swprintf(when, 32, L"%02d.%02d %02d:%02d", st.wDay, st.wMonth, st.wHour, st.wMinute);
-    std::wstring line = std::wstring(when) + L"\t" + text + L"\n";
-    std::string u = Narrow(line);
-    AcquireSRWLockExclusive(&g_lock);
-    std::wstring file = tools::DataDir() + L"\\journal.tsv";
-    HANDLE f = CreateFileW(file.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
-    if (f != INVALID_HANDLE_VALUE) {
-        DWORD put = 0;
-        WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
-        LARGE_INTEGER size{};
-        GetFileSizeEx(f, &size);
-        CloseHandle(f);
-        // журнал не растёт бесконечно: больше 64 КБ - оставить вторую половину
-        if (size.QuadPart > 64 * 1024) {
-            HANDLE r = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-            std::string all((size_t)size.QuadPart, '\0');
-            DWORD got = 0;
-            if (r != INVALID_HANDLE_VALUE) {
-                ReadFile(r, all.data(), (DWORD)all.size(), &got, nullptr);
-                CloseHandle(r);
-                all.resize(got);
-                size_t cut = all.find('\n', all.size() / 2);
-                if (cut != std::string::npos) {
-                    HANDLE w = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
-                    if (w != INVALID_HANDLE_VALUE) {
-                        WriteFile(w, all.data() + cut + 1, (DWORD)(all.size() - cut - 1), &put, nullptr);
-                        CloseHandle(w);
-                    }
-                }
-            }
-        }
-    }
-    ReleaseSRWLockExclusive(&g_lock);
+    tools::JournalAdd(tools::DataDir(), when, text);  // больше 64 КБ - уходит в journal.old.tsv (tools/journal.cpp)
 }
 
-std::vector<Entry> Journal(size_t max) {
-    std::vector<Entry> out;
-    AcquireSRWLockShared(&g_lock);
-    HANDLE f = CreateFileW((tools::DataDir() + L"\\journal.tsv").c_str(), GENERIC_READ,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
-    std::string s;
-    if (f != INVALID_HANDLE_VALUE) {
-        char buf[16384];
-        DWORD got = 0;
-        while (ReadFile(f, buf, sizeof(buf), &got, nullptr) && got) s.append(buf, got);
-        CloseHandle(f);
-    }
-    ReleaseSRWLockShared(&g_lock);
-    std::wstring w = Widen(s);
-    size_t end = w.size();
-    while (end > 0 && out.size() < max) {
-        size_t start = w.rfind(L'\n', end - 1);
-        std::wstring line =
-            w.substr(start == std::wstring::npos ? 0 : start + 1, end - (start == std::wstring::npos ? 0 : start + 1));
-        end = start == std::wstring::npos ? 0 : start;
-        size_t tab = line.find(L'\t');
-        if (tab == std::wstring::npos) continue;
-        out.push_back({line.substr(0, tab), line.substr(tab + 1)});
-    }
-    return out;
-}
+std::vector<Entry> Journal(size_t max) { return tools::JournalRead(tools::DataDir(), max); }
 
 // ---------------- для студии ----------------
 
 void CleanNow() { RunClean(L"Вручную из студии", false); }
-bool Cleaning() { return g_cleaning; }
+bool Cleaning() { return toolsui::CleanBusy(); }  // любая чистка кэшей, не только своя
 
 int LastCleanDays() {
     int d = _wtoi(Get(L"clean_day").c_str());
@@ -433,14 +361,14 @@ void OnJob(WPARAM, LPARAM lp) {
         case Msg::CLEAN_LOG:  // ход показывает сцена
             return;
         case Msg::CLEAN_DONE:
-            g_cleaning = false;
             Put(L"clean_day", std::to_wstring(Today()));
             Put(L"clean_freed", std::to_wstring(m->bytes));
-            Note(L"Тихая чистка (" + m->text + L"): освобождено " + tools::Bytes(m->bytes));
+            Note(L"Тихая чистка (" + m->text + L"): освобождено " + tools::Bytes(m->bytes) +
+                 (m->lockers.empty() ? L"" : L"; не дали удалить: " + m->lockers));
             // по расписанию мелочь не показываем - только в журнал
             if (m->silent && m->bytes >= 200ull * 1024 * 1024)  // по просьбе итог уже в сцене
                 g_card.Show(BoostCard::DONE, L"Тихая чистка: " + tools::Bytes(m->bytes),
-                            L"Временные файлы старше суток и кэши npm, pip и других; " + m->text +
+                            L"Временные файлы (старые и не занятые) и кэши npm, pip и других; " + m->text +
                                 L". Кэши шейдеров не трогал.",
                             Theme(), 7000, Toast::G_OK);
             return;

@@ -32,7 +32,7 @@ public:
 
 private:
     struct Job;
-    static DWORD WINAPI Thread(void* job);
+    static void Fetch(const Job& j);  // в фоне (bg::Run)
     SRWLOCK mu_ = SRWLOCK_INIT;
     std::map<std::wstring, Lyrics> cache_;
 };

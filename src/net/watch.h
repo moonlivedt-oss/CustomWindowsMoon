@@ -2,6 +2,7 @@
 // Сторож связи: в своём потоке раз в interval секунд лёгкий HTTPS-запрос; пропал интернет -
 // короткая диагностика и событие окну (карточка «Починить?»), вернулся - событие «вернулся».
 // Раз в несколько минут смотрит выходной узел и сообщает, когда страна сменилась.
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -43,10 +44,10 @@ private:
     HWND notify_ = nullptr;
     UINT msg_ = 0;
     HANDLE thread_ = nullptr, wake_ = nullptr;
-    volatile bool stop_ = false, on_ = true, exit_ = true;
-    volatile int interval_ = 20;
-    volatile ULONGLONG graceUntil_ = 0;
-    volatile bool fresh_ = false;  // замерить задержку туннеля сейчас (открыли кольцо сети)
+    std::atomic<bool> stop_{false}, on_{true}, exit_{true};
+    std::atomic<int> interval_{20};
+    std::atomic<ULONGLONG> graceUntil_{0};
+    std::atomic<bool> fresh_{false};  // замерить задержку туннеля сейчас (открыли кольцо сети)
     mutable SRWLOCK lock_ = SRWLOCK_INIT;
     Light light_;
 };

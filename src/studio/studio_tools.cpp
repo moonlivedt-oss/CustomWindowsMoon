@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "app/toolsui.h"
+#include "core/bg.h"
 #include "core/files.h"
 #include "core/fx.h"
 #include "core/text.h"
@@ -23,10 +25,7 @@ namespace studio {
 
 namespace {
 
-DWORD WINAPI ToolsThread(void* p) {
-    auto* holder = (std::shared_ptr<ToolsJob>*)p;
-    std::shared_ptr<ToolsJob> job = *holder;
-    delete holder;
+void ToolsThread(const std::shared_ptr<ToolsJob>& job) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     tools::Log log = [job](const std::wstring& s) {
         AcquireSRWLockExclusive(&job->lock);
@@ -41,7 +40,6 @@ DWORD WINAPI ToolsThread(void* p) {
     ReleaseSRWLockExclusive(&job->lock);
     if (job->wnd) InvalidateRect(job->wnd, nullptr, FALSE);
     CoUninitialize();
-    return 0;
 }
 
 std::wstring Ellip(const std::wstring& s, size_t n) { return s.size() > n ? s.substr(0, n - 1) + L"…" : s; }
@@ -270,8 +268,8 @@ int Studio::SizeRing(const RectF& r, const std::wstring& dir, const std::vector<
     } else if (scanning) {
         ui.HexSpinner(RectF(cx - ui.S(15), cy - ui.S(34), ui.S(30), ui.S(30)), c.accent);
         ui.Text(tools::Bytes(total), RectF(cx - tw / 2, cy - ui.S(2), tw, ui.S(20)), c.text, 12.5f, true, ui::Center);
-        ui.Text(L"файлов: " + std::to_wstring(seen), RectF(cx - tw / 2, cy + ui.S(17), tw, ui.S(18)), c.faint, 10.5f,
-                false, ui::Center);
+        ui.Text(seen < 0 ? std::wstring(L"Читаю таблицу MFT...") : L"файлов: " + std::to_wstring(seen),
+                RectF(cx - tw / 2, cy + ui.S(17), tw, ui.S(18)), c.faint, 10.5f, false, ui::Center);
     } else {
         ui.Text(tools::Bytes(total), mid1, c.text, 15, true, ui::Center);
         std::wstring leaf = dir;
@@ -291,27 +289,38 @@ void Studio::ToolsRun(const std::wstring& title, std::function<bool(const tools:
     job->work = std::move(work);
     job->wnd = wnd;
     toolsJob_ = job;
-    auto* holder = new std::shared_ptr<ToolsJob>(job);
-    if (HANDLE th = CreateThread(nullptr, 0, ToolsThread, holder, 0, nullptr))
-        CloseHandle(th);
-    else
-        delete holder;
+    if (!bg::Run([job] { ToolsThread(job); })) job->done = true;
 }
 
-void Studio::ToolsScan(const std::wstring& dir) {
+void Studio::ToolsScan(const std::wstring& dir, bool setup) {
     if (toolsJob_ && !toolsJob_->done) toolsJob_->cancel = true;
     toolsScanPath_ = dir;
     std::wstring d = dir;
     toolsJob_.reset();
-    ToolsRun(L"Что занимает место", [d](const tools::Log& log, ToolsJob& job) {
+    ToolsRun(L"Что занимает место", [d, setup](const tools::Log& log, ToolsJob& job) {
+        if (setup) {  // «Включить быстрый подсчёт»: один запрос UAC, потом тот же подсчёт уже по MFT
+            log(L"Настраиваю задачу с правами - Windows спросит разрешение.");
+            if (!net::SetupAdmin()) log(L"Разрешение не дано - считаю по файлам.");
+        }
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);  // обход диска не мешает работе
         log(L"Считаю " + d + L"...");
-        std::vector<tools::FolderSize> r =
-            tools::ScanSizes(d, &job.cancel, &job.progress, [&job](const std::vector<tools::FolderSize>& sofar) {
+        // задача с правами уже есть и диск NTFS - читаем таблицу MFT целиком (секунды) или берём её из кэша; нет -
+        // обход по файлам
+        std::vector<tools::FolderSize> r;
+        std::wstring note;
+        tools::MftState state = tools::MFT_READY;
+        bool mft = tools::ScanSizesMft(d, r, note, &job.mftReading, &state);
+        job.mftState = (int)state;
+        if (mft) {
+            log(L"Посчитано по таблице MFT: " + note + L".");
+        } else {
+            if (!note.empty()) log(L"MFT не подошла (" + note + L"), считаю по файлам...");
+            r = tools::ScanSizes(d, &job.cancel, &job.progress, [&job](const std::vector<tools::FolderSize>& sofar) {
                 AcquireSRWLockExclusive(&job.lock);  // список растёт по мере подсчёта
                 job.sizes = sofar;
                 ReleaseSRWLockExclusive(&job.lock);
             });
+        }
         AcquireSRWLockExclusive(&job.lock);
         job.sizes = std::move(r);
         job.hasSizes = true;
@@ -785,20 +794,31 @@ void Studio::ToolsPage(const RectF& r) {
         }
         // что занимает место
         std::vector<tools::FolderSize> sizes;
-        bool scanning = false;
+        bool scanning = false, mftOffer = false;
         long seen = 0;
         if (toolsJob_ && toolsJob_->title == L"Что занимает место") {
             AcquireSRWLockShared(&toolsJob_->lock);
             sizes = toolsJob_->sizes;
             ReleaseSRWLockShared(&toolsJob_->lock);
             scanning = !toolsJob_->done;
-            seen = toolsJob_->progress;
+            seen = toolsJob_->mftReading ? -1 : (long)toolsJob_->progress;  // -1: задача с правами читает MFT
+            int st = toolsJob_->mftState;
+            mftOffer = toolsJob_->done && (st == tools::MFT_NONE || st == tools::MFT_OLD);
         }
+        // папки, куда обходу нет входа: их размер виден только по MFT
+        ULONGLONG closedBytes = 0;
+        std::wstring closedNames;
+        for (const tools::FolderSize& f : sizes)
+            if (f.closed) {
+                closedBytes += f.bytes;
+                if (closedNames.size() < 80) closedNames += (closedNames.empty() ? L"" : L", ") + f.name;
+            }
+        bool extra = !scanning && (closedBytes || mftOffer);
         size_t shown = std::min<size_t>(sizes.size(), 20);
         // слева кольцо долей (наведение и щелчок - как по строке списка), справа сам список
         bool ring = !sizes.empty() || scanning;
         float ringW = ring ? ui.S(250) : 0;
-        float rows = rowsFor(shown) + 2.0f;
+        float rows = rowsFor(shown) + 2.0f + (extra ? 1.4f : 0);
         if (ring) rows = std::max(rows, (ui.S(46) + ringW) / rowH);
         if (!ring) rows += 2.6f;  // место под приглашение посчитать
         wide(L"Что занимает место", rows, [&](const RectF& b) {
@@ -868,6 +888,20 @@ void Studio::ToolsPage(const RectF& r) {
                     Defer([p] { ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
                 }
             }
+            if (!extra) return;
+            float yy = y + shown * lineH + ui.S(8);
+            if (closedBytes)
+                ui.Text(
+                    L"ещё " + tools::Bytes(closedBytes) + L" в закрытых папках (видно только по MFT): " + closedNames,
+                    RectF(lb.X + ui.S(8), yy, lb.Width - ui.S(16), lineH), c.muted, 11.5f);
+            else if (mftOffer) {
+                ui.Text(L"Целый диск считается минутами. С задачей с правами - секунды по таблице MFT.",
+                        RectF(lb.X + ui.S(8), yy, lb.Width - ui.S(270), lineH), c.faint, 11.5f);
+                if (ui.Button(ID_TOOLS_MFT_SETUP, RectF(lb.X + lb.Width - ui.S(250), yy, ui.S(250), ui.S(32)),
+                              L"Включить быстрый подсчёт") &&
+                    !busy)
+                    ToolsScan(dir, true);
+            }
         });
         // кэши
         // чистка идёт - над списком вихрь, куда осыпаются очищаемые места
@@ -891,18 +925,17 @@ void Studio::ToolsPage(const RectF& r) {
                         ui::Right);
                 if (ui.Button(ID_TOOLS_JUNK + (int)i,
                               RectF(b.X + b.Width - ui.S(120), y + ui.S(2), ui.S(120), ui.S(26)), L"Очистить") &&
-                    !busy &&
+                    !busy && !toolsui::CleanBusy() &&
                     MessageBoxW(wnd,
                                 (L"Удалить содержимое\n" + j.path + L"\n(" + tools::Bytes(j.bytes) +
                                  L")?\n\nЭто кэш: программы скачают или создадут его заново. Вернуть удалённое нельзя.")
                                     .c_str(),
-                                L"Очистка", MB_YESNO | MB_ICONWARNING) == IDYES) {
+                                L"Очистка", MB_YESNO | MB_ICONWARNING) == IDYES &&
+                    toolsui::CleanClaim()) {  // пока спрашивали, могла начаться тихая чистка
                     tools::Junk jj = j;
                     scene::CleanBegin({{jj.name, jj.bytes}});
                     ToolsRun(L"Очистка", [jj](const tools::Log& l, ToolsJob&) {
-                        scene::CleanMark(0, 1);
-                        scene::CleanMark(0, 2, tools::CleanJunk(jj, l));
-                        scene::CleanEnd();
+                        toolsui::CleanList({jj}, l);
                         return true;
                     });
                     toolsJunk_.erase(toolsJunk_.begin() + i);

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <memory>
 
+#include "core/bg.h"
 #include "core/files.h"
 #include "core/themes.h"
 #include "desk/icontheme.h"
@@ -24,10 +25,8 @@ namespace studio {
 
 namespace {
 
-DWORD WINAPI IconThread(void* p) {
-    // поток держит своё владение: студию могут закрыть, пока тема собирается
-    std::unique_ptr<std::shared_ptr<IconJob>> hold((std::shared_ptr<IconJob>*)p);
-    IconJob* job = hold->get();
+// задача держит своё владение (shared_ptr в bg::Run): студию могут закрыть, пока тема собирается
+void IconWork(IconJob* job) {
     std::wstring out, msg;
     bool ok = icontheme::Build(job->body, job->accent, job->name, out, msg, [job](int pct) {
         job->progress = pct;
@@ -40,7 +39,6 @@ DWORD WINAPI IconThread(void* p) {
     ReleaseSRWLockExclusive(&job->lock);
     job->done = true;
     InvalidateRect(job->wnd, nullptr, FALSE);
-    return 0;
 }
 
 std::wstring HexColor(COLORREF c) {
@@ -54,7 +52,8 @@ std::wstring HexColor(COLORREF c) {
 void Studio::SystemPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(Column(in, ui.S(900)), L"Система", L"Чтобы Windows выглядела одной темой с кольцами: значки, Пуск, курсор и мелочи.");
+    Header(Column(in, ui.S(900)), L"Система",
+           L"Чтобы Windows выглядела одной темой с кольцами: значки, Пуск, курсор и мелочи.");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -111,12 +110,7 @@ void Studio::SystemPage(const RectF& r) {
             job->previous = icontheme::SourceFolder();
             job->wnd = wnd;
             iconJob_ = job;
-            auto* hold = new std::shared_ptr<IconJob>(job);
-            HANDLE th = CreateThread(nullptr, 0, IconThread, hold, 0, nullptr);
-            if (th)
-                CloseHandle(th);
-            else
-                delete hold;
+            if (!bg::Run([job] { IconWork(job.get()); })) job->done = true;
         }
         bool ready = iconJob_ && iconJob_->done && iconJob_->ok;
         RectF ar(b.X, b.Y + rowH, b.Width, ui.S(44));  // без подписи: обе кнопки целиком

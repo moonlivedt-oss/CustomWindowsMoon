@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/bg.h"
 #include "core/fx.h"
 #include "core/text.h"
 #include "gfx/draw.h"
@@ -19,10 +20,7 @@ namespace studio {
 
 namespace {
 
-DWORD WINAPI NetThread(void* p) {
-    auto* holder = (std::shared_ptr<NetJob>*)p;
-    std::shared_ptr<NetJob> job = *holder;
-    delete holder;
+void NetThread(const std::shared_ptr<NetJob>& job) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     net::Log log = [job](const std::wstring& s) {
         AcquireSRWLockExclusive(&job->lock);
@@ -37,7 +35,6 @@ DWORD WINAPI NetThread(void* p) {
     ReleaseSRWLockExclusive(&job->lock);
     if (job->wnd) InvalidateRect(job->wnd, nullptr, FALSE);
     CoUninitialize();
-    return 0;
 }
 
 Color LevelColor(const UiColors& c, net::Level l) {
@@ -63,11 +60,7 @@ void Studio::NetRun(const std::wstring& title, std::function<bool(const net::Log
     job->work = std::move(work);
     job->wnd = wnd;
     netJob_ = job;
-    auto* holder = new std::shared_ptr<NetJob>(job);
-    if (HANDLE th = CreateThread(nullptr, 0, NetThread, holder, 0, nullptr))
-        CloseHandle(th);
-    else
-        delete holder;
+    if (!bg::Run([job] { NetThread(job); })) job->done = true;
 }
 
 void Studio::NetCheck() {
@@ -125,7 +118,8 @@ void Studio::NetPage(const RectF& r) {
         std::wstring head = netReport_ && !busy ? net::Summary(*netReport_) : L"Проверяю";
         Color hc = !netReport_ || busy ? c.muted : netReport_->Online() ? Color(255, 120, 205, 160) : c.warn;
         ui.Text(head, RectF(b.X, b.Y, b.Width, ui.S(30)), hc, 13.5f, true);
-        if (!netReport_ || busy) ui.BounceDots(b.X + ui.Measure(head, 13.5f, true) + ui.S(6), b.Y + ui.S(17), hc, ui.S(4));
+        if (!netReport_ || busy)
+            ui.BounceDots(b.X + ui.Measure(head, 13.5f, true) + ui.S(6), b.Y + ui.S(17), hc, ui.S(4));
         RouteLive(RectF(b.X, b.Y + ui.S(34), b.Width, routeH), busy);
         float by = b.Y + ui.S(46) + routeH;
         float bw = ui.S(170);
@@ -133,8 +127,7 @@ void Studio::NetPage(const RectF& r) {
                       L"", busy) &&
             !busy)
             NetCheck();
-        if (ui.Button(ID_NET_SMART, RectF(b.X + bw + ui.S(10), by, bw, ui.S(36)), L"Починить умно",
-                      Kind::Primary) &&
+        if (ui.Button(ID_NET_SMART, RectF(b.X + bw + ui.S(10), by, bw, ui.S(36)), L"Починить умно", Kind::Primary) &&
             !busy) {
             net::Proxy p = net::ReadProxy();
             if (!p.on || !p.alive ||
@@ -249,8 +242,7 @@ void Studio::NetPage(const RectF& r) {
             });
         if (netJob_) {
             AcquireSRWLockShared(&netJob_->lock);
-            std::wstring s =
-                netJob_->title + (netJob_->done ? (netJob_->ok ? L": готово" : L": не получилось") : L"");
+            std::wstring s = netJob_->title + (netJob_->done ? (netJob_->ok ? L": готово" : L": не получилось") : L"");
             bool going = !netJob_->done;
             float titleW = ui.Measure(netJob_->title, 11.5f);
             for (size_t i = netJob_->log.size() > 6 ? netJob_->log.size() - 6 : 0; i < netJob_->log.size(); ++i)

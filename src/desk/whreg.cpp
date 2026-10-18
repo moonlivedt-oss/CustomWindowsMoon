@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 
+#include "core/bg.h"
+
 namespace whreg {
 
 namespace {
@@ -296,26 +298,14 @@ void Run(const std::wstring& regFile) {
         return;
     }
     // замок снимаем, когда regedit закончит (или через 5 минут, если его окно так и висит)
-    struct Box {
-        HANDLE proc, lock;
-    };
-    auto* box = new Box{sei.hProcess, lock};
-    HANDLE th = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            std::unique_ptr<Box> b((Box*)p);
-            WaitForSingleObject(b->proc, 5 * 60 * 1000);
-            CloseHandle(b->proc);
-            CloseHandle(b->lock);
-            return 0;
-        },
-        box, 0, nullptr);
-    if (th) {
-        CloseHandle(th);
-    } else {
-        CloseHandle(sei.hProcess);
+    HANDLE proc = sei.hProcess;
+    if (!bg::Run([proc, lock] {
+            WaitForSingleObject(proc, 5 * 60 * 1000);
+            CloseHandle(proc);
+            CloseHandle(lock);
+        })) {
+        CloseHandle(proc);
         CloseHandle(lock);
-        delete box;
     }
 }
 

@@ -17,6 +17,7 @@
 #include "app/netui.h"
 #include "app/autos.h"
 #include "app/toolsui.h"
+#include "core/bg.h"
 #include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -346,8 +347,7 @@ struct BoostJob {
     int sleepApps = 0;
 };
 
-DWORD WINAPI BoostThread(void* p) {
-    std::unique_ptr<BoostJob> job((BoostJob*)p);
+void BoostWork(const BoostJob* job) {
     std::wstring dir = BoostDir();
     double before = boost::AvailMb();
     auto* r = new boost::Result;
@@ -359,7 +359,6 @@ DWORD WINAPI BoostThread(void* p) {
     }
     r->freedMb = std::max(0.0, boost::AvailMb() - before);
     PostMessageW(g_wnd, WM_BOOST_DONE, 0, (LPARAM)r);
-    return 0;
 }
 
 void StartBoost(BoostJob* job) {
@@ -375,12 +374,8 @@ void StartBoost(BoostJob* job) {
                                           L"закрылся - через пару "
                                           L"секунд добивается.",
                      CurrentTheme(g_cfg));
-    if (HANDLE th = CreateThread(nullptr, 0, BoostThread, job, 0, nullptr)) {
-        CloseHandle(th);
-    } else {
-        delete job;
-        g_boostBusy = false;
-    }
+    std::shared_ptr<BoostJob> j(job);
+    if (!bg::Run([j] { BoostWork(j.get()); })) g_boostBusy = false;
 }
 
 std::wstring GameExe() {
@@ -736,7 +731,7 @@ void BoostDemo(int what) {
         bool was = g_cfg.boostSummary;
         g_cfg.boostSummary = true;
         g_gbCard.Show(BoostCard::DONE, L"", L"", t);  // сброс подписей
-        SessionSummary(s, false);  // выдуманная сессия - не в историю
+        SessionSummary(s, false);                     // выдуманная сессия - не в историю
         g_cfg.boostSummary = was;
     } else {
         auto* n = new gboost::Note{gboost::EV_GPU_WRONG, 40, 0, L"D:\\Games\\NFS14\\NFS14.exe",
@@ -1374,6 +1369,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             g_snip.Destroy();
             cursor::Restore();
             RemoveTray();
+            bg::Quit(1500);  // фоновые задачи видят Quitting() и не пишут в уже убранное; дольше выход не ждёт
             PostQuitMessage(0);
             return 0;
     }

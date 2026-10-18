@@ -48,6 +48,10 @@ struct State {
     bool scanning = false;  // считается прямо сейчас
 };
 State Snapshot();
+// То же для того, кто держит снимок у себя и спрашивает часто (страница «Состояние» - каждые 250 мс): вектора
+// копируются, только если подсчёт или чистка их поменяли с прошлого раза (gen - номер изменения, начать с ~0u);
+// когда посчитано и идёт ли подсчёт - всегда. true - снимок обновился целиком.
+bool SnapshotIfChanged(State& s, unsigned& gen);
 // Для живых сцен студии (колба, батарея, табло версий): что знает слежка и последняя проверка версий.
 struct Watched {
     std::vector<tools::ProcHistory::Leak> leaks;
@@ -59,8 +63,17 @@ Watched Watch();
 std::vector<tools::ToolVersion> Versions();                  // пусто - ещё не проверялось
 void SetVersions(const std::vector<tools::ToolVersion>& v);  // проверили из студии - кольцу тоже
 void Refresh();                                              // пересчитать сейчас
-void PrimeForSnapshot(const Config* cfg);                    // для --studio-snap: посчитать сразу и дождаться
-void TrimDdc();                                              // старое из кэша Unreal
+// Чистка кэшей - одна на всю программу: кольцо, студия и тихая чистка делят одну ленту scene::Clean.
+void SystemClean();  // остатки обновлений Windows (Delivery Optimization, DISM) - спросит и пойдёт с правами
+bool CleanClaim();   // занять; false - уже идёт другая
+void CleanRelease();
+bool CleanBusy();
+// В рабочем потоке после CleanClaim и scene::CleanBegin(list): один запуск RadialTools на весь список, ход - в сцену,
+// размеры в подсчёте правятся по факту, в конце CleanRelease. Сколько освобождено.
+// lockers - кто не дал удалить занятое: «clangd, msedgewebview2» (пусто - всё удалилось или было свежим).
+ULONGLONG CleanList(const std::vector<tools::Junk>& list, const tools::Log& log, std::wstring* lockers = nullptr);
+void PrimeForSnapshot(const Config* cfg);  // для --studio-snap: посчитать сразу и дождаться
+void TrimDdc();                            // старое из кэша Unreal
 void CleanProjectList(const std::vector<tools::ProjectJunk>& list);
 bool Busy();
 

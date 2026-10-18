@@ -118,7 +118,8 @@ void Studio::StatePage(const RectF& r) {
         if (toolsPhys_.empty()) toolsPhys_ = physJob_->disks;
         ReleaseSRWLockShared(&physJob_->lock);
     }
-    toolsui::State s = toolsui::Snapshot();
+    toolsui::SnapshotIfChanged(stateSnap_, stateSnapGen_);
+    const toolsui::State& s = stateSnap_;
     std::vector<tools::DownloadJunk> dls = autos::Downloads();
     bool working = s.scanning || autos::Cleaning() || toolsui::Busy();
     if (working) RepaintIn(250);  // пока считается - изредка перерисовываемся, итог появится сам
@@ -206,8 +207,8 @@ void Studio::StatePage(const RectF& r) {
 
     // ---- что можно освободить ----
     {
-        ULONGLONG quick = 0, slow = 0, idle = 0, dlBytes = 0, bin = tools::RecycleBinBytes();
-        for (const tools::Junk& j : s.junk) (j.slow ? slow : quick) += j.bytes;
+        ULONGLONG quick = 0, slow = 0, idle = 0, dlBytes = 0, fresh = 0, bin = tools::RecycleBinBytes();
+        for (const tools::Junk& j : s.junk) (j.slow ? slow : quick) += j.bytes, fresh += j.fresh;
         for (const tools::ProjectJunk& p : s.projects)
             if (p.idleDays >= 60) idle += p.bytes;
         for (const tools::DownloadJunk& d : dls) dlBytes += d.bytes;
@@ -278,30 +279,51 @@ void Studio::StatePage(const RectF& r) {
             ui.Text(t, RectF(lx + ui.S(16), ly, tw, ui.S(20)), c.muted, 11.5f);
             lx += tw + ui.S(10);
         }
+        // свежее и занятое в TEMP чистка оставляет - говорим прямо, чтобы после чистки не удивляло
+        if (s.at && fresh >= 50ull * 1024 * 1024)
+            ui.Text(L"И ещё " + tools::Bytes(fresh) +
+                        L" временных файлов свежих или занятых программами: их не трогаю, уйдут в следующие "
+                        L"чистки.",
+                    RectF(bar.X, ly + ui.S(24), bar.Width, ui.S(18)), c.faint, 11);
         // кнопки справа сверху
         float bx = cr.GetRight() - ui.S(20);
         int lastDays = autos::LastCleanDays();
-        std::wstring cleanLabel = autos::Cleaning() ? L"Чищу"
-                                  : s.at            ? L"Тихая чистка " + tools::Bytes(quick)
-                                                    : std::wstring(L"Тихая чистка");
+        std::wstring cleanLabel = autos::Cleaning()              ? L"Чищу"
+                                  : s.at && quick >= 1024 * 1024 ? L"Тихая чистка " + tools::Bytes(quick)
+                                                                 : std::wstring(L"Тихая чистка");
         float bw = ui.Measure(cleanLabel, 12.5f, true) + ui.S(36);
         if (ui.Button(ID_STATE_CLEAN, RectF(bx - bw, cr.Y + ui.S(20), bw, ui.S(38)), cleanLabel, Kind::Primary, L"",
                       autos::Cleaning()) &&
             !autos::Cleaning())
             autos::CleanNow();
-        ui.Tip(ID_STATE_CLEAN, L"Временные файлы старше суток и кэши npm, pip, uv и других; кэши шейдеров не трогаю." +
-                                   (lastDays >= 0 ? L" В прошлый раз - " + Days(lastDays) + L", освободила " +
-                                                        tools::Bytes(autos::LastCleanFreed()) + L"."
-                                                  : std::wstring()));
+        ui.Tip(ID_STATE_CLEAN,
+               L"Временные файлы (старше 6 часов и никем не занятые) и кэши npm, pip, uv и других (их собственными "
+               L"командами, "
+               L"если программа установлена); кэши шейдеров не трогаю." +
+                   (lastDays >= 0 ? L" В прошлый раз - " + Days(lastDays) + L", освободила " +
+                                        tools::Bytes(autos::LastCleanFreed()) + L"."
+                                  : std::wstring()));
         bx -= bw + ui.S(10);
         if (s.ddcOld > 256ull * 1024 * 1024) {
             std::wstring t = L"Unreal: старое " + tools::Bytes(s.ddcOld);
             float tw = ui.Measure(t, 12.5f, true) + ui.S(36);
             if (ui.Button(ID_STATE_DDC, RectF(bx - tw, cr.Y + ui.S(20), tw, ui.S(38)), t, Kind::Secondary))
                 toolsui::TrimDdc();
+            bx -= tw + ui.S(10);
             ui.Tip(ID_STATE_DDC,
                    L"Из общего кэша Unreal - только то, что не открывалось 30 дней. Шейдеры текущих "
                    L"проектов остаются.");
+        }
+        {
+            std::wstring t = L"Остатки обновлений";
+            float tw = ui.Measure(t, 12.5f, true) + ui.S(36);
+            if (ui.Button(ID_STATE_SYSCLEAN, RectF(bx - tw, cr.Y + ui.S(20), tw, ui.S(38)), t, Kind::Secondary, L"",
+                          toolsui::Busy()) &&
+                !toolsui::Busy())
+                toolsui::SystemClean();
+            ui.Tip(ID_STATE_SYSCLEAN,
+                   L"Кэш Delivery Optimization и старые версии компонентов Windows (DISM, без "
+                   L"ResetBase). С правами администратора, 10-25 минут; сначала спрошу.");
         }
         y += h + gap;
     }
@@ -457,11 +479,22 @@ void Studio::StatePage(const RectF& r) {
         RectF gc(x, y, cw, h), sc(two ? x + cw + gap : x, two ? y : y + h + gap, cw, h);
         Card(gc);
         ui.Text(L"Рост за неделю", RectF(gc.X + ui.S(18), gc.Y + ui.S(14), gc.Width, ui.S(24)), c.text, 14, true);
+        // сейчас: живой рост Загрузок и TEMP за сегодня (ReadDirectoryChangesW, пересчёт раз в минуту)
+        {
+            std::wstring live;
+            for (const tools::LiveSize& l : tools::LiveSizes())
+                if (l.ready && (l.today >= 1024 * 1024 || l.today <= -1024 * 1024))
+                    live += (live.empty() ? L"сегодня: " : L", ") + l.name + (l.today > 0 ? L" +" : L" -") +
+                            tools::Bytes((ULONGLONG)(l.today > 0 ? l.today : -l.today));
+            if (!live.empty())
+                ui.Text(live, RectF(gc.X + ui.S(160), gc.Y + ui.S(16), gc.Width - ui.S(178), ui.S(20)), c.muted, 11,
+                        false, ui::Right);
+        }
         std::vector<tools::Growth> grow;
         for (const tools::Growth& gr : s.growth)
             if (gr.delta > 16ll * 1024 * 1024 && grow.size() < 6) grow.push_back(gr);
         if (grow.empty()) {
-            ui.Text(L"Замеры копятся раз в полчаса: через пару дней здесь будет видно, что растёт быстрее всего.",
+            ui.Text(L"Замеры копятся раз в 3 часа: через пару дней здесь будет видно, что растёт быстрее всего.",
                     RectF(gc.X + ui.S(18), gc.Y + ui.S(52), gc.Width - ui.S(36), ui.S(60)), c.muted, 12, false,
                     ui::Left, true);
         } else {
@@ -597,11 +630,11 @@ void Studio::AutoPage(const RectF& r) {
                       autos::Cleaning() ? L"Чищу" : L"Почистить сейчас", Kind::Secondary, L"", autos::Cleaning()) &&
             !autos::Cleaning())
             autos::CleanNow();
-        cols.Note(
-            b, 2.0f,
-            L"Временные файлы старше суток, кэши npm, pip, uv, Yarn, NuGet, Go, Gradle, Cargo, дампы. Кэши шейдеров "
-            L"и Unreal не трогаю. В игре не запускается; итог - короткой карточкой, мелочь - только в журнал.",
-            c.faint);
+        cols.Note(b, 2.0f,
+                  L"Временные файлы старше 6 часов (не занятые), кэши npm, pip, uv, Yarn, NuGet, Go, Gradle, Cargo, "
+                  L"дампы. Кэши шейдеров "
+                  L"и Unreal не трогаю. В игре не запускается; итог - короткой карточкой, мелочь - только в журнал.",
+                  c.faint);
     });
     cols.Card(L"Разбор Загрузок", 3.2f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Раз в неделю спрашивать, что убрать");

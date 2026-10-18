@@ -11,6 +11,7 @@
 #include <cmath>
 #include <ctime>
 
+#include "core/bg.h"
 #include "core/fx.h"
 #include "core/mem.h"
 #include "core/files.h"
@@ -232,28 +233,15 @@ void Studio::LoadPhysAsync() {
     auto job = std::make_shared<PhysJob>();
     physJob_ = job;
     HWND w = wnd;
-    struct Box {
-        std::shared_ptr<PhysJob> job;
-        HWND wnd;
-    };
-    auto* box = new Box{job, w};
-    HANDLE th = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            std::unique_ptr<Box> b((Box*)p);
-            std::vector<tools::Physical> d = tools::PhysicalDisks();  // свой COM в своём потоке
-            AcquireSRWLockExclusive(&b->job->lock);
-            b->job->disks = std::move(d);
-            ReleaseSRWLockExclusive(&b->job->lock);
-            b->job->done = true;
-            if (b->wnd) InvalidateRect(b->wnd, nullptr, FALSE);
-            return 0;
-        },
-        box, 0, nullptr);
-    if (th)
-        CloseHandle(th);
-    else
-        delete box;
+    bool started = bg::Run([job, w] {
+        std::vector<tools::Physical> d = tools::PhysicalDisks();  // свой COM в своём потоке
+        AcquireSRWLockExclusive(&job->lock);
+        job->disks = std::move(d);
+        ReleaseSRWLockExclusive(&job->lock);
+        job->done = true;
+        if (w) InvalidateRect(w, nullptr, FALSE);
+    });
+    if (!started) job->done = true;
 }
 
 void Studio::Frame(float w, float h) {
@@ -579,8 +567,8 @@ void Studio::StatusBar(const RectF& r) {
     ui.Fill(bar, c.card, ui.S(10));
     ui.Stroke(bar, c.border, ui.S(10));
     // что-то делается в фоне: вместо точки - три точки по орбите
-    bool working = (netJob_ && !netJob_->done) || (toolsJob_ && !toolsJob_->done) || autos::Cleaning() ||
-                   toolsui::Busy();
+    bool working =
+        (netJob_ && !netJob_->done) || (toolsJob_ && !toolsJob_->done) || autos::Cleaning() || toolsui::Busy();
     float d = ui.S(9), dcx = bar.X + ui.S(14) + d / 2, dcy = bar.Y + bar.Height / 2;
     if (working && !fx::Game()) {
         ui.Tick();
@@ -589,8 +577,8 @@ void Studio::StatusBar(const RectF& r) {
             double a = (t + i / 3.0) * 6.2831853;
             float s = ui.S(3.4f) + ui.S(1.2f) * (float)std::sin(a * 0.5 + i);
             SolidBrush o(WithAlpha(c.accent, (BYTE)(140 + 115 * (i == 0))));
-            ui.G().FillEllipse(&o, dcx + (float)std::cos(a) * ui.S(5) - s / 2, dcy + (float)std::sin(a) * ui.S(5) - s / 2,
-                               s, s);
+            ui.G().FillEllipse(&o, dcx + (float)std::cos(a) * ui.S(5) - s / 2,
+                               dcy + (float)std::sin(a) * ui.S(5) - s / 2, s, s);
         }
     } else {
         SolidBrush dot(statusFresh_ ? c.accent : c.faint);
@@ -630,8 +618,7 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
     if (page == PAGE_TOOLS) {  // RADIAL_SCAN=папка - сразу посчитать, что занимает место (снимок сот)
         const wchar_t* scan = _wgetenv(L"RADIAL_SCAN");
         GoTools(tab, scan ? scan : L"");
-    }
-    else
+    } else
         GoPage((Page)page);
     // кадр в HDC, как в окне: появление страницы смешивает карточки средствами GDI
     HDC sdc = GetDC(nullptr);
@@ -656,8 +643,9 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         ui.End();
         Sleep(120);
     } while (GetTickCount64() < end);
-    // RADIAL_FILM - проверка движения без мыши: «c x y» щелчок, «m x y» наведение, «d/u x y» нажать/отпустить, «w мс» подождать, «r д» колесо,
-    // «f n мс» снять n кадров через мс; кадры (вдвое меньше) ложатся листом по три в ряд вместо снимка
+    // RADIAL_FILM - проверка движения без мыши: «c x y» щелчок, «m x y» наведение, «d/u x y» нажать/отпустить, «w мс»
+    // подождать, «r д» колесо, «f n мс» снять n кадров через мс; кадры (вдвое меньше) ложатся листом по три в ряд
+    // вместо снимка
     std::unique_ptr<Bitmap> sheet;
     if (const char* film = getenv("RADIAL_FILM")) {
         std::vector<std::unique_ptr<Bitmap>> shots;

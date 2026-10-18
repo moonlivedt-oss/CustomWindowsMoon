@@ -2,7 +2,8 @@
 // этого не делает: он запускает RadialTools.exe по кнопке, читает ход из stdout и ждёт итога.
 // Строки журнала идут как есть, итог - строкой «@ключ=значение». Код выхода 0 - получилось.
 //
-//   clean <имя кэша>          содержимое кэша из списка FindJunk (в TEMP - только старше суток)
+//   clean <имя кэша>...       содержимое кэшей из списка FindJunk (в TEMP - по правилу tools::TempRemovable); ход по кэшам -
+//                             строки «#start	<номер>» и «#freed	<номер>	<байт>»
 //   ddc-trim <дней>           из кэша Unreal - то, что не открывалось дольше
 //   projects <путь>...        папки мусора проектов; каждая заново проверяется по признакам
 //   kill <pid> [exe]          завершить процесс (exe - проверить, что номер не достался другому)
@@ -41,12 +42,38 @@ constexpr ULONGLONG kDay = 24ull * 3600 * 10000000;
 
 bool Dots(const wchar_t* n) { return n[0] == L'.' && (!n[1] || (n[1] == L'.' && !n[2])); }
 
+// Удалить файл. Сначала POSIX-удаление (Windows 10 1709+): имя пропадает сразу, даже если файл кто-то держит открытым
+// с разрешением на удаление, - папка с ним тоже удалится; место вернётся, когда держащий его закроет. Не вышло
+// (старая Windows, FAT, сеть) - обычный DeleteFileW.
+bool Remove(const std::wstring& p, DWORD attrs) {
+    HANDLE h = CreateFileW(p.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+        // FILE_DISPOSITION_INFO_EX: DELETE | POSIX_SEMANTICS | IGNORE_READONLY_ATTRIBUTE
+        struct {
+            DWORD flags;
+        } disp{0x1 | 0x2 | 0x10};
+        BOOL ok = SetFileInformationByHandle(h, (FILE_INFO_BY_HANDLE_CLASS)21 /* FileDispositionInfoEx */, &disp,
+                                             sizeof(disp));
+        CloseHandle(h);
+        if (ok) return true;
+    }
+    if (attrs & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(p.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
+    return DeleteFileW(p.c_str());
+}
+
 // Удалить содержимое папки (саму папку оставить); занятые файлы пропускаются.
-// newer - файлы новее этой отметки не трогаются; oldAccess - удалять только то, что не открывалось и не менялось
-// с этой отметки (0 - всё).
+// temp - правило TEMP (tools::TempRemovable): свежее и занятое не трогаем; oldAccess - удалять только то, что не
+// открывалось и не менялось с этой отметки (0 - всё). busy - занятые файлы (до 300): кто их держит, скажет RadialMenu.
 struct Del {
-    ULONGLONG newer = 0, oldAccess = 0;
+    bool temp = false;
+    ULONGLONG oldAccess = 0;
     int failed = 0, kept = 0;
+    std::vector<std::wstring> busy;
+    void Busy(const std::wstring& p) {
+        ++failed;
+        if (busy.size() < 300) busy.push_back(p);
+    }
 };
 
 ULONGLONG DeleteContents(const std::wstring& root, Del& d, bool removeSelf = false) {
@@ -69,20 +96,26 @@ ULONGLONG DeleteContents(const std::wstring& root, Del& d, bool removeSelf = fal
                 freed += DeleteContents(p, d, true);
                 continue;
             }
-            if (d.newer && (Stamp(fd.ftLastWriteTime) > d.newer || Stamp(fd.ftCreationTime) > d.newer)) {
-                ++d.kept;
-                continue;
+            if (d.temp) {
+                tools::WalkFile f;
+                f.dir = &root;
+                f.name = fd.cFileName;
+                f.nameLen = wcslen(fd.cFileName);
+                f.write = Stamp(fd.ftLastWriteTime);
+                f.create = Stamp(fd.ftCreationTime);
+                if (!tools::TempRemovable(f, NowStamp())) {
+                    ++d.kept;
+                    continue;
+                }
             }
             if (d.oldAccess && std::max(Stamp(fd.ftLastAccessTime), Stamp(fd.ftLastWriteTime)) >= d.oldAccess) {
                 ++d.kept;
                 continue;
             }
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
-                SetFileAttributesW(p.c_str(), fd.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
-            if (DeleteFileW(p.c_str()))
+            if (Remove(p, fd.dwFileAttributes))
                 freed += ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
             else
-                ++d.failed;
+                d.Busy(p);
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
@@ -90,33 +123,111 @@ ULONGLONG DeleteContents(const std::wstring& root, Del& d, bool removeSelf = fal
     return freed;
 }
 
-int Clean(const std::wstring& name) {
-    // чистим только папку из своего списка, а не что прислали
-    for (const tools::Junk& j : tools::FindJunk(false)) {
-        if (j.name != name) continue;
-        if (j.path.size() < 8) break;
-        Del d;
-        if (_wcsicmp(j.path.c_str(), tools::TempDir().c_str()) == 0) {
-            // %TEMP% задаёт пользователь: если он указывает не на папку Temp (D:\, профиль), чистить нельзя
-            std::wstring leaf = Lower(j.path.substr(j.path.find_last_of(L'\\') + 1));
-            if (leaf != L"temp" && leaf != L"tmp") {
-                Out(L"%TEMP% указывает на " + j.path + L" - это не папка временных файлов, не трогаю.");
-                Out(L"@freed=0");
-                return 1;
-            }
-            d.newer = NowStamp() - kDay;
-        }
-        Out(L"Чищу: " + j.name + L"...");
-        ULONGLONG freed = DeleteContents(j.path, d);
-        Out(j.name + L": освобождено " + tools::Bytes(freed) +
-            (d.failed ? L", занятых файлов пропущено: " + std::to_wstring(d.failed) : L"") +
-            (d.kept ? L", свежих (моложе суток) оставлено: " + std::to_wstring(d.kept) : L""));
-        Out(L"@freed=" + std::to_wstring(freed));
-        return 0;
+// Программа на PATH: полный путь или пусто. Только папки PATH, по порядку: SearchPathW смотрел бы сначала рядом с
+// RadialTools.exe и в текущей папке - туда программу можно подложить.
+std::wstring Which(const wchar_t* exe) {
+    DWORD n = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    std::wstring path(n, L'\0');
+    path.resize(GetEnvironmentVariableW(L"PATH", path.data(), n));
+    for (std::wstring dir : Split(path, L';')) {
+        if (dir.size() > 1 && dir.front() == L'"' && dir.back() == L'"') dir = dir.substr(1, dir.size() - 2);
+        if (dir.empty() || dir == L"." || dir.size() < 3 || dir[1] != L':') continue;  // только полные пути
+        while (!dir.empty() && dir.back() == L'\\') dir.pop_back();
+        std::wstring full = dir + L"\\" + exe;
+        DWORD a = GetFileAttributesW(full.c_str());
+        if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) return full;
     }
-    Out(L"Эту папку чистить не буду: её нет в списке кэшей.");
-    Out(L"@freed=0");
-    return 1;
+    return L"";
+}
+
+// Запустить и дождаться (без окна); код выхода, -1 - не запустилась или не уложилась.
+int Run(const std::wstring& cmdLine, DWORD timeoutMs) {
+    STARTUPINFOW si{sizeof(si)};
+    PROCESS_INFORMATION pi{};
+    std::vector<wchar_t> line(cmdLine.begin(), cmdLine.end());
+    line.push_back(0);
+    if (!CreateProcessW(nullptr, line.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+        return -1;
+    DWORD code = (DWORD)-1;
+    if (WaitForSingleObject(pi.hProcess, timeoutMs) == WAIT_OBJECT_0)
+        GetExitCodeProcess(pi.hProcess, &code);
+    else
+        TerminateProcess(pi.hProcess, 1);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return (int)code;
+}
+
+// Кэши со своей командой очистки: сам менеджер знает, что у него занято (uv прямо пишет, что трогать его кэш руками
+// небезопасно, если uv в этот момент работает). Нет программы - чистим сами: тогда и пользоваться кэшем некому.
+struct Official {
+    const wchar_t *junk, *exe, *args;
+    bool viaCmd;  // npm - это npm.cmd, его запускает cmd
+};
+const Official kOfficial[] = {
+    {L"Кэш uv", L"uv.exe", L"cache clean", false},
+    {L"Кэш npm", L"npm.cmd", L"cache clean --force", true},
+    {L"Кэш pip", L"pip.exe", L"cache purge", false},
+    {L"Кэш Go", L"go.exe", L"clean -cache", false},
+};
+
+ULONGLONG CleanOne(const tools::Junk& j, int& failed, int& kept) {
+    for (const Official& o : kOfficial) {
+        if (j.name != o.junk) continue;
+        std::wstring exe = Which(o.exe);
+        if (exe.empty()) break;
+        ULONGLONG before = tools::DirBytes(j.path);
+        std::wstring cmd =
+            o.viaCmd ? L"cmd.exe /d /c \"\"" + exe + L"\" " + o.args + L"\"" : L"\"" + exe + L"\" " + o.args;
+        int code = Run(cmd, 10 * 60 * 1000);
+        ULONGLONG after = tools::DirBytes(j.path);
+        Out(j.name + L": " + o.exe + L" " + o.args + (code == 0 ? L"" : L" (код " + std::to_wstring(code) + L")"));
+        if (code == 0) return before > after ? before - after : 0;
+        Out(L"Команда не справилась - чищу папку сама.");
+        break;
+    }
+    Del d;
+    if (_wcsicmp(j.path.c_str(), tools::TempDir().c_str()) == 0) {
+        // %TEMP% задаёт пользователь: если он указывает не на папку Temp (D:\, профиль), чистить нельзя
+        std::wstring leaf = Lower(j.path.substr(j.path.find_last_of(L'\\') + 1));
+        if (leaf != L"temp" && leaf != L"tmp") {
+            Out(L"%TEMP% указывает на " + j.path + L" - это не папка временных файлов, не трогаю.");
+            return 0;
+        }
+        d.temp = true;
+    }
+    ULONGLONG freed = DeleteContents(j.path, d);
+    failed += d.failed;
+    kept += d.kept;
+    for (const std::wstring& b : d.busy) Out(L"#busy\t" + b);
+    return freed;
+}
+
+int Clean(const std::vector<std::wstring>& names) {
+    // чистим только папки из своего списка, а не что прислали
+    std::vector<tools::Junk> known = tools::FindJunk(false);
+    ULONGLONG total = 0;
+    int bad = 0;
+    for (size_t i = 0; i < names.size(); ++i) {
+        Out(L"#start	" + std::to_wstring(i));
+        auto it = std::find_if(known.begin(), known.end(), [&](const tools::Junk& j) { return j.name == names[i]; });
+        ULONGLONG freed = 0;
+        if (it == known.end() || it->path.size() < 8) {
+            Out(names[i] + L": этой папки нет в списке кэшей - не трогаю.");
+            ++bad;
+        } else {
+            Out(L"Чищу: " + it->name + L"...");
+            int failed = 0, kept = 0;
+            freed = CleanOne(*it, failed, kept);
+            Out(it->name + L": освобождено " + tools::Bytes(freed) +
+                (failed ? L", занятых файлов пропущено: " + std::to_wstring(failed) : L"") +
+                (kept ? L", свежих или занятых оставлено: " + std::to_wstring(kept) : L""));
+        }
+        Out(L"#freed	" + std::to_wstring(i) + L"	" + std::to_wstring(freed));
+        total += freed;
+    }
+    Out(L"@freed=" + std::to_wstring(total));
+    return bad ? 1 : 0;
 }
 
 int DdcTrim(int days) {
@@ -442,7 +553,7 @@ int wmain(int argc, wchar_t** argv) {
         return 2;
     }
     const std::wstring& cmd = a[0];
-    if (cmd == L"clean" && a.size() >= 2) return Clean(a[1]);
+    if (cmd == L"clean" && a.size() >= 2) return Clean(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"ddc-trim" && a.size() >= 2) return DdcTrim(_wtoi(a[1].c_str()));
     if (cmd == L"projects" && a.size() >= 2) return Projects(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"kill" && a.size() >= 2) return Kill((DWORD)_wtoi(a[1].c_str()), a.size() >= 3 ? a[2] : L"");

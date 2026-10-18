@@ -8,6 +8,8 @@
 
 #include <memory>
 
+#include "core/bg.h"
+
 // Интерфейсы Windows.Media.Ocr и Windows.Graphics.Imaging описаны вручную, как в media.cpp:
 // заголовков WinRT в MinGW нет. Порядок методов - как в .idl из Windows SDK;
 // IID фабрик сверены с GetIids настоящих фабрик.
@@ -176,11 +178,10 @@ struct Job {
     UINT msg;
 };
 
-DWORD WINAPI JobThread(void* p) {
-    std::unique_ptr<Job> j((Job*)p);
+void JobWork(const Job* j) {
     if (!A().ok) {
         PostMessageW(j->hwnd, j->msg, 1, (LPARAM) new std::wstring(L"OCR недоступен"));
-        return 0;
+        return;
     }
     A().roInit(RO_INIT_MULTITHREADED);
     std::wstring err;
@@ -188,7 +189,6 @@ DWORD WINAPI JobThread(void* p) {
     A().roUninit();
     bool failed = text.empty() && !err.empty();
     PostMessageW(j->hwnd, j->msg, failed ? 1 : 0, (LPARAM) new std::wstring(failed ? err : text));
-    return 0;
 }
 
 }  // namespace
@@ -269,12 +269,8 @@ std::wstring Recognize(const std::vector<uint8_t>& png, std::wstring* error) {
 }
 
 void RecognizeAsync(std::vector<uint8_t> png, void* hwnd, unsigned msg) {
-    auto* j = new Job{std::move(png), (HWND)hwnd, msg};
-    HANDLE t = CreateThread(nullptr, 0, JobThread, j, 0, nullptr);
-    if (t)
-        CloseHandle(t);
-    else
-        delete j;
+    auto j = std::make_shared<Job>(Job{std::move(png), (HWND)hwnd, msg});
+    bg::Run([j] { JobWork(j.get()); });
 }
 
 }  // namespace ocr

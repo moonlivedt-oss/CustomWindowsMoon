@@ -124,6 +124,8 @@ enum Job {
     JOB_UNBREAK,        // восстановление: вернуть системное, что ломают вирусы (HKLM: Shell, Userinit, IFEO, политики)
     JOB_DEFENDER_OFFLINE,  // восстановление: автономная проверка Defender (перезагрузит)
     JOB_VHD_COMPACT,       // место: сжать диски WSL и Docker
+    JOB_SYS_CLEAN,         // место: кэш Delivery Optimization и старые версии компонентов (DISM, без ResetBase)
+    JOB_MFT_SIZES,         // место: размеры папок чтением MFT (только чтение; папка - в HKCU MftDir)
     kJobs
 };
 bool AdminReady();  // задача есть

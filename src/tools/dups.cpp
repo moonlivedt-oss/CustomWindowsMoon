@@ -74,8 +74,8 @@ bool EngineAsset(const std::wstring& name) {
     return false;
 }
 
-void Walk(const std::wstring& dir, ULONGLONG minBytes, std::vector<File>& out, volatile bool* cancel,
-          volatile long* progress, int depth) {
+void Walk(const std::wstring& dir, ULONGLONG minBytes, std::vector<File>& out, std::atomic<bool>* cancel,
+          std::atomic<long>* progress, int depth) {
     if (depth > 24 || (cancel && *cancel)) return;
     if (ProjectDir(dir)) return;
     WIN32_FIND_DATAW fd;
@@ -90,7 +90,7 @@ void Walk(const std::wstring& dir, ULONGLONG minBytes, std::vector<File>& out, v
             if (!SkipDir(n)) Walk(dir + L"\\" + n, minBytes, out, cancel, progress, depth + 1);
             continue;
         }
-        if (progress) InterlockedIncrement(progress);
+        if (progress) progress->fetch_add(1, std::memory_order_relaxed);
         ULONGLONG size = ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
         if (size < minBytes || (fd.dwFileAttributes & (FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_OFFLINE)) ||
             EngineAsset(n))
@@ -151,8 +151,8 @@ std::vector<std::wstring> DupRoots() {
     return out;
 }
 
-std::vector<DupGroup> FindDuplicates(const std::vector<std::wstring>& roots, ULONGLONG minBytes, volatile bool* cancel,
-                                     volatile long* progress) {
+std::vector<DupGroup> FindDuplicates(const std::vector<std::wstring>& roots, ULONGLONG minBytes, std::atomic<bool>* cancel,
+                                     std::atomic<long>* progress) {
     std::vector<File> files;
     for (const std::wstring& r : roots) Walk(r, minBytes, files, cancel, progress, 0);
     std::map<ULONGLONG, std::vector<File>> bySize;
