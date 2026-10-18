@@ -11,6 +11,8 @@
 #include "core/secrets.h"
 #include "core/stroke.h"
 #include "desk/zones.h"
+#include "tools/mft_detail.h"
+#include "tools/tools.h"
 
 namespace {
 
@@ -150,6 +152,41 @@ void TestZones() {
     CHECK(n.right == 380 && n.bottom == 430 && n.left == 100);
 }
 
+void TestBigFiles() {
+    namespace md = tools::mft_detail;
+    std::vector<md::Node> nodes(40);
+    auto file = [&](size_t r, ULONGLONG size, bool dir = false, bool reparse = false) {
+        nodes[r].used = nodes[r].named = true;
+        nodes[r].size = size, nodes[r].dir = dir, nodes[r].reparse = reparse;
+    };
+    file(3, 1ull << 40);  // служебная запись NTFS ($LogFile) - не в счёт
+    file(24, 500);
+    file(25, 9000);
+    file(26, 7000, true);  // папка
+    file(27, 8000);
+    file(28, 99999, false, true);  // ссылка
+    file(30, 100);
+    auto top = md::TopFiles(nodes, 2);
+    CHECK(top == std::vector<ULONGLONG>({25, 27}));
+    CHECK(md::TopFiles(nodes, 100).size() == 4);
+    std::vector<md::BigRow> rows = {{9000, L"C:\\Users\\Moon\\Видео\\фильм.mkv"}, {8000, L"D:\\iso\\win.iso"}};
+    ULONGLONG t = 0;
+    std::vector<md::BigRow> back;
+    CHECK(md::ParseBig(md::FormatBig(1760000000, rows), t, back));
+    CHECK(t == 1760000000 && back.size() == 2 && back[0].path == rows[0].path && back[1].bytes == 8000);
+    CHECK(!md::ParseBig("#big\t1\n100\tC:\\x\n", t, back));  // недописан - без #end
+    // что можно отдать в Корзину
+    CHECK(tools::BigFileKeep(L"C:\\Users\\Moon\\Downloads\\game.iso").empty());
+    CHECK(tools::BigFileKeep(L"D:\\Видео\\запись.mp4").empty());
+    CHECK(!tools::BigFileKeep(L"C:\\pagefile.sys").empty());
+    CHECK(!tools::BigFileKeep(L"C:\\Windows\\Installer\\big.msi").empty());
+    CHECK(!tools::BigFileKeep(L"C:\\Program Files\\Epic\\data.pak").empty());
+    CHECK(!tools::BigFileKeep(L"D:\\SteamLibrary\\steamapps\\common\\Game\\data.pak").empty());
+    CHECK(!tools::BigFileKeep(L"C:\\Users\\Moon\\AppData\\Local\\Docker\\wsl\\disk\\docker_data.vhdx").empty());
+    CHECK(!tools::BigFileKeep(L"C:\\Users\\Moon\\proj\\.git\\objects\\pack\\pack-1.pack").empty());
+    CHECK(!tools::BigFileKeep(L"relative\\path.bin").empty());
+}
+
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int)) {
@@ -159,4 +196,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestFuzzy();
     TestSecrets();
     TestZones();
+    TestBigFiles();
 }

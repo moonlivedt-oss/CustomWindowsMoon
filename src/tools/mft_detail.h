@@ -87,6 +87,17 @@ bool IndexTable(const std::string& text, TableIndex& ix);
 // Папка rec и её дети - то же, что ParseTable(text, rec), но из индекса.
 std::vector<DirRow> Slice(const TableIndex& ix, ULONGLONG rec);
 
+// Большие файлы тома (И9): номера записей n самых больших файлов (не папок, не служебных, с именем), по убыванию.
+std::vector<ULONGLONG> TopFiles(const std::vector<Node>& nodes, size_t n);
+// Имя файла из записи (длинное, не 8.3) и папка, где оно лежит; false - не запись файла.
+bool RecordName(BYTE* rec, DWORD recSize, DWORD sector, std::wstring& name, ULONGLONG& parent);
+// Файл больших файлов тома: «#big время», строки «байт<TAB>путь», «#end».
+struct BigRow {
+    ULONGLONG bytes = 0;
+    std::wstring path;
+};
+std::string FormatBig(ULONGLONG time, const std::vector<BigRow>& rows);
+bool ParseBig(const std::string& text, ULONGLONG& time, std::vector<BigRow>& rows);
 // Поиск папок по имени (И8): лучшие max строк - совпало начало имени, начало слова, где-то внутри (раскладка RU/EN
 // не важна); при равенстве - что больше по размеру. lower - имена строк в нижнем регистре (LowerNames, один раз).
 std::vector<std::wstring> LowerNames(const TableIndex& ix);

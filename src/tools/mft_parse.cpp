@@ -279,6 +279,77 @@ std::vector<DirRow> Slice(const TableIndex& ix, ULONGLONG rec) {
     return out;
 }
 
+std::vector<ULONGLONG> TopFiles(const std::vector<Node>& nodes, size_t n) {
+    std::vector<std::pair<ULONGLONG, ULONGLONG>> v;  // размер, запись
+    for (ULONGLONG r = kFirstUserRecord; r < nodes.size(); ++r) {
+        const Node& x = nodes[r];
+        if (!x.used || x.dir || !x.named || x.reparse || !x.size) continue;
+        v.push_back({x.size, r});
+    }
+    size_t k = std::min(n, v.size());
+    std::partial_sort(v.begin(), v.begin() + k, v.end(), [](auto& a, auto& b) { return a.first > b.first; });
+    std::vector<ULONGLONG> out;
+    for (size_t i = 0; i < k; ++i) out.push_back(v[i].second);
+    return out;
+}
+
+bool RecordName(BYTE* rec, DWORD recSize, DWORD sector, std::wstring& name, ULONGLONG& parent) {
+    if (memcmp(rec, "FILE", 4) != 0 || !Fixup(rec, recSize, sector)) return false;
+    WORD flags = At<WORD>(rec, 0x16);
+    if (!(flags & 1) || (flags & 2)) return false;  // свободна или папка
+    bool got = false, gotLong = false;
+    for (DWORD off = At<WORD>(rec, 0x14); off + 16 <= recSize;) {
+        const BYTE* a = rec + off;
+        DWORD type = At<DWORD>(a, 0), len = At<DWORD>(a, 4);
+        if (type == kAttrEnd || type == 0 || len < 16 || off + len > recSize) break;
+        if (type == kAttrFileName && !a[8]) {
+            DWORD vLen = At<DWORD>(a, 0x10);
+            WORD vOff = At<WORD>(a, 0x14);
+            if (vOff + vLen <= len && vLen >= 0x42) {
+                const BYTE* fn = a + vOff;
+                BYTE chars = fn[0x40], ns = fn[0x41];
+                bool dos = ns == 2;
+                if (0x42u + chars * 2u <= vLen && (!got || (!gotLong && !dos))) {
+                    name.assign(chars, L'\0');
+                    memcpy(name.data(), fn + 0x42, chars * 2u);
+                    parent = At<ULONGLONG>(fn, 0) & kRefMask;
+                    got = true;
+                    gotLong = !dos;
+                }
+            }
+        }
+        off += len;
+    }
+    return got;
+}
+
+std::string FormatBig(ULONGLONG time, const std::vector<BigRow>& rows) {
+    std::string s = "#big\t" + std::to_string(time) + "\n";
+    for (const BigRow& r : rows) s += std::to_string(r.bytes) + "\t" + Narrow(r.path) + "\n";
+    return s + "#end\n";
+}
+
+bool ParseBig(const std::string& text, ULONGLONG& time, std::vector<BigRow>& rows) {
+    rows.clear();
+    if (text.rfind("#big\t", 0) != 0 || text.find("\n#end") == std::string::npos) return false;
+    time = strtoull(text.c_str() + 5, nullptr, 10);
+    size_t at = text.find('\n') + 1;
+    while (at < text.size()) {
+        size_t e = text.find('\n', at);
+        if (e == std::string::npos) e = text.size();
+        std::string line = text.substr(at, e - at);
+        at = e + 1;
+        if (line.empty() || line[0] == '#') continue;
+        size_t tab = line.find('\t');
+        if (tab == std::string::npos) continue;
+        BigRow r;
+        r.bytes = strtoull(line.c_str(), nullptr, 10);
+        r.path = Widen(line.substr(tab + 1));
+        rows.push_back(std::move(r));
+    }
+    return true;
+}
+
 std::vector<std::wstring> LowerNames(const TableIndex& ix) {
     std::vector<std::wstring> out;
     out.reserve(ix.rows.size());

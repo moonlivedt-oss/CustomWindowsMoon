@@ -243,6 +243,7 @@ enum Id {
     ID_SET = 16500,          // +набор*100 + поле (studio_apps.cpp)
     ID_TOOLS_FIND = 18590,   // «Диски»: поиск папки по таблице MFT
     ID_TOOLS_FOUND = 18600,  // +i*2: «Посчитать» и «Открыть» у найденной папки
+    ID_TOOLS_BIG = 18700,    // +i*2: «Показать» и «В Корзину» у большого файла
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -618,7 +619,9 @@ private:
     std::wstring toolsFind_;  // поиск папки по таблице MFT (И8)
     std::vector<tools::FoundDir> toolsFound_;
     ULONGLONG toolsFindAge_ = 0;
-    bool toolsFindAny_ = true;                     // таблицы MFT вообще есть
+    bool toolsFindAny_ = true;              // таблицы MFT вообще есть
+    std::vector<tools::BigFile> toolsBig_;  // большие файлы томов (И9)
+    ULONGLONG toolsBigAt_ = 0, toolsBigAge_ = 0;
     std::shared_ptr<std::atomic<int>> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
     std::wstring boostDir_;
     bool boostPurge_ = true;

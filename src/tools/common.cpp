@@ -597,6 +597,27 @@ std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots,
 
 // ---------------- разбор Загрузок ----------------
 
+std::wstring BigFileKeep(const std::wstring& path) {
+    std::wstring l = Lower(path);
+    if (l.size() < 4 || l[1] != L':' || l[2] != L'\\') return L"не полный путь";
+    size_t slash = l.find(L'\\', 3);
+    if (slash == std::wstring::npos) return L"файл в корне диска - системный";  // pagefile.sys, hiberfil.sys
+    std::wstring top = l.substr(3, slash - 3);
+    if (top == L"windows" || top == L"$recycle.bin" || top == L"system volume information" || top == L"recovery" ||
+        top == L"$windows.~bt" || top == L"$windows.~ws" || top == L"windows.old")
+        return L"системная папка - освобождается через «Системные гиганты»";
+    if (top == L"program files" || top == L"program files (x86)" || top == L"programdata")
+        return L"часть установленной программы - удалять через её деинсталлятор";
+    for (const wchar_t* part : {L"\\steamapps\\common\\", L"\\epic games\\", L"\\moonradial\\",
+                                L"\\appdata\\local\\packages\\", L"\\windowsapps\\", L"\\.git\\"})
+        if (l.find(part) != std::wstring::npos) return L"часть программы, игры или репозитория";
+    for (const wchar_t* ext : {L".vhdx", L".vhd", L".vmdk"})
+        if (EndsWithI(l, ext)) return L"диск виртуальной машины или WSL - через «Docker и WSL»";
+    for (const wchar_t* ext : {L".sys", L".dll", L".exe"})
+        if (EndsWithI(l, ext)) return L"программа или системный файл";
+    return L"";
+}
+
 std::wstring DownloadsDir() {
     PWSTR p = nullptr;
     std::wstring out;
