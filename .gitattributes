@@ -1,0 +1,30 @@
+# Концы строк: в репозитории и в рабочей папке исходники и тексты - LF, скрипты cmd - CRLF (cmd.exe с LF
+# путает метки и goto). Правки скриптами на Windows больше не переводят файлы на CRLF и не раздувают diff.
+* text=auto eol=lf
+
+*.cpp text eol=lf
+*.h text eol=lf
+*.rc text eol=lf
+*.manifest text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.html text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf
+*.cfg text eol=lf
+.clang-format text eol=lf
+.clangd text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.exe binary
+*.dll binary
