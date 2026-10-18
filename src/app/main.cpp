@@ -16,6 +16,7 @@
 #include "app/devcli.h"
 #include "app/netui.h"
 #include "app/palette.h"
+#include "desk/cliphist.h"
 #include "app/autos.h"
 #include "app/toolsui.h"
 #include "core/bg.h"
@@ -1383,6 +1384,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             mc::StopWatch();
             netui::Shutdown();
             toolsui::Shutdown();
+            cliphist::Stop();
             autos::Shutdown();
             boost::GameTweaks(boost::Load(BoostDir()), false);
             g_frame.Destroy();
@@ -1543,6 +1545,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         EditorGoPage(page);
     });
     palette::Apply();
+    cliphist::Start(inst, &g_cfg);
+    corners::SetClip([] { cliphist::ShowRing(g_menu); });
+    palette::AddSource([](std::vector<Item>& out) {
+        for (Item& it : cliphist::Items(L"b|")) {
+            it.name = L"Буфер: " + it.name;
+            out.push_back(std::move(it));
+        }
+    });
+    palette::AddRunner(L"b|", [](const std::wstring& n) { cliphist::Use(_wtoi(n.c_str())); });
     // вошли в Windows только что: стол открывается порталом
     if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
     g_game.onChange = OnGameMode;

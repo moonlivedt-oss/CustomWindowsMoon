@@ -22,6 +22,8 @@ bool Apply();
 void Show();
 // дополнительные пункты (история буфера, папки из таблицы MFT): их даёт тот, кто их знает
 void AddSource(std::function<void(std::vector<Item>&)> source);
+// кто выполняет пункты с ключом prefix... (пункты special 3 из AddSource)
+void AddRunner(const std::wstring& prefix, std::function<void(const std::wstring& rest)> run);
 std::wstring Status();  // для студии: «Alt + Space» или почему не работает
 
 }  // namespace palette
