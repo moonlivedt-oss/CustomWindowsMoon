@@ -210,6 +210,12 @@ int RecycleLeftovers(const std::vector<std::wstring>& paths, const Log& log) {
     return moved;
 }
 
+int RecycleBig(const std::wstring& path, const Log& log) {
+    std::map<std::wstring, std::wstring> r;
+    RunTools(L"recycle-big " + Quote(path), log, &r);
+    return _wtoi(r[L"moved"].c_str());
+}
+
 bool ResetExplorer(const Log& log) {
     std::map<std::wstring, std::wstring> r;
     RunTools(L"explorer-reset", log, &r, 60000);

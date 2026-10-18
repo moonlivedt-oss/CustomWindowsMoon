@@ -924,6 +924,13 @@ std::vector<Item> RingItems(std::wstring& status) {
     groups.push_back(group(L"Место", Have(L"grp-space.png", L"tools-disk.png"),
                            L"Диски, очистка, мусор проектов. " + ring[CLEAN].note, {DISKS, CLEAN, PROJECTS}, 1,
                            L"Что занимает место: соты по папкам, кэши"));
+    // большие файлы томов (И9) - из списка, что кладёт задача с правами при подсчёте по MFT
+    std::vector<tools::BigFile> big = tools::BigFiles();
+    if (!big.empty())
+        groups.back().children.insert(groups.back().children.end() - 1,
+                                      Act(L"Большие файлы", Have(L"tools-bigfiles.png", L"tools-disk.png"), L"studio:1",
+                                          L"Самый большой: " + Leaf(big[0].path) + L", " + tools::Bytes(big[0].bytes) +
+                                              L". Щелчок - список в студии с «Показать» и «В Корзину»"));
     groups.push_back(group(L"Память", Have(L"grp-memory.png", L"tools-mem.png"),
                            L"Процессы, фон, автозагрузка. " + ring[PROCS].note, {PROCS, BG, STARTS}, 4,
                            L"Колба памяти (слои программ, утечки, подкачка) и батарея (ветки к фоновым программам) в "

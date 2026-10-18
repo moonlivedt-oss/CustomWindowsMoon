@@ -108,7 +108,20 @@ struct FoundDir {
     int files = 0;
 };
 bool MftFindDirs(const std::wstring& query, size_t max, std::vector<FoundDir>& out, ULONGLONG* age = nullptr);
-void MftSearchForget(ULONGLONG idleMs);  // выбросить индекс поиска, если им не пользовались дольше idleMs
+void MftSearchForget(ULONGLONG idleMs);
+// Большие файлы томов (И9): задача с правами при чтении MFT заодно кладёт 200 самых больших файлов в big-C.tsv.
+// Здесь - все тома, только существующие файлы, размер - нынешний, по убыванию. why - почему в Корзину нельзя
+// (BigFileKeep), пусто - можно. age - сколько секунд самому старому списку.
+struct BigFile {
+    std::wstring path, why;
+    ULONGLONG bytes = 0;
+};
+std::vector<BigFile> BigFiles(ULONGLONG* age = nullptr);
+// Можно ли большой файл отдать в Корзину: пусто - можно, иначе почему нет (системный, программа, файл подкачки...).
+// Только по пути - одно правило для студии и RadialTools (тот ещё смотрит атрибуты).
+std::wstring BigFileKeep(const std::wstring& path);
+int RecycleBig(const std::wstring& path, const Log& log);  // через RadialTools.exe recycle-big  // выбросить индекс
+                                                           // поиска, если им не пользовались дольше idleMs
 // В процессе с правами: таблица тома, где лежит dir, - в файл кэша; ответ - строка «@mftok» или «@mftfail»
 std::wstring MftAdminMain(const std::wstring& dir);
 

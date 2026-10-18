@@ -2,7 +2,8 @@
 // этого не делает: он запускает RadialTools.exe по кнопке, читает ход из stdout и ждёт итога.
 // Строки журнала идут как есть, итог - строкой «@ключ=значение». Код выхода 0 - получилось.
 //
-//   clean <имя кэша>...       содержимое кэшей из списка FindJunk (в TEMP - по правилу tools::TempRemovable); ход по кэшам -
+//   clean <имя кэша>...       содержимое кэшей из списка FindJunk (в TEMP - по правилу tools::TempRemovable); ход по
+//   кэшам -
 //                             строки «#start	<номер>» и «#freed	<номер>	<байт>»
 //   ddc-trim <дней>           из кэша Unreal - то, что не открывалось дольше
 //   projects <путь>...        папки мусора проектов; каждая заново проверяется по признакам
@@ -10,6 +11,7 @@
 //   close <exe> <мс>          закрыть программу: окнам WM_CLOSE, оставшиеся процессы - силой
 //   empty-bin                 очистить корзину
 //   recycle-dup <оставить> <копии>  копии в Корзину, если размер и SHA-256 совпадают с оставляемым
+//   recycle-big <файл>        большой файл из списка MFT - в Корзину, если tools::BigFileKeep не против
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
@@ -478,6 +480,34 @@ int RecycleLeftovers(const std::vector<std::wstring>& paths) {
     return ok ? 0 : 1;
 }
 
+// Большой файл (И9) - в Корзину. Правило места то же, что у студии (tools::BigFileKeep), плюс атрибуты здесь:
+// не папка, не ссылка, не системный.
+int RecycleBig(const std::wstring& p) {
+    DWORD a = GetFileAttributesW(p.c_str());
+    std::wstring why = tools::BigFileKeep(p);
+    if (why.empty() && (a == INVALID_FILE_ATTRIBUTES ||
+                        (a & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_SYSTEM))))
+        why = a == INVALID_FILE_ATTRIBUTES ? L"файла уже нет" : L"папка, ссылка или системный файл";
+    if (!why.empty()) {
+        Out(L"Не трогаю: " + why + L" - " + p);
+        Out(L"@moved=0");
+        return 1;
+    }
+    std::wstring list = p;
+    list.push_back(L'\0');
+    list.push_back(L'\0');
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = FO_DELETE;
+    op.pFrom = list.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int rc = SHFileOperationW(&op);
+    bool ok = rc == 0 && !op.fAnyOperationsAborted;
+    Out(ok ? L"В Корзине: " + p
+           : L"Корзина не приняла (код " + std::to_wstring(rc) + L"), файл занят или слишком велик");
+    Out(std::wstring(L"@moved=") + (ok ? L"1" : L"0"));
+    return ok ? 0 : 1;
+}
+
 // Сбросить Проводник: закрыть, удалить кэш значков и эскизов, запустить заново. Окна Проводника закроются.
 int ExplorerReset() {
     DWORD mySession = 0;
@@ -564,6 +594,7 @@ int wmain(int argc, wchar_t** argv) {
     if (cmd == L"recycle-leftover" && a.size() >= 2)
         return RecycleLeftovers(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"explorer-reset") return ExplorerReset();
+    if (cmd == L"recycle-big" && a.size() >= 2) return RecycleBig(a[1]);
     if (cmd == L"empty-bin") {
         bool ok =
             SUCCEEDED(SHEmptyRecycleBinW(nullptr, nullptr, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND));

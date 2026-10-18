@@ -79,7 +79,8 @@ bool DirRecord(const std::wstring& dir, ULONGLONG& rec, DWORD& serial) {
 }
 
 // Весь том за один проход: таблица всех папок. root - «C:\».
-bool ReadVolume(const std::wstring& root, std::vector<DirRow>& rows, TableHead& head, std::wstring& err) {
+bool ReadVolume(const std::wstring& root, std::vector<DirRow>& rows, TableHead& head, std::wstring& err,
+                std::vector<BigRow>* big = nullptr) {
     auto t0 = std::chrono::steady_clock::now();
     if (!IsNtfs(root, &head.serial)) return err = L"не NTFS", false;
     MftVolume v;
@@ -142,6 +143,36 @@ bool ReadVolume(const std::wstring& root, std::vector<DirRow>& rows, TableHead& 
         }
     }
     rows = BuildDirs(nodes, names, links);
+    if (big) {
+        // большие файлы (И9): имена 200 самых больших - второй проход, только по их записям
+        TableIndex ix;
+        ix.rows = rows;
+        for (size_t i = 0; i < ix.rows.size(); ++i) ix.byRec[ix.rows[i].rec] = i;
+        DWORD block = std::max(v.recSize, v.sector);
+        std::unique_ptr<BYTE, decltype(&::_aligned_free)> one((BYTE*)_aligned_malloc(block, 4096), &::_aligned_free);
+        for (ULONGLONG r : TopFiles(nodes, 200)) {
+            ULONGLONG first = 0, offset = ~0ull;
+            for (const Extent& e : extents) {
+                ULONGLONG n = e.clusters * v.cluster / v.recSize;
+                if (r < first + n) {
+                    if (e.lcn >= 0) offset = (ULONGLONG)e.lcn * v.cluster + (r - first) * v.recSize;
+                    break;
+                }
+                first += n;
+            }
+            if (offset == ~0ull || !one) continue;
+            ULONGLONG at = offset / block * block;  // чтение тома - кратно сектору
+            if (!v.Read(at, one.get(), block)) continue;
+            std::wstring name;
+            ULONGLONG parent = 0;
+            if (!RecordName(one.get() + (offset - at), v.recSize, v.sector, name, parent)) continue;
+            auto p = ix.byRec.find(parent);
+            if (p == ix.byRec.end()) continue;
+            std::wstring dir = PathOf(ix, p->second, root.substr(0, 2));
+            if (dir.empty()) continue;
+            big->push_back({nodes[r].size, (dir.back() == L'\\' ? dir : dir + L"\\") + name});
+        }
+    }
     head.time = UnixNow();
     head.records = count;
     head.ms =
@@ -153,6 +184,10 @@ bool ReadVolume(const std::wstring& root, std::vector<DirRow>& rows, TableHead& 
 
 std::wstring CacheFile(wchar_t letter) {
     return elevate::DataDir() + L"\\mft-" + std::wstring(1, (wchar_t)towupper(letter)) + L".tsv";
+}
+
+std::wstring BigListFile(wchar_t letter) {
+    return elevate::DataDir() + L"\\big-" + std::wstring(1, (wchar_t)towupper(letter)) + L".tsv";
 }
 
 std::string ReadFileAll(const std::wstring& path) {
@@ -312,7 +347,20 @@ std::wstring MftAdminMain(const std::wstring& dirIn) {
     std::vector<DirRow> rows;
     TableHead head;
     std::wstring note;
-    if (!ReadVolume(root, rows, head, note)) return L"@mftfail\t" + note + L"\n";
+    std::vector<BigRow> big;
+    if (!ReadVolume(root, rows, head, note, &big)) return L"@mftfail\t" + note + L"\n";
+    // большие файлы тома - рядом с таблицей, тоже целиком или никак
+    {
+        std::string bt = FormatBig(head.time, big);
+        std::wstring bp = BigListFile(root[0]), btmp = bp + L".new";
+        HANDLE bf = CreateFileW(btmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        if (bf != INVALID_HANDLE_VALUE) {
+            DWORD bw = 0;
+            BOOL bok = WriteFile(bf, bt.data(), (DWORD)bt.size(), &bw, nullptr) && bw == bt.size();
+            CloseHandle(bf);
+            if (!bok || !MoveFileExW(btmp.c_str(), bp.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(btmp.c_str());
+        }
+    }
     std::string text = FormatTable(head, rows);
     CreateDirectoryW(elevate::DataDir().c_str(), nullptr);
     std::wstring path = CacheFile(root[0]), tmp = path + L".new";
@@ -333,6 +381,29 @@ MftState MftReady() {
     if (elevate::Blocked(elevate::TASK_NET)) return MFT_BLOCKED;
     if (net::AdminReady()) return MFT_READY;
     return elevate::TaskExists(elevate::TASK_NET) ? MFT_OLD : MFT_NONE;
+}
+
+std::vector<BigFile> BigFiles(ULONGLONG* age) {
+    std::vector<BigFile> out;
+    ULONGLONG oldest = 0, now = UnixNow();
+    for (wchar_t l = L'C'; l <= L'Z'; ++l) {
+        ULONGLONG time = 0;
+        std::vector<BigRow> rows;
+        if (!ParseBig(ReadFileAll(BigListFile(l)), time, rows)) continue;
+        oldest = std::max(oldest, now > time ? now - time : 0);
+        for (const BigRow& r : rows) {
+            WIN32_FILE_ATTRIBUTE_DATA a{};
+            if (!GetFileAttributesExW(r.path.c_str(), GetFileExInfoStandard, &a)) continue;  // уже удалён
+            BigFile f;
+            f.path = r.path;
+            f.bytes = ((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+            f.why = BigFileKeep(r.path);
+            out.push_back(std::move(f));
+        }
+    }
+    std::sort(out.begin(), out.end(), [](const BigFile& a, const BigFile& b) { return a.bytes > b.bytes; });
+    if (age) *age = oldest;
+    return out;
 }
 
 // Индекс для поиска папок (И8): все таблицы томов, имена в нижнем регистре; держится, пока ищут.

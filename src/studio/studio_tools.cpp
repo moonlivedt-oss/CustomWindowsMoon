@@ -951,6 +951,56 @@ void Studio::ToolsPage(const RectF& r) {
                 ui.Text(L"Размеры - на момент таблицы (" + std::to_wstring(toolsFindAge_ / 60) + L" мин назад)",
                         RectF(b.X, y + found * lineH, b.Width, lineH), c.faint, 10.5f);
         });
+        // большие файлы томов (И9): список кладёт задача с правами при подсчёте по MFT
+        if (GetTickCount64() - toolsBigAt_ > 5000) {
+            toolsBigAt_ = GetTickCount64();
+            toolsBig_ = tools::BigFiles(&toolsBigAge_);
+        }
+        size_t bigN = std::min<size_t>(toolsBig_.size(), 25);
+        wide(L"Большие файлы", rowsFor(bigN) + 1.4f, [&](const RectF& b) {
+            float y = b.Y;
+            if (toolsBig_.empty()) {
+                ui.Text(
+                    L"Список появится после подсчёта целого диска по MFT («Посчитать» для C:\\ выше, с задачей "
+                    L"с правами): задача заодно запоминает 200 самых больших файлов тома.",
+                    RectF(b.X, y, b.Width, lineH * 1.4f), c.muted, 11.5f, false, ui::Left, true);
+                return;
+            }
+            for (size_t i = 0; i < bigN; ++i) {
+                const tools::BigFile& f = toolsBig_[i];
+                float yy = y + i * lineH;
+                bool can = f.why.empty();
+                ui.Text(f.path, RectF(b.X, yy, b.Width - ui.S(360), lineH), can ? c.text : c.muted, 11.5f);
+                if (!can) ui.Tip(ID_TOOLS_BIG + (int)i * 2 + 1, L"Не в Корзину: " + f.why);
+                ui.Text(tools::Bytes(f.bytes), RectF(b.X + b.Width - ui.S(350), yy, ui.S(110), lineH), c.gold, 12, true,
+                        ui::Right);
+                if (ui.Button(ID_TOOLS_BIG + (int)i * 2,
+                              RectF(b.X + b.Width - ui.S(230), yy + ui.S(2), ui.S(110), ui.S(26)), L"Показать")) {
+                    std::wstring p = f.path;
+                    Defer([p] {
+                        ShellExecuteW(nullptr, nullptr, L"explorer.exe", (L"/select,\"" + p + L"\"").c_str(), nullptr,
+                                      SW_SHOWNORMAL);
+                    });
+                }
+                if (ui.Button(ID_TOOLS_BIG + (int)i * 2 + 1,
+                              RectF(b.X + b.Width - ui.S(110), yy + ui.S(2), ui.S(110), ui.S(26)), L"В Корзину",
+                              can ? Kind::Secondary : Kind::Ghost) &&
+                    can && !busy &&
+                    MessageBoxW(wnd,
+                                (L"Отправить в Корзину\n" + f.path + L"\n(" + tools::Bytes(f.bytes) +
+                                 L")?\n\nВернуть можно из Корзины, пока она не очищена. Очень большие файлы Windows "
+                                 L"может удалить мимо Корзины - тогда она спросит сама.")
+                                    .c_str(),
+                                L"Большой файл", MB_YESNO | MB_ICONWARNING) == IDYES) {
+                    std::wstring p = f.path;
+                    ToolsRun(L"В Корзину", [p](const tools::Log& l, ToolsJob&) { return tools::RecycleBig(p, l) > 0; });
+                    toolsBigAt_ = 0;
+                }
+            }
+            ui.Text(L"По таблице MFT " + std::to_wstring(toolsBigAge_ / 3600) +
+                        L" ч назад; размеры - нынешние. Серые - системное, программы и диски WSL: их здесь не удаляю.",
+                    RectF(b.X, y + bigN * lineH, b.Width, lineH), c.faint, 10.5f);
+        });
         // кэши
         // чистка идёт - над списком вихрь, куда осыпаются очищаемые места
         bool vortex = scene::CleanRecent();
