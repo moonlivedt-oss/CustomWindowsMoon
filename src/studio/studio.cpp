@@ -1059,6 +1059,18 @@ void EditorGoNet() {
     if (g_st) g_st->GoPage(PAGE_NET);
 }
 
+void EditorGoPage(int page) {
+    if (g_st && page >= 0 && page <= PAGE_AIDS) g_st->GoPage((Page)page);
+}
+
+std::vector<std::pair<int, std::wstring>> EditorPages() {
+    std::vector<std::pair<int, std::wstring>> out;
+    for (const Group& g : kGroups)
+        for (int k = 0; k < g.count; ++k)
+            out.push_back({g.pages[k].page, std::wstring(g.name) + L" - " + g.pages[k].name});
+    return out;
+}
+
 void EditorGoTools(int tab, const std::wstring& scan) {
     if (g_st) g_st->GoTools(tab, scan);
 }

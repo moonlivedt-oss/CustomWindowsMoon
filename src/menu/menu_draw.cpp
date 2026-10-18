@@ -384,6 +384,10 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
         if (subItems_.empty()) s += L"   ничего не найдено";
         return s;
     }
+    if (palette_ && query_.empty() && !HoveredItem()) {
+        alpha = 0.8;
+        return L"Печатайте: команда, папка, окно, раздел студии   |   Enter - выполнить";
+    }
     if (dragging_) {
         if (targetKey_.empty()) return L"Наведите на папку";
         std::wstring q = L" «" + targetName_ + L"»";

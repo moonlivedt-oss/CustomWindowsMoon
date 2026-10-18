@@ -15,6 +15,7 @@
 #include "app/autostart.h"
 #include "app/devcli.h"
 #include "app/netui.h"
+#include "app/palette.h"
 #include "app/autos.h"
 #include "app/toolsui.h"
 #include "core/bg.h"
@@ -149,6 +150,7 @@ void Reload() {
         if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
     }
     if (g_wnd) netui::Apply(g_cfg);
+    if (g_wnd) palette::Apply();
     if (g_wnd) SetTimer(g_wnd, kWarmTimer, 500, nullptr);  // прогреть новые значки
 }
 
@@ -1221,6 +1223,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_HOTKEY:
             if (wp == kHotWindows) ShowWindowsRing();
+            if (wp == palette::kHotId) palette::Show();
             return 0;
         case WM_TRAY:
             if (LOWORD(lp) == WM_RBUTTONUP) TrayMenu();
@@ -1535,6 +1538,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         if (g_menu.IsOpen()) return;
         toolsui::ShowRing(g_menu);
     });
+    palette::Init(g_wnd, &g_cfg, &g_menu, [](int page) {
+        OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
+        EditorGoPage(page);
+    });
+    palette::Apply();
     // вошли в Windows только что: стол открывается порталом
     if (g_cfg.bootPortal && !wantEditor && JustLoggedOn()) SetTimer(g_wnd, kIntroTimer, 400, nullptr);
     g_game.onChange = OnGameMode;

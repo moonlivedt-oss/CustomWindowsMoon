@@ -130,6 +130,25 @@ struct Config {
     bool toolsDiskWarn = true;  // карточка, когда на диске мало места (меньше 10% и меньше 20 ГБ)
     int lockPattern = 1;        // узор стекла при переходе: 0 - нет, 1 - соты, 2 - осколки
     std::wstring avatarSource;  // своя картинка в середине аватара, пусто - эмблема-полумесяц
+    // помощники (студия, Настройки - Помощники)
+    bool stroke = true;                      // росчерк: махнули с зажатым Alt и отпустили над пунктом - открыть
+    bool palette = true;                     // командная палитра по сочетанию
+    std::wstring paletteKey = L"alt+space";  // её сочетание
+    bool clipHistory = true;                 // история буфера: последние тексты и картинки
+    bool clipSecrets = true;                 // токены, ключи и номера карт не запоминать, из буфера стирать
+    int clipSecretSec = 60;                  // через сколько секунд стирать секрет из буфера
+    bool winDrag = true;                     // Alt + левая - тащить окно за любое место, Alt + правая - размер
+    bool cpuBalance = true;                  // тихий баланс процессора: фоновым обжорам - пониже приоритет
+    bool noSleep = true;                     // не спать, пока идёт сборка, загрузка или копирование
+    std::wstring noSleepApps =
+        L"cmake.exe|ninja.exe|cl.exe|link.exe|MSBuild.exe|UnrealBuildTool.exe|"
+        L"ShaderCompileWorker.exe|robocopy.exe|steamwebhelper.exe|git.exe|cc1plus.exe";
+    bool longWatch = true;  // карточка, когда долгая сборка или упаковка закончилась
+    std::wstring longApps =
+        L"cmake.exe|ninja.exe|MSBuild.exe|UnrealBuildTool.exe|UnrealPak.exe|"
+        L"ShaderCompileWorker.exe|git.exe|cargo.exe|npm.cmd|node.exe|RunUAT.bat|"
+        L"UnrealEditor-Cmd.exe|dotnet.exe";
+    int longMin = 3;  // от скольких минут работы команда считается долгой
     std::vector<Item> left, right;
     std::vector<AppRing> apps;  // кольца программ
 

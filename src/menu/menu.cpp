@@ -174,6 +174,23 @@ void RadialMenu::ShowAround(const Config* cfg, POINT cursor, const RECT& work, U
     Start();
 }
 
+void RadialMenu::ShowPalette(const Config* cfg, std::vector<Item> extra, POINT cursor, const RECT& work, UINT dpi) {
+    PERF_SCOPE("menu.ShowPalette");
+    fullRing_ = cfg->left;
+    fullRing_.insert(fullRing_.end(), cfg->right.begin(), cfg->right.end());
+    if (fullRing_.empty() && extra.empty()) return;
+    if (fullRing_.empty()) fullRing_.push_back(extra.front());
+    demo_ = false;
+    cfg_ = cfg;
+    ring_ = &fullRing_;
+    geo_ = MakeGeo(dpi / 96.0 * cfg->scale);
+    winMode_ = netMode_ = false;
+    paletteExtra_ = std::move(extra);
+    PlaceAround(cursor, work);
+    Start();
+    palette_ = true;
+}
+
 void RadialMenu::ShowWindows(const Config* cfg, POINT cursor, const RECT& work, UINT dpi) {
     PERF_SCOPE("menu.ShowWindows");
     winRing_ = winlist::Build(16);
@@ -347,6 +364,11 @@ void RadialMenu::Start(bool live) {
     }
     tOpen_ = tLast_ = GetTickCount64();
     subSlide_ = 0;
+    flick_ = false;
+    {
+        POINT c = CursorPt();
+        stroke_.Start(tOpen_, c.x, c.y);
+    }
 
     CaptureBackdrop();  // до показа окна, чтобы в снимок не попало само меню
     EnsureHexGlass();
@@ -409,6 +431,8 @@ void RadialMenu::Hide() {
     for (RingCache& c : ringCache_) c = {};
     searchPool_.clear();
     searchPool_.shrink_to_fit();
+    palette_ = false;
+    paletteExtra_ = {};
     labels_.clear();  // подписи и ширины строк соберутся заново при следующем открытии
     textW_.clear();
     labelFit_.clear();
@@ -449,6 +473,22 @@ void RadialMenu::Tick() {
 
         bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
         bool mouseDown = GetAsyncKeyState(VK_LBUTTON) & 0x8000;
+        // росчерк: Alt ещё держат и сразу махнули - выбор по направлению; отпустили Alt над пунктом - открыть.
+        // Над сектором со вторым кольцом (группа, папка) - кольцо просто остаётся, как без росчерка
+        if (cfg_->stroke && !winMode_ && altWasDown_ && alt && !flick_ && now - tOpen_ < 600) {
+            stroke_.Feed(now, pt.x, pt.y);
+            flick_ = stroke_.Flick(70 * geo_.k);
+        }
+        if (flick_ && altWasDown_ && !alt) {
+            flick_ = false;
+            const Item* it = HoveredItem();
+            bool leaf = it && it->special != 4 && !it->Nested() &&
+                        (hoverSub_ >= 0 || (hoverRoot_ >= 0 && !(*ring_)[hoverRoot_].HasRing()));
+            if (leaf && !mouseDown && !dragging_ && mode_ != Mode::Search) {
+                ActivateHover();
+                if (!open_) return;
+            }
+        }
         // кольцо окон работает как Alt+Tab: отпустил Alt над окном - оно впереди;
         // папки и программы открываются только двойным кликом или Enter
         if (winMode_ && altWasDown_ && !alt && !dragging_ && !mouseDown && (hoverSub_ >= 0 || hoverRoot_ >= 0)) {

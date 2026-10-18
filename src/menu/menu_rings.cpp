@@ -11,6 +11,7 @@
 #include <set>
 
 #include "core/files.h"
+#include "core/fuzzy.h"
 #include "core/launch.h"
 #include "core/perf.h"
 #include "core/text.h"
@@ -23,38 +24,7 @@
 using namespace Gdiplus;
 using namespace menu_detail;
 
-namespace {
-
-// Запрос, набранный не в той раскладке: "ghjtrns" -> "проекты" и обратно.
-std::wstring OtherLayout(const std::wstring& q) {
-    static const wchar_t en[] = L"qwertyuiop[]asdfghjkl;'zxcvbnm,.`";
-    static const wchar_t ru[] =
-        L"йцукенгшщзхъфывап"
-        L"ролджэячсмитьбюё";
-    std::wstring out = q;
-    for (wchar_t& c : out) {
-        if (const wchar_t* p = wcschr(en, c); p && c)
-            c = ru[p - en];
-        else if (const wchar_t* r = wcschr(ru, c); r && c)
-            c = en[r - ru];
-    }
-    return out;
-}
-
-// 0 - совпало начало имени, 1 - начало слова, 2 - где-то внутри, -1 - нет
-int MatchScore(const std::wstring& name, const std::wstring& q) {
-    if (q.empty()) return -1;
-    size_t at = name.find(q);
-    if (at == std::wstring::npos) return -1;
-    if (at == 0) return 0;
-    for (; at != std::wstring::npos; at = name.find(q, at + 1)) {
-        wchar_t p = name[at - 1];
-        if (p == L' ' || p == L'-' || p == L'_' || p == L'.' || p == L'(') return 1;
-    }
-    return 2;
-}
-
-}  // namespace
+namespace {}  // namespace
 
 double RadialMenu::Span() const { return full_ ? 180.0 : kHalfSpan; }
 
@@ -159,13 +129,11 @@ void RadialMenu::RebuildSub() {
     constexpr int cap = 400;  // больше пунктов кольцом всё равно не пролистать
     if (mode_ == Mode::Search) {
         subMid_ = 0;
-        std::wstring q = Lower(query_), q2 = OtherLayout(q);
+        std::wstring q = Lower(query_);
         std::vector<std::pair<int, const Item*>> found;
         for (const Item& it : searchPool_) {
             std::wstring n = Lower(it.name);
-            int s = MatchScore(n, q);
-            int s2 = MatchScore(n, q2);
-            if (s < 0 || (s2 >= 0 && s2 < s)) s = s2;
+            int s = fuzzy::Score(n, q);
             if (s >= 0) found.push_back({s * 1000 + (int)std::min<size_t>(n.size(), 999), &it});
         }
         std::stable_sort(found.begin(), found.end(), [](auto& a, auto& b) { return a.first < b.first; });
@@ -258,8 +226,10 @@ void RadialMenu::BuildSearchPool() {
     std::set<std::wstring> seen;
     constexpr size_t kMax = 5000;
     auto add = [&](const Item& it) {
-        if (searchPool_.size() >= kMax || it.full.empty()) return false;
-        if (!seen.insert(Lower(it.full)).second) return false;
+        // команды палитры (действия, окна, сочетания) без пути - по имени и ключу
+        std::wstring key = it.full.empty() ? it.path + L"|" + it.name + (it.win ? L"|w" : L"") : it.full;
+        if (searchPool_.size() >= kMax || (it.full.empty() && it.path.empty() && !it.win)) return false;
+        if (!seen.insert(Lower(key)).second) return false;
         searchPool_.push_back(it);
         return true;
     };
@@ -282,4 +252,5 @@ void RadialMenu::BuildSearchPool() {
         else if (root.dir)
             addFolder(root.full, false, 1);
     }
+    for (const Item& it : paletteExtra_) add(it);  // командная палитра: действия утилит, сети, студии, окна
 }
