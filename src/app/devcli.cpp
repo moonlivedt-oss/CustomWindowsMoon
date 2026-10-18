@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "core/bg.h"
+#include "tools/mft_detail.h"
 #include "core/config.h"
 #include "core/elevate.h"
 #include "core/filedlg.h"
@@ -841,6 +842,12 @@ int MftTest(const std::wstring& dirIn) {
             closed = hidden && Near(mb, w.bytes + hidden);
             if (!why.empty()) why = L"  [закрыто для обхода: " + why + L"]";
         }
+        // файлы прямо в папке: число то же, а MFT больше - растущие открытые журналы, сверка студии это пропускает
+        if (!same && !closed && m != mft.end() && w.name.front() == L'(' &&
+            tools::mft_detail::LooseMatch(mf, mb, w.files, w.bytes)) {
+            closed = true;
+            why = L"  [растут открытые файлы: в MFT настоящий размер, сверка проходит]";
+        }
         if (!same && !closed) ++bad;
         s += std::wstring(same     ? L"  "
                           : closed ? L"~ "
@@ -850,7 +857,8 @@ int MftTest(const std::wstring& dirIn) {
         if (!same && !closed && mb > w.bytes && w.name.front() != L'(') Drill(w.path, 0, s);
     }
     s += nl + L"расхождений: " + std::to_wstring(bad) +
-         L" (~ - обходу нет доступа внутрь, MFT видит; остаток в пределах 1% - открытые файлы, которые растут: размер "
+         L" (~ - обходу нет доступа внутрь или в папке растут открытые файлы, MFT видит; остаток в пределах 1% - "
+         L"открытые файлы, которые растут: размер "
          L"в списке папки Windows обновляет с запозданием, в MFT он настоящий)" +
          nl;
     // тот же ответ через таблицу в кэше помощника - как его берёт студия; по именам и с тем же допуском
