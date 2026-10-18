@@ -170,14 +170,54 @@ std::string ReadFileAll(const std::wstring& path) {
     return s;
 }
 
+// Разобранная таблица в памяти (П1): пока файл кэша тот же (время записи и размер), срез папки - из индекса.
+// Сбрасывается, когда таблица устарела или студия закрылась (MftForget).
+struct Loaded {
+    std::wstring file;
+    ULONGLONG stamp = 0, size = 0;
+    TableIndex ix;
+};
+std::mutex g_loadedLock;
+std::unique_ptr<Loaded> g_loaded;
+
+bool FileStamp(const std::wstring& path, ULONGLONG& stamp, ULONGLONG& size) {
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a)) return false;
+    stamp = ((ULONGLONG)a.ftLastWriteTime.dwHighDateTime << 32) | a.ftLastWriteTime.dwLowDateTime;
+    size = ((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+    return true;
+}
+
+// Срез папки rec из таблицы тома: из индекса в памяти; keep - разобрать файл целиком и оставить индекс (студия
+// ходит по папкам), иначе - разовый разбор одной папки.
+bool CachedRows(const std::wstring& file, ULONGLONG rec, bool keep, TableHead& head, std::vector<DirRow>& rows) {
+    ULONGLONG stamp = 0, size = 0;
+    if (!FileStamp(file, stamp, size)) return false;
+    std::lock_guard<std::mutex> hold(g_loadedLock);
+    if (g_loaded && (g_loaded->file != file || g_loaded->stamp != stamp || g_loaded->size != size)) g_loaded.reset();
+    if (!g_loaded && keep) {
+        auto l = std::make_unique<Loaded>();
+        l->file = file, l->stamp = stamp, l->size = size;
+        if (!IndexTable(ReadFileAll(file), l->ix)) return false;
+        g_loaded = std::move(l);
+    }
+    if (g_loaded) {
+        head = g_loaded->ix.head;
+        rows = Slice(g_loaded->ix, rec);
+        return true;
+    }
+    std::string text = ReadFileAll(file);
+    return !text.empty() && ParseTable(text, rec, head, rows);
+}
+
 // Папка из таблицы в кэше, если таблица того же тома и не старше maxAge секунд. age - сколько ей секунд.
 bool FromCache(const std::wstring& dir, ULONGLONG rec, DWORD serial, ULONGLONG maxAge, std::vector<FolderSize>& out,
-               ULONGLONG* age) {
-    std::string text = ReadFileAll(CacheFile(dir[0]));
+               ULONGLONG* age, bool keep = false) {
     TableHead head;
     std::vector<DirRow> rows;
-    if (text.empty() || !ParseTable(text, rec, head, rows) || head.serial != serial) return false;
+    if (!CachedRows(CacheFile(dir[0]), rec, keep, head, rows) || head.serial != serial) return false;
     ULONGLONG now = UnixNow(), old = now > head.time ? now - head.time : 0;
+    if (old > kFreshSec) MftForget();  // устаревшую таблицу в памяти не держим
     if (old > maxAge || !std::any_of(rows.begin(), rows.end(), [&](const DirRow& d) { return d.rec == rec; }))
         return false;
     if (age) *age = old;
@@ -197,7 +237,7 @@ bool Verify(const std::wstring& dir, std::vector<FolderSize>& got, std::wstring&
     HANDLE h = FindFirstFileExW((base + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
     if (h != INVALID_HANDLE_VALUE) {
         do {
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+            if (LinkDir(fd.dwFileAttributes)) continue;  // файлы-ссылки MFT считает - и сверка тоже
             if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
                 looseBytes += ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
                 ++looseFiles;
@@ -220,11 +260,13 @@ bool Verify(const std::wstring& dir, std::vector<FolderSize>& got, std::wstring&
     int mftFiles = 0;
     for (const FolderSize& f : got)
         if (f.path == dir) mftBytes = f.bytes, mftFiles = f.files;
-    // пока считали, файл мог дописаться: допуск 1% и мегабайт
-    ULONGLONG diff = mftBytes > looseBytes ? mftBytes - looseBytes : looseBytes - mftBytes;
-    if (mftFiles != looseFiles || diff > looseBytes / 100 + 1024 * 1024) {
+    // растущие открытые журналы: MFT видит больше списка - норма (LooseMatch)
+    if (!LooseMatch(mftFiles, mftBytes, looseFiles, looseBytes)) {
         note = L"сверка не сошлась: файлы в корне " + std::to_wstring(mftFiles) + L" против " +
-               std::to_wstring(looseFiles);
+               std::to_wstring(looseFiles) +
+               (mftFiles == looseFiles
+                    ? L", байты " + std::to_wstring(mftBytes) + L" против " + std::to_wstring(looseBytes)
+                    : L"");
         return false;
     }
     for (FolderSize& f : got) {
@@ -293,6 +335,11 @@ MftState MftReady() {
     return elevate::TaskExists(elevate::TASK_NET) ? MFT_OLD : MFT_NONE;
 }
 
+void MftForget() {
+    std::lock_guard<std::mutex> hold(g_loadedLock);
+    g_loaded.reset();
+}
+
 bool MftCached(const std::wstring& dirIn, std::vector<FolderSize>& out, bool verify) {
     std::wstring dir = NormDir(dirIn);
     ULONGLONG rec = 0;
@@ -306,7 +353,7 @@ bool MftCached(const std::wstring& dirIn, std::vector<FolderSize>& out, bool ver
 }
 
 bool ScanSizesMft(const std::wstring& dirIn, std::vector<FolderSize>& out, std::wstring& note,
-                  std::atomic<bool>* reading, MftState* state) {
+                  std::atomic<bool>* reading, MftState* state, const std::atomic<bool>* cancel) {
     std::wstring dir = NormDir(dirIn);
     if (dir.size() < 3 || dir[1] != L':') return false;
     if (!IsNtfs(dir.substr(0, 3))) return note = L"не NTFS", false;
@@ -318,7 +365,7 @@ bool ScanSizesMft(const std::wstring& dirIn, std::vector<FolderSize>& out, std::
     std::lock_guard<std::mutex> hold(busy);
     std::vector<FolderSize> got;
     ULONGLONG age = 0;
-    if (FromCache(dir, rec, serial, kFreshSec, got, &age) && Verify(dir, got, note)) {
+    if (FromCache(dir, rec, serial, kFreshSec, got, &age, true) && Verify(dir, got, note)) {
         out = std::move(got);
         note = L"таблица MFT из кэша, " + std::to_wstring(age / 60) + L" мин назад";
         return true;
@@ -351,11 +398,11 @@ bool ScanSizesMft(const std::wstring& dirIn, std::vector<FolderSize>& out, std::
                 note = p[1];
             }
         },
-        120000);
+        120000, cancel);
     if (reading) *reading = false;
     if (!answered) return false;
     std::wstring summary = note;
-    if (!FromCache(dir, rec, serial, kFreshSec, got, nullptr)) return note = L"таблица MFT не прочиталась", false;
+    if (!FromCache(dir, rec, serial, kFreshSec, got, nullptr, true)) return note = L"таблица MFT не прочиталась", false;
     if (!Verify(dir, got, note)) return false;
     out = std::move(got);
     note = summary;

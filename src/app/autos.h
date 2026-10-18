@@ -39,7 +39,9 @@ bool Cleaning();
 int LastCleanDays();                           // сколько дней назад была тихая чистка, -1 - не было
 ULONGLONG LastCleanFreed();                    // сколько она освободила
 std::vector<tools::DownloadJunk> Downloads();  // последний разбор Загрузок
-void ScanDownloads();                          // разобрать заново (в фоне)
+// Для кадра студии: копирует, только если разбор поменялся с прошлого раза (gen - номер у вызывающего, сначала ~0u)
+bool DownloadsIfChanged(std::vector<tools::DownloadJunk>& out, unsigned& gen);
+void ScanDownloads();  // разобрать заново (в фоне)
 void RecycleDownloads(const std::vector<std::wstring>& paths);
 std::wstring PowerStatus();  // «экономия, от батареи» - что сейчас и почему
 std::wstring RepairStatus();

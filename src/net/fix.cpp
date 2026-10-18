@@ -138,7 +138,41 @@ bool AdminReady() { return elevate::TaskReady(elevate::TASK_NET); }
 
 bool SetupAdmin() { return elevate::Setup(elevate::TASK_NET); }
 
-bool RunAdmin(Job j, const Log& log, int timeoutMs) {
+namespace {
+
+// Брошенное ожидание («Стоп»): задание с правами доработает само, но журнал и задача у него те же - следующее
+// задание сначала дожидается его «#done», иначе планировщик не запустит второй экземпляр, а журнал перепишется.
+std::wstring g_leftHead;    // «#run <метка>» брошенного задания
+ULONGLONG g_leftUntil = 0;  // до когда его ждать (его собственный тайм-аут)
+
+bool Stopped(const std::atomic<bool>* cancel) { return cancel && cancel->load(); }
+
+// Ждать «#done» задания с меткой head; строки журнала - в log (если он есть). 1 - готово успешно, 0 - готово с
+// ошибкой, -1 - тайм-аут, -2 - отменено.
+int WaitDone(const std::wstring& head, ULONGLONG until, const Log* log, const std::atomic<bool>* cancel, bool& ok) {
+    size_t shown = head.size();
+    while (GetTickCount64() < until) {
+        if (Stopped(cancel)) return -2;
+        Sleep(200);
+        std::wstring all = Widen(ReadAll(ResultFile()));
+        if (all.compare(0, head.size(), head) != 0) continue;
+        size_t end;
+        while ((end = all.find(L'\n', shown)) != std::wstring::npos) {
+            std::wstring line = Trim(all.substr(shown, end - shown));
+            shown = end + 1;
+            if (line.rfind(L"#done", 0) == 0) {
+                ok = line.find(L'1') != std::wstring::npos;
+                return ok ? 1 : 0;
+            }
+            if (!line.empty() && log) (*log)(line);
+        }
+    }
+    return -1;
+}
+
+}  // namespace
+
+bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* cancel) {
     if (j < 0 || j >= kJobs) return false;
     // одно задание за раз: зовут из разных потоков (студия, кольцо, недельная проверка, подсчёт MFT), а задание в
     // реестре и журнал у задачи одни - второе затёрло бы первое, и первый ждал бы ответа до тайм-аута
@@ -146,10 +180,29 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs) {
     std::unique_lock<std::timed_mutex> hold(one, std::defer_lock);
     if (!hold.try_lock()) {
         log(L"Задача с правами занята другим действием - жду, пока закончит.");
-        if (!hold.try_lock_for(std::chrono::milliseconds(timeoutMs))) {
-            log(L"Не дождался - это действие пропущено.");
-            return false;
+        ULONGLONG until = GetTickCount64() + (ULONGLONG)timeoutMs;
+        while (!hold.try_lock_for(std::chrono::milliseconds(200))) {
+            if (Stopped(cancel)) return log(L"Остановлено."), false;
+            if (GetTickCount64() >= until) {
+                log(L"Не дождался - это действие пропущено.");
+                return false;
+            }
         }
+    }
+    if (!g_leftHead.empty()) {  // прошлое задание бросили по «Стоп», а оно, может, ещё работает
+        bool ok = false;
+        ULONGLONG now = GetTickCount64();
+        if (now < g_leftUntil) {
+            log(L"Прошлое остановленное задание с правами ещё доделывается - жду его.");
+            ULONGLONG until = std::min(g_leftUntil, now + (ULONGLONG)timeoutMs);
+            int r = WaitDone(g_leftHead, until, nullptr, cancel, ok);
+            if (r == -2) return log(L"Остановлено."), false;
+            if (r == -1 && until < g_leftUntil) {
+                log(L"Оно ещё идёт - это действие пропущено, повтори позже.");
+                return false;
+            }
+        }
+        g_leftHead.clear();
     }
     // задачу уже не пускал антивирус: не ставить её заново после каждой пересборки, а сразу одно окно UAC
     bool blocked = elevate::Blocked(elevate::TASK_NET);
@@ -177,24 +230,22 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs) {
             return false;
         }
     }
-    std::wstring head = std::wstring(L"#run ") + nonce + L"\n";
     // журнал задачи приходит файлом: читаем по мере появления строк
-    size_t shown = head.size();
-    ULONGLONG t0 = GetTickCount64();
-    while ((int)(GetTickCount64() - t0) < timeoutMs) {
-        Sleep(200);
-        std::wstring all = Widen(ReadAll(ResultFile()));
-        if (all.compare(0, head.size(), head) != 0) continue;
-        size_t end;
-        while ((end = all.find(L'\n', shown)) != std::wstring::npos) {
-            std::wstring line = Trim(all.substr(shown, end - shown));
-            shown = end + 1;
-            if (line.rfind(L"#done", 0) == 0) return line.find(L'1') != std::wstring::npos;
-            if (!line.empty()) log(line);
-        }
+    std::wstring head = std::wstring(L"#run ") + nonce + L"\n";
+    ULONGLONG until = GetTickCount64() + (ULONGLONG)timeoutMs;
+    bool ok = false;
+    switch (WaitDone(head, until, &log, cancel, ok)) {
+        case -2:
+            g_leftHead = head;  // под замком one: следующее задание дождётся этого
+            g_leftUntil = until;
+            log(L"Остановлено: само задание с правами доработает в фоне, его итог уже не жду.");
+            return false;
+        case -1:
+            log(L"Задача с правами не ответила вовремя.");
+            return false;
+        default:
+            return ok;
     }
-    log(L"Задача с правами не ответила вовремя.");
-    return false;
 }
 
 // ---- выполняется в процессе с правами (--net-job) ----

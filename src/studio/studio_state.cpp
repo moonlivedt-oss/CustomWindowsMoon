@@ -120,7 +120,8 @@ void Studio::StatePage(const RectF& r) {
     }
     toolsui::SnapshotIfChanged(stateSnap_, stateSnapGen_);
     const toolsui::State& s = stateSnap_;
-    std::vector<tools::DownloadJunk> dls = autos::Downloads();
+    autos::DownloadsIfChanged(stateDls_, stateDlsGen_);
+    const std::vector<tools::DownloadJunk>& dls = stateDls_;
     bool working = s.scanning || autos::Cleaning() || toolsui::Busy();
     if (working) RepaintIn(250);  // пока считается - изредка перерисовываемся, итог появится сам
 
@@ -648,7 +649,9 @@ void Studio::AutoPage(const RectF& r) {
             cfg.downloadsDays = days;
             Save();
         }
-        rr = cols.Row(b, 2, L"Найдено сейчас: " + std::to_wstring(autos::Downloads().size()));
+        rr = cols.Row(b, 2,
+                      L"Найдено сейчас: " +
+                          (autos::DownloadsIfChanged(stateDls_, stateDlsGen_), std::to_wstring(stateDls_.size())));
         if (ui.Button(ID_AUTO_DL_NOW, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
                       L"Показать", Kind::Secondary))
             Defer([this] { GoState(L"downloads"); });

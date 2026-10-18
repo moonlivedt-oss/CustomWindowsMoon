@@ -1,4 +1,5 @@
-// Тесты без окон: правило TEMP, разбор хода чистки, обход папок, разбор MFT, журнал автоматики, фоновые задачи.
+// Тесты без окон: правило TEMP, разбор хода чистки, обход папок, разбор MFT и индекс таблицы, сверка MFT, журнал
+// автоматики, находки автозапуска, дампы падений, фоновые задачи.
 // Сборка и запуск: cmake --build build-check --target radial_tests && ctest --test-dir build-check
 #include <windows.h>
 
@@ -10,8 +11,10 @@
 #include <vector>
 
 #include "core/bg.h"
+#include "core/crash.h"
 #include "tools/journal.h"
 #include "tools/mft_detail.h"
+#include "tools/selfwatch.h"
 #include "tools/tools.h"
 
 namespace {
@@ -148,6 +151,22 @@ void TestWalk() {
     });
     CHECK(sawName);
     CHECK(tools::DirBytes(t.path + L"\\нет такой") == 0);
+    // Н2: папка-ссылка не раскрывается (иначе 3.bin посчитался бы дважды), файл-ссылка идёт в fn
+    std::wstring cmd = L"cmd.exe /d /c mklink /J \"" + t.path + L"\\j\" \"" + sub + L"\" >nul";
+    _wsystem(cmd.c_str());
+    if (tools::LinkDir(GetFileAttributesW((t.path + L"\\j").c_str()))) CHECK(tools::DirBytes(t.path) == 6000 + 300 * 7);
+    if (CreateSymbolicLinkW((t.path + L"\\s.lnk").c_str(), (t.path + L"\\1.bin").c_str(),
+                            SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {  // без режима разработчика - не выйдет
+        bool sawLink = false;
+        tools::WalkFiles(t.path, [&](const tools::WalkFile& f) {
+            if (std::wstring(f.name, f.nameLen) == L"s.lnk") sawLink = (f.attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        });
+        CHECK(sawLink);
+    }
+    CHECK(tools::CloudOnly(FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS));
+    CHECK(!tools::CloudOnly(FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_ARCHIVE));
+    CHECK(tools::LinkDir(FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY));
+    CHECK(!tools::LinkDir(FILE_ATTRIBUTE_REPARSE_POINT));
 }
 
 void TestLiveSize() {
@@ -396,6 +415,56 @@ void TestMftTable() {
     CHECK(md::ListDir(part, 24, L"C:\\A").size() == 2 && md::ListDir(part, 24, L"C:\\A")[0].name == L"Загрузки");
 }
 
+// ---- П1: индекс таблицы в памяти даёт те же срезы, что разбор текста ----
+
+void TestMftIndex() {
+    std::vector<md::DirRow> rows;
+    auto add = [&](ULONGLONG r, ULONGLONG parent, ULONGLONG total, const wchar_t* name, bool reparse = false) {
+        md::DirRow d;
+        d.rec = r, d.parent = parent, d.total = total, d.totalFiles = (int)(total / 10), d.name = name;
+        d.loose = total / 4, d.looseFiles = 1, d.reparse = reparse;
+        rows.push_back(d);
+    };
+    add(5, 5, 1000, L"");
+    add(24, 5, 600, L"Users");
+    add(25, 24, 400, L"Moon");
+    add(26, 25, 100, L"Загрузки");
+    add(27, 5, 300, L"Windows");
+    add(28, 5, 0, L"Ссылка", true);
+    add(29, 27, 120, L"System32");
+    std::string text = md::FormatTable({0x1234, 1760000000, 64, 900}, rows);
+    md::TableIndex ix;
+    CHECK(md::IndexTable(text, ix));
+    CHECK(ix.rows.size() == rows.size() && ix.head.serial == 0x1234);
+    bool same = true;
+    for (ULONGLONG rec : {5ull, 24ull, 25ull, 26ull, 27ull, 29ull, 999ull}) {
+        md::TableHead h;
+        std::vector<md::DirRow> part;
+        md::ParseTable(text, rec, h, part);
+        std::wstring base = L"C:\\x";
+        std::vector<tools::FolderSize> a = md::ListDir(part, rec, base), b = md::ListDir(md::Slice(ix, rec), rec, base);
+        if (a.size() != b.size()) same = false;
+        for (size_t i = 0; same && i < a.size(); ++i)
+            if (a[i].name != b[i].name || a[i].bytes != b[i].bytes || a[i].files != b[i].files) same = false;
+    }
+    CHECK(same);
+    CHECK(md::Slice(ix, 5).size() == 4);  // корень (сам себе родитель - один раз), Users, Windows, Ссылка
+    CHECK(md::Slice(ix, 999).empty());
+    CHECK(!md::IndexTable(text.substr(0, text.size() - 2), ix));
+}
+
+// ---- Н1: сверка файлов в корне на растущих журналах ----
+
+void TestLooseMatch() {
+    const ULONGLONG MB = 1024 * 1024;
+    CHECK(md::LooseMatch(10, 500 * MB, 10, 500 * MB));
+    CHECK(md::LooseMatch(10, 900 * MB, 10, 20 * MB));    // журнал растёт: MFT видит настоящий размер, список отстаёт
+    CHECK(!md::LooseMatch(11, 900 * MB, 10, 900 * MB));  // число файлов - строго
+    CHECK(md::LooseMatch(3, 100 * MB, 3, 101 * MB));     // дописался после чтения таблицы: в пределах допуска
+    CHECK(!md::LooseMatch(3, 100 * MB, 3, 150 * MB));    // MFT заметно меньше - таблица не та или устарела
+    CHECK(md::LooseMatch(0, 0, 0, 0));
+}
+
 // ---- вывод DISM /AnalyzeComponentStore ----
 
 void TestStoreSize() {
@@ -412,6 +481,21 @@ void TestStoreSize() {
     CHECK(tools::ParseStoreSize(ru) == (ULONGLONG)(512.5 * 1024 * 1024));
     CHECK(tools::ParseStoreSize(L"Ошибка: 740\r\nТребуются повышенные права.") == 0);
     CHECK(tools::ParseStoreSize(L"") == 0);
+}
+
+// ---- У2: ход DISM и SFC по процентам в выводе ----
+
+void TestLastPercent() {
+    CHECK(tools::LastPercent("Deployment Image Servicing\r\n[==========                 20.0%                  ]\r"
+                             "[====================       45.3%                  ]\r") == 45);
+    CHECK(tools::LastPercent("[==========================100.0%==========================]\r\n") == 100);
+    // SFC пишет в UTF-16: между буквами нули
+    std::string sfc;
+    for (char ch : std::string("Verification 37% complete.")) sfc += ch, sfc += '\0';
+    CHECK(tools::LastPercent(sfc) == 37);
+    CHECK(tools::LastPercent("Проверка 8,5% завершена") == 8);
+    CHECK(tools::LastPercent("The operation completed successfully.") == -1);
+    CHECK(tools::LastPercent("100% is %d and 250%") == 100);  // 250 - не процент хода, берём предыдущий
 }
 
 // ---- журнал автоматики: ротация в journal.old.tsv ----
@@ -436,6 +520,100 @@ void TestJournal() {
     CHECK(ordered);
 }
 
+// ---- «Защита»: находка автозапуска несёт саму запись, перед выключением - сверка со свежим списком ----
+
+void TestStartFind() {
+    tools::StartItem a, b, c;
+    a.name = L"Updater", a.kind = 0, a.key = L"Updater", a.command = L"C:\\U\\up.exe";
+    b.name = L"Telegram", b.kind = 0, b.key = L"Telegram", b.command = L"C:\\T\\tg.exe -autostart";
+    c.name = L"Steam", c.kind = 1, c.key = L"Steam.lnk", c.command = L"C:\\S\\steam.exe";
+    tools::Suspect s;
+    s.isStart = true, s.startItem = b;  // находка взята, когда b стояла второй
+    // список обновили: порядок другой, на месте номера 1 теперь чужая запись
+    std::vector<tools::StartItem> fresh = {c, a, b};
+    const tools::StartItem* f = tools::FindStart(fresh, s.startItem);
+    CHECK(f && f->name == L"Telegram");
+    CHECK(fresh[1].name != s.startItem.name);  // старый номер указал бы на Updater
+    // команду подменили - это уже не та запись
+    fresh[2].command = L"C:\\Temp\\evil.exe";
+    CHECK(tools::FindStart(fresh, s.startItem) == nullptr);
+    // запись убрали
+    CHECK(tools::FindStart({a, c}, s.startItem) == nullptr);
+    // то же имя из другого места - другая запись
+    tools::StartItem d = b;
+    d.kind = 1;
+    CHECK(!tools::SameStart(d, b));
+}
+
+// ---- С3: дампы падений - о каждом говорим один раз, храним не больше kKeep ----
+
+void TestCrashReports() {
+    TempDir t;
+    auto dump = [&](const wchar_t* stem, const char* what) {
+        MakeFile(t.path, (std::wstring(stem) + L".dmp").c_str(), 16, 0);
+        if (what) {
+            HANDLE f = CreateFileW((t.path + L"\\" + stem + L".txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                   0, nullptr);
+            DWORD put = 0;
+            WriteFile(f, what, (DWORD)strlen(what), &put, nullptr);
+            CloseHandle(f);
+        }
+    };
+    dump(L"crash-20261017-093000-11", "C0000005 (обращение к памяти) в RadialMenu.exe+0x10");
+    dump(L"crash-20261018-140501-22", nullptr);
+    std::vector<crash::Report> r = crash::Unreported(t.path, true);
+    CHECK(r.size() == 2);
+    if (r.size() == 2) {
+        CHECK(r[0].when == L"17.10 09:30" && r[0].what.find(L"RadialMenu.exe+0x10") != std::wstring::npos);
+        CHECK(r[1].when == L"18.10 14:05" && r[1].what.empty());
+    }
+    CHECK(crash::Unreported(t.path, true).empty());  // сказали - больше не говорим
+    dump(L"crash-20261019-080000-33", "E0000A11");
+    r = crash::Unreported(t.path, false);
+    CHECK(r.size() == 1 && r[0].when == L"19.10 08:00");
+    CHECK(crash::Unreported(t.path, false).size() == 1);  // без mark отметка не сдвинулась
+    for (int i = 0; i < 6; ++i) dump((L"crash-2026102" + std::to_wstring(i) + L"-120000-1").c_str(), "x");
+    crash::Prune(t.path, crash::kKeep);
+    int dmp = 0, txt = 0;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((t.path + L"\\crash-*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            std::wstring n = fd.cFileName;
+            dmp += n.find(L".dmp") != std::wstring::npos;
+            txt += n.find(L".txt") != std::wstring::npos;
+            if (n.find(L"crash-20261017") == 0) CHECK(!"самый старый дамп должен уйти");
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    CHECK(dmp == crash::kKeep && txt == crash::kKeep);  // .txt уходят вместе со своими дампами
+}
+
+// ---- П3: рост своей памяти и дескрипторов за сутки ----
+
+void TestSelfLeak() {
+    const ULONGLONG H = 3600ull * 1000, MB = 1024 * 1024;
+    std::vector<tools::SelfSample> s;
+    auto at = [&](ULONGLONG hour, ULONGLONG privMb, DWORD handles, DWORD gdi) {
+        tools::SelfSample x;
+        x.at = 1000 + hour * H, x.priv = privMb * MB, x.handles = handles, x.gdi = gdi, x.user = 100;
+        s.push_back(x);
+    };
+    std::wstring what;
+    for (ULONGLONG h = 0; h < 10; ++h) at(h, 100 + h * 50, 900, 300);
+    CHECK(!tools::SelfLeak(s, what));  // 10 часов - рано судить, хоть и растёт
+    s.clear();
+    for (ULONGLONG h = 0; h <= 24; ++h) at(h, 100 + (h % 3) * 20, 900 + (DWORD)(h % 2) * 50, 300);
+    CHECK(!tools::SelfLeak(s, what));  // сутки колебаний без роста
+    s.clear();
+    for (ULONGLONG h = 0; h <= 24; ++h) at(h, 100 + h * 20, 900 + (DWORD)h * 200, 300);
+    CHECK(tools::SelfLeak(s, what));  // +480 МБ и +4800 дескрипторов
+    CHECK(what.find(L"частные") != std::wstring::npos && what.find(L"дескрипторы +4800") != std::wstring::npos);
+    CHECK(what.find(L"GDI") == std::wstring::npos);
+    tools::SelfSample me = tools::SampleSelf();
+    CHECK(me.priv > 0 && me.handles > 0);
+}
+
 void TestBackground() {
     std::atomic<int> hits{0};
     for (int i = 0; i < 8; ++i) CHECK(bg::Run([&] { Sleep(30), ++hits; }));
@@ -456,8 +634,14 @@ int wmain() {
     TestMftExtents();
     TestMftParseRecord();
     TestMftTable();
+    TestMftIndex();
+    TestLooseMatch();
     TestStoreSize();
+    TestLastPercent();
     TestJournal();
+    TestStartFind();
+    TestCrashReports();
+    TestSelfLeak();
     TestBackground();  // последним: после Quit задачи видят Quitting()
     std::printf("%d passed, %d failed\n", g_passed, g_failed);
     return g_failed ? 1 : 0;

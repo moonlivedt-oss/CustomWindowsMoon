@@ -309,7 +309,7 @@ void Studio::ToolsScan(const std::wstring& dir, bool setup) {
         std::vector<tools::FolderSize> r;
         std::wstring note;
         tools::MftState state = tools::MFT_READY;
-        bool mft = tools::ScanSizesMft(d, r, note, &job.mftReading, &state);
+        bool mft = tools::ScanSizesMft(d, r, note, &job.mftReading, &state, &job.cancel);
         job.mftState = (int)state;
         if (mft) {
             log(L"Посчитано по таблице MFT: " + note + L".");
@@ -318,11 +318,13 @@ void Studio::ToolsScan(const std::wstring& dir, bool setup) {
             r = tools::ScanSizes(d, &job.cancel, &job.progress, [&job](const std::vector<tools::FolderSize>& sofar) {
                 AcquireSRWLockExclusive(&job.lock);  // список растёт по мере подсчёта
                 job.sizes = sofar;
+                ++job.sizesGen;
                 ReleaseSRWLockExclusive(&job.lock);
             });
         }
         AcquireSRWLockExclusive(&job.lock);
         job.sizes = std::move(r);
+        ++job.sizesGen;
         job.hasSizes = true;
         ReleaseSRWLockExclusive(&job.lock);
         return !job.cancel;
@@ -793,12 +795,18 @@ void Studio::ToolsPage(const RectF& r) {
             toolsJob_->hasPhys = false;
         }
         // что занимает место
-        std::vector<tools::FolderSize> sizes;
         bool scanning = false, mftOffer = false;
         long seen = 0;
-        if (toolsJob_ && toolsJob_->title == L"Что занимает место") {
-            AcquireSRWLockShared(&toolsJob_->lock);
-            sizes = toolsJob_->sizes;
+        static const std::vector<tools::FolderSize> kNoSizes;
+        bool sizing = toolsJob_ && toolsJob_->title == L"Что занимает место";
+        const std::vector<tools::FolderSize>& sizes = sizing ? toolsSizes_ : kNoSizes;
+        if (sizing) {
+            AcquireSRWLockShared(&toolsJob_->lock);  // копия - только когда список поменялся, не каждый кадр
+            if (toolsSizesJob_.lock() != toolsJob_ || toolsSizesGen_ != toolsJob_->sizesGen) {
+                toolsSizes_ = toolsJob_->sizes;
+                toolsSizesJob_ = toolsJob_;
+                toolsSizesGen_ = toolsJob_->sizesGen;
+            }
             ReleaseSRWLockShared(&toolsJob_->lock);
             scanning = !toolsJob_->done;
             seen = toolsJob_->mftReading ? -1 : (long)toolsJob_->progress;  // -1: задача с правами читает MFT

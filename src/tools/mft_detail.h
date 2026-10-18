@@ -6,6 +6,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "tools/tools.h"
@@ -71,7 +72,24 @@ struct TableHead {
     ULONGLONG records = 0, ms = 0;
 };
 std::string FormatTable(const TableHead& head, const std::vector<DirRow>& rows);
-// Из текста таблицы - только сама папка rec и её дети. false - файл испорчен или недописан.
+// Из текста таблицы - только сама папка rec и её дети (kAllDirs - все строки). false - файл испорчен или недописан.
 bool ParseTable(const std::string& text, ULONGLONG rec, TableHead& head, std::vector<DirRow>& rows);
+
+// Вся таблица в памяти: строки и дети каждой папки. Студия ходит по папкам одного тома - переход внутрь берёт
+// готовый срез за миллисекунды, а не разбирает 25 МБ текста заново.
+struct TableIndex {
+    TableHead head;
+    std::vector<DirRow> rows;
+    std::unordered_map<ULONGLONG, std::vector<size_t>> kids;  // родитель -> номера строк
+    std::unordered_map<ULONGLONG, size_t> byRec;              // запись папки -> номер строки
+};
+bool IndexTable(const std::string& text, TableIndex& ix);
+// Папка rec и её дети - то же, что ParseTable(text, rec), но из индекса.
+std::vector<DirRow> Slice(const TableIndex& ix, ULONGLONG rec);
+
+// Сверка «файлы прямо в папке»: MFT против списка папки. Число файлов должно совпасть. Байты: MFT видит настоящий
+// размер открытых растущих файлов (журналы в System32\LogFiles\WMI), а список папки - отстающий, поэтому MFT больше
+// списка - норма; меньше - только в пределах допуска (файл дописался уже после чтения таблицы): 1% и мегабайт.
+bool LooseMatch(int mftFiles, ULONGLONG mftBytes, int listFiles, ULONGLONG listBytes);
 
 }  // namespace tools::mft_detail

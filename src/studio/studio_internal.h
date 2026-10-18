@@ -334,6 +334,7 @@ struct ToolsJob {
     SRWLOCK lock = SRWLOCK_INIT;
     std::atomic<bool> done{false}, cancel{false};
     std::atomic<long> progress{0};
+    unsigned sizesGen = 0;                // растёт под lock при каждой правке sizes: кадр копирует только новое
     std::atomic<bool> mftReading{false};  // задача с правами читает таблицу MFT
     std::atomic<int> mftState{-1};        // tools::MftState, если подсчёт спрашивал задачу с правами
     bool ok = false, hasSizes = false, hasJunk = false, hasPhys = false;
@@ -552,6 +553,11 @@ private:
     std::vector<tools::HeavyApp> stateApps_;
     toolsui::State stateSnap_;  // последний снимок подсчёта: вектора копируются, только когда он поменялся
     unsigned stateSnapGen_ = ~0u;
+    std::vector<tools::DownloadJunk> stateDls_;  // разбор Загрузок: тоже копия по номеру изменения
+    unsigned stateDlsGen_ = ~0u;
+    std::vector<tools::FolderSize> toolsSizes_;  // «Что занимает место»: копия job->sizes по номеру изменения
+    std::weak_ptr<ToolsJob> toolsSizesJob_;      // чья копия: новая задача - копировать заново
+    unsigned toolsSizesGen_ = ~0u;
     std::vector<tools::Physical> statePhys_;
     struct PhysJob {
         SRWLOCK lock = SRWLOCK_INIT;

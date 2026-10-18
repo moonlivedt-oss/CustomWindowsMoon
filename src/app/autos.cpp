@@ -30,6 +30,7 @@ ULONGLONG g_started = 0, g_cleanCheck = 0, g_lowCheck = 0, g_repairCheck = 0, g_
 std::atomic<bool> g_dlScanning{false};
 bool g_game = false, g_dev = false, g_toolsWarned = false;
 std::vector<tools::DownloadJunk> g_downloads;
+unsigned g_downloadsGen = 0;    // растёт под g_lock при каждой правке g_downloads (DownloadsIfChanged)
 SRWLOCK g_lock = SRWLOCK_INIT;  // список Загрузок пишется из потоков
 std::wstring g_power, g_repair;
 
@@ -125,6 +126,7 @@ void ScanDl(bool offer) {
             CoUninitialize();
             AcquireSRWLockExclusive(&g_lock);
             g_downloads = found;
+            ++g_downloadsGen;
             ReleaseSRWLockExclusive(&g_lock);
             ULONGLONG total = 0;
             for (const tools::DownloadJunk& d : found) total += d.bytes;
@@ -278,6 +280,14 @@ std::vector<tools::DownloadJunk> Downloads() {
     return d;
 }
 
+bool DownloadsIfChanged(std::vector<tools::DownloadJunk>& out, unsigned& gen) {
+    AcquireSRWLockShared(&g_lock);
+    bool changed = gen != g_downloadsGen;
+    if (changed) out = g_downloads, gen = g_downloadsGen;
+    ReleaseSRWLockShared(&g_lock);
+    return changed;
+}
+
 void ScanDownloads() { ScanDl(false); }
 void RecycleDownloads(const std::vector<std::wstring>& paths) { Recycle(paths); }
 
@@ -413,6 +423,7 @@ void OnJob(WPARAM, LPARAM lp) {
             Note(L"Загрузки: в Корзину " + std::to_wstring(m->count) + L" файлов, " + tools::Bytes(m->bytes));
             AcquireSRWLockExclusive(&g_lock);
             g_downloads.clear();
+            ++g_downloadsGen;
             ReleaseSRWLockExclusive(&g_lock);
             g_card.Show(BoostCard::DONE, m->count ? L"Загрузки разобраны" : L"Не получилось",
                         m->count ? std::to_wstring(m->count) + L" файлов, " + tools::Bytes(m->bytes) +

@@ -26,6 +26,7 @@ void BoostCard::Create(HINSTANCE inst) { CreateWnd(inst, L"MoonRadialBoost", L"B
 void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs,
                      Glyph glyph) {
     mode_ = mode;
+    if (mode != WORKING) onStop = nullptr, progress = -1;
     title_ = title;
     sub_ = Pretty(sub);
     theme_ = theme;
@@ -70,6 +71,7 @@ Color BoostCard::Tone() const {
 }
 
 std::wstring BoostCard::Label(bool yes) const {
+    if (mode_ == WORKING) return L"Стоп";
     if (yes) return !yesLabel.empty() ? yesLabel : mode_ == OFFER ? L"Освободить" : L"Вернуть";
     return !noLabel.empty() ? noLabel : mode_ == OFFER ? L"Не сейчас" : L"Не нужно";
 }
@@ -81,13 +83,14 @@ float BoostCard::BodyHeight(Graphics& g) {
     float tw = (kW - kText - kPad) * K;
     subH_ = std::min(TextHeight(g, sub_, fS, tw), 4 * 17.5f * K);  // не больше четырёх строк
     float h = kPad + 21 + (subH_ > 0 ? 4 + subH_ / K : 0);
+    if (mode_ == WORKING && progress >= 0) h += 12;  // полоска хода
     if (Buttons()) {
         float bh = 32, top = std::max(h + 12, 52.0f);
         float bw = ButtonWidth(g, Label(true)) / K, nw = ButtonWidth(g, Label(false)) / K;
         RectF body(kM * K, kM * K, kW * K, 0);
         float right = body.GetRight() - kPad * K;
         no_ = RectF(right - nw * K, body.Y + top * K, nw * K, bh * K);
-        yes_ = RectF(no_.X - 8 * K - bw * K, no_.Y, bw * K, bh * K);
+        yes_ = StopButton() ? RectF() : RectF(no_.X - 8 * K - bw * K, no_.Y, bw * K, bh * K);
         h = top + bh;
     } else {
         yes_ = no_ = RectF();
@@ -115,15 +118,22 @@ void BoostCard::Paint(Graphics& g, const RectF& body) {
         wf.SetTrimming(StringTrimmingEllipsisWord);
         g.DrawString(sub_.c_str(), -1, &fS, RectF(x0, body.Y + (kPad + 25) * K, tw, subH_ + 1), &wf, &mB);
     }
+    if (mode_ == WORKING && progress >= 0) {  // полоска хода под текстом
+        float y = body.Y + (kPad + 25 + 6) * K + subH_;
+        RectF track(x0, y, tw, 4 * K);
+        SolidBrush back(MixColor(muted, ToColor(theme_.bg), 0.6)), fill(Tone());
+        g.FillRectangle(&back, track);
+        g.FillRectangle(&fill, RectF(track.X, track.Y, track.Width * std::min(1.0f, progress), track.Height));
+    }
     if (Buttons()) {
-        DrawButton(g, yes_, Label(true), true, H_YES);
+        if (!StopButton()) DrawButton(g, yes_, Label(true), true, H_YES);
         DrawButton(g, no_, Label(false), false, H_NO);
     }
 }
 
 int BoostCard::HitContent(const PointF& p) const {
     if (!Buttons()) return H_NONE;
-    if (yes_.Contains(p)) return H_YES;
+    if (!StopButton() && yes_.Contains(p)) return H_YES;
     if (no_.Contains(p)) return H_NO;
     return H_NONE;
 }
@@ -137,6 +147,13 @@ void BoostCard::Click(int id) {
             auto f = onYes;
             f();
         }
+        return;
+    }
+    if (id == H_NO && StopButton()) {  // «Стоп»: карточка остаётся, работа сама скажет, что остановилась
+        auto f = std::move(onStop);
+        onStop = nullptr;
+        f();
+        Invalidate();  // кнопка ушла - высота пересчитается
         return;
     }
     if (id == H_NO) {

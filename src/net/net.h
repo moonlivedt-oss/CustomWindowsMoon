@@ -2,6 +2,7 @@
 // Сеть: что сломалось и как починить. Наследник NetworkDoctor, но без Python и PowerShell -
 // всё на функциях Windows (WinHTTP, IP Helper, ICMP, COM брандмауэра), поэтому быстро и тихо.
 // Всё здесь блокирующее: зовётся из рабочих потоков, не из потока окон.
+#include <atomic>
 #include <functional>
 #include <string>
 #include <vector>
@@ -130,7 +131,8 @@ enum Job {
 };
 bool AdminReady();  // задача есть
 bool SetupAdmin();  // создать задачу (Windows спросит разрешение)
-bool RunAdmin(Job j, const Log& log, int timeoutMs = 90000);
+// cancel - «Стоп»: перестать ждать (задание доработает само, следующее дождётся его конца), false
+bool RunAdmin(Job j, const Log& log, int timeoutMs = 90000, const std::atomic<bool>* cancel = nullptr);
 int AdminMain();  // RadialMenu.exe --net-job: выполнить задание, уже с правами
 
 // «Починить умно»: шаги по порядку, пока интернет не вернётся. true - работает.

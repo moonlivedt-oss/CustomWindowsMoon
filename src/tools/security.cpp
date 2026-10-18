@@ -1027,7 +1027,8 @@ SecurityScan ScanSecurity() {
         s.name = it.name;
         s.where = it.where;
         s.kind = FIND_AUTO;
-        s.start = (int)i;
+        s.isStart = true;
+        s.startItem = it;
         s.path = Expand(StartExe(it));
         if (!s.path.empty() && s.path.find(L'\\') == std::wstring::npos) {  // «wscript.exe» - ищется как Windows
             wchar_t found[MAX_PATH];

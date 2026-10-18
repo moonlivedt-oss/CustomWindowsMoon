@@ -78,6 +78,22 @@ std::wstring DataDir() {
     return p;
 }
 
+// Ход консольной программы: последний процент в её выводе (RunCapture с percent).
+int LastPercent(const std::string& raw) {
+    std::string s;
+    s.reserve(raw.size());
+    for (char ch : raw)
+        if (ch) s += ch;
+    for (size_t at = s.rfind('%'); at != std::string::npos && at > 0; at = s.rfind('%', at - 1)) {
+        size_t b = at;
+        while (b > 0 && (isdigit((unsigned char)s[b - 1]) || s[b - 1] == '.' || s[b - 1] == ',')) --b;
+        if (b == at || !isdigit((unsigned char)s[b])) continue;
+        int v = atoi(s.c_str() + b);
+        if (v >= 0 && v <= 100) return v;
+    }
+    return -1;
+}
+
 std::wstring Bytes(ULONGLONG b) {
     wchar_t buf[32] = L"";
     StrFormatByteSizeW((LONGLONG)b, buf, 32);
@@ -112,6 +128,8 @@ NtQueryDir NtQuery() {
 }
 
 // Одна папка: файлы - в fn, вложенные папки (не ссылки) - в stack. false - открыть не удалось.
+// Файлы-ссылки (OneDrive «только в облаке», AppExecLink, symlink) идут в fn со своим EndOfFile - так же их считает
+// MFT; папки-ссылки не раскрываются (можно уйти по кругу или в чужой том).
 bool ListNt(const std::wstring& d, std::vector<std::wstring>& stack, const std::function<void(const WalkFile&)>& fn) {
     HANDLE h = CreateFileW(d.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
@@ -127,7 +145,8 @@ bool ListNt(const std::wstring& d, std::vector<std::wstring>& stack, const std::
             const WCHAR* n = e->FileName;
             size_t len = e->FileNameLength / sizeof(WCHAR);
             bool dots = (len == 1 && n[0] == L'.') || (len == 2 && n[0] == L'.' && n[1] == L'.');
-            if (!dots && !(e->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            bool link = e->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT;
+            if (!dots && !(link && (e->FileAttributes & FILE_ATTRIBUTE_DIRECTORY))) {
                 if (e->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                     stack.push_back(d + L"\\" + std::wstring(n, len));
                 } else {
@@ -157,7 +176,7 @@ void ListFind(const std::wstring& d, std::vector<std::wstring>& stack, const std
                                 FIND_FIRST_EX_LARGE_FETCH);
     if (h == INVALID_HANDLE_VALUE) return;
     do {
-        if (Dots(fd.cFileName) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        if (Dots(fd.cFileName) || LinkDir(fd.dwFileAttributes)) continue;
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             stack.push_back(d + L"\\" + fd.cFileName);
             continue;
@@ -178,7 +197,7 @@ void ListFind(const std::wstring& d, std::vector<std::wstring>& stack, const std
 
 }  // namespace
 
-// Обход без рекурсии, ссылки (reparse points) не раскрываем - иначе можно уйти по кругу.
+// Обход без рекурсии, папки-ссылки (reparse points) не раскрываем - иначе можно уйти по кругу.
 void WalkFiles(const std::wstring& root, const std::function<void(const WalkFile&)>& fn, std::atomic<bool>* cancel) {
     std::vector<std::wstring> stack{root};
     while (!stack.empty()) {
@@ -187,6 +206,17 @@ void WalkFiles(const std::wstring& root, const std::function<void(const WalkFile
         stack.pop_back();
         if (!NtQuery() || !ListNt(d, stack, fn)) ListFind(d, stack, fn);
     }
+}
+
+ULONGLONG FreeableBytes(const std::wstring& root, std::atomic<bool>* cancel) {
+    ULONGLONG sum = 0;
+    WalkFiles(
+        root,
+        [&](const WalkFile& f) {
+            if (!CloudOnly(f.attrs)) sum += f.size;
+        },
+        cancel);
+    return sum;
 }
 
 // Размер папки целиком.
@@ -299,7 +329,9 @@ namespace {
 // оставит до следующего раза (fresh). Иначе «можно освободить» обещает больше, чем освободится.
 void TempBytes(Junk& j) {
     ULONGLONG now = NowStamp();
-    WalkFiles(j.path, [&](const WalkFile& f) { (TempRemovable(f, now) ? j.bytes : j.fresh) += f.size; });
+    WalkFiles(j.path, [&](const WalkFile& f) {
+        if (!CloudOnly(f.attrs)) (TempRemovable(f, now) ? j.bytes : j.fresh) += f.size;
+    });
 }
 
 }  // namespace
@@ -410,7 +442,7 @@ std::vector<Junk> FindJunk(bool sizes) {
         if (_wcsicmp(j.path.c_str(), TempDir().c_str()) == 0)
             TempBytes(j);
         else
-            j.bytes = DirBytes(j.path, nullptr, nullptr, nullptr);
+            j.bytes = FreeableBytes(j.path);
         if (j.bytes || j.fresh) out.push_back(j);
     }
     std::sort(out.begin(), out.end(), [](const Junk& a, const Junk& b) { return a.bytes > b.bytes; });
@@ -426,7 +458,7 @@ std::wstring DdcDir() { return Env(L"%LOCALAPPDATA%\\UnrealEngine\\Common\\Deriv
 ULONGLONG OldBytes(const std::wstring& root, int days, int* files) {
     ULONGLONG cutoff = NowStamp() - (ULONGLONG)days * kDay, sum = 0;
     WalkFiles(root, [&](const WalkFile& f) {
-        if (std::max(f.access, f.write) >= cutoff) return;
+        if (std::max(f.access, f.write) >= cutoff || CloudOnly(f.attrs)) return;
         sum += f.size;
         if (files) ++*files;
     });
@@ -553,8 +585,8 @@ std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots,
     std::vector<ProjectJunk> sized;
     for (ProjectJunk& j : out) {
         if (cancel && *cancel) break;
-        j.bytes = DirBytes(j.path, nullptr, cancel, nullptr);
-        if (j.bytes < 1024 * 1024) continue;  // мелочь не показываем
+        j.bytes = FreeableBytes(j.path, cancel);  // проект в OneDrive: облачное место на диске не займёт
+        if (j.bytes < 1024 * 1024) continue;      // мелочь не показываем
         auto it = idle.find(j.project);
         j.idleDays = it != idle.end() ? it->second : (idle[j.project] = IdleDays(j.project));
         sized.push_back(j);

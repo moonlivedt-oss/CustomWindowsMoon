@@ -242,13 +242,20 @@ bool RestartToRecovery() {
 
 // ---------------- в процессе с правами ----------------
 
+// Строка хода с процентом: «@pct 45 DISM: 45%». Обычный процесс показывает её в карточке полоской (toolsui OnJob).
+std::function<void(int)> PercentLog(const Log& log, const std::wstring& what) {
+    return
+        [&log, what](int p) { log(L"@pct " + std::to_wstring(p) + L" " + what + L": " + std::to_wstring(p) + L"%"); };
+}
+
 bool RepairWindowsAdminMain(const Log& log) {
     std::wstring out;
     log(L"Шаг 1 из 2: DISM сверяет хранилище компонентов с Windows Update (до 20-30 минут, нужен интернет)...");
-    int a = RunCapture(L"dism.exe /Online /Cleanup-Image /RestoreHealth", out, 60 * 60 * 1000);
+    int a = RunCapture(L"dism.exe /Online /Cleanup-Image /RestoreHealth", out, 60 * 60 * 1000,
+                       PercentLog(log, L"DISM сверяет хранилище"));
     log(L"DISM: " + (a == 0 ? std::wstring(L"готово") : L"код " + std::to_wstring(a)) + L". " + Tail(out, 2));
     log(L"Шаг 2 из 2: SFC проверяет системные файлы (10-15 минут)...");
-    int b = RunCapture(L"sfc.exe /scannow", out, 60 * 60 * 1000);
+    int b = RunCapture(L"sfc.exe /scannow", out, 60 * 60 * 1000, PercentLog(log, L"SFC проверяет файлы"));
     log(L"SFC: " + Tail(out, 3));
     log(L"Подробный журнал SFC: " + WinDir() + L"\\Logs\\CBS\\CBS.log");
     return a == 0 && b == 0;
@@ -297,7 +304,8 @@ bool SystemCleanAdminMain(const Log& log) {
     // DISM) и папки кэша Delivery Optimization. Не удалось замерить - запасной вариант: свободное место.
     auto storeSize = [&] {
         std::wstring o;
-        RunCapture(L"dism.exe /Online /Cleanup-Image /AnalyzeComponentStore", o, 15 * 60 * 1000);
+        RunCapture(L"dism.exe /Online /Cleanup-Image /AnalyzeComponentStore", o, 15 * 60 * 1000,
+                   PercentLog(log, L"DISM замеряет хранилище"));
         return ParseStoreSize(o);
     };
     // кэш DO: папка службы (Windows 10 1709+), раньше - в SoftwareDistribution
@@ -325,7 +333,8 @@ bool SystemCleanAdminMain(const Log& log) {
                        out, 10 * 60 * 1000);
     log(a == 0 ? L"Кэш Delivery Optimization очищен." : L"Delivery Optimization: " + Tail(out, 2));
     log(L"Шаг 3 из 4: DISM убирает вытесненные версии компонентов Windows (5-20 минут)...");
-    int b = RunCapture(L"dism.exe /Online /Cleanup-Image /StartComponentCleanup", out, 60 * 60 * 1000);
+    int b = RunCapture(L"dism.exe /Online /Cleanup-Image /StartComponentCleanup", out, 60 * 60 * 1000,
+                       PercentLog(log, L"DISM убирает старые компоненты"));
     log(L"DISM: " + (b == 0 ? std::wstring(L"готово") : L"код " + std::to_wstring(b)) + L". " + Tail(out, 2));
     ULONGLONG after = freeNow();
     ULONGLONG byDisk = after > before ? after - before : 0, freed = byDisk;

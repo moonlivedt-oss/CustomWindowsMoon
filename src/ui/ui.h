@@ -55,8 +55,9 @@ public:
     double K() const { return k_; }
     const UiColors& C() const { return c_; }
     Gdiplus::Graphics& G() { return *g_; }
-    bool Scaled() const;  // в кадре масштаб или поворот: картинки - со сглаживанием, не один к одному
-    bool interactive = true;  // false - под открытым окном поверх (тур, библиотека)
+    bool Scaled() const;       // в кадре масштаб или поворот: картинки - со сглаживанием, не один к одному
+    bool interactive = true;   // false - под открытым окном поверх (тур, библиотека)
+    bool paintFields = false;  // снимок в картинку: окна ввода (EDIT) в него не попадают - текст поля рисуем сами
 
     // попадания
     bool Hover(int id, const RectF& r);

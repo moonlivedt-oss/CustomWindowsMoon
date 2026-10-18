@@ -51,6 +51,11 @@ bool Is(const std::wstring& lowerName, std::initializer_list<const wchar_t*> nam
 }  // namespace
 
 int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs) {
+    return RunCapture(cmdline, out, timeoutMs, nullptr);
+}
+
+int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs,
+               const std::function<void(int)>& percent) {
     out.clear();
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE rd = nullptr, wr = nullptr;
@@ -82,13 +87,19 @@ int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs) 
     std::string buf;
     char chunk[4096];
     DWORD got = 0;
-    ULONGLONG until = GetTickCount64() + timeoutMs;
+    ULONGLONG until = GetTickCount64() + timeoutMs, saidAt = 0;
+    int said = -1;
     for (;;) {
         DWORD avail = 0;
         if (!PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr)) break;  // процесс закрыл свой конец
         if (avail) {
             if (!ReadFile(rd, chunk, std::min<DWORD>(avail, sizeof(chunk)), &got, nullptr) || !got) break;
             buf.append(chunk, got);
+            ULONGLONG now = GetTickCount64();
+            if (percent && now - saidAt >= 2000) {  // ход - не чаще раза в 2 с и только новое число
+                int p = LastPercent(buf.substr(buf.size() > 400 ? buf.size() - 400 : 0));
+                if (p >= 0 && p != said) said = p, saidAt = now, percent(p);
+            }
             continue;
         }
         if (WaitForSingleObject(pi.hProcess, 50) == WAIT_OBJECT_0) {

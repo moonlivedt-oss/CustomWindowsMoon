@@ -92,11 +92,13 @@ enum MftState { MFT_READY, MFT_NONE, MFT_OLD, MFT_BLOCKED };  // есть, не 
 // reading - true, пока задача читает таблицу (для подписи «Читаю таблицу MFT...»); state - что с задачей с правами,
 // если её пришлось спросить (иначе не трогается).
 bool ScanSizesMft(const std::wstring& dir, std::vector<FolderSize>& out, std::wstring& note,
-                  std::atomic<bool>* reading = nullptr, MftState* state = nullptr);
+                  std::atomic<bool>* reading = nullptr, MftState* state = nullptr,
+                  const std::atomic<bool>* cancel = nullptr);  // cancel - «Стоп»: не ждать задачу
 // Только из свежей таблицы в кэше, без задачи (для карточек): false - таблицы нет или устарела.
 bool MftCached(const std::wstring& dir, std::vector<FolderSize>& out,
                bool verify = true);  // verify=false - для разбора
 MftState MftReady();                 // спрашивает планировщик - не из потока окна
+void MftForget();                    // выбросить разобранную таблицу из памяти (студия закрыта)
 // В процессе с правами: таблица тома, где лежит dir, - в файл кэша; ответ - строка «@mftok» или «@mftfail»
 std::wstring MftAdminMain(const std::wstring& dir);
 
@@ -122,8 +124,17 @@ struct Junk {
 std::vector<Junk> FindJunk(bool sizes = true);  // sizes=false - только список, быстро (для кольца)
 ULONGLONG DirBytes(const std::wstring& root, int* files = nullptr, std::atomic<bool>* cancel = nullptr,
                    std::atomic<long>* progress = nullptr);
-// Обход дерева без рекурсии и без захода в ссылки: NtQueryDirectoryFile с большим буфером (запасной путь -
-// FindFirstFileEx). fn получает каждый файл; папки обходятся сами.
+// Сколько освободит удаление папки: как DirBytes, но без файлов «только в облаке» (для «можно освободить»).
+ULONGLONG FreeableBytes(const std::wstring& root, std::atomic<bool>* cancel = nullptr);
+// Обход дерева без рекурсии и без захода в папки-ссылки: NtQueryDirectoryFile с большим буфером (запасной путь -
+// FindFirstFileEx). fn получает каждый файл, и файлы-ссылки тоже (их EndOfFile, как в MFT); папки обходятся сами.
+inline bool LinkDir(DWORD attrs) {  // папка-ссылка: не раскрываем ни обходом, ни MFT
+    return (attrs & FILE_ATTRIBUTE_REPARSE_POINT) && (attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+// Файл «только в облаке» (OneDrive и др.): размер виден, а места на диске нет - удаление ничего не освободит.
+inline bool CloudOnly(DWORD attrs) {
+    return attrs & (FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS);
+}
 struct WalkFile {
     DWORD attrs = 0;
     ULONGLONG size = 0, write = 0, create = 0, access = 0;  // время - FILETIME одним числом
@@ -235,6 +246,16 @@ struct StartItem {
 };
 std::vector<StartItem> StartupItems();
 bool SetStartup(const StartItem& it, bool on, const Log& log);
+// Та же запись: откуда, ключ и команда. Перед выключением показанной записи сверяем её со свежим списком -
+// пока карточка висела, запись могли поменять или убрать.
+inline bool SameStart(const StartItem& a, const StartItem& b) {
+    return a.kind == b.kind && a.key == b.key && a.command == b.command;
+}
+inline const StartItem* FindStart(const std::vector<StartItem>& items, const StartItem& it) {
+    for (const StartItem& x : items)
+        if (SameStart(x, it)) return &x;
+    return nullptr;
+}
 void StartupWeight(std::vector<StartItem>& items);  // заполнить running и memory
                                                     // по запущенным процессам
 
@@ -323,10 +344,11 @@ struct Suspect {
     std::wstring parent;  // кто запустил процесс
     std::wstring signer;  // издатель из подписи
     SignState sign = SIGN_NOFILE;
-    bool net = false;  // есть соединения в сеть
-    int start = -1;    // номер в SecurityScan::starts (для автозапуска)
-    int score = 0;     // сумма признаков
-    std::wstring why;  // признаки через «; »
+    bool net = false;      // есть соединения в сеть
+    bool isStart = false;  // запись автозапуска: сама запись в startItem
+    StartItem startItem;   // копия, а не номер: список автозагрузки мог обновиться, пока находка показана
+    int score = 0;         // сумма признаков
+    std::wstring why;      // признаки через «; »
 };
 struct SecurityScan {
     std::vector<Suspect> procs, autos, hijacks;  // по убыванию счёта
@@ -492,6 +514,12 @@ ULONGLONG PrivateBytes(HANDLE h);   // личная память процесс�
 // запустить консольную программу без окна и забрать вывод (UTF-8 или кодировка консоли); код выхода, -1 - не
 // запустилась
 int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs);
+// То же, но пока программа работает, не чаще раза в 2 с зовёт percent(N) - последний «NN.N%» в выводе (полоска DISM,
+// «Проверка 45% завершена» у SFC), только когда число поменялось.
+int RunCapture(const std::wstring& cmdline, std::wstring& out, DWORD timeoutMs,
+               const std::function<void(int)>& percent);
+// Последний процент в куске вывода (байты; нули UTF-16 пропускаются): «[=====  25.3%  ]» -> 25; нет - -1.
+int LastPercent(const std::string& raw);
 
 class ProcHistory {
 public:
