@@ -565,6 +565,8 @@ private:
     // «Состояние»: живые данные (не чаще раза в 3 с), выбор строк, к какой карточке прокрутить
     ULONGLONG stateAt_ = 0, statePhysAt_ = 0;
     std::vector<tools::Volume> stateVols_;
+    std::vector<tools::Forecast> stateFc_;  // прогноз места (И10), раз в минуту
+    ULONGLONG stateFcAt_ = 0;
     tools::MemoryState stateMem_;
     std::vector<tools::HeavyApp> stateApps_;
     toolsui::State stateSnap_;  // последний снимок подсчёта: вектора копируются, только когда он поменялся

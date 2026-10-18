@@ -597,6 +597,35 @@ std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots,
 
 // ---------------- разбор Загрузок ----------------
 
+// Прогноз места (И10): прямая по замерам последних 21 дня; здесь, а не в health.cpp, - чтобы проверяли тесты.
+int DaysLeft(const std::vector<FreePoint>& ptsIn, double* perDay) {
+    if (perDay) *perDay = 0;
+    if (ptsIn.empty()) return -1;
+    int last = ptsIn.back().day;
+    for (const FreePoint& p : ptsIn) last = std::max(last, p.day);
+    std::vector<FreePoint> pts;
+    for (const FreePoint& p : ptsIn)
+        if (p.day > last - 21) pts.push_back(p);
+    if (pts.size() < 3) return -1;
+    double n = (double)pts.size(), sx = 0, sy = 0, sxx = 0, sxy = 0;
+    int first = last;
+    for (const FreePoint& p : pts) first = std::min(first, p.day);
+    if (last - first < 2) return -1;
+    for (const FreePoint& p : pts) {
+        double x = p.day - first, y = (double)p.free;
+        sx += x, sy += y, sxx += x * x, sxy += x * y;
+    }
+    double den = n * sxx - sx * sx;
+    if (den <= 0) return -1;
+    double slope = (n * sxy - sx * sy) / den;  // байт в сутки, убывает - отрицательный
+    if (perDay) *perDay = -slope;
+    if (-slope < 200.0 * 1024 * 1024) return -1;
+    ULONGLONG now = 0;
+    for (const FreePoint& p : pts)
+        if (p.day == last) now = p.free;
+    return (int)std::min(3650.0, now / -slope);
+}
+
 std::wstring BigFileKeep(const std::wstring& path) {
     std::wstring l = Lower(path);
     if (l.size() < 4 || l[1] != L':' || l[2] != L'\\') return L"не полный путь";

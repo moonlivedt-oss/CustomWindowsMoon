@@ -997,6 +997,11 @@ bool Run(int& exitCode) {
     } else if (Has(args, L"--ring-bench")) {
         size_t i = std::find(args.begin(), args.end(), L"--ring-bench") - args.begin();
         exitCode = RingBench(i + 1 < args.size() ? std::max(500, _wtoi(args[i + 1].c_str())) : 4000);
+    } else if (Has(args, L"--forecast")) {  // прогноз места по free.tsv -> forecast_out.txt
+        std::wstring o;
+        for (const tools::Forecast& f : tools::SpaceForecast())
+            o += tools::ForecastText(f) + L", свободно " + tools::Bytes(f.free) + L"\r\n";
+        WriteOut(L"forecast_out.txt", o.empty() ? L"замеров нет (free.tsv пишется раз в 3 часа фоновым подсчётом)" : o);
     } else if (Value(args, L"--find-dir", v)) {  // --find-dir <имя>: поиск папок по таблицам MFT -> find_out.txt
         ULONGLONG t0 = GetTickCount64(), age = 0;
         std::vector<tools::FoundDir> found;

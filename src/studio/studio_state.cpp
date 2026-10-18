@@ -104,6 +104,10 @@ void Studio::StatePage(const RectF& r) {
     if (!stateAt_ || now - stateAt_ > 3000) {
         stateAt_ = now;
         stateVols_ = tools::VolumesCached(3000);
+        if (!stateFcAt_ || GetTickCount64() - stateFcAt_ > 60000) {
+            stateFcAt_ = GetTickCount64();
+            stateFc_ = tools::SpaceForecast();
+        }
         stateMem_ = tools::Memory();
         stateApps_ = tools::HeavyApps(4);
         homeAuto_ = AutostartOn();
@@ -159,9 +163,16 @@ void Studio::StatePage(const RectF& r) {
         for (const tools::Volume& v : stateVols_) {
             if (v.type != DRIVE_FIXED || !v.total) continue;
             float used = 1 - (float)v.free / v.total;
-            gauges.push_back({std::to_wstring((int)std::lround(used * 100)) + L"%", L"Диск " + v.root.substr(0, 2),
-                              L"свободно " + tools::Bytes(v.free) + L"\nиз " + tools::Bytes(v.total), used,
-                              tools::DiskWarn(v), 1, v.root});
+            std::wstring sub = L"свободно " + tools::Bytes(v.free) + L"\nиз " + tools::Bytes(v.total);
+            bool soon = false;
+            for (const tools::Forecast& f : stateFc_)
+                if (!_wcsicmp(f.root.c_str(), v.root.c_str()) && f.days >= 0 && f.days <= 180) {
+                    sub = L"свободно " + tools::Bytes(v.free) + L"\nхватит на ~" +
+                          Plural(std::max(1, f.days), L"день", L"дня", L"дней");
+                    soon = f.days <= 30;
+                }
+            gauges.push_back({std::to_wstring((int)std::lround(used * 100)) + L"%", L"Диск " + v.root.substr(0, 2), sub,
+                              used, tools::DiskWarn(v) || soon, 1, v.root});
         }
         if (stateMem_.total)
             gauges.push_back({std::to_wstring(stateMem_.loadPercent) + L"%", L"Память",
