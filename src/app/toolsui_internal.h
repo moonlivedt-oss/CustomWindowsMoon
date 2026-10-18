@@ -12,6 +12,7 @@
 #include <shlobj.h>
 #include "core/bg.h"
 #include "core/config.h"
+#include "core/elevate.h"
 #include "core/files.h"
 #include "core/text.h"
 #include "core/themes.h"

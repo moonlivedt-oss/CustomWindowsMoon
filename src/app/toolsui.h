@@ -94,6 +94,13 @@ void IgnoreFind(const tools::Suspect& s);        // «Это моё»: боль�
 void ClearIgnored();                             // показывать снова всё
 const wchar_t* FindKindName(tools::FindKind k);  // «процесс», «сертификат»...
 const wchar_t* FindKindIcon(tools::FindKind k);  // файл значка в icons: tools-certs.png...
+// Системные гиганты (И11, toolsui_giants.cpp): hiberfil, подкачка, Windows.old, точки восстановления... Размеры
+// считаются в фоне (пусто, пока не посчитано); GiantsMeasure - точные размеры задачей с правами; GiantAct - действие
+// с вопросом (undo - обратное: вернуть гибернацию).
+std::vector<tools::Giant> Giants();
+bool GiantsCounting();
+void GiantsMeasure();
+void GiantAct(const std::wstring& key, bool undo = false);
 // Для проверки (WM_APP+58): карточка со сценой на выдуманных данных, ничего не удаляет.
 // 0 - очистка, 1 - защита с находками, 2 - защита, всё чисто
 void Demo(int what);

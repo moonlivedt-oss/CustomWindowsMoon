@@ -954,6 +954,22 @@ std::vector<Item> RingItems(std::wstring& status) {
     groups.push_back(SecurityItem());
     groups.push_back(RecoveryItem());
     groups.push_back(SystemItem(scan));
+    // системные гиганты (И11): что занимает Windows сама и что с этим честно можно сделать
+    std::vector<tools::Giant> giants = Giants();
+    if (!giants.empty()) {
+        ULONGLONG sum = 0;
+        for (const tools::Giant& g : giants) sum += g.bytes;
+        Item gi = Act(L"Гиганты", Have(L"tools-giants.png", L"tools-wmi.png"), L"",
+                      L"Гибернация, подкачка, прошлая Windows, точки восстановления: " + tools::Bytes(sum) +
+                          L". Щелчок - открыть");
+        for (const tools::Giant& g : giants)
+            gi.children.push_back(Act(g.name + (g.bytes ? L" " + tools::Bytes(g.bytes) : L""),
+                                      Have(L"tools-giants.png", L"tools-wmi.png"), L"giant:" + g.key, g.why));
+        gi.children.push_back(
+            Act(L"Точно, с правами", Have(L"tools-giants.png", L"tools-wmi.png"), L"giants-measure",
+                L"Размер точек восстановления и закрытых папок прошлой Windows видно только с правами"));
+        groups.back().children.push_back(std::move(gi));
+    }
     ring = std::move(groups);
     if (sized && quickTotal + scan.ddcOld + bin > 0)
         status += L"   |   можно освободить " + tools::Bytes(quickTotal + scan.ddcOld + bin);
