@@ -23,8 +23,10 @@ endif()
 
 # exe кладём в корень проекта рядом с radial.cfg и icons/;
 # для проверочной сборки без остановки работающей копии: -DRADIAL_OUT_DIR=<папка>
+# Линкер пишет в <сборка>/link, в RADIAL_OUT_DIR exe попадает только проверенным и целым (cmake/deploy.cmake)
 set(RADIAL_OUT_DIR ${CMAKE_SOURCE_DIR} CACHE PATH "куда класть RadialMenu.exe")
-set_target_properties(RadialMenu PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_OUT_DIR})
+set(RADIAL_LINK_DIR ${CMAKE_BINARY_DIR}/link)
+set_target_properties(RadialMenu PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_LINK_DIR})
 
 # RadialTools.exe - удаление и завершение процессов отдельным процессом по кнопке:
 # постоянно работающий RadialMenu.exe сам ничего не удаляет и чужие процессы не трогает
@@ -35,12 +37,27 @@ target_link_libraries(RadialTools PRIVATE shlwapi shell32 ole32 user32 bcrypt)
 if(MINGW)
   target_link_options(RadialTools PRIVATE -municode -static -s)
 endif()
-set_target_properties(RadialTools PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_OUT_DIR})
+set_target_properties(RadialTools PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_LINK_DIR})
 
-# подпись своим сертификатом, если он настроен (cmake/sign.cmake), потом отметка целостности: SHA-256 свежего exe -
+# тесты без окон (tests/): правило TEMP, разбор хода чистки, обход папок, разбор MFT, журнал, фоновые задачи; запуск - ctest
+enable_testing()
+add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp src/tools/common.cpp src/tools/livesize.cpp
+  src/tools/mft_parse.cpp src/tools/journal.cpp src/core/text.cpp src/core/bg.cpp)
+target_include_directories(radial_tests PRIVATE src)
+target_compile_definitions(radial_tests PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
+target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 uuid bcrypt)
+if(MINGW)
+  target_link_options(radial_tests PRIVATE -municode -static)
+endif()
+add_test(NAME radial_tests COMMAND radial_tests)
+
+# подпись своим сертификатом, если он настроен (cmake/sign.cmake), потом выкладка с проверкой (не пустой, начинается
+# с MZ) и заменой одним переименованием (cmake/deploy.cmake), потом отметка целостности: SHA-256 выложенного exe -
 # «Защита» заметит, если файл потом изменится (cmake/integrity.cmake)
 foreach(t RadialMenu RadialTools)
+  set(dst ${RADIAL_OUT_DIR}/${t}.exe)
   add_custom_command(TARGET ${t} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:${t}> -P ${CMAKE_SOURCE_DIR}/cmake/sign.cmake
-    COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:${t}> -P ${CMAKE_SOURCE_DIR}/cmake/integrity.cmake)
+    COMMAND ${CMAKE_COMMAND} -DSRC=$<TARGET_FILE:${t}> -DDST=${dst} -P ${CMAKE_SOURCE_DIR}/cmake/deploy.cmake
+    COMMAND ${CMAKE_COMMAND} -DEXE=${dst} -P ${CMAKE_SOURCE_DIR}/cmake/integrity.cmake)
 endforeach()

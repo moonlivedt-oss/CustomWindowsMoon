@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -17,7 +18,7 @@ namespace lockscreen {
 // Сборка картинки идёт в своём потоке; студия смотрит на done и забирает сообщение.
 struct Job {
     SRWLOCK lock = SRWLOCK_INIT;
-    volatile bool done = false;
+    std::atomic<bool> done{false};
     bool ok = false;
     std::wstring message;
     HWND notify = nullptr;  // кому InvalidateRect по готовности

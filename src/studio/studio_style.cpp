@@ -1,9 +1,11 @@
 // Раздел «Красота»: скорость анимаций, рамки и заголовки окон, игровой режим, экран блокировки.
+#include <atomic>
 #include <windows.h>
 #include <shellapi.h>
 
 #include <algorithm>
 
+#include "core/bg.h"
 #include "core/themes.h"
 #include "desk/boost.h"
 #include "desk/gameboost.h"
@@ -226,7 +228,7 @@ void Studio::StylePage(const RectF& r) {
         toggle(row(b, 0, L"Предлагать освободить память"), ID_BOOST_OFFER, cfg.boostOffer);
         toggle(row(b, 1, L"После игры вернуть закрытое"), ID_BOOST_RESTORE, cfg.boostRestore);
         toggle(row(b, 2, L"После игры почистить ещё раз"), ID_BOOST_AFTER, cfg.boostAfter);
-        if (!boostTask_) boostTask_ = std::make_shared<volatile int>(boost::PurgeTaskExists() ? 1 : 0);
+        if (!boostTask_) boostTask_ = std::make_shared<std::atomic<int>>(boost::PurgeTaskExists() ? 1 : 0);
         int task = *boostTask_;
         RectF tr = row(b, 3, task == 1 ? L"Очистка кэша: без запросов" : L"Очистка кэша без запросов");
         if (task == 2) {
@@ -235,28 +237,15 @@ void Studio::StylePage(const RectF& r) {
             ui.Invalidate();
         } else if (ui.Button(ID_BOOST_TASK, RectF(tr.X + tr.Width - ui.S(150), tr.Y + ui.S(4), ui.S(150), ui.S(36)),
                              task == 1 ? L"Пересоздать" : L"Настроить", task == 1 ? Kind::Ghost : Kind::Primary)) {
-            // поток держит своё состояние: студию могут закрыть, пока Windows ждёт подтверждения UAC
-            struct Ctx {
-                std::shared_ptr<volatile int> state;
-                HWND wnd;
-            };
+            // задача держит своё состояние: студию могут закрыть, пока Windows ждёт подтверждения UAC
             *boostTask_ = 2;
-            auto* ctx = new Ctx{boostTask_, wnd};
-            HANDLE th = CreateThread(
-                nullptr, 0,
-                [](void* p) -> DWORD {
-                    std::unique_ptr<Ctx> c((Ctx*)p);
-                    *c->state = boost::SetupPurgeTask() ? 1 : 0;
-                    if (IsWindow(c->wnd)) InvalidateRect(c->wnd, nullptr, FALSE);
-                    return 0;
-                },
-                ctx, 0, nullptr);
-            if (th) {
-                CloseHandle(th);
-            } else {
-                delete ctx;
+            std::shared_ptr<std::atomic<int>> state = boostTask_;
+            HWND w = wnd;
+            if (!bg::Run([state, w] {
+                    *state = boost::SetupPurgeTask() ? 1 : 0;
+                    if (IsWindow(w)) InvalidateRect(w, nullptr, FALSE);
+                }))
                 *boostTask_ = 0;
-            }
         }
         RectF nr = row(b, 4, L"");
         if (ui.Button(ID_BOOST_NOW, RectF(nr.X + nr.Width - ui.S(150), nr.Y + ui.S(4), ui.S(150), ui.S(36)),

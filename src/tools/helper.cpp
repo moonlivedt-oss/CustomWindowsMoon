@@ -110,9 +110,36 @@ ULONGLONG Freed(const std::map<std::wstring, std::wstring>& r) {
 
 }  // namespace
 
-ULONGLONG CleanJunk(const Junk& j, const Log& log) {
+ULONGLONG CleanJunk(const Junk& j, const Log& log) { return CleanJunks({j}, nullptr, nullptr, log); }
+
+ULONGLONG CleanJunks(const std::vector<Junk>& list, const std::function<void(size_t)>& started,
+                     const std::function<void(size_t, ULONGLONG)>& done, const Log& log,
+                     std::vector<std::wstring>* busy) {
+    if (list.empty()) return 0;
+    std::wstring args = L"clean";
+    for (const Junk& j : list) args += L" " + Quote(j.name);
+    std::vector<bool> reported(list.size(), false);
     std::map<std::wstring, std::wstring> r;
-    RunTools(L"clean " + Quote(j.name), log, &r);
+    RunTools(
+        args,
+        [&](const std::wstring& s) {
+            CleanLine c = ParseCleanLine(s);
+            if (c.kind == CleanLine::LOG) {
+                if (log) log(s);
+            } else if (c.kind == CleanLine::BUSY) {
+                if (busy) busy->push_back(c.text);
+            } else if (c.index < list.size()) {
+                if (c.kind == CleanLine::START && started) started(c.index);
+                if (c.kind == CleanLine::FREED) {
+                    reported[c.index] = true;
+                    if (done) done(c.index, c.bytes);
+                }
+            }
+        },
+        &r);
+    // RadialTools упал или его не было - сцена не должна ждать вечно
+    for (size_t i = 0; i < list.size(); ++i)
+        if (!reported[i] && done) done(i, 0);
     return Freed(r);
 }
 

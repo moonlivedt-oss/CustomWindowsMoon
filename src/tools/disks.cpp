@@ -5,6 +5,7 @@
 
 #include <algorithm>
 
+#include "core/bg.h"
 #include "core/perf.h"
 #include "core/text.h"
 #include "net/net_internal.h"
@@ -50,7 +51,7 @@ namespace {
 SRWLOCK g_volLock = SRWLOCK_INIT;
 std::vector<Volume> g_vols;
 ULONGLONG g_volAt = 0;
-volatile LONG g_volBusy = 0;
+std::atomic<bool> g_volBusy{false};
 }  // namespace
 
 // Спящий жёсткий диск или флешка отвечают на GetVolumeInformation секундами: основной поток берёт последний
@@ -69,23 +70,16 @@ std::vector<Volume> VolumesCached(DWORD maxAgeMs) {
         ReleaseSRWLockExclusive(&g_volLock);
         return v;
     }
-    if (now - at > maxAgeMs && InterlockedCompareExchange(&g_volBusy, 1, 0) == 0) {
-        HANDLE th = CreateThread(
-            nullptr, 0,
-            [](void*) -> DWORD {
-                std::vector<Volume> fresh = Volumes();
-                AcquireSRWLockExclusive(&g_volLock);
-                g_vols = std::move(fresh);
-                g_volAt = GetTickCount64();
-                ReleaseSRWLockExclusive(&g_volLock);
-                InterlockedExchange(&g_volBusy, 0);
-                return 0;
-            },
-            nullptr, 0, nullptr);
-        if (th)
-            CloseHandle(th);
-        else
-            InterlockedExchange(&g_volBusy, 0);
+    if (now - at > maxAgeMs && !g_volBusy.exchange(true)) {
+        bool started = bg::Run([] {
+            std::vector<Volume> fresh = Volumes();
+            AcquireSRWLockExclusive(&g_volLock);
+            g_vols = std::move(fresh);
+            g_volAt = GetTickCount64();
+            ReleaseSRWLockExclusive(&g_volLock);
+            g_volBusy = false;
+        });
+        if (!started) g_volBusy = false;
     }
     return v;
 }
@@ -174,7 +168,7 @@ bool DiskHealth(std::vector<Physical>& disks, const Log& log) {
     return ok && any;
 }
 
-std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* cancel, volatile long* progress,
+std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, std::atomic<bool>* cancel, std::atomic<long>* progress,
                                   const std::function<void(const std::vector<FolderSize>&)>& partial) {
     PERF_SCOPE("tools.ScanSizes");
     std::wstring dir = dirIn;
@@ -209,7 +203,7 @@ std::vector<FolderSize> ScanSizes(const std::wstring& dirIn, volatile bool* canc
         } else {
             loose.bytes += ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
             ++loose.files;
-            if (progress) InterlockedIncrement(progress);
+            if (progress) progress->fetch_add(1, std::memory_order_relaxed);
         }
     } while (FindNextFileW(h, &fd));
     FindClose(h);

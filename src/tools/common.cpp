@@ -84,31 +84,122 @@ std::wstring Bytes(ULONGLONG b) {
     return buf;
 }
 
-// Размер папки целиком: обход без рекурсии, ссылки (reparse points) не раскрываем - иначе можно уйти по кругу.
-ULONGLONG DirBytes(const std::wstring& root, int* files, volatile bool* cancel, volatile long* progress) {
-    ULONGLONG sum = 0;
+namespace {
+
+// NtQueryDirectoryFile отдаёт за один вызов столько записей, сколько влезет в буфер, сразу с размерами и временем;
+// FindFirstFileEx поверх него делает то же, но с лишним копированием в WIN32_FIND_DATA. Своих имён у структур -
+// заголовки MinGW объявляют их не везде.
+struct IoStatus {
+    union {
+        LONG Status;
+        PVOID Pointer;
+    };
+    ULONG_PTR Information;
+};
+struct DirInfo {  // FILE_DIRECTORY_INFORMATION
+    ULONG NextEntryOffset, FileIndex;
+    LARGE_INTEGER CreationTime, LastAccessTime, LastWriteTime, ChangeTime, EndOfFile, AllocationSize;
+    ULONG FileAttributes, FileNameLength;
+    WCHAR FileName[1];
+};
+using NtQueryDir = LONG(NTAPI*)(HANDLE, HANDLE, PVOID, PVOID, IoStatus*, PVOID, ULONG, int, BOOLEAN, PVOID, BOOLEAN);
+constexpr int kFileDirectoryInformation = 1;
+constexpr LONG kNoMoreFiles = (LONG)0x80000006;
+
+NtQueryDir NtQuery() {
+    static NtQueryDir f = (NtQueryDir)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryDirectoryFile");
+    return f;
+}
+
+// Одна папка: файлы - в fn, вложенные папки (не ссылки) - в stack. false - открыть не удалось.
+bool ListNt(const std::wstring& d, std::vector<std::wstring>& stack, const std::function<void(const WalkFile&)>& fn) {
+    HANDLE h = CreateFileW(d.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    alignas(8) static thread_local BYTE buf[64 * 1024];
+    IoStatus io{};
+    for (BOOLEAN first = TRUE;; first = FALSE) {
+        LONG st = NtQuery()(h, nullptr, nullptr, nullptr, &io, buf, sizeof(buf), kFileDirectoryInformation, FALSE,
+                            nullptr, first);
+        if (st < 0) break;  // kNoMoreFiles или ошибка - дальше нечего
+        for (BYTE* p = buf;;) {
+            const DirInfo* e = (const DirInfo*)p;
+            const WCHAR* n = e->FileName;
+            size_t len = e->FileNameLength / sizeof(WCHAR);
+            bool dots = (len == 1 && n[0] == L'.') || (len == 2 && n[0] == L'.' && n[1] == L'.');
+            if (!dots && !(e->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+                if (e->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    stack.push_back(d + L"\\" + std::wstring(n, len));
+                } else {
+                    WalkFile f;
+                    f.dir = &d;
+                    f.name = n;
+                    f.nameLen = len;
+                    f.attrs = e->FileAttributes;
+                    f.size = (ULONGLONG)e->EndOfFile.QuadPart;
+                    f.write = (ULONGLONG)e->LastWriteTime.QuadPart;
+                    f.create = (ULONGLONG)e->CreationTime.QuadPart;
+                    f.access = (ULONGLONG)e->LastAccessTime.QuadPart;
+                    fn(f);
+                }
+            }
+            if (!e->NextEntryOffset) break;
+            p += e->NextEntryOffset;
+        }
+    }
+    CloseHandle(h);
+    return true;
+}
+
+void ListFind(const std::wstring& d, std::vector<std::wstring>& stack, const std::function<void(const WalkFile&)>& fn) {
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileExW((d + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr,
+                                FIND_FIRST_EX_LARGE_FETCH);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (Dots(fd.cFileName) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            stack.push_back(d + L"\\" + fd.cFileName);
+            continue;
+        }
+        WalkFile f;
+        f.dir = &d;
+        f.name = fd.cFileName;
+        f.nameLen = wcslen(fd.cFileName);
+        f.attrs = fd.dwFileAttributes;
+        f.size = ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+        f.write = Stamp(fd.ftLastWriteTime);
+        f.create = Stamp(fd.ftCreationTime);
+        f.access = Stamp(fd.ftLastAccessTime);
+        fn(f);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+}  // namespace
+
+// Обход без рекурсии, ссылки (reparse points) не раскрываем - иначе можно уйти по кругу.
+void WalkFiles(const std::wstring& root, const std::function<void(const WalkFile&)>& fn, std::atomic<bool>* cancel) {
     std::vector<std::wstring> stack{root};
     while (!stack.empty()) {
         if (cancel && *cancel) break;
         std::wstring d = stack.back();
         stack.pop_back();
-        WIN32_FIND_DATAW fd;
-        HANDLE h = FindFirstFileExW((d + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr,
-                                    FIND_FIRST_EX_LARGE_FETCH);
-        if (h == INVALID_HANDLE_VALUE) continue;
-        do {
-            if (Dots(fd.cFileName)) continue;
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                stack.push_back(d + L"\\" + fd.cFileName);
-            } else {
-                sum += ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
-                if (files) ++*files;
-                if (progress) InterlockedIncrement(progress);
-            }
-        } while (FindNextFileW(h, &fd));
-        FindClose(h);
+        if (!NtQuery() || !ListNt(d, stack, fn)) ListFind(d, stack, fn);
     }
+}
+
+// Размер папки целиком.
+ULONGLONG DirBytes(const std::wstring& root, int* files, std::atomic<bool>* cancel, std::atomic<long>* progress) {
+    ULONGLONG sum = 0;
+    WalkFiles(
+        root,
+        [&](const WalkFile& f) {
+            sum += f.size;
+            if (files) ++*files;
+            if (progress) progress->fetch_add(1, std::memory_order_relaxed);
+        },
+        cancel);
     return sum;
 }
 
@@ -202,6 +293,85 @@ std::wstring FileSha256(const std::wstring& path) {
 
 // ---------------- кэши ----------------
 
+namespace {
+
+// TEMP делим на две части по тому же правилу, что у RadialTools (TempRemovable): что чистка удалит (bytes) и что
+// оставит до следующего раза (fresh). Иначе «можно освободить» обещает больше, чем освободится.
+void TempBytes(Junk& j) {
+    ULONGLONG now = NowStamp();
+    WalkFiles(j.path, [&](const WalkFile& f) { (TempRemovable(f, now) ? j.bytes : j.fresh) += f.size; });
+}
+
+}  // namespace
+
+CleanLine ParseCleanLine(const std::wstring& s) {
+    CleanLine c;
+    if (s.empty() || s[0] != L'#') return c;
+    std::vector<std::wstring> p = Split(s, L'\t');
+    auto index = [](const std::wstring& v) {
+        return !v.empty() && iswdigit(v[0]) ? (size_t)_wcstoui64(v.c_str(), nullptr, 10) : (size_t)-1;
+    };
+    if (p.size() == 2 && p[0] == L"#start") {
+        c.kind = CleanLine::START;
+        c.index = index(p[1]);
+    } else if (p.size() == 3 && p[0] == L"#freed") {
+        c.kind = CleanLine::FREED;
+        c.index = index(p[1]);
+        c.bytes = _wcstoui64(p[2].c_str(), nullptr, 10);
+    } else if (s.rfind(L"#busy\t", 0) == 0) {
+        c.kind = CleanLine::BUSY;
+        c.text = s.substr(6);  // путь может содержать что угодно, кроме перевода строки
+    }
+    return c;
+}
+
+ULONGLONG ParseStoreSize(const std::wstring& dismOut) {
+    // «Actual Size of Component Store : 7.89 GB» / «Фактический размер хранилища компонентов : 7,89 ГБ»
+    for (const std::wstring& raw : Split(dismOut, L'\n')) {
+        std::wstring line = Lower(raw);
+        if (line.find(L"actual size") == std::wstring::npos && line.find(L"фактический размер") == std::wstring::npos)
+            continue;
+        size_t colon = line.rfind(L':');
+        if (colon == std::wstring::npos) continue;
+        std::wstring num;
+        size_t i = colon + 1;
+        while (i < line.size() && iswspace(line[i])) ++i;
+        for (; i < line.size() && (iswdigit(line[i]) || line[i] == L',' || line[i] == L'.'); ++i)
+            num += line[i] == L',' ? L'.' : line[i];
+        if (num.empty()) continue;
+        while (i < line.size() && iswspace(line[i])) ++i;
+        double mul = 1;
+        wchar_t u = i < line.size() ? line[i] : 0;
+        if (u == L'k' || u == L'к') mul = 1024.0;
+        if (u == L'm' || u == L'м') mul = 1024.0 * 1024;
+        if (u == L'g' || u == L'г') mul = 1024.0 * 1024 * 1024;
+        if (u == L't' || u == L'т') mul = 1024.0 * 1024 * 1024 * 1024;
+        return (ULONGLONG)(_wtof(num.c_str()) * mul);
+    }
+    return 0;
+}
+
+bool FileInUse(const std::wstring& path) {
+    // без общего доступа файл открывается, только если его больше никто не держит; право DELETE - что удалить его
+    // нам вообще можно (файлы, оставленные установщиком с правами администратора, только для чтения). Держим
+    // микросекунды.
+    HANDLE h = CreateFileW(path.c_str(), DELETE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return true;  // занят или удалить нельзя - в обоих случаях не наш
+    CloseHandle(h);
+    return false;
+}
+
+bool TempRemovable(const WalkFile& f, ULONGLONG now) {
+    ULONGLONG touched = std::max(f.write, f.create), age = now > touched ? now - touched : 0;
+    const ULONGLONG hour = kDay / 24;
+    std::wstring n(f.name, f.nameLen);
+    bool pch =
+        n.size() > 13 && _wcsnicmp(n.c_str(), L"preamble-", 9) == 0 && _wcsicmp(n.c_str() + n.size() - 4, L".pch") == 0;
+    if (age < (pch ? hour : 6 * hour)) return false;
+    // занятый не удалится всё равно, и обещать его в «можно освободить» нечестно - в любом возрасте
+    return !FileInUse(f.Path());
+}
+
 std::vector<Junk> FindJunk(bool sizes) {
     // slow - пересоздаётся дорого (шейдеры собираются заново, первые запуски игр и редактора тормозят):
     // в «Всё сразу» не входит, только по отдельности
@@ -237,8 +407,11 @@ std::vector<Junk> FindJunk(bool sizes) {
             out.push_back(j);
             continue;
         }
-        j.bytes = DirBytes(j.path, nullptr, nullptr, nullptr);
-        if (j.bytes) out.push_back(j);
+        if (_wcsicmp(j.path.c_str(), TempDir().c_str()) == 0)
+            TempBytes(j);
+        else
+            j.bytes = DirBytes(j.path, nullptr, nullptr, nullptr);
+        if (j.bytes || j.fresh) out.push_back(j);
     }
     std::sort(out.begin(), out.end(), [](const Junk& a, const Junk& b) { return a.bytes > b.bytes; });
     return out;
@@ -252,25 +425,11 @@ std::wstring DdcDir() { return Env(L"%LOCALAPPDATA%\\UnrealEngine\\Common\\Deriv
 
 ULONGLONG OldBytes(const std::wstring& root, int days, int* files) {
     ULONGLONG cutoff = NowStamp() - (ULONGLONG)days * kDay, sum = 0;
-    std::vector<std::wstring> stack{root};
-    while (!stack.empty()) {
-        std::wstring d = stack.back();
-        stack.pop_back();
-        WIN32_FIND_DATAW fd;
-        HANDLE h = FindFirstFileExW((d + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr,
-                                    FIND_FIRST_EX_LARGE_FETCH);
-        if (h == INVALID_HANDLE_VALUE) continue;
-        do {
-            if (Dots(fd.cFileName) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                stack.push_back(d + L"\\" + fd.cFileName);
-            } else if (std::max(Stamp(fd.ftLastAccessTime), Stamp(fd.ftLastWriteTime)) < cutoff) {
-                sum += ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
-                if (files) ++*files;
-            }
-        } while (FindNextFileW(h, &fd));
-        FindClose(h);
-    }
+    WalkFiles(root, [&](const WalkFile& f) {
+        if (std::max(f.access, f.write) >= cutoff) return;
+        sum += f.size;
+        if (files) ++*files;
+    });
     return sum;
 }
 
@@ -349,7 +508,7 @@ bool IsProjectJunk(const std::wstring& pathIn, std::wstring* kind) {
     return k != nullptr;
 }
 
-std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots, volatile bool* cancel) {
+std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots, std::atomic<bool>* cancel) {
     std::vector<ProjectJunk> out;
     std::vector<std::pair<std::wstring, int>> stack;
     for (const std::wstring& r : roots)

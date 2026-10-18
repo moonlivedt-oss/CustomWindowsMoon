@@ -8,6 +8,7 @@
 #include <map>
 
 #include "app/toolsui.h"
+#include "core/bg.h"
 #include "core/fx.h"
 #include "core/text.h"
 #include "gfx/color.h"
@@ -48,15 +49,13 @@ void Push(std::vector<float>& h, float v) {
 
 // Замеры раз в 1,5 с, пока раздел «Сеть» смотрит (seen свежий): пинг шлюза, HTTPS-круг до выхода (раз в
 // 4,5 с), TCP до 1.1.1.1 на 53 и 443 - через туннель TUN они отвечают сами за 0 мс, такие замеры не в счёт.
-DWORD WINAPI SampleThread(void* p) {
-    auto* holder = (std::shared_ptr<NetSampler>*)p;
-    std::shared_ptr<NetSampler> s = *holder;
-    delete holder;
+// пока страница смотрит (seen свежее 4 с) и программа не закрывается
+void SampleThread(const std::shared_ptr<NetSampler>& s) {
     int n = 0, httpFail = 0;
     float http = -1;
     std::wstring gw, ad, country;
     bool tunnel = false;
-    while (GetTickCount64() - s->seen < 4000) {
+    while (GetTickCount64() - s->seen < 4000 && !bg::Quitting()) {
         if (n % 20 == 0) {
             gw = net::Gateway(&ad);
             std::wstring rt;
@@ -93,7 +92,6 @@ DWORD WINAPI SampleThread(void* p) {
         Sleep(1500);
     }
     s->running = false;
-    return 0;
 }
 
 // выдуманная сеть как в наброске: через 2,6 с выход меняется, через 5,2 с рвётся DNS, «Починить» - 1,4 с
@@ -174,11 +172,8 @@ void Studio::RouteLive(const RectF& r, bool busy) {
             sampler_ = std::make_shared<NetSampler>();
             sampler_->running = true;
             sampler_->seen = now;
-            auto* holder = new std::shared_ptr<NetSampler>(sampler_);
-            if (HANDLE th = CreateThread(nullptr, 0, SampleThread, holder, 0, nullptr))
-                CloseHandle(th);
-            else
-                delete holder, sampler_->running = false;
+            std::shared_ptr<NetSampler> s = sampler_;
+            if (!bg::Run([s] { SampleThread(s); })) sampler_->running = false;
         }
         sampler_->seen = now;
         AcquireSRWLockShared(&sampler_->lock);

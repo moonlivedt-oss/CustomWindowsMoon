@@ -100,7 +100,7 @@ float Live::Step(const RectF& r, float k, const Input& in) {
     float dt = last_ && now - last_ < 200 ? (now - last_) / 1000.0f : 0.016f;
     last_ = now;
     dt *= (float)(1000.0 / std::max(250.0, fx::Dur(1000)));  // «спокойно» / «живо»
-    dt = std::min(dt, 0.04f);  // пружины явные: на длинном шаге раскачиваются и улетают
+    dt = std::min(dt, 0.04f);                                // пружины явные: на длинном шаге раскачиваются и улетают
     t_ += dt;
     game_ = fx::Game();
     r_ = r;
@@ -535,7 +535,7 @@ bool CleanScene::Draw(Graphics& g, const RectF& r, float k, const Palette& p, PO
     // счётчик под вихрем
     double total = 0;
     for (const Row& row : rows_) {
-        ULONGLONG v = row.state == 2 && row.freed ? row.freed : row.bytes;
+        ULONGLONG v = row.state == 2 ? row.freed : row.bytes;  // готово - только то, что правда удалено
         total += (double)v * row.absorbed / std::max(1, row.count);
     }
     float ty = cy_ + vr_ * kSquish + 6 * k;

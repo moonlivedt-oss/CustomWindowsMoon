@@ -2,6 +2,7 @@
 #include "app/autostart.h"
 #include "app/toolsui.h"
 
+#include <atomic>
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
@@ -10,9 +11,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <vector>
 
+#include "core/bg.h"
 #include "core/config.h"
 #include "core/elevate.h"
 #include "core/filedlg.h"
@@ -391,9 +394,9 @@ int WatchDiag(bool slow) {
                  (v.eol.empty() ? L"" : L"  " + v.eol) + nl;
         s += L"  за " + std::to_wstring(GetTickCount64() - t0) + L" мс" + nl;
         t0 = GetTickCount64();
-        volatile long seen = 0;
+        std::atomic<long> seen{0};
         std::vector<tools::DupGroup> d = tools::FindDuplicates(tools::DupRoots(), 20ull * 1024 * 1024, nullptr, &seen);
-        s += nl + L"Дубли от 20 МБ (" + std::to_wstring(seen) + L" файлов просмотрено, " +
+        s += nl + L"Дубли от 20 МБ (" + std::to_wstring(seen.load()) + L" файлов просмотрено, " +
              std::to_wstring(GetTickCount64() - t0) + L" мс):" + nl;
         for (const tools::DupGroup& g : d) {
             s += L"  " + tools::Bytes(g.size) + L" x" + std::to_wstring(g.paths.size()) + nl;
@@ -690,6 +693,193 @@ int RingBench(int ms) {
 }
 
 // Очистка всего, что пересоздаётся быстро (как «Всё сразу» в кольце): кэши шейдеров и Unreal не трогаются.
+// Сверка чтения MFT с обычным обходом: те же папки, байты и файлы. Нужна консоль администратора.
+// Папки внутри root, куда обход не пускают даже с правами (FindFirstFile - «отказано в доступе»); ссылки не раскрываем.
+std::vector<std::wstring> ClosedInside(const std::wstring& root) {
+    std::vector<std::wstring> closed, stack{root};
+    while (!stack.empty()) {
+        std::wstring d = stack.back();
+        stack.pop_back();
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileExW((d + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+        if (h == INVALID_HANDLE_VALUE) {
+            // папка только что была в списке родителя, а сама не открывается - закрыта. Ни код ошибки, ни атрибуты не
+            // годятся: на LogFiles\WMI\RtBackup (только для SYSTEM) Windows не отдаёт даже атрибуты папки
+            if (d != root) closed.push_back(d);
+            continue;
+        }
+        do {
+            std::wstring n = fd.cFileName;
+            if (n == L"." || n == L".." || !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+            // папка-ссылка: обход её не раскрывает, а если внутри настоящие файлы - MFT их видит
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                closed.push_back(d + L"\\" + n);
+            else
+                stack.push_back(d + L"\\" + n);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    return closed;
+}
+
+// Допуск сверки: открытые на запись файлы растут, пока считаем - 1% и мегабайт
+bool Near(ULONGLONG a, ULONGLONG b) { return (a > b ? a - b : b - a) <= std::max(a, b) / 100 + 1024 * 1024; }
+
+// Где именно MFT видит больше обхода: спуск по папкам, пока разница не окажется в файлах самой папки. По пути -
+// сколько в папке ссылок (reparse): обход их пропускает, а в таблице MFT они есть.
+void Drill(const std::wstring& path, int depth, std::wstring& s) {
+    std::vector<tools::FolderSize> mft;
+    if (depth > 8 || !tools::MftCached(path, mft, false)) return;
+    const std::wstring nl = L"\r\n";
+    std::wstring pad(4 + depth * 2, L' ');
+    for (const tools::FolderSize& m : mft) {
+        ULONGLONG wb = 0;
+        int wf = 0, rFiles = 0, rDirs = 0;
+        ULONGLONG rBytes = 0;
+        bool loose = m.name.front() == L'(';
+        if (loose) {  // файлы прямо в папке: обычные - как у обхода, ссылки - отдельно
+            WIN32_FIND_DATAW fd;
+            HANDLE h =
+                FindFirstFileExW((path + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+            if (h != INVALID_HANDLE_VALUE) {
+                do {
+                    ULONGLONG sz = ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+                    bool dir = fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY,
+                         rp = fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT;
+                    if (dir && rp) ++rDirs;
+                    if (dir) continue;
+                    if (rp)
+                        ++rFiles, rBytes += sz;
+                    else
+                        ++wf, wb += sz;
+                } while (FindNextFileW(h, &fd));
+                FindClose(h);
+            }
+        } else {
+            DWORD a = GetFileAttributesW(m.path.c_str());
+            if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT)) rDirs = 1;
+            wb = tools::DirBytes(m.path, &wf);
+        }
+        if (m.bytes <= wb + 1024 * 1024 && m.files <= wf) continue;
+        s += pad + (loose ? path + L"\\" + m.name : m.path) + L": обход " + tools::Bytes(wb) + L" / " +
+             std::to_wstring(wf) + L", MFT " + tools::Bytes(m.bytes) + L" / " + std::to_wstring(m.files);
+        if (rFiles) s += L", файлов-ссылок " + std::to_wstring(rFiles) + L" на " + tools::Bytes(rBytes);
+        if (rDirs) s += loose ? L", папок-ссылок " + std::to_wstring(rDirs) : std::wstring(L", сама папка - ссылка");
+        if (!loose && wf == 0 && m.files > 0) {
+            // почему: ответ на список, атрибуты папки и как она выглядит в списке родителя
+            WIN32_FIND_DATAW fd;
+            HANDLE h =
+                FindFirstFileExW((m.path + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+            DWORD err = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+            int listed = 0;  // сколько файлов отдал список (без папок и точек)
+            ULONGLONG listedBytes = 0;
+            if (h != INVALID_HANDLE_VALUE) {
+                do
+                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                        ++listed, listedBytes += ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+                while (FindNextFileW(h, &fd));
+                err = GetLastError();  // ERROR_NO_MORE_FILES - дочитали
+                FindClose(h);
+            }
+            DWORD attrs = GetFileAttributesW(m.path.c_str());
+            DWORD inParent = INVALID_FILE_ATTRIBUTES;
+            HANDLE p = FindFirstFileExW(m.path.c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+            if (p != INVALID_HANDLE_VALUE) inParent = fd.dwFileAttributes, FindClose(p);
+            wchar_t b[200];
+            swprintf(b, 200, L" (список: %ls, код %lu, файлов %d на %ls; атрибуты %08lX, в списке родителя %08lX)",
+                     h == INVALID_HANDLE_VALUE ? L"ошибка" : L"открылся", err, listed,
+                     tools::Bytes(listedBytes).c_str(), attrs, inParent);
+            s += L", обходу нет входа" + std::wstring(b);
+        }
+        s += nl;
+        if (!loose) Drill(m.path, depth + 1, s);
+    }
+}
+
+int MftTest(const std::wstring& dirIn) {
+    std::wstring dir = dirIn;
+    while (dir.size() > 3 && dir.back() == L'\\') dir.pop_back();
+    std::wstring nl = L"\r\n", s;
+    // таблица тома в кэш помощника - по ней и студия, и разбор закрытых папок ниже
+    std::wstring admin = tools::MftAdminMain(dir.substr(0, 3));
+    std::vector<tools::FolderSize> mft;
+    std::wstring note;
+    ULONGLONG t0 = GetTickCount64();
+    bool ok = tools::MftSizes(dir, mft, note);
+    ULONGLONG t1 = GetTickCount64();
+    std::vector<tools::FolderSize> walk = tools::ScanSizes(dir, nullptr, nullptr);
+    ULONGLONG t2 = GetTickCount64();
+    s += L"MFT: " + std::wstring(ok ? L"ok, " : L"ошибка: ") + note + L", " + std::to_wstring(t1 - t0) + L" мс" + nl;
+    s += L"обход: " + std::to_wstring(t2 - t1) + L" мс" + nl + nl;
+    int bad = ok ? 0 : 1;
+    std::map<std::wstring, std::vector<tools::FolderSize>> byParent;  // кэш MftCached по родителю
+    for (const tools::FolderSize& w : walk) {
+        auto m = std::find_if(mft.begin(), mft.end(), [&](const tools::FolderSize& x) { return x.name == w.name; });
+        ULONGLONG mb = m == mft.end() ? 0 : m->bytes;
+        int mf = m == mft.end() ? -1 : m->files;
+        bool same = m != mft.end() && Near(mb, w.bytes);
+        // обходу внутрь не пустили даже с правами (System Volume Information), а MFT видит - это не ошибка MFT
+        bool closed = !same && !w.files && m != mft.end() && m->files > 0;
+        // MFT больше обхода: ищем вложенные закрытые папки и их размер по таблице - сойдётся, значит дело в них
+        std::wstring why;
+        if (!same && !closed && m != mft.end() && mb > w.bytes && w.name.front() != L'(') {
+            ULONGLONG hidden = 0;
+            int hiddenFiles = 0;
+            for (const std::wstring& c : ClosedInside(w.path)) {
+                std::wstring parent = c.substr(0, c.find_last_of(L'\\')), leaf = c.substr(parent.size() + 1);
+                // без сверки: родитель её может не пройти из-за растущих журналов (LogFiles\WMI), а размер закрытой
+                // папки в таблице от этого не хуже
+                if (!byParent.count(parent)) tools::MftCached(parent, byParent[parent], false);
+                for (const tools::FolderSize& f : byParent[parent])
+                    if (_wcsicmp(f.name.c_str(), leaf.c_str()) == 0) {
+                        hidden += f.bytes, hiddenFiles += f.files;
+                        if (why.size() < 160)
+                            why += (why.empty() ? L"" : L", ") + c.substr(w.path.size() + 1) + L" " +
+                                   tools::Bytes(f.bytes);
+                    }
+            }
+            closed = hidden && Near(mb, w.bytes + hidden);
+            if (!why.empty()) why = L"  [закрыто для обхода: " + why + L"]";
+        }
+        if (!same && !closed) ++bad;
+        s += std::wstring(same     ? L"  "
+                          : closed ? L"~ "
+                                   : L"! ") +
+             w.name + L": обход " + tools::Bytes(w.bytes) + L" / " + std::to_wstring(w.files) + L", MFT " +
+             tools::Bytes(mb) + L" / " + std::to_wstring(mf) + why + nl;
+        if (!same && !closed && mb > w.bytes && w.name.front() != L'(') Drill(w.path, 0, s);
+    }
+    s += nl + L"расхождений: " + std::to_wstring(bad) +
+         L" (~ - обходу нет доступа внутрь, MFT видит; остаток в пределах 1% - открытые файлы, которые растут: размер "
+         L"в списке папки Windows обновляет с запозданием, в MFT он настоящий)" +
+         nl;
+    // тот же ответ через таблицу в кэше помощника - как его берёт студия; по именам и с тем же допуском
+    std::vector<tools::FolderSize> cached;
+    bool cacheOk = admin.rfind(L"@mftok", 0) == 0 && tools::MftCached(dir, cached);
+    std::wstring diff;
+    int diffs = cacheOk && cached.size() != mft.size() ? 1 : 0;
+    for (const tools::FolderSize& m : mft) {
+        if (!cacheOk) break;
+        auto c =
+            std::find_if(cached.begin(), cached.end(), [&](const tools::FolderSize& x) { return x.name == m.name; });
+        if (c != cached.end() && Near(c->bytes, m.bytes)) continue;
+        ++diffs;
+        if (diff.size() < 200)
+            diff += L"  " + m.name + L": напрямую " + tools::Bytes(m.bytes) + L", из кэша " +
+                    (c == cached.end() ? std::wstring(L"нет") : tools::Bytes(c->bytes)) + nl;
+    }
+    s += L"кэш таблицы: " + Trim(admin) + L", " +
+         (!cacheOk ? L"не прочитался"
+          : diffs  ? L"НЕ совпадает (" + std::to_wstring(diffs) + L")"
+                   : std::wstring(L"совпадает")) +
+         nl + diff;
+    for (const tools::FolderSize& f : cached)
+        if (f.closed) s += L"  закрыта для обхода: " + f.name + L" " + tools::Bytes(f.bytes) + nl;
+    if (!cacheOk || diffs) ++bad;
+    WriteOut(L"mft_out.txt", s);
+    return bad ? 1 : 0;
+}
+
 int Clean() {
     std::wstring s;
     const std::wstring nl = L"\r\n";
@@ -740,7 +930,7 @@ bool Run(int& exitCode) {
         std::wstring out = i + 3 < args.size() ? args[i + 3] : ExeDir() + L"\\studio_snap.png";
         int ms = i + 4 < args.size() ? _wtoi(args[i + 4].c_str()) : 2500;
         if (const char* sc = getenv("RADIAL_SCENE"))
-            if (!strcmp(sc, "clean")) CloseHandle(CreateThread(nullptr, 0, FakeClean, nullptr, 0, nullptr));
+            if (!strcmp(sc, "clean")) bg::Run([] { FakeClean(nullptr); });
         static Config snapCfg;
         if (page == 10 && !getenv("RADIAL_NOPRIME")) {  // RADIAL_NOPRIME - снять, как выглядит подсчёт  // «Состояние»:
                                                         // размеры считаются заранее, как в работающей программе
@@ -776,10 +966,10 @@ bool Run(int& exitCode) {
             o += L"mc: " + in.id + L" | " + in.name + L" | " + std::to_wstring(in.maxMb) + L" МБ | " +
                  std::to_wstring(in.mods) + L" модов | pretouch=" + (in.preTouch ? L"1" : L"0") + L" | icon=" +
                  in.icon + L" | game=" + in.game + L"\n";
-                 o += std::wstring(L"prism: ") + mc::PrismExe() + L" | pagefile auto=" +
-                      (mc::PagefileAuto() ? L"1" : L"0") + L"\n";
-                      for (const gboost::Session& s : gboost::History(10))
-                          o += L"session: " + s.name + L" " + std::to_wstring(s.ms / 60000) + L" мин\n";
+        o += std::wstring(L"prism: ") + mc::PrismExe() + L" | pagefile auto=" + (mc::PagefileAuto() ? L"1" : L"0") +
+             L"\n";
+        for (const gboost::Session& s : gboost::History(10))
+            o += L"session: " + s.name + L" " + std::to_wstring(s.ms / 60000) + L" мин\n";
         WriteOut(L"boost_out.txt", o);
         exitCode = 0;
     } else if (Has(args, L"--scene-film")) {  // --scene-film clean|guard|guard0 out.png: лист кадров живой сцены
@@ -796,6 +986,8 @@ bool Run(int& exitCode) {
     } else if (Has(args, L"--ring-bench")) {
         size_t i = std::find(args.begin(), args.end(), L"--ring-bench") - args.begin();
         exitCode = RingBench(i + 1 < args.size() ? std::max(500, _wtoi(args[i + 1].c_str())) : 4000);
+    } else if (Value(args, L"--mft-test", v)) {  // --mft-test <папка>, из консоли администратора -> mft_out.txt
+        exitCode = MftTest(v);
     } else if (Has(args, L"--clean")) {  // очистить кэши и временные файлы, итог в clean_out.txt
         exitCode = Clean();
     } else if (Has(args, L"--autostart-on")) {  // включить запуск вместе с Windows, как пункт трея

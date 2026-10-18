@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -59,7 +60,7 @@ private:
     HANDLE thread_ = nullptr, wake_ = nullptr;
     HWND notify_ = nullptr;
     UINT msg_ = 0;
-    volatile bool quit_ = false, fast_ = true;
+    std::atomic<bool> quit_{false}, fast_{true};
     SRWLOCK mu_ = SRWLOCK_INIT;
     Track track_;
     std::vector<std::pair<Cmd, int64_t>> cmds_;

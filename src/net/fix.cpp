@@ -7,6 +7,8 @@
 #include <wininet.h>
 
 #include <algorithm>
+#include <chrono>
+#include <mutex>
 
 #include "core/elevate.h"
 #include "core/perf.h"
@@ -20,10 +22,10 @@ namespace {
 constexpr wchar_t kInet[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
 const wchar_t* const kJobKeys[kJobs] = {
-    L"smart",      L"winhttp",       L"routes",   L"ip",     L"vpn",         L"dns-cf",        L"dns-google",
-    L"dns-auto",   L"fw-restore",    L"adapter",  L"deep",   L"disk-health", L"syspath-clean", L"net-top",
-    L"power",      L"restore-point", L"path-acl", L"repair", L"wu-reset",    L"unbreak",       L"defender-offline",
-    L"vhd-compact"};
+    L"smart",       L"winhttp",       L"routes",   L"ip",     L"vpn",         L"dns-cf",        L"dns-google",
+    L"dns-auto",    L"fw-restore",    L"adapter",  L"deep",   L"disk-health", L"syspath-clean", L"net-top",
+    L"power",       L"restore-point", L"path-acl", L"repair", L"wu-reset",    L"unbreak",       L"defender-offline",
+    L"vhd-compact", L"sys-clean",     L"mft-sizes"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -138,6 +140,17 @@ bool SetupAdmin() { return elevate::Setup(elevate::TASK_NET); }
 
 bool RunAdmin(Job j, const Log& log, int timeoutMs) {
     if (j < 0 || j >= kJobs) return false;
+    // одно задание за раз: зовут из разных потоков (студия, кольцо, недельная проверка, подсчёт MFT), а задание в
+    // реестре и журнал у задачи одни - второе затёрло бы первое, и первый ждал бы ответа до тайм-аута
+    static std::timed_mutex one;
+    std::unique_lock<std::timed_mutex> hold(one, std::defer_lock);
+    if (!hold.try_lock()) {
+        log(L"Задача с правами занята другим действием - жду, пока закончит.");
+        if (!hold.try_lock_for(std::chrono::milliseconds(timeoutMs))) {
+            log(L"Не дождался - это действие пропущено.");
+            return false;
+        }
+    }
     // задачу уже не пускал антивирус: не ставить её заново после каждой пересборки, а сразу одно окно UAC
     bool blocked = elevate::Blocked(elevate::TASK_NET);
     if (!blocked && !AdminReady()) {
@@ -407,6 +420,15 @@ bool Job_(Job j, const Log& log) {
             return tools::DefenderOfflineAdminMain(log);
         case JOB_VHD_COMPACT:
             return tools::CompactVhdAdminMain(log) > 0;
+        case JOB_SYS_CLEAN:
+            return tools::SystemCleanAdminMain(log);
+        case JOB_MFT_SIZES: {
+            // таблица всех папок тома уходит файлом в папку помощника, в журнал - только итог
+            std::wstring lines = tools::MftAdminMain(elevate::Take(L"MftDir"));
+            while (!lines.empty() && lines.back() == L'\n') lines.pop_back();
+            log(lines);
+            return lines.rfind(L"@mftok", 0) == 0;
+        }
         case JOB_DEEP: {
             int a = Exec(L"netsh.exe", L"winsock reset", &out);
             int b = Exec(L"netsh.exe", L"int ip reset", &out);
@@ -428,19 +450,22 @@ int AdminMain() {
     size_t sp = req.find(L' ');
     std::wstring key = req.substr(0, sp), nonce = sp == std::wstring::npos ? L"" : req.substr(sp + 1);
     CreateDirectoryW(elevate::DataDir().c_str(), nullptr);
-    std::string log = "#run " + Narrow(nonce) + "\n";
-    auto flush = [&] { WriteAll(ResultFile(), log); };
-    Log add = [&](const std::wstring& s) {
-        log += Narrow(s) + "\n";
-        flush();
+    // файл открыт на всё время задания, каждая строка дописывается в конец одной записью: RunAdmin читает его
+    // по мере появления строк и берёт только законченные (до \n)
+    HANDLE f = CreateFileW(ResultFile().c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+    auto put = [&](const std::string& s) {
+        DWORD w = 0;
+        if (f != INVALID_HANDLE_VALUE) WriteFile(f, s.data(), (DWORD)s.size(), &w, nullptr);
     };
+    put("#run " + Narrow(nonce) + "\n");
+    Log add = [&](const std::wstring& s) { put(Narrow(s) + "\n"); };
     int job = -1;
     for (int i = 0; i < kJobs; ++i)
         if (key == kJobKeys[i]) job = i;  // только известные действия: из файла выполнять нечего другого
     bool ok = job >= 0 && Job_((Job)job, add);
     if (job < 0) add(L"Неизвестное задание.");
-    log += ok ? "#done 1\n" : "#done 0\n";
-    flush();
+    put(ok ? "#done 1\n" : "#done 0\n");
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
     return ok ? 0 : 1;
 }
 

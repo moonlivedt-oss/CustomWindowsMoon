@@ -1,5 +1,6 @@
 #pragma once
 // Внутреннее устройство Radial Studio: идентификаторы элементов, класс окна.
+#include <atomic>
 #include <windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -189,6 +190,7 @@ enum Id {
     ID_TOOLS_SCAN_PATH,
     ID_TOOLS_SCAN,
     ID_TOOLS_SCAN_UP,
+    ID_TOOLS_MFT_SETUP,
     ID_TOOLS_RING,
     ID_TOOLS_JUNK_SCAN,
     ID_TOOLS_LOCK_PATH,
@@ -198,6 +200,7 @@ enum Id {
     ID_STATE_REFRESH,
     ID_STATE_CLEAN,
     ID_STATE_DDC,
+    ID_STATE_SYSCLEAN,
     ID_STATE_PROJ_DEL,
     ID_STATE_PROJ_IDLE,
     ID_STATE_DL_DEL,
@@ -220,15 +223,15 @@ enum Id {
     ID_LIVE_BATTERY,
     ID_LIVE_VERS,
     ID_TOOLS_VER_CHECK,
-    ID_TOOLS_SEC_KIND,    // вкладка «Защита»: фильтр по виду находок
-    ID_TOOLS_SEC_RESCAN,  // «Проверить заново»
-    ID_TOOLS_SEC_UNHIDE,  // «Показать скрытые»
-    ID_TOOLS_SIGN,        // «Настроить подпись»
-    ID_LANE_BIN,    // «Кольца»: корзина под дорожками
-    ID_TAPE,        // лента правок
-    ID_ICON_DOCK,   // сетка значков-дока (наведение)
-    ID_FLOW_FILL,   // «Наполнить из папки»
-    ID_FLOW_FILES,  // «И обычные файлы»
+    ID_TOOLS_SEC_KIND,       // вкладка «Защита»: фильтр по виду находок
+    ID_TOOLS_SEC_RESCAN,     // «Проверить заново»
+    ID_TOOLS_SEC_UNHIDE,     // «Показать скрытые»
+    ID_TOOLS_SIGN,           // «Настроить подпись»
+    ID_LANE_BIN,             // «Кольца»: корзина под дорожками
+    ID_TAPE,                 // лента правок
+    ID_ICON_DOCK,            // сетка значков-дока (наведение)
+    ID_FLOW_FILL,            // «Наполнить из папки»
+    ID_FLOW_FILES,           // «И обычные файлы»
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -253,27 +256,27 @@ enum Id {
     ID_SUBTAB = 9700,        // +страница: вкладка внутри группы
     ID_HOME_TILE = 9800,     // +i: предмет карты экрана «Обзора» (+50 - его анимация)
 
-    ID_STATE_PROJ = 10000,   // +i: строка мусора проектов (выбор)
-    ID_STATE_DL = 10100,     // +i: строка Загрузок (выбор)
-    ID_STATE_APP = 10200,    // +i: «Закрыть» у тяжёлой программы
-    ID_STATE_ANIM = 10300,   // +i: появление шкал и полос
-    ID_PATH_SUGG = 10400,    // +i: подсказка похожей папки под путём
-    ID_LANE_FIND = 10500,    // +край*100 + i: «найти» на карточке с пропавшим путём
-    ID_LANE_MINI = 10700,    // +j: пункт раскрытой стопки
-    ID_FLOW = 10800,         // +n: плашка второго кольца (щелчок - закрепить)
-    ID_LANE_ANIM = 11000,    // +край*100 + i: раскрытие стопки
+    ID_STATE_PROJ = 10000,  // +i: строка мусора проектов (выбор)
+    ID_STATE_DL = 10100,    // +i: строка Загрузок (выбор)
+    ID_STATE_APP = 10200,   // +i: «Закрыть» у тяжёлой программы
+    ID_STATE_ANIM = 10300,  // +i: появление шкал и полос
+    ID_PATH_SUGG = 10400,   // +i: подсказка похожей папки под путём
+    ID_LANE_FIND = 10500,   // +край*100 + i: «найти» на карточке с пропавшим путём
+    ID_LANE_MINI = 10700,   // +j: пункт раскрытой стопки
+    ID_FLOW = 10800,        // +n: плашка второго кольца (щелчок - закрепить)
+    ID_LANE_ANIM = 11000,   // +край*100 + i: раскрытие стопки
 };
 
 // Пружина раздела «Кольца» (studio_lanes.cpp): карточка, пункт веера, плашка второго кольца, значок дока.
 // Координаты - в своей рамке (дорожек, потока, сетки): при прокрутке рамка едет целиком, пружина не тянется.
 struct Mover {
     float x = 0, y = 0, vx = 0, vy = 0;
-    float a = 1;      // видимость
-    float pop = 0;    // подпрыгнуть: 1 - только что, тает
-    float crack = 0;  // трещина пропавшего пути
-    float s = 1;      // масштаб (док значков)
-    float wait = 0;   // задержка перед стартом, с
-    float pull = 0;   // притяжение к квадрату значка
+    float a = 1;              // видимость
+    float pop = 0;            // подпрыгнуть: 1 - только что, тает
+    float crack = 0;          // трещина пропавшего пути
+    float s = 1;              // масштаб (док значков)
+    float wait = 0;           // задержка перед стартом, с
+    float pull = 0;           // притяжение к квадрату значка
     int ring = -1, idx = -1;  // где стоял в прошлом кадре
     bool live = false;
 };
@@ -305,8 +308,8 @@ struct FolderStats {
 // Сборка темы значков идёт в своём потоке; студия только смотрит на прогресс.
 struct IconJob {
     SRWLOCK lock = SRWLOCK_INIT;
-    volatile int progress = 0;
-    volatile bool done = false;
+    std::atomic<int> progress{0};
+    std::atomic<bool> done{false};
     bool ok = false;
     std::wstring out, message, previous;
     COLORREF body = 0, accent = 0;
@@ -317,7 +320,7 @@ struct IconJob {
 // Работа раздела «Сеть» в своём потоке: журнал и отчёт под замком, страница только читает.
 struct NetJob {
     SRWLOCK lock = SRWLOCK_INIT;
-    volatile bool done = false;
+    std::atomic<bool> done{false};
     bool ok = false, hasReport = false;
     net::Report report;
     std::vector<std::wstring> log;
@@ -329,8 +332,10 @@ struct NetJob {
 // Работа раздела «Утилиты» в своём потоке; что успело посчитаться - под замком.
 struct ToolsJob {
     SRWLOCK lock = SRWLOCK_INIT;
-    volatile bool done = false, cancel = false;
-    volatile long progress = 0;
+    std::atomic<bool> done{false}, cancel{false};
+    std::atomic<long> progress{0};
+    std::atomic<bool> mftReading{false};  // задача с правами читает таблицу MFT
+    std::atomic<int> mftState{-1};        // tools::MftState, если подсчёт спрашивал задачу с правами
     bool ok = false, hasSizes = false, hasJunk = false, hasPhys = false;
     std::vector<tools::FolderSize> sizes;
     std::vector<tools::Junk> junk;
@@ -348,8 +353,8 @@ struct NetSampler {
     std::wstring gateway, adapter, country;
     bool tunnel = false, gwDown = false, httpDown = false;
     int gen = 0;
-    volatile ULONGLONG seen = 0;  // когда страница последний раз смотрела; давно - поток выходит
-    volatile bool running = false;
+    std::atomic<ULONGLONG> seen{0};  // когда страница последний раз смотрела; давно - поток выходит
+    std::atomic<bool> running{false};
 };
 
 // Картинка темы, которая сменяется растворением с медленным наездом (обои «Обзора», витрина «Тем»).
@@ -359,11 +364,11 @@ struct PicFade {
     double at = -10;  // когда пришла новая (clock_)
 };
 
-void Preview(int what);     // studio.h: EditorPreview
-std::wstring GameStatus();  // studio.h: SetEditorGameStatus
-void GameToggle();          // studio.h: SetEditorGameToggle
+void Preview(int what);                                // studio.h: EditorPreview
+std::wstring GameStatus();                             // studio.h: SetEditorGameStatus
+void GameToggle();                                     // studio.h: SetEditorGameToggle
 const wchar_t* ThemeTagline(const std::wstring& key);  // настроение темы одной строкой (studio_themes.cpp)
-std::wstring DevStatus();   // studio.h: SetEditorDevStatus
+std::wstring DevStatus();                              // studio.h: SetEditorDevStatus
 
 class Studio {
 public:
@@ -420,14 +425,17 @@ private:
     void SectorMain(const RectF& r);
     // живой раздел «Кольца» (studio_lanes.cpp, studio_ringparts.cpp)
     void LaneTick();
-    void LaneCard(const Item& it, int L, int i, const RectF& r, const std::wstring& name, float hot, bool on,
-                  int prob, float crack, bool smooth);
+    void LaneCard(const Item& it, int L, int i, const RectF& r, const std::wstring& name, float hot, bool on, int prob,
+                  float crack, bool smooth);
     void LaneCrumble(int L, int i);
     void CrumbsDraw();
     void MorphGhost();
     void Tape(const RectF& r);
     bool DropOnLanes(POINT pt, const std::vector<std::wstring>& paths);
-    bool LaneTarget(int& lane, int& at) const { lane = laneHot_, at = laneIns_; return laneHot_ >= 0; }
+    bool LaneTarget(int& lane, int& at) const {
+        lane = laneHot_, at = laneIns_;
+        return laneHot_ >= 0;
+    }
     struct Arrival {
         float dy = 0, veil = 0;
     };
@@ -455,8 +463,8 @@ private:
     // кусок кадра, который меняется только со своим ключом: рисуется один раз в свою картинку, дальше копируется
     void Baked(const wchar_t* slot, const std::wstring& key, const RectF& area, Color bg,
                const std::function<void()>& draw);
-    std::wstring ArtKey(const ThemeInfo& t);        // всё, от чего зависит картинка темы: для ключей Baked
-    std::wstring UiKey(const UiColors& c) const;    // цвета студии одной строкой: для ключей Baked
+    std::wstring ArtKey(const ThemeInfo& t);      // всё, от чего зависит картинка темы: для ключей Baked
+    std::wstring UiKey(const UiColors& c) const;  // цвета студии одной строкой: для ключей Baked
     RectF HomeWindowRect(const RectF& scr, float taskH) const;
     ThemeInfo ThemeAs(const wchar_t* key) const;  // тема с подставленными цветами обоев и своей палитры
     ThemeInfo ShownTheme() const;                 // выбранная или примеряемая наведением
@@ -488,7 +496,7 @@ private:
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
     void ToolsPage(const RectF& r);
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
-    void ToolsScan(const std::wstring& dir);
+    void ToolsScan(const std::wstring& dir, bool setup = false);  // setup - сперва настроить задачу с правами
     void NetCheck();
     void NetRun(const std::wstring& title, std::function<bool(const net::Log&, NetJob&)> work);
     void CornerMenu(int corner, int kind);  // kind: 0 задержка, 1 двойной толчок, 2 колесо
@@ -521,14 +529,14 @@ private:
     std::vector<tools::Volume> homeVols_;
     int homePathBad_ = 0;
     bool homeAuto_ = false;
-    double homeBoot_ = -1;               // когда экран включился (clock_); -1 - включится в следующем кадре
-    float homeOpen_[2] = {};             // ручки краёв: насколько выехали значки
-    double homeHealAt_[2] = {-10, -10};  // ручка вспыхнула зелёным после починки
+    double homeBoot_ = -1;                        // когда экран включился (clock_); -1 - включится в следующем кадре
+    float homeOpen_[2] = {};                      // ручки краёв: насколько выехали значки
+    double homeHealAt_[2] = {-10, -10};           // ручка вспыхнула зелёным после починки
     double homePathAt_ = -10, homeAutoAt_ = -10;  // метка PATH сжалась, метка автозапуска выскочила
     bool homeAutoWas_ = true;
-    Mover homeThumbs_[8];  // подъём миниатюр тем в окне (x: 0..1)
+    Mover homeThumbs_[8];   // подъём миниатюр тем в окне (x: 0..1)
     int homePathGone_ = 0;  // сколько было лишних в PATH: метка сжимается с этим числом
-    PicFade homeWall_;         // обои монитора
+    PicFade homeWall_;      // обои монитора
     struct HomeTip {
         std::wstring title, sub;
         bool warn = false;
@@ -542,14 +550,16 @@ private:
     std::vector<tools::Volume> stateVols_;
     tools::MemoryState stateMem_;
     std::vector<tools::HeavyApp> stateApps_;
+    toolsui::State stateSnap_;  // последний снимок подсчёта: вектора копируются, только когда он поменялся
+    unsigned stateSnapGen_ = ~0u;
     std::vector<tools::Physical> statePhys_;
     struct PhysJob {
         SRWLOCK lock = SRWLOCK_INIT;
-        volatile bool done = false;
+        std::atomic<bool> done{false};
         std::vector<tools::Physical> disks;
     };
     std::shared_ptr<PhysJob> physJob_;
-    ULONGLONG busyDue_ = 0;  // когда сработает таймер следующего кадра (RepaintIn)
+    ULONGLONG busyDue_ = 0;                       // когда сработает таймер следующего кадра (RepaintIn)
     bool painting_ = false, paintAgain_ = false;  // кадр уже рисуется (вложенный WM_PAINT из COM)
     std::set<std::wstring> projSel_, dlSel_;
     std::wstring stateFocus_;
@@ -582,7 +592,7 @@ private:
     std::vector<tools::Locker> toolsLockers_;
     bool toolsLockChecked_ = false, toolsJunkAsked_ = false, toolsShowSys_ = false;
     std::wstring toolsAddPath_, toolsEnvName_, toolsEnvValue_, toolsScanPath_, toolsLockPath_;
-    std::shared_ptr<volatile int> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
+    std::shared_ptr<std::atomic<int>> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
     std::wstring boostDir_;
     bool boostPurge_ = true;
     ULONGLONG boostReadAt_ = 0;
@@ -627,7 +637,7 @@ private:
     void RevealComposite(const RectF& body, ULONGLONG since);
     int tabsGroup_ = -1;  // группа, чьи вкладки рисовались в прошлом кадре
     int SizeRing(const RectF& r, const std::wstring& dir, const std::vector<tools::FolderSize>& sizes, bool scanning,
-                 long seen, int& hot);  // кольцо долей «Что занимает место»
+                 long seen, int& hot);     // кольцо долей «Что занимает место»
     int pathDrag_ = -1, pathDragTo_ = -1;  // своя строка PATH, которую тянут, и куда её поставят
     float pathGrab_ = 0;
     std::map<std::wstring, float> ringShown_;
@@ -647,7 +657,7 @@ private:
     };
     std::vector<HiveGhost> hiveGhosts_;
     ULONGLONG hiveBorn_ = 0, hiveGone_ = 0;
-    int hiveZoom_ = -1;  // доля, в которую зашли
+    int hiveZoom_ = -1;             // доля, в которую зашли
     scene::CleanScene cleanScene_;  // вихрь очистки: «Состояние» и «Кэши»
     void CleanSceneIn(const RectF& r);
     bool netWasBusy_ = false;
@@ -664,7 +674,7 @@ private:
     bool versionsBusy_ = false;
     toolsui::SecurityView secView_;  // вкладка «Защита»
     int secKind_ = 0;                // фильтр: 0 - все, дальше - виды, что есть в находках
-    ULONGLONG liveAt_ = 0;  // данные колбы и батареи - не чаще раза в 3 с
+    ULONGLONG liveAt_ = 0;           // данные колбы и батареи - не чаще раза в 3 с
     tools::MemoryState liveMem_;
     std::vector<tools::HeavyApp> liveApps_;
     tools::BatteryInfo liveBat_;
@@ -680,7 +690,7 @@ private:
     void LiveData();
     static bool Cable(const tools::Listener& l);  // порт в кабелях: сервер проекта или прокси-клиент
     static float RouteH(float k) { return scene::RouteScene::Height(k); }
-    int railPop_ = -1;    // значок группы, которую только что выбрали, подпрыгивает
+    int railPop_ = -1;  // значок группы, которую только что выбрали, подпрыгивает
     ULONGLONG railPopAt_ = 0;
     std::wstring hoverTheme_, hoverThemeNext_;  // примерка темы наведением
     // витрина тем: прежняя тема растворяется в новую

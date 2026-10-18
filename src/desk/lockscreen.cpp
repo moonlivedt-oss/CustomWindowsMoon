@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/bg.h"
 #include "core/config.h"
 #include "core/files.h"
 #include "core/themes.h"
@@ -260,8 +261,7 @@ struct Work {
     ThemeInfo theme;
 };
 
-DWORD WINAPI Worker(void* p) {
-    std::unique_ptr<Work> w((Work*)p);
+void Worker(const Work* w) {
     RECT mr = PrimaryRect();
     int W = mr.right - mr.left, H = mr.bottom - mr.top;
     std::vector<uint32_t> px;
@@ -288,7 +288,6 @@ DWORD WINAPI Worker(void* p) {
     ReleaseSRWLockExclusive(&w->job->lock);
     w->job->done = true;
     if (w->job->notify) InvalidateRect(w->job->notify, nullptr, FALSE);
-    return 0;
 }
 
 }  // namespace
@@ -462,11 +461,8 @@ bool BuildAvatar(const Config& cfg, std::wstring& out, std::wstring& msg) {
 std::shared_ptr<Job> ApplyAsync(const Config& cfg, HWND notify) {
     auto job = std::make_shared<Job>();
     job->notify = notify;
-    auto* w = new Work{job, SourceFile(cfg), CurrentTheme(cfg)};
-    if (HANDLE th = CreateThread(nullptr, 0, Worker, w, 0, nullptr)) {
-        CloseHandle(th);
-    } else {
-        delete w;
+    Work w{job, SourceFile(cfg), CurrentTheme(cfg)};
+    if (!bg::Run([w] { Worker(&w); })) {
         job->message = L"Не получилось запустить сборку";
         job->done = true;
     }

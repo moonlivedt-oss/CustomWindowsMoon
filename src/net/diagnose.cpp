@@ -9,6 +9,7 @@
 
 #include <algorithm>
 
+#include "core/bg.h"
 #include "core/perf.h"
 #include "core/text.h"
 
@@ -31,23 +32,17 @@ struct ComScope {
 
 // Две работы параллельно: сетевые пробы ждут ответа, а не процессор.
 void Parallel(const std::function<void()>& a, const std::function<void()>& b) {
-    struct Box {
-        const std::function<void()>* f;
-    } box{&b};
-    HANDLE th = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            (*((Box*)p)->f)();
-            return 0;
-        },
-        &box, 0, nullptr);
+    HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    bool started = done && bg::Run([&b, done] {
+                       b();
+                       SetEvent(done);
+                   });
     a();
-    if (th) {
-        WaitForSingleObject(th, INFINITE);
-        CloseHandle(th);
-    } else {
+    if (started)
+        WaitForSingleObject(done, INFINITE);
+    else
         b();
-    }
+    if (done) CloseHandle(done);
 }
 
 std::wstring Ms(int ms) { return std::to_wstring(ms) + L" мс"; }
@@ -321,8 +316,9 @@ Report Diagnose(bool remnants) {
         r.https ? L"Сайты открываются." : L"Сайты не открываются.");
     if (viaHttp && r.pingMs >= 0)
         add(r.pingMs > 150 ? WARN : OK, L"Задержка через туннель",
-            Ms(r.pingMs) + L" до выхода туннеля и обратно. Обычный пинг здесь врёт: туннель отвечает на него сам "
-                           L"за 0 мс, поэтому меряю повтором HTTPS-запроса.");
+            Ms(r.pingMs) +
+                L" до выхода туннеля и обратно. Обычный пинг здесь врёт: туннель отвечает на него сам "
+                L"за 0 мс, поэтому меряю повтором HTTPS-запроса.");
     else if (r.pingMs >= 0)
         add(r.pingMs > 150 || r.lossPct > 10 ? WARN : OK, L"Пинг до 1.1.1.1",
             Ms(r.pingMs) + L", потерь " + std::to_wstring(r.lossPct) + L"%." +
@@ -332,8 +328,9 @@ Report Diagnose(bool remnants) {
             CountryName(r.country) + (r.colo.empty() ? L"" : L" (" + r.colo + L")") + L", адрес " + r.ip + L".");
     Adapter phys;
     if (PhysicalAdapter(phys) && phys.mtu > 0 && phys.mtu < 1400)
-        add(WARN, L"MTU", L"«" + phys.name + L"»: " + std::to_wstring(phys.mtu) +
-                              L" - занижен (туннель мог оставить). Часть сайтов может «висеть».");
+        add(WARN, L"MTU",
+            L"«" + phys.name + L"»: " + std::to_wstring(phys.mtu) +
+                L" - занижен (туннель мог оставить). Часть сайтов может «висеть».");
 
     // --- остатки VPN ---
     std::vector<FwRule> fw;

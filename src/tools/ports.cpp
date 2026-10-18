@@ -76,7 +76,8 @@ std::vector<Listener> Listeners() {
         GetExtendedTcpTable(nullptr, &size, FALSE, fam, TCP_TABLE_OWNER_PID_CONNECTIONS, 0);
         std::vector<BYTE> buf(size + 4096);
         size = (ULONG)buf.size();
-        if (GetExtendedTcpTable(buf.data(), &size, FALSE, fam, TCP_TABLE_OWNER_PID_CONNECTIONS, 0) != NO_ERROR) continue;
+        if (GetExtendedTcpTable(buf.data(), &size, FALSE, fam, TCP_TABLE_OWNER_PID_CONNECTIONS, 0) != NO_ERROR)
+            continue;
         if (fam == AF_INET) {
             auto* t = (MIB_TCPTABLE_OWNER_PID*)buf.data();
             for (DWORD i = 0; i < t->dwNumEntries; ++i)
@@ -251,6 +252,31 @@ std::vector<Locker> WhoLocks(const std::wstring& pathIn) {
     } else {
         files.push_back(path);
     }
+    out = WhoLocksFiles(files);
+    // папку держат и программы, запущенные из неё самой: Restart Manager про них не всегда знает
+    if (a & FILE_ATTRIBUTE_DIRECTORY) {
+        std::wstring prefix = Lower(path);
+        while (!prefix.empty() && prefix.back() == L'\\') prefix.pop_back();
+        prefix += L'\\';
+        for (const auto& [pid, name] : ProcessNames()) {
+            if (pid <= 4) continue;
+            bool known = false;
+            for (const Locker& l : out) known = known || l.pid == pid;
+            if (known) continue;
+            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (!h) continue;
+            wchar_t buf[MAX_PATH];
+            DWORD n = MAX_PATH;
+            if (QueryFullProcessImageNameW(h, 0, buf, &n) && Lower(std::wstring(buf, n)).rfind(prefix, 0) == 0)
+                out.push_back({pid, name});
+            CloseHandle(h);
+        }
+    }
+    return out;
+}
+
+std::vector<Locker> WhoLocksFiles(const std::vector<std::wstring>& files) {
+    std::vector<Locker> out;
     if (files.empty()) return out;
     DWORD session = 0;
     WCHAR key[CCH_RM_SESSION_KEY + 1] = {};
@@ -271,25 +297,6 @@ std::vector<Locker> WhoLocks(const std::wstring& pathIn) {
             for (UINT i = 0; i < have; ++i) out.push_back({info[i].Process.dwProcessId, info[i].strAppName});
     }
     RmEndSession(session);
-    // папку держат и программы, запущенные из неё самой: Restart Manager про них не всегда знает
-    if (a & FILE_ATTRIBUTE_DIRECTORY) {
-        std::wstring prefix = Lower(path);
-        while (!prefix.empty() && prefix.back() == L'\\') prefix.pop_back();
-        prefix += L'\\';
-        for (const auto& [pid, name] : ProcessNames()) {
-            if (pid <= 4) continue;
-            bool known = false;
-            for (const Locker& l : out) known = known || l.pid == pid;
-            if (known) continue;
-            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-            if (!h) continue;
-            wchar_t buf[MAX_PATH];
-            DWORD n = MAX_PATH;
-            if (QueryFullProcessImageNameW(h, 0, buf, &n) && Lower(std::wstring(buf, n)).rfind(prefix, 0) == 0)
-                out.push_back({pid, name});
-            CloseHandle(h);
-        }
-    }
     return out;
 }
 

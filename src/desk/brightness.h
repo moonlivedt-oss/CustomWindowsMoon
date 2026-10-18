@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <windows.h>
 
 // Яркость экрана колесом из угла. Внешний монитор - через DDC/CI, экран ноутбука - через WMI.
@@ -18,7 +19,7 @@ private:
     HANDLE thread_ = nullptr, wake_ = nullptr;
     HWND notify_ = nullptr;
     UINT msg_ = 0;
-    volatile bool quit_ = false;
+    std::atomic<bool> quit_{false};
     SRWLOCK mu_ = SRWLOCK_INIT;
     HMONITOR mon_ = nullptr;
     int pending_ = 0;
