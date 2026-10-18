@@ -437,6 +437,27 @@ struct SelfMsg {
     std::wstring line, leak;
 };
 
+struct LeftMsg {
+    net::Job job;
+    bool ok;
+    std::wstring last;
+};
+
+std::wstring JobTitle(net::Job j) {
+    switch (j) {
+        case net::JOB_REPAIR:
+            return L"Починка Windows";
+        case net::JOB_SYS_CLEAN:
+            return L"Остатки обновлений";
+        case net::JOB_VHD_COMPACT:
+            return L"Сжатие дисков";
+        case net::JOB_MFT_SIZES:
+            return L"Чтение таблицы MFT";
+        default:
+            return L"Задание с правами";
+    }
+}
+
 DWORD WINAPI WatchLoop(void*) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -926,6 +947,11 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
     g_diskCheck = GetTickCount64() - 9 * 60 * 1000;  // первая проверка места - через минуту после старта
     g_started = GetTickCount64();
     g_weeklyCheck = g_started;
+    // остановили по «Стоп», а задание доработало в фоне - итог карточкой (из фонового потока - в поток окна)
+    net::SetLeftDone([](net::Job j, bool ok, const std::wstring& last) {
+        auto* m = new LeftMsg{j, ok, last};
+        if (!PostMessageW(g_app, WM_TOOLS_JOB, kLeftTag, (LPARAM)m)) delete m;
+    });
     g_watchStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     g_watchThread = CreateThread(nullptr, 0, WatchLoop, nullptr, 0, nullptr);
     // живой рост: Загрузки и TEMP - чаще всего именно они съедают место незаметно
@@ -1055,6 +1081,18 @@ void OnJob(WPARAM wp, LPARAM lp) {
                 if (g_openStudio) g_openStudio(1, root);
             },
             nullptr, 40000, Toast::G_WARN);
+        return;
+    }
+    if (wp == kLeftTag) {
+        std::unique_ptr<LeftMsg> m((LeftMsg*)lp);
+        std::wstring title = JobTitle(m->job);
+        autos::Note(title + L": доделано в фоне после «Стоп», " + (m->ok ? L"успешно" : L"с ошибкой") +
+                    (m->last.empty() ? L"" : L". " + m->last));
+        if (m->job == net::JOB_MFT_SIZES) return;  // таблица просто ляжет в кэш - карточка ни к чему
+        g_card.Show(BoostCard::DONE, m->ok ? title + L": доделано в фоне" : title + L": не получилось",
+                    (m->last.empty() ? std::wstring(L"Задание, остановленное по «Стоп», закончилось.") : m->last) +
+                        (m->job == net::JOB_REPAIR ? L" Журнал SFC: C:\\Windows\\Logs\\CBS\\CBS.log." : L""),
+                    Theme(), 20000, m->ok ? Toast::G_OK : Toast::G_FAIL);
         return;
     }
     if (wp == kSelfTag) {
