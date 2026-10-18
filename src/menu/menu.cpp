@@ -28,6 +28,20 @@ using namespace menu_detail;
 
 namespace {
 RadialMenu* g_self = nullptr;
+
+// exe окна, которое впереди (для кольца программы); пусто - стол или не узнать
+std::wstring ForegroundExe() {
+    HWND fg = GetForegroundWindow();
+    DWORD pid = 0;
+    if (!fg || !GetWindowThreadProcessId(fg, &pid) || !pid) return L"";
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return L"";
+    wchar_t buf[MAX_PATH];
+    DWORD n = MAX_PATH;
+    std::wstring out = QueryFullProcessImageNameW(h, 0, buf, &n) ? std::wstring(buf, n) : L"";
+    CloseHandle(h);
+    return out;
+}
 }  // namespace
 
 RadialMenu::Geo RadialMenu::MakeGeo(double k) {
@@ -115,10 +129,21 @@ bool RadialMenu::Prewarm(const Config* cfg, UINT dpi, int budgetMs) {
 void RadialMenu::Show(const Config* cfg, POINT cursor, const RECT& mon, bool leftEdge, UINT dpi, bool demo) {
     PERF_SCOPE("menu.Show");
     demo_ = demo;
-    const auto& ring = cfg->RingFor(leftEdge);
-    if (ring.empty()) return;
+    const std::vector<Item>* ring = &cfg->RingFor(leftEdge);
+    // своё кольцо программы, что впереди, - первым сектором (из студии кольцо показывается без него)
+    std::wstring exe = demo ? L"" : ForegroundExe();
+    if (const AppRing* app = cfg->AppFor(exe)) {
+        appRing_ = *ring;
+        Item own = app->ring;
+        own.special = 4;
+        own.path.clear();
+        if (own.iconFull.empty()) own.full = exe;  // значок самой программы
+        appRing_.insert(appRing_.begin(), std::move(own));
+        ring = &appRing_;
+    }
+    if (ring->empty()) return;
     cfg_ = cfg;
-    ring_ = &ring;
+    ring_ = ring;
     geo_ = MakeGeo(dpi / 96.0 * cfg->scale);
     EnsureSurface();
     left_ = leftEdge;

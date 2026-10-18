@@ -13,6 +13,7 @@
 #include "core/filedlg.h"
 #include "core/files.h"
 #include "core/launch.h"
+#include "core/macro.h"
 #include "core/perf.h"
 #include "core/text.h"
 #include "core/themes.h"
@@ -347,8 +348,10 @@ void RadialMenu::Activate(const Item& it) {
         winlist::Activate(w);
         return;
     }
-    if (it.path.rfind(L"action:", 0) == 0) {  // действие угла из обычного кольца: делает main, меню гаснет
-        std::wstring a = it.path.substr(7);
+    if (it.special == 4) return;  // кольцо программы: команды - во втором кольце
+    // действие угла из обычного кольца (action:...), сочетание или макрос: делает main, меню гаснет
+    if (it.path.rfind(L"action:", 0) == 0 || macro::Is(it.path)) {
+        std::wstring a = macro::Is(it.path) ? it.path : it.path.substr(7);
         StopHooks();
         Launch();
         if (cfg_->sounds) Sound::Play(Sound::Select);
@@ -388,6 +391,7 @@ void RadialMenu::Activate(const Item& it) {
 // Папки и документы уходят в диалог; программы и ярлыки по-прежнему запускаются.
 bool RadialMenu::ToDialog(const Item& it) const {
     if (!dialog_ || shift_ || ctrl_ || it.special || it.full.empty() || !IsWindow(dialog_)) return false;
+    if (macro::Is(it.path) || it.path.rfind(L"action:", 0) == 0) return false;
     if (it.dir) return true;
     std::wstring f = Lower(it.full);
     for (const wchar_t* ext : {L".exe", L".lnk", L".url", L".bat", L".cmd", L".appref-ms"}) {

@@ -11,6 +11,7 @@
 
 #include "core/fx.h"
 #include "core/llmouse.h"
+#include "core/macro.h"
 #include "core/config.h"
 #include "core/night.h"
 #include "core/files.h"
@@ -64,18 +65,6 @@ const Action kWheel[] = {
     {L"track", L"Треки"},
 };
 
-struct KeyTok {
-    UINT vk;
-    const wchar_t* tok;
-};
-const KeyTok kKeys[] = {
-    {VK_CONTROL, L"ctrl"},   {VK_SHIFT, L"shift"}, {VK_MENU, L"alt"},     {VK_LWIN, L"win"},
-    {VK_ESCAPE, L"esc"},     {VK_TAB, L"tab"},     {VK_RETURN, L"enter"}, {VK_SPACE, L"space"},
-    {VK_BACK, L"backspace"}, {VK_DELETE, L"del"},  {VK_INSERT, L"ins"},   {VK_HOME, L"home"},
-    {VK_END, L"end"},        {VK_PRIOR, L"pgup"},  {VK_NEXT, L"pgdn"},    {VK_LEFT, L"left"},
-    {VK_RIGHT, L"right"},    {VK_UP, L"up"},       {VK_DOWN, L"down"},    {VK_SNAPSHOT, L"prtsc"},
-};
-
 void Keys(const std::vector<WORD>& vk) {
     std::vector<INPUT> in;
     for (WORD k : vk) {
@@ -92,18 +81,6 @@ void Keys(const std::vector<WORD>& vk) {
         in.push_back(i);
     }
     SendInput((UINT)in.size(), in.data(), sizeof(INPUT));
-}
-
-UINT TokenVk(const std::wstring& t) {
-    for (auto& k : kKeys)
-        if (t == k.tok) return k.vk;
-    if (t.size() == 1 && iswalnum(t[0])) return towupper(t[0]);
-    if (t.size() >= 2 && t[0] == L'f' && iswdigit(t[1])) {
-        int n = _wtoi(t.c_str() + 1);
-        if (n >= 1 && n <= 24) return VK_F1 + n - 1;
-    }
-    if (t.rfind(L"vk", 0) == 0) return (UINT)wcstoul(t.c_str() + 2, nullptr, 16);
-    return 0;
 }
 
 void CALLBACK ScreenOff(HWND, UINT, UINT_PTR id, DWORD) {
@@ -141,25 +118,14 @@ const Action* WheelActions(int& count) {
     return kWheel;
 }
 
-std::wstring KeyName(UINT vk) {
-    if (vk == VK_LCONTROL || vk == VK_RCONTROL) vk = VK_CONTROL;
-    if (vk == VK_LSHIFT || vk == VK_RSHIFT) vk = VK_SHIFT;
-    if (vk == VK_LMENU || vk == VK_RMENU) vk = VK_MENU;
-    if (vk == VK_RWIN) vk = VK_LWIN;
-    for (auto& k : kKeys)
-        if (k.vk == vk) return k.tok;
-    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) return std::wstring(1, (wchar_t)towlower(vk));
-    if (vk >= VK_F1 && vk <= VK_F24) return L"f" + std::to_wstring(vk - VK_F1 + 1);
-    wchar_t b[16];
-    swprintf(b, 16, L"vk%02X", vk);
-    return b;
-}
+std::wstring KeyName(UINT vk) { return macro::KeyName(vk); }
 
 std::wstring ActionName(const std::wstring& v) {
     for (const Action& a : kActions)
         if (v == a.key) return a.name;
     for (const Action& a : kWheel)
         if (v == a.key) return a.name;
+    if (v.rfind(L"macro:", 0) == 0) return macro::Describe(v);
     if (v.rfind(L"keys:", 0) == 0) {
         std::wstring out;
         for (auto& t : Split(v.substr(5), L'+')) {
@@ -250,13 +216,7 @@ void Run(const std::wstring& a) {
     if (a == L"next") return Keys({VK_MEDIA_NEXT_TRACK});
     if (a == L"mute") return Keys({VK_VOLUME_MUTE});
     if (a == L"pin") return PinForegroundWindow();
-    if (a.rfind(L"keys:", 0) == 0) {
-        std::vector<WORD> vk;
-        for (auto& t : Split(Lower(a.substr(5)), L'+'))
-            if (UINT v = TokenVk(t)) vk.push_back((WORD)v);
-        if (!vk.empty()) Keys(vk);
-        return;
-    }
+    if (macro::Is(a)) return macro::Run(a);  // сочетание или макрос: в фоне, когда отпустят модификаторы
     std::wstring f = ExpandPath(a);
     ShellExecuteW(nullptr, nullptr, f.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }

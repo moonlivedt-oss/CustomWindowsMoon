@@ -14,8 +14,9 @@ struct Item {
     std::wstring iconFull;
     bool expand = false;
     bool files = false;
-    bool dir = false;    // папка (для значка папок и входа внутрь)
-    int special = 0;     // служебные секторы: 1 - следующая страница, 2 - окно (кольцо окон), 3 - действие сети
+    bool dir = false;  // папка (для значка папок и входа внутрь)
+    // служебные секторы: 1 - следующая страница, 2 - окно (кольцо окон), 3 - действие сети, 4 - кольцо программы
+    int special = 0;
     std::wstring note;   // пояснение для карточки (действия сети)
     HWND win = nullptr;  // для special 2: какое окно вызвать
     std::vector<Item> children;
@@ -25,6 +26,14 @@ struct Item {
     bool Nested() const { return !dir && special == 3 && !children.empty(); }
     bool CanDrill() const { return dir || Nested(); }
 };
+
+// Кольцо программы: открыли кольцо, когда впереди эта программа (по exe активного окна), - первым сектором идёт
+// её кольцо команд. В radial.cfg - после [@apps], у секции есть exe = имена через | (можно маски *).
+struct AppRing {
+    std::wstring exes;
+    Item ring;  // имя, значок, пункты: сочетания keys:, макросы macro:, программы, папки, ссылки
+};
+bool ExeMatch(const std::wstring& exePath, const std::wstring& masks);  // имя exe подходит под одну из масок
 
 struct Config {
     bool desktopOnly = false;
@@ -82,17 +91,17 @@ struct Config {
     // режим разработки: пока открыт тяжёлый редактор, ему отдаются память и видеокарта (красота остаётся)
     bool devAuto = true;
     std::wstring devApps = L"UnrealEditor.exe|UE4Editor.exe";  // маски, как у games
-    bool devWallpaper = true;  // ставить Wallpaper Engine на паузу
-    bool devBoost = true;      // при запуске редактора предлагать освободить память
+    bool devWallpaper = true;                                  // ставить Wallpaper Engine на паузу
+    bool devBoost = true;                                      // при запуске редактора предлагать освободить память
     // «Защита» в кольце утилит: программы из этой папки (System Informer, RecoveryKit...) - пунктами кольца
     std::wstring securityDir = L"D:\\tools\\security";
     // экран блокировки
     std::wstring lockSource;  // картинка для экрана блокировки, пусто - обои
-    bool lockReveal = true;  // после входа картинка блокировки плавно растворяется в стол
-    bool lockPortal = true;  // переход «портал» (кольцо раскрывается в стол); иначе картинка просто тает
-    bool hexGlass = true;    // сотовое стекло: углы, кольцо, заряд, волна игрового режима
-    bool bootPortal = true;  // портал при входе после включения компьютера
-    bool wakePortal = true;  // портал после сна и после выключения экрана из угла
+    bool lockReveal = true;   // после входа картинка блокировки плавно растворяется в стол
+    bool lockPortal = true;   // переход «портал» (кольцо раскрывается в стол); иначе картинка просто тает
+    bool hexGlass = true;     // сотовое стекло: углы, кольцо, заряд, волна игрового режима
+    bool bootPortal = true;   // портал при входе после включения компьютера
+    bool wakePortal = true;   // портал после сна и после выключения экрана из угла
     // Boost: папка со скриптами и boost.config.json (пусто - ..\Boost рядом с программой)
     std::wstring boostDir;
     bool boostOffer = true;    // при запуске игры предлагать освободить память
@@ -107,10 +116,10 @@ struct Config {
     bool boostSummary = true;  // после игры - итог: пик памяти, подкачка, видеопамять
     bool devWatch = true;      // в Unreal: видеопамять, шейдеры, сборки UBT - сообщать
     // сеть: сторож связи, смена выходного узла, проверка маршрута игры
-    bool netWatch = true;    // следить за интернетом и предлагать починку при обрыве
-    bool netExit = true;     // сообщать, когда выходной узел (страна) сменился
-    bool netGame = true;     // при запуске игры проверить, идёт ли она через туннель, и пинг
-    int netInterval = 20;    // раз во сколько секунд проверять связь
+    bool netWatch = true;  // следить за интернетом и предлагать починку при обрыве
+    bool netExit = true;   // сообщать, когда выходной узел (страна) сменился
+    bool netGame = true;   // при запуске игры проверить, идёт ли она через туннель, и пинг
+    int netInterval = 20;  // раз во сколько секунд проверять связь
     // автоматика: тихая чистка раз в неделю и при нехватке места, разбор Загрузок (с вопросом),
     // режим питания по батарее и игре, самовосстановление автозапуска и настроек
     bool autoClean = true;
@@ -119,9 +128,17 @@ struct Config {
     bool autoPower = true;
     bool autoRepair = true;
     bool toolsDiskWarn = true;  // карточка, когда на диске мало места (меньше 10% и меньше 20 ГБ)
-    int lockPattern = 1;  // узор стекла при переходе: 0 - нет, 1 - соты, 2 - осколки
+    int lockPattern = 1;        // узор стекла при переходе: 0 - нет, 1 - соты, 2 - осколки
     std::wstring avatarSource;  // своя картинка в середине аватара, пусто - эмблема-полумесяц
     std::vector<Item> left, right;
+    std::vector<AppRing> apps;  // кольца программ
+
+    // Кольцо программы для exe активного окна; nullptr - своего нет.
+    const AppRing* AppFor(const std::wstring& exePath) const {
+        for (const AppRing& a : apps)
+            if (!a.ring.children.empty() && ExeMatch(exePath, a.exes)) return &a;
+        return nullptr;
+    }
 
     // Кольцо для края; если для него ничего не задано - берётся другое.
     const std::vector<Item>& RingFor(bool leftEdge) const {

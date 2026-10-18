@@ -15,6 +15,7 @@
 #include "core/files.h"
 #include "core/launch.h"
 #include "core/perf.h"
+#include "core/macro.h"
 #include "core/text.h"
 #include "core/themes.h"
 #include "core/winlist.h"
@@ -196,9 +197,9 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
             hex::Cell c = hex::At(cursorLocal_.x, cursorLocal_.y, 13 * geo_.k);
             key.insert(key.end(), {(double)c.q, (double)c.r});
         }
-        key.insert(key.end(), {s.a0, s.a1, s.ring.rIn, s.ring.rOut, (double)s.ring.iconPx, s.hl,
-                               s.appear, s.active ? 1.0 : 0.0, s.hue, s.hot ? 1.0 : 0.0,
-                               (double)std::hash<std::wstring>()(s.it->name + L"|" + s.it->full)});
+        key.insert(key.end(),
+                   {s.a0, s.a1, s.ring.rIn, s.ring.rOut, (double)s.ring.iconPx, s.hl, s.appear, s.active ? 1.0 : 0.0,
+                    s.hue, s.hot ? 1.0 : 0.0, (double)std::hash<std::wstring>()(s.it->name + L"|" + s.it->full)});
         bandLo = std::min(bandLo, s.ring.rIn);
         bandHi = std::max(bandHi, s.ring.rOut);
     }
@@ -408,6 +409,14 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
         return it->path.empty() ? L"Наведите на действие" : L"2 клика: выполнить";
     }
     if (it && ToDialog(*it)) return it->dir ? L"Перейти сюда в диалоге" : L"Выбрать в диалоге";
+    if (it && macro::Is(it->path)) {
+        alpha = 0.55;
+        return L"2 клика: нажать " + macro::Describe(it->path);
+    }
+    if (it && it->special == 4) {
+        alpha = 0.55;
+        return L"Команды этой программы";
+    }
     if (it && !it->special && !it->full.empty()) {
         if (shift_ && ctrl_) return L"Показать в Проводнике";
         if (shift_) return L"Открыть в VS Code";
