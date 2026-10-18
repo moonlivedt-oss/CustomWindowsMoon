@@ -124,7 +124,7 @@ std::wstring Status() {
     return s;
 }
 
-void ShowRing(RadialMenu& menu) {
+std::vector<Item> RingItems() {
     std::vector<Item> ring;
     ring.push_back(Act(L"Починить умно", L"net-fix.png", L"smart",
                        L"Прокси и DNS, потом WinHTTP и маршруты, потом IP - пока интернет не вернётся"));
@@ -149,7 +149,11 @@ void ShowRing(RadialMenu& menu) {
     ring.push_back(ping);
     ring.push_back(Act(L"Проверить сеть", L"net-check.png", L"check",
                        L"Полная проверка в студии: прокси, туннели, остатки VPN, история"));
+    return ring;
+}
 
+void ShowRing(RadialMenu& menu) {
+    std::vector<Item> ring = RingItems();
     menu.onNet = [](const std::wstring& key) { Run(key); };
     menu.netStatus = [] { return Status(); };
     POINT pt;

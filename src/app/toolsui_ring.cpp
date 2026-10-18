@@ -539,7 +539,7 @@ Item GitItem(const Scan& scan) {
     return item;
 }
 
-void ShowRing(RadialMenu& menu) {
+std::vector<Item> RingItems(std::wstring& status) {
     g_roots = ProjectRoots(*g_cfg);
     ULONGLONG now = GetTickCount64();
     AcquireSRWLockShared(&g_scanLock);
@@ -552,7 +552,7 @@ void ShowRing(RadialMenu& menu) {
     g_conflicts = scan.conflicts;
 
     std::vector<Item> ring;
-    std::wstring status;
+    status.clear();
     // диски: место, здоровье, рост за неделю, драйвер
     Item disks = Act(L"Диски", L"tools-disk.png", L"", L"Место на дисках, здоровье, что выросло за неделю");
     for (const tools::Volume& v : tools::VolumesCached()) {
@@ -939,7 +939,12 @@ void ShowRing(RadialMenu& menu) {
         status += L"   |   можно освободить " + tools::Bytes(quickTotal + scan.ddcOld + bin);
     if (projTotal) status += L"   |   мусор проектов " + tools::Bytes(projTotal);
     status += L"   |   память свободна " + tools::Bytes(mem.avail);
+    return ring;
+}
 
+void ShowRing(RadialMenu& menu) {
+    std::wstring status;
+    std::vector<Item> ring = RingItems(status);
     menu.onNet = [](const std::wstring& key) { Run(key); };
     menu.netStatus = [status] { return status; };
     POINT pt;

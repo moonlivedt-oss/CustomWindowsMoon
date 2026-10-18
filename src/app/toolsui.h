@@ -8,6 +8,7 @@
 #include <windows.h>
 
 struct Config;
+struct Item;
 class BoostCard;
 class RadialMenu;
 #include "tools/tools.h"
@@ -22,6 +23,7 @@ inline constexpr UINT WM_TOOLS_JOB = WM_APP + 63;  // ход действия: l
 void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
           std::function<void(int page, const std::wstring& scan)> openStudio);
 void ShowRing(RadialMenu& menu);
+std::vector<Item> RingItems(std::wstring& status);  // пункты кольца без показа (для командной палитры)
 void Run(const std::wstring& key);
 void OnJob(WPARAM wp, LPARAM lp);
 void Tick();  // карточка и раз в 10 минут - проверка места на дисках

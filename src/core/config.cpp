@@ -185,6 +185,32 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.lockPortal = Lower(val) != L"fade";
             else if (key == L"avatar_source")
                 cfg.avatarSource = val;
+            else if (key == L"stroke")
+                cfg.stroke = ParseBool(val);
+            else if (key == L"palette")
+                cfg.palette = ParseBool(val);
+            else if (key == L"palette_key")
+                cfg.paletteKey = Lower(val);
+            else if (key == L"clip_history")
+                cfg.clipHistory = ParseBool(val);
+            else if (key == L"clip_secrets")
+                cfg.clipSecrets = ParseBool(val);
+            else if (key == L"clip_secret_sec")
+                cfg.clipSecretSec = std::clamp(_wtoi(val.c_str()), 10, 600);
+            else if (key == L"win_drag")
+                cfg.winDrag = ParseBool(val);
+            else if (key == L"cpu_balance")
+                cfg.cpuBalance = ParseBool(val);
+            else if (key == L"no_sleep")
+                cfg.noSleep = ParseBool(val);
+            else if (key == L"no_sleep_apps")
+                cfg.noSleepApps = val;
+            else if (key == L"long_watch")
+                cfg.longWatch = ParseBool(val);
+            else if (key == L"long_apps")
+                cfg.longApps = val;
+            else if (key == L"long_min")
+                cfg.longMin = std::clamp(_wtoi(val.c_str()), 1, 120);
             else if (key == L"scale")
                 cfg.scale = std::clamp(_wtof(val.c_str()), 0.5, 3.0);
             else if (key == L"accent") {
@@ -434,6 +460,25 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"lock_pattern = " << (c.lockPattern == 0 ? L"none" : c.lockPattern == 2 ? L"shards" : L"hex") << L"\n";
     o << L"# аватар для экрана входа: картинка в середине (пусто - полумесяц), вокруг кольцо секторов\n";
     o << L"avatar_source = " << c.avatarSource << L"\n";
+    o << L"# помощники: stroke - росчерк (махнули с Alt и отпустили над пунктом), palette - командная палитра\n"
+         L"# (palette_key - сочетание), clip_history - история буфера, clip_secrets - секреты не запоминать и через\n"
+         L"# clip_secret_sec секунд стирать из буфера, win_drag - Alt + левая тащит окно, Alt + правая - размер\n";
+    o << L"stroke = " << (c.stroke ? 1 : 0) << L"\n";
+    o << L"palette = " << (c.palette ? 1 : 0) << L"\n";
+    o << L"palette_key = " << c.paletteKey << L"\n";
+    o << L"clip_history = " << (c.clipHistory ? 1 : 0) << L"\n";
+    o << L"clip_secrets = " << (c.clipSecrets ? 1 : 0) << L"\n";
+    o << L"clip_secret_sec = " << c.clipSecretSec << L"\n";
+    o << L"win_drag = " << (c.winDrag ? 1 : 0) << L"\n";
+    o << L"# cpu_balance - фоновому процессу, что долго ест процессор, пока вы работаете, временно ниже приоритет;\n"
+         L"# no_sleep - не уходить в сон, пока идёт что-то из no_sleep_apps; long_watch - карточка, когда команда из\n"
+         L"# long_apps, работавшая дольше long_min минут, закончилась (если её окно не впереди)\n";
+    o << L"cpu_balance = " << (c.cpuBalance ? 1 : 0) << L"\n";
+    o << L"no_sleep = " << (c.noSleep ? 1 : 0) << L"\n";
+    o << L"no_sleep_apps = " << c.noSleepApps << L"\n";
+    o << L"long_watch = " << (c.longWatch ? 1 : 0) << L"\n";
+    o << L"long_apps = " << c.longApps << L"\n";
+    o << L"long_min = " << c.longMin << L"\n";
 
     auto ring = [&](const wchar_t* tag, const std::vector<Item>& v) {
         o << L"\n" << tag << L"\n";

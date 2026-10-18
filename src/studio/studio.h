@@ -1,6 +1,8 @@
 #pragma once
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <windows.h>
 
@@ -17,6 +19,10 @@ void EditorGoTools(int tab, const std::wstring& scan);
 // Раздел «Состояние»; focus - к какой карточке прокрутить («downloads», «projects» или пусто).
 void EditorGoState(const std::wstring& focus);
 
+// Любой раздел по номеру из EditorPages (командная палитра).
+void EditorGoPage(int page);
+// Разделы студии для палитры: номер и «Группа - вкладка».
+std::vector<std::pair<int, std::wstring>> EditorPages();
 // Для проверки без окна: раздел (page - номер из enum Page, tab - вкладка утилит) в PNG.
 int EditorSnapshot(HINSTANCE inst, const std::wstring& cfgPath, int page, int tab, const std::wstring& out, int ms);
 
@@ -24,7 +30,13 @@ int EditorSnapshot(HINSTANCE inst, const std::wstring& cfgPath, int page, int ta
 bool EditorPreTranslate(MSG* m);
 
 // Показать вживую то, что живёт в основной программе (свечение заряда и т.п.): задаёт main.
-enum EditorPreview { PREVIEW_BATTERY_LOW = 1, PREVIEW_BATTERY_CHARGE, PREVIEW_LOCK_REVEAL, PREVIEW_GAME_WAVE, PREVIEW_BOOST };
+enum EditorPreview {
+    PREVIEW_BATTERY_LOW = 1,
+    PREVIEW_BATTERY_CHARGE,
+    PREVIEW_LOCK_REVEAL,
+    PREVIEW_GAME_WAVE,
+    PREVIEW_BOOST
+};
 void SetEditorPreview(std::function<void(int what)> f);
 // Состояние игрового режима для студии («выключен», «включён: cs2.exe»): задаёт main.
 void SetEditorGameStatus(std::function<std::wstring()> f);

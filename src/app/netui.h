@@ -8,6 +8,7 @@
 #include <windows.h>
 
 struct Config;
+struct Item;
 class BoostCard;
 class RadialMenu;
 
@@ -19,6 +20,7 @@ inline constexpr UINT WM_NET_JOB = WM_APP + 62;    // ход действия: l
 void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below, std::function<void()> openStudio);
 void Apply(const Config& cfg);      // настройки сторожа после перечитывания radial.cfg
 void ShowRing(RadialMenu& menu);    // кольцо «Сеть» у курсора (обычно - в углу)
+std::vector<Item> RingItems();      // пункты кольца «Сеть» без показа (для командной палитры)
 void Run(const std::wstring& key);  // действие по ключу: smart, proxy, vpn, ip, dns-cf, kill:123, ping:1.1.1.1...
 void OnEvent(LPARAM lp);
 void OnJob(LPARAM lp);

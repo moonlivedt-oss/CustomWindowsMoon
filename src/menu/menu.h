@@ -13,6 +13,7 @@
 
 #include "core/config.h"
 #include "core/project.h"
+#include "core/stroke.h"
 #include "gfx/icons.h"
 
 class MenuDrop;
@@ -33,6 +34,9 @@ public:
     // пункт кольца с path = action:<действие> (как у горячих углов: minecraft, net, tools...)
     std::function<void(const std::wstring& action)> onAction;
     std::function<std::wstring()> netStatus;  // строка состояния для кольца сети
+    // Командная палитра: целое кольцо у курсора, сразу ждёт ввода; ищет по кольцам краёв и по extra (действия
+    // утилит и сети - special 3 с ключом, разделы студии, окна - special 2, команды программы).
+    void ShowPalette(const Config* cfg, std::vector<Item> extra, POINT cursor, const RECT& work, UINT dpi);
     void Close();
     bool IsOpen() const { return open_; }
     void Guard();  // раз в секунду: закрытое кольцо не остаётся видимым, оборванное угасание доводится до конца
@@ -253,7 +257,9 @@ private:
     bool full_ = false;           // целое кольцо вокруг курсора
     std::vector<Item> fullRing_;  // секторы обоих краёв для целого кольца
     std::vector<Item> appRing_;   // кольцо края с кольцом программы первым сектором
-    bool winMode_ = false;        // кольцо окон
+    bool palette_ = false;        // открыта командная палитра
+    std::vector<Item> paletteExtra_;
+    bool winMode_ = false;  // кольцо окон
     std::vector<Item> winRing_;
     bool netMode_ = false;  // кольцо сети
     bool reached_ = false;  // курсор уже был внутри кольца (до этого далёкий курсор меню не закрывает)
@@ -265,6 +271,8 @@ private:
     POINT center_{};         // центр колец в координатах окна
     ULONGLONG tOpen_ = 0, tSub_ = 0, tClose_ = 0, tLast_ = 0;
     bool altWasDown_ = false;
+    stroke::Tracker stroke_;  // росчерк: путь курсора с открытия, пока держат Alt
+    bool flick_ = false;      // махнули - отпускание Alt над пунктом его открывает
     bool demo_ = false;
     bool shift_ = false, ctrl_ = false;
     bool swallowed_[256] = {};
