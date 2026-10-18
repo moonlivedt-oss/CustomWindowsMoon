@@ -911,6 +911,46 @@ void Studio::ToolsPage(const RectF& r) {
                     ToolsScan(dir, true);
             }
         });
+        // поиск папки по имени в таблицах MFT (И8): миллисекунды, размер рядом
+        size_t found = std::min<size_t>(toolsFound_.size(), 15);
+        wide(L"Найти папку", rowsFor(found) + 1.6f, [&](const RectF& b) {
+            FieldOrText(
+                ID_TOOLS_FIND, RectF(b.X, b.Y, b.Width, ui.S(36)), view, toolsFind_,
+                [this](const std::wstring& s) {
+                    toolsFind_ = s;
+                    toolsFound_.clear();
+                    if (Trim(s).size() >= 2)
+                        toolsFindAny_ = tools::MftFindDirs(Trim(s), 15, toolsFound_, &toolsFindAge_);
+                },
+                L"Имя папки - поиск по таблице MFT всех томов, раскладка не важна");
+            float y = b.Y + ui.S(46);
+            if (!toolsFindAny_) {
+                ui.Text(L"Таблиц MFT ещё нет: «Посчитать» целый диск выше с задачей с правами - и поиск заработает.",
+                        RectF(b.X, y, b.Width, lineH), c.muted, 11.5f);
+                return;
+            }
+            for (size_t i = 0; i < found; ++i) {
+                const tools::FoundDir& f = toolsFound_[i];
+                float yy = y + i * lineH;
+                ui.Text(f.path, RectF(b.X, yy, b.Width - ui.S(360), lineH), c.text, 11.5f);
+                ui.Text(tools::Bytes(f.bytes), RectF(b.X + b.Width - ui.S(350), yy, ui.S(110), lineH), c.gold, 12, true,
+                        ui::Right);
+                if (ui.Button(ID_TOOLS_FOUND + (int)i * 2,
+                              RectF(b.X + b.Width - ui.S(230), yy + ui.S(2), ui.S(120), ui.S(26)), L"Что внутри") &&
+                    !busy)
+                    ToolsScan(f.path);
+                if (ui.Button(ID_TOOLS_FOUND + (int)i * 2 + 1,
+                              RectF(b.X + b.Width - ui.S(100), yy + ui.S(2), ui.S(100), ui.S(26)), L"Открыть")) {
+                    std::wstring p = f.path;
+                    Defer([p] { ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
+                }
+            }
+            if (!toolsFind_.empty() && toolsFound_.empty() && Trim(toolsFind_).size() >= 2)
+                ui.Text(L"Не нашлось", RectF(b.X, y, b.Width, lineH), c.muted, 11.5f);
+            else if (found)
+                ui.Text(L"Размеры - на момент таблицы (" + std::to_wstring(toolsFindAge_ / 60) + L" мин назад)",
+                        RectF(b.X, y + found * lineH, b.Width, lineH), c.faint, 10.5f);
+        });
         // кэши
         // чистка идёт - над списком вихрь, куда осыпаются очищаемые места
         bool vortex = scene::CleanRecent();

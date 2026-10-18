@@ -99,6 +99,16 @@ bool MftCached(const std::wstring& dir, std::vector<FolderSize>& out,
                bool verify = true);  // verify=false - для разбора
 MftState MftReady();                 // спрашивает планировщик - не из потока окна
 void MftForget();                    // выбросить разобранную таблицу из памяти (студия закрыта)
+// Поиск папок по имени во всех таблицах MFT, что лежат в папке помощника (И8): таблица любой давности - имена папок
+// меняются редко, размер рядом - на момент таблицы. age - сколько секунд самой старой из просмотренных таблиц.
+// false - ни одной таблицы нет (подсчёт по MFT ни разу не запускали). Индекс держится в памяти до MftSearchForget.
+struct FoundDir {
+    std::wstring path;
+    ULONGLONG bytes = 0;
+    int files = 0;
+};
+bool MftFindDirs(const std::wstring& query, size_t max, std::vector<FoundDir>& out, ULONGLONG* age = nullptr);
+void MftSearchForget(ULONGLONG idleMs);  // выбросить индекс поиска, если им не пользовались дольше idleMs
 // В процессе с правами: таблица тома, где лежит dir, - в файл кэша; ответ - строка «@mftok» или «@mftfail»
 std::wstring MftAdminMain(const std::wstring& dir);
 

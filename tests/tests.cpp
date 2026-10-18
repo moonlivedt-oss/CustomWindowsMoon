@@ -448,6 +448,16 @@ void TestMftIndex() {
             if (a[i].name != b[i].name || a[i].bytes != b[i].bytes || a[i].files != b[i].files) same = false;
     }
     CHECK(same);
+    // поиск папок по имени (И8): начало имени раньше середины, раскладка не важна, ссылки не ищутся
+    std::vector<std::wstring> low = md::LowerNames(ix);
+    auto found = md::FindDirs(ix, low, L"зфп", 10);  // «Загрузки» в английской раскладке - нет такого
+    CHECK(found.empty());
+    found = md::FindDirs(ix, low, L"pfuh", 10);  // «загр» набрано в английской раскладке
+    CHECK(found.size() == 1 && md::PathOf(ix, found[0], L"C:") == L"C:\\Users\\Moon\\Загрузки");
+    found = md::FindDirs(ix, low, L"S", 10);  // System32 начинается с s; в Users и Windows s внутри, Users больше
+    CHECK(found.size() == 3 && ix.rows[found[0]].name == L"System32" && ix.rows[found[1]].name == L"Users");
+    CHECK(md::FindDirs(ix, low, L"ссыл", 10).empty());
+    CHECK(md::PathOf(ix, ix.byRec.at(5), L"D:") == L"D:\\");
     CHECK(md::Slice(ix, 5).size() == 4);  // корень (сам себе родитель - один раз), Users, Windows, Ссылка
     CHECK(md::Slice(ix, 999).empty());
     CHECK(!md::IndexTable(text.substr(0, text.size() - 2), ix));

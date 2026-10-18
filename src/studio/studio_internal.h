@@ -241,6 +241,8 @@ enum Id {
     ID_AID = 16000,          // +поле: «Помощники» (studio_aids.cpp)
     ID_SET_NEW = 16490,      // «Программы»: новый рабочий набор
     ID_SET = 16500,          // +набор*100 + поле (studio_apps.cpp)
+    ID_TOOLS_FIND = 18590,   // «Диски»: поиск папки по таблице MFT
+    ID_TOOLS_FOUND = 18600,  // +i*2: «Посчитать» и «Открыть» у найденной папки
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
     ID_TOOLS_ROW = 8100,     // +запись*4: кнопки у записи PATH
@@ -613,6 +615,10 @@ private:
     std::vector<tools::Locker> toolsLockers_;
     bool toolsLockChecked_ = false, toolsJunkAsked_ = false, toolsShowSys_ = false;
     std::wstring toolsAddPath_, toolsEnvName_, toolsEnvValue_, toolsScanPath_, toolsLockPath_;
+    std::wstring toolsFind_;  // поиск папки по таблице MFT (И8)
+    std::vector<tools::FoundDir> toolsFound_;
+    ULONGLONG toolsFindAge_ = 0;
+    bool toolsFindAny_ = true;                     // таблицы MFT вообще есть
     std::shared_ptr<std::atomic<int>> boostTask_;  // задача очистки: 0 нет, 1 есть, 2 создаётся; общая с потоком
     std::wstring boostDir_;
     bool boostPurge_ = true;

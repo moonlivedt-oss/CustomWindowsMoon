@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cwctype>
 
+#include "core/fuzzy.h"
 #include "core/text.h"
 #include "tools/mft_detail.h"
 
@@ -275,6 +277,62 @@ std::vector<DirRow> Slice(const TableIndex& ix, ULONGLONG rec) {
         for (size_t i : k->second)
             if (ix.rows[i].rec != rec) out.push_back(ix.rows[i]);  // корень тома - сам себе родитель
     return out;
+}
+
+std::vector<std::wstring> LowerNames(const TableIndex& ix) {
+    std::vector<std::wstring> out;
+    out.reserve(ix.rows.size());
+    for (const DirRow& r : ix.rows) { out.push_back(Lower(r.name)); }
+    return out;
+}
+
+std::vector<size_t> FindDirs(const TableIndex& ix, const std::vector<std::wstring>& lower, const std::wstring& query,
+                             size_t max) {
+    std::wstring q = Lower(query);
+    std::vector<size_t> out;
+    if (q.empty() || lower.size() != ix.rows.size()) return out;
+    std::wstring q2 = fuzzy::OtherLayout(q);
+    auto score = [](const std::wstring& n, const std::wstring& s) {
+        size_t at = n.find(s);
+        if (at == std::wstring::npos) return -1;
+        if (at == 0) return 0;
+        for (; at != std::wstring::npos; at = n.find(s, at + 1)) {
+            wchar_t p = n[at - 1];
+            if (p == L' ' || p == L'-' || p == L'_' || p == L'.' || p == L'(') return 1;
+        }
+        return 2;
+    };
+    std::vector<std::pair<int, size_t>> hits;
+    for (size_t i = 0; i < lower.size(); ++i) {
+        if (ix.rows[i].rec == kRootRecord || ix.rows[i].reparse) continue;
+        int a = score(lower[i], q), b = q2 == q ? -1 : score(lower[i], q2);
+        int s = a < 0 ? b : (b < 0 ? a : std::min(a, b));
+        if (s >= 0) hits.push_back({s, i});
+    }
+    std::sort(hits.begin(), hits.end(), [&](const auto& x, const auto& y) {
+        if (x.first != y.first) return x.first < y.first;
+        return ix.rows[x.second].total > ix.rows[y.second].total;
+    });
+    for (size_t i = 0; i < hits.size() && i < max; ++i) out.push_back(hits[i].second);
+    return out;
+}
+
+std::wstring PathOf(const TableIndex& ix, size_t row, const std::wstring& root) {
+    std::vector<const std::wstring*> parts;
+    size_t cur = row;
+    for (int guard = 0; guard < 512; ++guard) {
+        const DirRow& r = ix.rows[cur];
+        if (r.rec == kRootRecord) {
+            std::wstring p = root;
+            for (auto it = parts.rbegin(); it != parts.rend(); ++it) p += L"\\" + **it;
+            return parts.empty() ? root + L"\\" : p;
+        }
+        parts.push_back(&r.name);
+        auto up = ix.byRec.find(r.parent);
+        if (up == ix.byRec.end()) return L"";
+        cur = up->second;
+    }
+    return L"";
 }
 
 bool LooseMatch(int mftFiles, ULONGLONG mftBytes, int listFiles, ULONGLONG listBytes) {

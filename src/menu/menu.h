@@ -37,6 +37,8 @@ public:
     // Командная палитра: целое кольцо у курсора, сразу ждёт ввода; ищет по кольцам краёв и по extra (действия
     // утилит и сети - special 3 с ключом, разделы студии, окна - special 2, команды программы).
     void ShowPalette(const Config* cfg, std::vector<Item> extra, POINT cursor, const RECT& work, UINT dpi);
+    // палитра: пункты по самому запросу (папки из таблицы MFT) - дописываются после найденного в кольцах
+    std::function<std::vector<Item>(const std::wstring& query)> paletteQuery;
     void Close();
     bool IsOpen() const { return open_; }
     void Guard();  // раз в секунду: закрытое кольцо не остаётся видимым, оборванное угасание доводится до конца

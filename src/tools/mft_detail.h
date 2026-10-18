@@ -87,6 +87,13 @@ bool IndexTable(const std::string& text, TableIndex& ix);
 // Папка rec и её дети - то же, что ParseTable(text, rec), но из индекса.
 std::vector<DirRow> Slice(const TableIndex& ix, ULONGLONG rec);
 
+// Поиск папок по имени (И8): лучшие max строк - совпало начало имени, начало слова, где-то внутри (раскладка RU/EN
+// не важна); при равенстве - что больше по размеру. lower - имена строк в нижнем регистре (LowerNames, один раз).
+std::vector<std::wstring> LowerNames(const TableIndex& ix);
+std::vector<size_t> FindDirs(const TableIndex& ix, const std::vector<std::wstring>& lower, const std::wstring& query,
+                             size_t max);
+// Полный путь строки: «C:\Users\...» (root - «C:»); пусто - цепочка родителей оборвалась.
+std::wstring PathOf(const TableIndex& ix, size_t row, const std::wstring& root);
 // Сверка «файлы прямо в папке»: MFT против списка папки. Число файлов должно совпасть. Байты: MFT видит настоящий
 // размер открытых растущих файлов (журналы в System32\LogFiles\WMI), а список папки - отстающий, поэтому MFT больше
 // списка - норма; меньше - только в пределах допуска (файл дописался уже после чтения таблицы): 1% и мегабайт.
