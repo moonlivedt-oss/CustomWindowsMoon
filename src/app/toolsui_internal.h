@@ -31,6 +31,7 @@ constexpr UINT kSecTag = 0x5E;  // wParam у WM_TOOLS_JOB: проверка за
 constexpr int kDdcDays = 30, kIdleDays = 60;
 constexpr UINT kWatchTag = 0x5F;   // wParam у WM_TOOLS_JOB: новый снимок слежки
 constexpr UINT kWeeklyTag = 0x57;  // wParam у WM_TOOLS_JOB: итог недельной проверки
+constexpr UINT kLeftTag = 0x5B;    // wParam у WM_TOOLS_JOB: задание, брошенное по «Стоп», доработало (LeftMsg)
 constexpr UINT kSelfTag = 0x5C;    // wParam у WM_TOOLS_JOB: часовой снимок своей памяти (SelfMsg)
 constexpr UINT kDiskTag = 0x5D;    // wParam у WM_TOOLS_JOB: карточка «Мало места» собрана
 

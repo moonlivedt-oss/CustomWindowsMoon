@@ -10,6 +10,7 @@
 #include <chrono>
 #include <mutex>
 
+#include "core/bg.h"
 #include "core/elevate.h"
 #include "core/perf.h"
 #include "core/text.h"
@@ -145,6 +146,8 @@ namespace {
 std::wstring g_leftHead;    // «#run <метка>» брошенного задания
 ULONGLONG g_leftUntil = 0;  // до когда его ждать (его собственный тайм-аут)
 
+std::function<void(Job, bool, const std::wstring&)> g_onLeftDone;  // SetLeftDone
+
 bool Stopped(const std::atomic<bool>* cancel) { return cancel && cancel->load(); }
 
 // Ждать «#done» задания с меткой head; строки журнала - в log (если он есть). 1 - готово успешно, 0 - готово с
@@ -170,7 +173,29 @@ int WaitDone(const std::wstring& head, ULONGLONG until, const Log* log, const st
     return -1;
 }
 
+// Брошенное по «Стоп» задание: дождаться его «#done» в фоне и сказать итог (последняя строка журнала - что было)
+void WatchLeft(Job j, const std::wstring& head, ULONGLONG until) {
+    bg::Run(
+        [j, head, until] {
+            std::wstring last;
+            Log keep = [&](const std::wstring& s) {
+                if (s.rfind(L"@", 0) != 0) last = s;  // строки хода и служебные - не итог
+            };
+            int r = -1;
+            bool ok = false;
+            // кусками по 5 с: при выходе из программы bg::Quit не ждёт до конца DISM
+            while (r == -1 && !bg::Quitting() && GetTickCount64() < until) {
+                last.clear();
+                r = WaitDone(head, std::min(until, GetTickCount64() + 5000), &keep, nullptr, ok);
+            }
+            if (r >= 0 && g_onLeftDone) g_onLeftDone(j, ok, last);
+        },
+        THREAD_PRIORITY_LOWEST);
+}
+
 }  // namespace
+
+void SetLeftDone(std::function<void(Job, bool, const std::wstring&)> fn) { g_onLeftDone = std::move(fn); }
 
 bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* cancel) {
     if (j < 0 || j >= kJobs) return false;
@@ -238,7 +263,8 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* can
         case -2:
             g_leftHead = head;  // под замком one: следующее задание дождётся этого
             g_leftUntil = until;
-            log(L"Остановлено: само задание с правами доработает в фоне, его итог уже не жду.");
+            log(L"Остановлено: само задание с правами доработает в фоне, когда закончит - скажу.");
+            if (g_onLeftDone) WatchLeft(j, head, until);
             return false;
         case -1:
             log(L"Задача с правами не ответила вовремя.");
