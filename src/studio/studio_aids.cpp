@@ -89,6 +89,23 @@ void Studio::AidsPage(const RectF& r) {
                   L"его не заменили. Что менеджеры паролей помечают «не для истории» - не трогаю.",
                   c.faint);
     });
+    cols.Card(L"Окна: раскладка и Alt + мышь", 3.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Alt + мышь: тащить и размер");
+        toggle(rr, ID_AID + 7, cfg.winDrag);
+        rr = cols.Row(b, 1, L"Кольцо «Раскладка» на угол", 0.6f);
+        bool onCorner = false;
+        for (int i = 0; i < 4; ++i) onCorner |= cfg.corners[i] == L"layout" || cfg.corners2[i] == L"layout";
+        if (ui.Button(ID_AID + 8, RectF(rr.GetRight() - ui.S(170), rr.Y + ui.S(4), ui.S(170), ui.S(36)),
+                      onCorner ? L"Уже на углу" : L"Выбрать угол", Kind::Secondary))
+            Defer([this] { GoPage(PAGE_DESK); });
+        cols.Note(b, 2.0f,
+                  L"Тащить окно можно за любое место, развёрнутое встаёт обычным под курсором; размер тянется "
+                  L"ближним краем или углом. Не в играх, окнах без рамки и там, где Alt + мышь - своя камера (Unreal, "
+                  L"Blender, Maya, 3ds Max, Houdini, ZBrush, Krita, Photoshop, Unity, Godot). Кольцо «Раскладка» "
+                  L"(угол layout или пункт action:layout, строки «Окно:» в палитре): половины, трети, четверти, "
+                  L"середина и несколько последних окон монитора рядом, колонками, «главное и два», четвертями.",
+                  c.faint);
+    });
     pageContentH_ = cols.Height();
     ui.G().Restore(st);
 }

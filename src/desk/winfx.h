@@ -12,6 +12,9 @@ struct Config;
 // Alt + колесо над верхней полосой окна - прозрачность, Alt + средняя кнопка там же - закрепить
 // поверх остальных. Закреплённое окно получает рамку цвета темы. Рядом с окном всплывает
 // подсказка с уровнем. При выходе программы все окна возвращаются как были.
+// Alt + левая кнопка в любом месте окна - тащить окно, Alt + правая - менять размер (тянется ближний край или угол,
+// как в KDE). Не в играх, не в окнах на весь экран и не в программах, где Alt + мышь - своё управление камерой
+// (Unreal, Blender, Maya, 3ds Max, Houdini, Substance, ZBrush, Krita, Photoshop).
 class WindowFx {
 public:
     void Create(HINSTANCE inst);
@@ -24,6 +27,7 @@ public:
     void Destroy();   // вернуть все окна как было
     void ResetAll();  // то же, но программа продолжает работать
     void TogglePin(HWND w);
+    void SetBlocked(bool on);  // кольцо открыто или игра: Alt + мышь не трогаем
 
 private:
     struct State {
@@ -42,6 +46,14 @@ private:
 
     HWND wnd_ = nullptr;
     bool enabled_ = true;
+    // Alt + мышь: окно, рамка в начале, где нажали, какие края тянуть (zones::ResizeEdges)
+    HWND dragWin_ = nullptr;
+    RECT dragFrom_{};
+    POINT dragAt_{};
+    bool dragSize_ = false;
+    int dragEx_ = 2, dragEy_ = 2;
+    void DragBegin(HWND w, POINT at, bool size);
+    void DragMove(POINT pt);
     ThemeInfo theme_{};
     std::map<HWND, State> states_;
     // подсказка
