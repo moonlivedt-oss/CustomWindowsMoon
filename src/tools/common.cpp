@@ -626,6 +626,32 @@ int DaysLeft(const std::vector<FreePoint>& ptsIn, double* perDay) {
     return (int)std::min(3650.0, now / -slope);
 }
 
+// Системные гиганты (И11): здесь, а не в giants.cpp, - чтобы проверяли тесты.
+ULONGLONG ParseShadowUsed(const std::wstring& text) {
+    // vssadmin list shadowstorage: «Used Shadow Copy Storage space: 2.53 GB (0%)» или по-русски «Используемое ...:
+    // 2,53 GB (0%)» - первая строка с размером и процентом в скобках
+    for (const std::wstring& line : Split(text, L'\n')) {
+        size_t pct = line.find(L"%)"), colon = line.find(L':');
+        if (pct == std::wstring::npos || colon == std::wstring::npos || colon > pct) continue;
+        std::wstring v = Trim(line.substr(colon + 1));
+        double num = 0;
+        size_t i = 0;
+        std::wstring digits;
+        for (; i < v.size() && (iswdigit(v[i]) || v[i] == L'.' || v[i] == L',' || v[i] == L' ' || v[i] == 0xA0); ++i)
+            if (v[i] != L' ' && v[i] != 0xA0) digits += v[i] == L',' ? L'.' : v[i];
+        if (digits.empty()) continue;
+        num = _wtof(digits.c_str());
+        std::wstring unit = Lower(Trim(v.substr(i, 3)));
+        double mul = 1;
+        if (unit.rfind(L"kb", 0) == 0 || unit.rfind(L"кб", 0) == 0) mul = 1024.0;
+        if (unit.rfind(L"mb", 0) == 0 || unit.rfind(L"мб", 0) == 0) mul = 1024.0 * 1024;
+        if (unit.rfind(L"gb", 0) == 0 || unit.rfind(L"гб", 0) == 0) mul = 1024.0 * 1024 * 1024;
+        if (unit.rfind(L"tb", 0) == 0 || unit.rfind(L"тб", 0) == 0) mul = 1024.0 * 1024 * 1024 * 1024;
+        return (ULONGLONG)(num * mul);
+    }
+    return 0;
+}
+
 std::wstring BigFileKeep(const std::wstring& path) {
     std::wstring l = Lower(path);
     if (l.size() < 4 || l[1] != L':' || l[2] != L'\\') return L"не полный путь";

@@ -211,6 +211,20 @@ void TestForecast() {
     CHECK(tools::DaysLeft(old) == -1);
 }
 
+void TestGiants() {
+    std::wstring en =
+        L"Shadow Copy Storage association\r\n   For volume: (C:)\\\\?\\Volume{1}\\\r\n"
+        L"   Used Shadow Copy Storage space: 2.53 GB (0%)\r\n   Allocated Shadow Copy Storage space: 3 GB (0%)\r\n"
+        L"   Maximum Shadow Copy Storage space: 23.7 GB (5%)\r\n";
+    ULONGLONG v = tools::ParseShadowUsed(en);
+    CHECK(v > 2716000000ull && v < 2717000000ull);  // 2,53 ГиБ
+    std::wstring ru =
+        L"   Используемое пространство для хранения теневой копии: 512 MB (0%)\r\n"
+        L"   Выделенное пространство: 1,5 GB (0%)\r\n";
+    CHECK(tools::ParseShadowUsed(ru) == 512ull << 20);
+    CHECK(tools::ParseShadowUsed(L"Нет элементов, удовлетворяющих запросу.") == 0);
+}
+
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int)) {
@@ -222,4 +236,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestZones();
     TestBigFiles();
     TestForecast();
+    TestGiants();
 }

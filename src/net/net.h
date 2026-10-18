@@ -127,6 +127,7 @@ enum Job {
     JOB_VHD_COMPACT,       // место: сжать диски WSL и Docker
     JOB_SYS_CLEAN,         // место: кэш Delivery Optimization и старые версии компонентов (DISM, без ResetBase)
     JOB_MFT_SIZES,         // место: размеры папок чтением MFT (только чтение; папка - в HKCU MftDir)
+    JOB_GIANTS,            // место: системные гиганты (действие - в HKCU GiantJob, только из списка giants.cpp)
     kJobs
 };
 bool AdminReady();  // задача есть

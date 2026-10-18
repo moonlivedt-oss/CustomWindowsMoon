@@ -951,6 +951,52 @@ void Studio::ToolsPage(const RectF& r) {
                 ui.Text(L"Размеры - на момент таблицы (" + std::to_wstring(toolsFindAge_ / 60) + L" мин назад)",
                         RectF(b.X, y + found * lineH, b.Width, lineH), c.faint, 10.5f);
         });
+        // системные гиганты (И11)
+        std::vector<tools::Giant> giants = toolsui::Giants();
+        bool hiber = false;
+        for (const tools::Giant& g : giants) hiber |= g.key == L"hiber";
+        if (toolsui::GiantsCounting() && giants.empty()) RepaintIn(500);
+        wide(L"Системные гиганты", rowsFor(giants.size()) * 1.9f + 1.6f, [&](const RectF& b) {
+            float y = b.Y, rh = lineH * 1.9f;
+            if (giants.empty())
+                ui.Text(toolsui::GiantsCounting() ? L"Считаю..."
+                                                  : L"Ничего крупного: гибернация выключена, прошлой "
+                                                    L"Windows нет.",
+                        RectF(b.X, y, b.Width, lineH), c.muted, 11.5f);
+            for (size_t i = 0; i < giants.size(); ++i) {
+                const tools::Giant& g = giants[i];
+                float yy = y + i * rh;
+                ui.Text(g.name, RectF(b.X, yy, b.Width * 0.5f, ui.S(22)), c.text, 12.5f, true);
+                std::wstring size =
+                    !g.exact && !g.bytes
+                        ? std::wstring(L"размер - с правами")
+                        : (g.exact || g.path.find(L".sys") != std::wstring::npos ? L"" : L"не меньше ") +
+                              tools::Bytes(g.bytes);
+                ui.Text(size, RectF(b.X + b.Width - ui.S(390), yy, ui.S(150), ui.S(22)), c.gold, 12, true, ui::Right);
+                ui.Text(g.why, RectF(b.X, yy + ui.S(22), b.Width - ui.S(230), rh - ui.S(24)), c.faint, 10.5f, false,
+                        ui::Left, true);
+                static const std::map<std::wstring, std::wstring> kLabel = {
+                    {L"hiber-off", L"Выключить"},         {L"old-windows", L"Убрать"},
+                    {L"shadow-shrink", L"Ограничить 5%"}, {L"sys-clean", L"Остатки обнов."},
+                    {L"page-open", L"Настроить"},         {L"cleanmgr", L"Очистка диска"}};
+                auto lab = kLabel.find(g.action);
+                if (lab != kLabel.end() &&
+                    ui.Button(ID_TOOLS_GIANT + (int)i, RectF(b.X + b.Width - ui.S(220), yy, ui.S(220), ui.S(30)),
+                              lab->second) &&
+                    !busy) {
+                    std::wstring k = g.key;
+                    Defer([k] { toolsui::GiantAct(k); });
+                }
+            }
+            float yb = y + std::max<size_t>(giants.size(), 1) * rh + ui.S(4);
+            if (ui.Button(ID_TOOLS_GIANT + 40, RectF(b.X, yb, ui.S(220), ui.S(34)), L"Точно, с правами") && !busy)
+                Defer([] { toolsui::GiantsMeasure(); });
+            if (!hiber && !toolsui::GiantsCounting() &&
+                ui.Button(ID_TOOLS_GIANT + 41, RectF(b.X + ui.S(230), yb, ui.S(220), ui.S(34)),
+                          L"Вернуть гибернацию") &&
+                !busy)
+                Defer([] { toolsui::GiantAct(L"hiber", true); });
+        });
         // большие файлы томов (И9): список кладёт задача с правами при подсчёте по MFT
         if (GetTickCount64() - toolsBigAt_ > 5000) {
             toolsBigAt_ = GetTickCount64();

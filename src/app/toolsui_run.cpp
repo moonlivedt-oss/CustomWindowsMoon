@@ -294,6 +294,8 @@ void Run(const std::wstring& key) {
         });
         return;
     }
+    if (key.rfind(L"giant:", 0) == 0) return GiantAct(key.substr(6));
+    if (key == L"giants-measure") return GiantsMeasure();
     if (key == L"net-top" || key == L"power") {
         bool top = key == L"net-top";
         if (!net::AdminReady()) {

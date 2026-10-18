@@ -120,6 +120,21 @@ std::vector<BigFile> BigFiles(ULONGLONG* age = nullptr);
 // Можно ли большой файл отдать в Корзину: пусто - можно, иначе почему нет (системный, программа, файл подкачки...).
 // Только по пути - одно правило для студии и RadialTools (тот ещё смотрит атрибуты).
 std::wstring BigFileKeep(const std::wstring& path);
+
+// Системные гиганты (И11, giants.cpp): hiberfil, подкачка, Windows.old, точки восстановления, загрузки обновлений,
+// дампы. action - что предложить: hiber-off, old-windows, shadow-shrink (задача с правами), sys-clean («Остатки
+// обновлений»), page-open, cleanmgr (открыть окно Windows); undo - обратное действие (hiber-on).
+struct Giant {
+    std::wstring key, name, path, why, action, undo;
+    ULONGLONG bytes = 0;
+    bool exact = false;  // размер из замера с правами (иначе - что видно без прав, папки могут быть больше)
+};
+// exact - размеры из последнего замера с правами (ключ -> байты)
+std::vector<Giant> SystemGiants(const std::map<std::wstring, ULONGLONG>& exact = {});
+ULONGLONG ParseShadowUsed(const std::wstring& vssadminOutput);  // «Used Shadow Copy Storage space: 2.53 GB (0%)»
+// В процессе с правами: job - read (строки «@giant<TAB>ключ<TAB>байт»), hiber-off, hiber-on, shadow-shrink,
+// old-windows; другое не выполняется. Пусто - не получилось.
+std::wstring GiantsAdminMain(const std::wstring& job, const Log& log);
 int RecycleBig(const std::wstring& path, const Log& log);  // через RadialTools.exe recycle-big  // выбросить индекс
                                                            // поиска, если им не пользовались дольше idleMs
 // В процессе с правами: таблица тома, где лежит dir, - в файл кэша; ответ - строка «@mftok» или «@mftfail»
