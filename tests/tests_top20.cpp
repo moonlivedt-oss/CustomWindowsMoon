@@ -187,6 +187,30 @@ void TestBigFiles() {
     CHECK(!tools::BigFileKeep(L"relative\\path.bin").empty());
 }
 
+void TestForecast() {
+    constexpr ULONGLONG GB = 1ull << 30;
+    std::vector<tools::FreePoint> pts;
+    for (int d = 0; d < 10; ++d) pts.push_back({1000 + d, 100 * GB - d * 4 * GB});  // -4 ГБ в сутки, сейчас 64 ГБ
+    double per = 0;
+    CHECK(tools::DaysLeft(pts, &per) == 16);
+    CHECK(per > 3.9 * GB && per < 4.1 * GB);
+    // место прибавилось (чистка) - не убывает
+    std::vector<tools::FreePoint> up = {{1, 50 * GB}, {2, 49 * GB}, {3, 80 * GB}, {4, 80 * GB}};
+    CHECK(tools::DaysLeft(up) == -1);
+    // мало замеров или все за два дня
+    CHECK(tools::DaysLeft({{1, 10 * GB}, {2, 5 * GB}}) == -1);
+    CHECK(tools::DaysLeft({{1, 10 * GB}, {1, 9 * GB}, {2, 5 * GB}}) == -1);
+    // убывает медленно (100 МБ в сутки) - не тревожим
+    std::vector<tools::FreePoint> slow;
+    for (int d = 0; d < 7; ++d) slow.push_back({d, 50 * GB - d * (100ull << 20)});
+    CHECK(tools::DaysLeft(slow) == -1);
+    // старые замеры (старше 21 дня) не в счёт: тогда убывало, теперь стоит
+    std::vector<tools::FreePoint> old;
+    for (int d = 0; d < 10; ++d) old.push_back({d, 200 * GB - d * 10 * GB});
+    for (int d = 40; d < 50; ++d) old.push_back({d, 60 * GB});
+    CHECK(tools::DaysLeft(old) == -1);
+}
+
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int)) {
@@ -197,4 +221,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestSecrets();
     TestZones();
     TestBigFiles();
+    TestForecast();
 }

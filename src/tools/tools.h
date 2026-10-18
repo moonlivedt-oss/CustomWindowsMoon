@@ -225,6 +225,25 @@ void RecordSizes(const std::vector<std::pair<std::wstring, std::wstring>>& nameP
                  const std::vector<ULONGLONG>& bytes);  // имя и путь -> размер, на сегодня
 std::vector<Growth> WeekGrowth(int days = 7);           // что выросло сильнее всего (по убыванию)
 
+// Прогноз места (И10): свободное место томов раз в день (free.tsv, 60 дней) и через сколько дней оно кончится при
+// нынешнем темпе - прямая по замерам последних 21 дня (метод наименьших квадратов).
+struct FreePoint {
+    int day = 0;
+    ULONGLONG free = 0;
+};
+// Дней до нуля; -1 - место не убывает (медленнее 200 МБ в сутки) или замеров мало (нужно 3 за 3+ дня). perDay - на
+// сколько байт в сутки убывает.
+int DaysLeft(const std::vector<FreePoint>& pts, double* perDay = nullptr);
+struct Forecast {
+    std::wstring root;  // «C:\»
+    ULONGLONG free = 0;
+    int days = -1;
+    double perDay = 0;
+};
+void RecordFree();                             // сегодняшний замер всех несъёмных томов (заменяет прежний за сегодня)
+std::vector<Forecast> SpaceForecast();         // по каждому тому из free.tsv
+std::wstring ForecastText(const Forecast& f);  // «C: закончится примерно через 23 дня (-4,1 ГБ в сутки)»
+
 // ---------------- действия через RadialTools.exe ----------------
 // Удаление и завершение процессов живут в отдельном RadialTools.exe рядом с
 // основным: постоянно работающий RadialMenu.exe сам ничего не удаляет и чужие

@@ -212,6 +212,7 @@ void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
             bytes.push_back(tools::DirBytes(f));
         }
         tools::RecordSizes(names, bytes);
+        tools::RecordFree();  // прогноз места (И10)
     }
     s.growth = proj ? tools::WeekGrowth(7) : prev.growth;
     CoInitializeEx(nullptr,
@@ -1049,8 +1050,20 @@ std::wstring DiskAdvice(const std::wstring& root) {
         parts.push_back(L"сборки давних проектов - " + tools::Bytes(idle) + L" (" + list + L")");
     }
     std::wstring out;
+    // прогноз (И10): через сколько дней кончится и что растёт быстрее всего
+    for (const tools::Forecast& f : tools::SpaceForecast())
+        if (onDisk(f.root) && f.days >= 0 && f.days <= 365) {
+            out = L"При нынешнем темпе " + tools::ForecastText(f).substr(3) + L".";
+            for (const tools::Growth& g : s.growth)
+                if (onDisk(g.path) && g.delta > (LONGLONG)kWorth) {
+                    out += L" Быстрее всего растёт " + g.name + L" (+" + tools::Bytes((ULONGLONG)g.delta) +
+                           L" за неделю).";
+                    break;
+                }
+            out += L" ";
+        }
     if (!parts.empty()) {
-        out = L"Можно освободить: ";
+        out += L"Можно освободить: ";
         for (size_t i = 0; i < parts.size(); ++i) out += (i ? L"; " : L"") + parts[i];
         out += L".";
     }

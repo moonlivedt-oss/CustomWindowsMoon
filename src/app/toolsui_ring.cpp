@@ -566,6 +566,19 @@ std::vector<Item> RingItems(std::wstring& status) {
     }
     disks.children.push_back(
         Act(L"Здоровье", L"tools-health.png", L"health", L"Износ, температура и часы работы SSD; раз в неделю - сам"));
+    // прогноз места (И10): только если место заметно убывает
+    for (const tools::Forecast& f : tools::SpaceForecast()) {
+        if (f.days < 0 || f.days > 180) continue;
+        std::wstring fast;
+        for (const tools::Growth& g : scan.growth)
+            if (g.path.size() >= 2 && _wcsnicmp(g.path.c_str(), f.root.c_str(), 2) == 0 && g.delta > 0) {
+                fast = L" Быстрее всего растёт " + g.name + L": +" + tools::Bytes((ULONGLONG)g.delta) + L" за неделю.";
+                break;
+            }
+        disks.children.push_back(Act(f.root.substr(0, 2) + L" на " + std::to_wstring(f.days) + L" дн.",
+                                     Have(L"tools-forecast.png", L"tools-disk.png"), L"scan:" + f.root,
+                                     tools::ForecastText(f) + L"." + fast + L" 2 клика - что занимает место"));
+    }
     for (size_t i = 0, shown = 0; i < scan.growth.size() && shown < 3; ++i) {
         const tools::Growth& g = scan.growth[i];
         if (g.delta < 200ll * 1024 * 1024) break;

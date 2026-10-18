@@ -122,6 +122,56 @@ std::vector<Growth> WeekGrowth(int days) {
     return out;
 }
 
+// ---------------- прогноз места ----------------
+// free.tsv: день<TAB>том<TAB>свободно байт; на день и том - одна строка, 60 дней.
+
+void RecordFree() {
+    std::wstring file = DataDir() + L"\\free.tsv";
+    int today = Today();
+    std::vector<Volume> vols = Volumes();
+    std::map<std::wstring, bool> fresh;
+    for (const Volume& v : vols)
+        if (v.type == DRIVE_FIXED && v.total) fresh[Lower(v.root)] = true;
+    std::vector<std::wstring> keep;
+    for (const std::wstring& l : ReadLines(file)) {
+        std::vector<std::wstring> p = Tabs(l);
+        if (p.size() < 3) continue;
+        int day = _wtoi(p[0].c_str());
+        if (day < today - 60 || (day == today && fresh.count(Lower(p[1])))) continue;
+        keep.push_back(l);
+    }
+    for (const Volume& v : vols)
+        if (v.type == DRIVE_FIXED && v.total)
+            keep.push_back(std::to_wstring(today) + L"\t" + v.root + L"\t" + std::to_wstring(v.free));
+    WriteLines(file, keep);
+}
+
+std::vector<Forecast> SpaceForecast() {
+    std::map<std::wstring, std::vector<FreePoint>> byVol;
+    for (const std::wstring& l : ReadLines(DataDir() + L"\\free.tsv")) {
+        std::vector<std::wstring> p = Tabs(l);
+        if (p.size() < 3) continue;
+        byVol[p[1]].push_back({_wtoi(p[0].c_str()), _wcstoui64(p[2].c_str(), nullptr, 10)});
+    }
+    std::vector<Forecast> out;
+    for (auto& [root, pts] : byVol) {
+        std::sort(pts.begin(), pts.end(), [](const FreePoint& a, const FreePoint& b) { return a.day < b.day; });
+        Forecast f;
+        f.root = root;
+        f.free = pts.back().free;
+        f.days = DaysLeft(pts, &f.perDay);
+        out.push_back(f);
+    }
+    return out;
+}
+
+std::wstring ForecastText(const Forecast& f) {
+    std::wstring d = f.root.substr(0, 2);
+    if (f.days < 0) return d + L" не убывает";
+    return d + L" закончится примерно через " + Plural(std::max(1, f.days), L"день", L"дня", L"дней") + L" (-" +
+           Bytes((ULONGLONG)f.perDay) + L" в сутки)";
+}
+
 // ---------------- здоровье SSD ----------------
 // health.tsv: имя<TAB>износ<TAB>температура<TAB>состояние - прошлый замер для сравнения.
 
