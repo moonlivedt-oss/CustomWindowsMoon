@@ -944,10 +944,19 @@ std::vector<Item> RingItems(std::wstring& status) {
                                       Act(L"Большие файлы", Have(L"tools-bigfiles.png", L"tools-disk.png"), L"studio:1",
                                           L"Самый большой: " + Leaf(big[0].path) + L", " + tools::Bytes(big[0].bytes) +
                                               L". Щелчок - список в студии с «Показать» и «В Корзину»"));
+    // тихий баланс (И12): кого сейчас придержали - вернуть одним щелчком
+    std::vector<std::wstring> low = BalanceLowered();
+    std::wstring lowNames;
+    for (const std::wstring& n : low) lowNames += (lowNames.empty() ? L"" : L", ") + NoExe(n);
     groups.push_back(group(L"Память", Have(L"grp-memory.png", L"tools-mem.png"),
                            L"Процессы, фон, автозагрузка. " + ring[PROCS].note, {PROCS, BG, STARTS}, 4,
                            L"Колба памяти (слои программ, утечки, подкачка) и батарея (ветки к фоновым программам) в "
                            L"студии"));
+    if (!low.empty())
+        groups.back().children.insert(
+            groups.back().children.end() - 1,
+            Act(L"Баланс: " + std::to_wstring(low.size()), Have(L"tools-balance.png", L"tools-procs.png"),
+                L"balance-restore", L"Придержан приоритет: " + lowNames + L". 2 клика - вернуть всем обычный"));
     groups.push_back(group(L"Разработка", Have(L"grp-dev.png", L"tools-git.png"),
                            L"Git, PATH, порты, терминал, кто держит файл. " + ring[GIT].note,
                            {GIT, PATH, PORTS, TERM, LOCK}, 0, L"PATH и переменные, порты, версии в студии"));

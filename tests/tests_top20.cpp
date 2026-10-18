@@ -11,6 +11,7 @@
 #include "core/secrets.h"
 #include "core/stroke.h"
 #include "desk/zones.h"
+#include "tools/guard.h"
 #include "tools/mft_detail.h"
 #include "tools/tools.h"
 
@@ -225,6 +226,59 @@ void TestGiants() {
     CHECK(tools::ParseShadowUsed(L"Нет элементов, удовлетворяющих запросу.") == 0);
 }
 
+void TestGuard() {
+    CHECK(guard::Match(L"CMake.exe", L"ninja.exe|cmake.exe") && guard::Match(L"UE4Editor.exe", L"*Editor.exe"));
+    CHECK(!guard::Match(L"cmd.exe", L"cmake.exe|"));
+    // баланс: 8 ядер, фоновый процесс ест 4 ядра (50%) - через 90 с понижается, не раньше
+    guard::Balancer b;
+    std::vector<guard::Balancer::Act> lo, re;
+    auto at = [](ULONGLONG ms, ULONGLONG cpu, DWORD pid = 10) {
+        guard::Proc p;
+        p.pid = pid, p.name = L"hog.exe", p.created = 5, p.cpu = cpu;
+        return std::vector<guard::Proc>{p};
+    };
+    ULONGLONG cpu = 0;
+    std::set<DWORD> none;
+    for (ULONGLONG t = 0; t <= 80000; t += 10000, cpu += 4 * 10000 * 10000ull)
+        b.Feed(t, at(t, cpu), 8, true, none, lo, re);
+    CHECK(lo.empty());
+    for (ULONGLONG t = 90000; t <= 100000; t += 10000, cpu += 4 * 10000 * 10000ull)
+        b.Feed(t, at(t, cpu), 8, true, none, lo, re);
+    CHECK(lo.size() == 1 && lo[0].pid == 10 && lo[0].share > 0.45 && b.Lowered().size() == 1);
+    // пользователь ушёл - сразу вернуть
+    lo.clear();
+    b.Feed(110000, at(110000, cpu + 4 * 10000 * 10000ull), 8, false, none, lo, re);
+    CHECK(re.size() == 1 && b.Lowered().empty());
+    // защищённого (впереди, игра) не трогаем
+    guard::Balancer b2;
+    std::vector<guard::Balancer::Act> lo2, re2;
+    cpu = 0;
+    for (ULONGLONG t = 0; t <= 200000; t += 10000, cpu += 8 * 10000 * 10000ull)
+        b2.Feed(t, at(t, cpu), 8, true, {10}, lo2, re2);
+    CHECK(lo2.empty());
+    // «не спать»
+    guard::Proc a, c;
+    a.name = L"chrome.exe", c.name = L"ninja.exe";
+    CHECK(guard::KeepAwake({a, c}, L"cmake.exe|ninja.exe") == L"ninja.exe" &&
+          guard::KeepAwake({a}, L"ninja.exe").empty());
+    // долгие команды: cmake 5 минут, под ним ninja - сообщается только cmake; короткий git - нет
+    constexpr ULONGLONG kMin = 60ull * 10000000;  // минута в 100 нс
+    guard::LongWatch w;
+    guard::Proc term, cm, nj, git;
+    term.pid = 1, term.name = L"WindowsTerminal.exe", term.created = 1;
+    cm.pid = 2, cm.parent = 1, cm.name = L"cmake.exe", cm.created = 10 * kMin;
+    nj.pid = 3, nj.parent = 2, nj.name = L"ninja.exe", nj.created = 10 * kMin + 5;
+    git.pid = 4, git.parent = 1, git.name = L"git.exe", git.created = 11 * kMin;
+    const std::wstring masks = L"cmake.exe|ninja.exe|git.exe";
+    CHECK(w.Feed(11 * kMin, {term, cm, nj, git}, masks, 3 * 60000).empty() && w.Tracking() == 3);
+    auto done = w.Feed(12 * kMin, {term, cm, nj}, masks, 3 * 60000);  // git закончился через минуту - не долгий
+    CHECK(done.empty() && w.Tracking() == 2);
+    CHECK(w.Feed(14 * kMin, {term, cm, nj}, masks, 3 * 60000).empty());
+    done = w.Feed(15 * kMin, {term}, masks, 3 * 60000);  // cmake и ninja закончились; последний раз видели в 14 мин
+    CHECK(done.size() == 1 && done[0].name == L"cmake.exe" && done[0].ms == 4 * 60000);
+    CHECK(done.size() == 1 && done[0].ancestors == std::vector<DWORD>({1}));
+}
+
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int)) {
@@ -237,4 +291,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestBigFiles();
     TestForecast();
     TestGiants();
+    TestGuard();
 }

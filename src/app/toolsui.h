@@ -97,6 +97,11 @@ const wchar_t* FindKindIcon(tools::FindKind k);  // файл значка в ico
 // Системные гиганты (И11, toolsui_giants.cpp): hiberfil, подкачка, Windows.old, точки восстановления... Размеры
 // считаются в фоне (пусто, пока не посчитано); GiantsMeasure - точные размеры задачей с правами; GiantAct - действие
 // с вопросом (undo - обратное: вернуть гибернацию).
+// Сторожа процессов (И12-И14, toolsui_guard.cpp): что держит компьютер без сна (пусто - ничего), кому тихий
+// баланс понизил приоритет, вернуть всем обычный.
+std::wstring AwakeReason();
+std::vector<std::wstring> BalanceLowered();
+void BalanceRestoreAll();
 std::vector<tools::Giant> Giants();
 bool GiantsCounting();
 void GiantsMeasure();

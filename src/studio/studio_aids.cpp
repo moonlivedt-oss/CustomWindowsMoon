@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "app/palette.h"
+#include "app/toolsui.h"
 #include "core/files.h"
 #include "desk/cliphist.h"
 #include "core/text.h"
@@ -104,6 +105,65 @@ void Studio::AidsPage(const RectF& r) {
                   L"Blender, Maya, 3ds Max, Houdini, ZBrush, Krita, Photoshop, Unity, Godot). Кольцо «Раскладка» "
                   L"(угол layout или пункт action:layout, строки «Окно:» в палитре): половины, трети, четверти, "
                   L"середина и несколько последних окон монитора рядом, колонками, «главное и два», четвертями.",
+                  c.faint);
+    });
+    auto field = [&](const RectF& b, float row, int id, std::wstring& v, const wchar_t* ph) {
+        RectF fr(b.X, b.Y + row * cols.RowH(), b.Width, ui.S(36));
+        FieldOrText(
+            id, fr, view, v,
+            [this, id, &v](const std::wstring& s) {
+                FieldEdit(id);
+                v = s;
+            },
+            ph);
+    };
+    RepaintIn(2000);  // сторожа живут своей жизнью: строки «Сейчас» обновляются
+    cols.Card(L"Тихий баланс процессора", 3.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Придерживать фоновых обжор");
+        toggle(rr, ID_AID + 9, cfg.cpuBalance);
+        std::vector<std::wstring> low = toolsui::BalanceLowered();
+        std::wstring now;
+        for (const std::wstring& n : low) now += (now.empty() ? L"" : L", ") + n;
+        rr = cols.Row(b, 1, low.empty() ? L"Сейчас никто не понижен" : L"Понижены: " + now, 0.62f);
+        if (!low.empty() &&
+            ui.Button(ID_AID + 10, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
+                      L"Вернуть всем", Kind::Secondary))
+            toolsui::BalanceRestoreAll();
+        cols.Note(
+            b, 2.0f,
+            L"Как ProBalance: процесс не на переднем плане полторы минуты ест больше четверти процессора, пока вы "
+            L"работаете, - его приоритет «ниже обычного». Вернётся сам, когда успокоится, когда вы отойдёте или "
+            L"переключитесь на него. Системное, своё, игру, OBS и то, что из boost_keep_fast, не трогаю; в игре "
+            L"баланс спит (там свой Boost). Каждое действие - в журнале автоматики.",
+            c.faint);
+    });
+    cols.Card(L"Не спать, пока работает", 3.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Сборка, копирование, загрузка Steam");
+        toggle(rr, ID_AID + 11, cfg.noSleep);
+        field(b, 1, ID_AID + 12, cfg.noSleepApps, L"Имена exe через |");
+        std::wstring a = toolsui::AwakeReason();
+        cols.Row(b, 2, a.empty() ? L"Сейчас: ничего не идёт, сон как обычно" : L"Сейчас не сплю: идёт " + a, 0.95f);
+        cols.Note(b, 3.0f,
+                  L"Пока работает что-то из списка, компьютер не уходит в сон (экран гаснет как обычно). Причина - в "
+                  L"подсказке значка в трее.",
+                  c.faint);
+    });
+    cols.Card(L"Сторож долгих команд", 4.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Карточка «готово за N мин»");
+        toggle(rr, ID_AID + 13, cfg.longWatch);
+        rr = cols.Row(b, 1, L"Долгая - от " + Plural(cfg.longMin, L"минуты", L"минут", L"минут"), 0.5f);
+        int m = cfg.longMin;
+        if (ui.Slider(ID_AID + 14, RectF(rr.GetRight() - ui.S(170), rr.Y + ui.S(8), ui.S(170), ui.S(28)), m, 1, 30)) {
+            Change();
+            cfg.longMin = m;
+            Save();
+        }
+        field(b, 2, ID_AID + 15, cfg.longApps, L"Имена exe через |");
+        cols.Note(b, 3.0f,
+                  L"Сборка Unreal, шейдеры, упаковка, ninja, cmake, долгий git clone закончились - карточка «готово» "
+                  L"или «упало» с кодом выхода, если вы в это время в другом окне (в терминале, откуда запускали, - "
+                  L"молчу). Вложенные команды (ninja под cmake) не дублируются; сборки и шейдеры Unreal в режиме "
+                  L"разработки сообщает он сам.",
                   c.faint);
     });
     pageContentH_ = cols.Height();
