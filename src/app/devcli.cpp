@@ -28,6 +28,7 @@
 #include "desk/lockscreen.h"
 #include "desk/gameboost.h"
 #include "desk/minecraft.h"
+#include "desk/recent.h"
 #include "desk/modefx.h"
 #include "desk/ocr.h"
 #include "desk/startbg.h"
@@ -1041,6 +1042,25 @@ bool Run(int& exitCode) {
         exitCode = SecDiag();
     } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
         exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--recent-diag")) {  // недавние файлы и папки -> recent_out.txt
+        std::wstring s;
+        ULONGLONG t0 = GetTickCount64();
+        std::vector<recent::Entry> list = recent::List();  // первый вызов только запускает чтение в фоне
+        for (int i = 0; i < 100 && list.empty(); ++i) {
+            Sleep(50);
+            list = recent::List();
+        }
+        for (const recent::Entry& e : list) s += (e.dir ? L"[папка] " : L"") + e.path + L"\r\n";
+        s += L"(" + std::to_wstring(GetTickCount64() - t0) + L" мс)\r\n";
+        std::string u = Narrow(s);
+        HANDLE f =
+            CreateFileW((ExeDir() + L"\\recent_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        DWORD put = 0;
+        if (f != INVALID_HANDLE_VALUE) {
+            WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
+            CloseHandle(f);
+        }
+        exitCode = 0;
     } else if (Has(args, L"--sys-diag")) {  // восстановление, приватность, система, разработка -> sys_out.txt
         exitCode = SysDiag();
     } else if (Has(args, L"--watch-selftest")) {  // логика слежки на выдуманных данных -> selftest_out.txt

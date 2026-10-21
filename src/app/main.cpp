@@ -38,6 +38,7 @@
 #include "desk/boostcard.h"
 #include "desk/dropundo.h"
 #include "desk/gamepad.h"
+#include "desk/recent.h"
 #include "desk/boostpick.h"
 #include "desk/corners.h"
 #include "desk/cursor.h"
@@ -1780,6 +1781,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         for (Item& it : layout::Items(L"z|")) out.push_back(std::move(it));
     });
     palette::AddRunner(L"z|", [](const std::wstring& key) { layout::Run(key); });
+    recent::Init(&g_cfg);
+    corners::SetRecent([] { recent::ShowRing(g_menu); });
+    palette::AddSource([](std::vector<Item>& out) {
+        for (Item& it : recent::Items(L"r|")) out.push_back(std::move(it));
+    });
+    palette::AddRunner(L"r|", [](const std::wstring& path) { recent::Open(path); });
     worksets::Init(g_wnd, &g_cfg);
     corners::SetSets([] { worksets::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {
