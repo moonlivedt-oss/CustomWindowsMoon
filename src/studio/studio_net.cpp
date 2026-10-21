@@ -1,10 +1,12 @@
 // Раздел «Сеть»: состояние, проверка карточками, починка, права, сторож, прокси-процессы, история.
 // Всё долгое идёт в своём потоке (NetJob), страница только смотрит на результат.
 #include <windows.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cmath>
 
+#include "app/netui.h"
 #include "core/bg.h"
 #include "core/fx.h"
 #include "core/text.h"
@@ -313,6 +315,51 @@ void Studio::NetPage(const RectF& r) {
                 bool ok = net::Kill(p.pid);
                 Toast(ok ? L"Завершён " + p.name : L"Не удалось завершить " + p.name);
                 netProcsAt_ = 0;
+            }
+        }
+    });
+
+    // --- кто качает и отрезанные (И15, И16) ---
+    netCut_ = netui::CutList();
+    ULONGLONG topAt = 0;
+    std::vector<netui::TopRow> top = netui::TopRows(&topAt);
+    float topRows = 2.0f + (float)top.size() + (netCut_.empty() ? 0 : 0.6f + netCut_.size());
+    card(L"Кто качает", topRows, [&](const RectF& b) {
+        // подпись своей строкой, кнопки - под ней: в узкой колонке они иначе наезжают на текст
+        ui.Text(topAt ? L"Замер " + std::to_wstring((now - topAt) / 60000) + L" мин назад, за 3 секунды"
+                      : L"Ещё не замеряли (TCP по программам, нужны права)",
+                RectF(b.X, b.Y, b.Width, ui.S(22)), c.muted, 11.5f);
+        float by = b.Y + ui.S(28);
+        if (ui.Button(ID_NET_TOP, RectF(b.X, by, ui.S(140), ui.S(36)), L"Замерить")) Defer([] { netui::Top(); });
+        if (ui.Button(ID_NET_TOP + 50, RectF(b.X + ui.S(150), by, ui.S(140), ui.S(36)), L"За 30 дней", Kind::Ghost))
+            Defer([] { ShellExecuteW(nullptr, L"open", L"ms-settings:datausage", nullptr, nullptr, SW_SHOWNORMAL); });
+        ui.Tip(ID_NET_TOP + 50, L"Сколько каждая программа потратила за 30 дней - считает сама Windows");
+        float share = std::max(0.3f, (b.Width - ui.S(140)) / b.Width);
+        for (size_t i = 0; i < top.size(); ++i) {
+            const netui::TopRow& t = top[i];
+            wchar_t rate[64];
+            swprintf(rate, 64, L"  %.1f / %.1f МБ/с", t.down / 1048576.0, t.up / 1048576.0);
+            RectF row = cols.Row(b, 1.4f + i, t.name + rate, share);
+            ui.Tip(ID_NET_TOP + 1 + (int)i, L"Приём / отдача за 3 секунды замера. " + t.exe);
+            bool can = !t.exe.empty() && tools::CutRefuse(t.exe).empty();
+            if (can && ui.Button(ID_NET_TOP + 1 + (int)i,
+                                 RectF(row.GetRight() - ui.S(130), row.Y + ui.S(4), ui.S(130), ui.S(36)), L"Отрезать",
+                                 Kind::Ghost)) {
+                std::wstring exe = t.exe;
+                Defer([exe] { netui::Cut(exe); });
+            }
+        }
+        float y0 = 1.4f + top.size() + 0.2f;
+        if (!netCut_.empty())
+            ui.Text(L"Отрезаны от интернета:", RectF(b.X, b.Y + y0 * cols.RowH(), b.Width, ui.S(22)), c.muted, 11.5f);
+        for (size_t i = 0; i < netCut_.size(); ++i) {
+            const std::wstring& exe = netCut_[i].exe;
+            RectF row = cols.Row(b, y0 + 0.5f + i, exe.substr(exe.find_last_of(L'\\') + 1), share);
+            ui.Tip(ID_NET_TOP + 20 + (int)i, exe);
+            if (ui.Button(ID_NET_TOP + 20 + (int)i,
+                          RectF(row.GetRight() - ui.S(130), row.Y + ui.S(4), ui.S(130), ui.S(36)), L"Вернуть")) {
+                std::wstring e = exe;
+                Defer([e] { netui::Uncut(e); });
             }
         }
     });

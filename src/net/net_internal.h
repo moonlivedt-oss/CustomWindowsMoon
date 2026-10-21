@@ -28,7 +28,7 @@ std::vector<StaleRoute> StaleRoutes();  // маршруты на адаптер�
 std::vector<std::wstring> SuspiciousHosts(std::vector<std::wstring>* all = nullptr);
 
 struct FwRule {
-    std::wstring name;
+    std::wstring name, app;  // app - программа правила (пусто - все)
     bool vpn = false;  // похоже на kill-switch VPN
 };
 std::vector<FwRule> FirewallBlocks(bool* readOk = nullptr);       // включённые исходящие блок-правила

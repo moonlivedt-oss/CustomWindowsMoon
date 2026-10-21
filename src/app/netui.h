@@ -7,6 +7,8 @@
 
 #include <windows.h>
 
+#include "net/net.h"
+
 struct Config;
 struct Item;
 class BoostCard;
@@ -29,5 +31,16 @@ void Wake();  // после сна и разблокировки: провери
 void Tick();
 void Shutdown();
 std::wstring Status();  // для кольца и подсказки трея
+// Кто качает (И15): последний замер трафика по программам (задача с правами, 3 с TCP EStats); Top() - замерить
+// заново (ход и итог в карточке). Отрезать (И16): исходящее правило брандмауэра на exe, с вопросом; Uncut - вернуть.
+struct TopRow {
+    std::wstring name, exe;
+    ULONGLONG down = 0, up = 0;  // байт/с
+};
+std::vector<TopRow> TopRows(ULONGLONG* at = nullptr);  // at - когда замерено (GetTickCount64), 0 - не замеряли
+void Top();
+void Cut(const std::wstring& exe);
+void Uncut(const std::wstring& exe);
+std::vector<net::CutApp> CutList();  // отрезанные - из кэша (освежается в фоне раз в 5 с), без задержки кадра
 
 }  // namespace netui
