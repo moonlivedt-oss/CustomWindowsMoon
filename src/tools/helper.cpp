@@ -210,6 +210,19 @@ int RecycleLeftovers(const std::vector<std::wstring>& paths, const Log& log) {
     return moved;
 }
 
+int RecycleCopies(const std::vector<std::wstring>& pairs, const Log& log) {
+    int moved = 0;
+    for (size_t i = 0; i + 1 < pairs.size(); i += 40) {
+        std::wstring args = L"recycle-copy";
+        for (size_t j = i; j + 1 < pairs.size() && j < i + 40; j += 2)
+            args += L" " + Quote(pairs[j]) + L" " + Quote(pairs[j + 1]);
+        std::map<std::wstring, std::wstring> r;
+        RunTools(args, log, &r);
+        moved += _wtoi(r[L"moved"].c_str());
+    }
+    return moved;
+}
+
 int RecycleBig(const std::wstring& path, const Log& log) {
     std::map<std::wstring, std::wstring> r;
     RunTools(L"recycle-big " + Quote(path), log, &r);

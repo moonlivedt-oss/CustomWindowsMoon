@@ -7,6 +7,7 @@
 
 #include "core/config.h"
 #include "core/edgecheck.h"
+#include "desk/dropundo.h"
 
 namespace {
 
@@ -73,10 +74,45 @@ void TestEdgeCheck() {
     CHECK(!edgecheck::PowerToysEnabled("", "CursorWrap"));
 }
 
+void TestDropUndo() {
+    std::wstring base = TempFile(L"radial_drop_test");
+    std::wstring a = base + L"\\a", b = base + L"\\b";
+    CreateDirectoryW(base.c_str(), nullptr);
+    CreateDirectoryW(a.c_str(), nullptr);
+    CreateDirectoryW(b.c_str(), nullptr);
+    auto put = [](const std::wstring& f) {
+        HANDLE h = CreateFileW(f.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        DWORD w = 0;
+        WriteFile(h, "abc", 3, &w, nullptr);
+        CloseHandle(h);
+    };
+    put(a + L"\\moved.txt");
+    put(a + L"\\copied.txt");
+    put(a + L"\\waiting.txt");
+    ULONGLONG t0 = dropundo::Now();
+    MoveFileW((a + L"\\moved.txt").c_str(), (b + L"\\moved.txt").c_str());
+    CopyFileW((a + L"\\copied.txt").c_str(), (b + L"\\copied.txt").c_str(), TRUE);
+    dropundo::Result r = dropundo::Resolve(
+        {a + L"\\moved.txt", a + L"\\copied.txt", a + L"\\waiting.txt", b + L"\\moved.txt"}, b + L"\\", t0);
+    CHECK(r.pending == 1);  // waiting.txt ещё «копируется»; бросок в ту же папку не считается
+    CHECK(r.done.size() == 2);
+    if (r.done.size() == 2) {
+        CHECK(!r.done[0].copy && r.done[0].to == b + L"\\moved.txt");
+        CHECK(r.done[1].copy && r.done[1].from == a + L"\\copied.txt");
+        CHECK(dropundo::Title(r.done, b) == L"Перенесено и скопировано 2 файла в «b»");
+    }
+    for (const wchar_t* f : {L"\\a\\copied.txt", L"\\a\\waiting.txt", L"\\b\\moved.txt", L"\\b\\copied.txt"})
+        DeleteFileW((base + f).c_str());
+    RemoveDirectoryW(a.c_str());
+    RemoveDirectoryW(b.c_str());
+    RemoveDirectoryW(base.c_str());
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
     TestEdgeCheck();
+    TestDropUndo();
 }

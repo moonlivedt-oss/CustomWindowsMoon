@@ -34,6 +34,9 @@ public:
     // пункт кольца с path = action:<действие> (как у горячих углов: minecraft, net, tools...)
     std::function<void(const std::wstring& action)> onAction;
     std::function<std::wstring()> netStatus;  // строка состояния для кольца сети
+    // файлы бросили на папку кольца (Проводник переносит или копирует сам, иногда уже после Drop): что и куда -
+    // для карточки «Вернуть»
+    std::function<void(std::vector<std::wstring> files, std::wstring dir)> onDropped;
     // Командная палитра: целое кольцо у курсора, сразу ждёт ввода; ищет по кольцам краёв и по extra (действия
     // утилит и сети - special 3 с ключом, разделы студии, окна - special 2, команды программы).
     void ShowPalette(const Config* cfg, std::vector<Item> extra, POINT cursor, const RECT& work, UINT dpi);

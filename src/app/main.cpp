@@ -36,6 +36,7 @@
 #include "desk/battery.h"
 #include "desk/boost.h"
 #include "desk/boostcard.h"
+#include "desk/dropundo.h"
 #include "desk/boostpick.h"
 #include "desk/corners.h"
 #include "desk/cursor.h"
@@ -78,6 +79,7 @@ enum Cmd {
     CMD_RESTORE_ALL
 };
 constexpr UINT WM_BOOST_DONE = WM_APP + 60;  // поток Boost закончил: lParam - boost::Result*
+constexpr UINT WM_DROP_DONE = WM_APP + 71;   // бросок на папку кольца разобран: lParam - DropMsg*
 
 HINSTANCE g_inst;
 HWND g_wnd;
@@ -100,6 +102,7 @@ BoostPick g_pick;        // выбор по программам: закрыть
 BoostCard g_gbCard;      // новости Boost во время игры и работы: видеокарта, шейдеры, сборки, итог
 std::wstring g_pickFor;  // чей профиль выбора: exe игры, редактора или «вручную»
 ULONGLONG g_avHintAt = 0;
+BoostCard g_dropCard;            // «Перенесено в ... - Вернуть»
 BoostCard g_edgeCard;           // что мешает кольцам у края (CursorWrap)
 BoostCard g_mcCard, g_mcCard2;  // Minecraft: падение / AlwaysPreTouch и подкачка
 struct McGame {
@@ -1262,6 +1265,48 @@ void TrayMenu() {
     DestroyMenu(m);
 }
 
+// Бросок файлов на папку кольца: Проводник мог ещё работать - ждём до 15 с, пока станет ясно, что перенесено или
+// скопировано, потом карточка с «Вернуть».
+struct DropMsg {
+    std::vector<dropundo::Moved> done;
+    std::wstring dir;
+};
+
+void OnDropped(std::vector<std::wstring> files, std::wstring dir) {
+    ULONGLONG t0 = dropundo::Now();
+    bg::Run([files = std::move(files), dir = std::move(dir), t0] {
+        dropundo::Result r;
+        for (int i = 0; i < 30 && !bg::Quitting(); ++i) {
+            Sleep(i ? 500 : 300);
+            r = dropundo::Resolve(files, dir, t0);
+            if (!r.pending) break;
+        }
+        if (r.done.empty()) return;
+        auto* m = new DropMsg{std::move(r.done), dir};
+        if (!PostMessageW(g_wnd, WM_DROP_DONE, 0, (LPARAM)m)) delete m;
+    });
+}
+
+void ShowDropped(std::unique_ptr<DropMsg> m) {
+    std::wstring names;
+    for (size_t i = 0; i < m->done.size() && i < 3; ++i) {
+        const std::wstring& f = m->done[i].from;
+        names += (i ? L", " : L"") + f.substr(f.find_last_of(L'\\') + 1);
+    }
+    if (m->done.size() > 3) names += L" и ещё " + std::to_wstring(m->done.size() - 3);
+    std::vector<dropundo::Moved> done = m->done;
+    g_dropCard.yesLabel = L"Вернуть";
+    g_dropCard.noLabel = L"Оставить";
+    g_dropCard.onNo = nullptr;
+    g_dropCard.onYes = [done] {
+        bg::Run([done] {
+            std::wstring res = dropundo::Undo(done);
+            autos::Note(L"Отмена броска: " + res);
+        });
+    };
+    g_dropCard.Show(BoostCard::OFFER, dropundo::Title(m->done, m->dir), names, CurrentTheme(g_cfg), 12000);
+}
+
 // Кольца у края не откроются (PowerToys CursorWrap): карточка при запуске, не чаще раза в неделю.
 void WarnEdgeConflict() {
     std::wstring why = edgecheck::Conflict();
@@ -1322,6 +1367,7 @@ void ShutdownAll() {
     g_mcCard.Destroy();
     g_mcCard2.Destroy();
     g_edgeCard.Destroy();
+    g_dropCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
     toolsui::Shutdown();
@@ -1437,6 +1483,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_SETTINGCHANGE:
             if (wp == SPI_SETDESKWALLPAPER && g_cfg.accentAuto) ApplyAccent();
+            return 0;
+        case WM_DROP_DONE:
+            ShowDropped(std::unique_ptr<DropMsg>(reinterpret_cast<DropMsg*>(lp)));
             return 0;
         case WM_BOOST_DONE:
             BoostDone(reinterpret_cast<boost::Result*>(lp));
@@ -1657,6 +1706,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     gboost::Start(g_wnd);
     g_game.recognize = [](DWORD pid, const std::wstring& path) { return mc::GameName(pid, path); };
     corners::SetMinecraft(ShowMcRing);
+    g_menu.onDropped = OnDropped;
     g_menu.onAction = [](const std::wstring& a) {
         g_pendingAction = a;
         SetTimer(g_wnd, kActionTimer, 260, nullptr);  // кольцо успевает погаснуть
