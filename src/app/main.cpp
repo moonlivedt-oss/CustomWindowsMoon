@@ -39,6 +39,7 @@
 #include "desk/dropundo.h"
 #include "desk/gamepad.h"
 #include "desk/recent.h"
+#include "app/rules.h"
 #include "desk/boostpick.h"
 #include "desk/corners.h"
 #include "desk/cursor.h"
@@ -128,6 +129,7 @@ std::wstring g_cfgPath;
 FILETIME g_cfgTime{};
 bool g_armed = true;
 bool g_restored = false;  // «Вернуть всё как было»: рамки окон на паузе до следующего перечитывания настроек
+std::wstring g_themeOverride;  // тема на время правила «если - то» (пусто - своя из radial.cfg)
 bool g_altTab = false;    // за это нажатие Alt был Tab: идёт переключение окон, кольцо у края не открываем
 
 FILETIME FileTime(const std::wstring& p) {
@@ -145,6 +147,7 @@ void Reload() {
     if (g_menu.IsOpen()) return;  // меню держит указатели на старые пункты
     Config c;
     if (LoadConfig(g_cfgPath, c)) g_cfg = std::move(c);
+    if (!g_themeOverride.empty()) g_cfg.theme = g_themeOverride;  // правило ещё держится
     g_cfgTime = FileTime(g_cfgPath);
     ApplyAccent();
     night::Set(night::Due(g_cfg));
@@ -253,6 +256,11 @@ void PollWork() {
     }
     netui::Tick();
     toolsui::Tick();
+    if (!g_menu.IsOpen())
+        rules::Tick(g_cfg, [](const std::wstring& theme) {
+            g_themeOverride = theme;
+            g_cfgTime = {};  // перечитать: Reload поставит тему правила или вернёт свою и перекрасит всё
+        });
     autos::Tick();
     if (!alt) {
         g_armed = true;
@@ -1224,6 +1232,8 @@ void RestoreEverything() {
     done.push_back(L"приоритеты и уведомления");
     if (!toolsui::BalanceLowered().empty()) done.push_back(L"фоновые процессы");
     toolsui::BalanceRestoreAll();
+    if (!rules::ActiveText().empty()) done.push_back(L"правило «" + rules::ActiveText() + L"»");
+    rules::Release();
     g_winfx.ResetAll();
     g_frame.Suspend(true);
     g_restored = true;
@@ -1406,6 +1416,7 @@ void ShutdownAll() {
     g_deskClick.Destroy();
     llmouse::Shutdown();
     gamepad::Stop();
+    rules::Release();
     g_snip.Destroy();
     cursor::Restore();
     RemoveTray();

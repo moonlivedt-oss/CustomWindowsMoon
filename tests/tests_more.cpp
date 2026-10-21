@@ -8,6 +8,7 @@
 #include "core/config.h"
 #include "core/edgecheck.h"
 #include "desk/dropundo.h"
+#include "app/rules.h"
 
 namespace {
 
@@ -108,6 +109,41 @@ void TestDropUndo() {
     RemoveDirectoryW(base.c_str());
 }
 
+void TestRules() {
+    std::wstring bad;
+    auto r = rules::Parse({L"app:blender.exe+UnrealEditor.exe -> power:perf, volume:40",
+                           L"battery & time:23:00-07:00 -> power:eco, mute, theme:crimson", L"ac -> run:net",
+                           L"app:x.exe -> fly", L"time:25:00-07:00 -> mute", L"no arrow"},
+                          &bad);
+    CHECK(r.size() == 3);
+    CHECK(bad == L"app:x.exe -> fly; time:25:00-07:00 -> mute; no arrow");
+    if (r.size() == 3) {
+        CHECK(r[0].power == L"perf" && r[0].volume == 40 && r[0].when.size() == 1);
+        CHECK(r[1].mute && r[1].theme == L"crimson" && r[1].when.size() == 2);
+        CHECK(r[2].run == L"net");
+        rules::Facts f;
+        f.procs = {L"explorer.exe", L"UnrealEditor.exe"};
+        f.ac = false;
+        f.minutes = 23 * 60 + 30;
+        CHECK(rules::Holds(r[0], f));
+        CHECK(rules::Holds(r[1], f));  // ночь через полночь, от батареи
+        f.minutes = 12 * 60;
+        CHECK(!rules::Holds(r[1], f));
+        f.minutes = 6 * 60 + 59;
+        CHECK(rules::Holds(r[1], f));
+        CHECK(!rules::Holds(r[2], f));
+        f.procs = {L"explorer.exe"};
+        CHECK(!rules::Holds(r[0], f));
+    }
+    auto low = rules::Parse({L"battery<30 -> power:eco"});
+    rules::Facts g;
+    g.ac = false;
+    g.battery = 25;
+    CHECK(low.size() == 1 && rules::Holds(low[0], g));
+    g.battery = 45;
+    CHECK(low.size() == 1 && !rules::Holds(low[0], g));
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
@@ -115,4 +151,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestConfigRoundTrip();
     TestEdgeCheck();
     TestDropUndo();
+    TestRules();
 }

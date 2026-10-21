@@ -11,6 +11,7 @@
 #include "core/text.h"
 #include "desk/gamepad.h"
 #include "tools/guard.h"
+#include "app/rules.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "studio/studio.h"
@@ -95,6 +96,51 @@ void Studio::AidsPage(const RectF& r) {
                       L"Каждому новому процессу с таким именем - сразу свой приоритет, ядра или экономия (EcoQoS). Слова: "
                       L"idle, below, normal, above, high, eco, noeco, cores:0-3+6. Правила через «|», маски как "
                       L"*Editor*.exe. Игровой режим и баланс продолжают работать поверх.",
+                      c.faint);
+        });
+    }
+    {
+        std::wstring bad;
+        rules::Parse(cfg.rules, &bad);
+        std::wstring active = rules::ActiveText();
+        float rows = 2.6f + cfg.rules.size() * 0.8f + (active.empty() ? 0 : 0.6f);
+        cols.Card(L"Если - то", rows, [&](const RectF& b) {
+            float y = b.Y;
+            for (size_t i = 0; i < cfg.rules.size() && i < 20; ++i) {
+                bool ok = bad.find(cfg.rules[i]) == std::wstring::npos;
+                ui.Text(cfg.rules[i], RectF(b.X, y, b.Width - ui.S(110), ui.S(30)), ok ? c.text : c.warn, 11.5f);
+                if (ui.Button(ID_AID + 50 + (int)i, RectF(b.GetRight() - ui.S(100), y, ui.S(100), ui.S(30)), L"Убрать",
+                              Kind::Ghost)) {
+                    Change();
+                    cfg.rules.erase(cfg.rules.begin() + i);
+                    Save();
+                    break;
+                }
+                y += cols.RowH() * 0.8f;
+            }
+            if (!active.empty()) {
+                ui.Text(L"Сейчас держится: " + active, RectF(b.X, y, b.Width, ui.S(24)), c.accent, 11.5f);
+                y += cols.RowH() * 0.6f;
+            }
+            RectF rr(b.X, y, b.Width, ui.S(44));
+            FieldOrText(
+                ID_AID + 49, RectF(rr.X, rr.Y + ui.S(4), rr.Width - ui.S(130), ui.S(36)), view, ruleDraft_,
+                [this](const std::wstring& s) { ruleDraft_ = s; }, L"новое: app:blender.exe -> power:perf, volume:40");
+            std::wstring draftBad;
+            bool draftOk = !rules::Parse({ruleDraft_}, &draftBad).empty();
+            if (ui.Button(ID_AID + 48, RectF(rr.GetRight() - ui.S(120), rr.Y + ui.S(4), ui.S(120), ui.S(36)),
+                          L"Добавить", draftOk ? Kind::Primary : Kind::Ghost) &&
+                draftOk) {
+                Change();
+                cfg.rules.push_back(Trim(ruleDraft_));
+                ruleDraft_.clear();
+                SetFocus(wnd);  // поле без фокуса покажет пустой черновик
+                Save();
+            }
+            cols.Note(b, (y + ui.S(48) - b.Y) / cols.RowH(),
+                      L"Условия: app:имя.exe, ac, battery, battery<30, time:23:00-07:00, weekend (вместе - через &). "
+                      L"Действия: power:eco|balanced|perf, volume:30, mute, theme:<тема>, run:<действие угла>. Правило "
+                      L"кончилось - режим, громкость и тема возвращаются. Первое подходящее главнее.",
                       c.faint);
         });
     }
