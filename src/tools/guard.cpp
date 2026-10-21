@@ -8,6 +8,92 @@
 
 namespace guard {
 
+std::vector<ProcRule> ParseRules(const std::wstring& text, std::wstring* bad) {
+    std::vector<ProcRule> out;
+    size_t a = 0;
+    while (a <= text.size()) {
+        size_t b = text.find(L'|', a);
+        std::wstring part = text.substr(a, b == std::wstring::npos ? std::wstring::npos : b - a);
+        a = b == std::wstring::npos ? text.size() + 1 : b + 1;
+        size_t eq = part.find(L'=');
+        auto trim = [](std::wstring s) {
+            size_t x = s.find_first_not_of(L" \t"), y = s.find_last_not_of(L" \t");
+            return x == std::wstring::npos ? std::wstring() : s.substr(x, y - x + 1);
+        };
+        if (trim(part).empty()) continue;
+        ProcRule r;
+        r.mask = trim(part.substr(0, eq));
+        bool ok = eq != std::wstring::npos && !r.mask.empty();
+        std::wstring what = eq == std::wstring::npos ? L"" : part.substr(eq + 1);
+        size_t c = 0;
+        while (ok && c <= what.size()) {
+            size_t d = what.find(L',', c);
+            std::wstring w = trim(what.substr(c, d == std::wstring::npos ? std::wstring::npos : d - c));
+            c = d == std::wstring::npos ? what.size() + 1 : d + 1;
+            for (wchar_t& ch : w) ch = (wchar_t)towlower(ch);
+            if (w.empty()) continue;
+            if (w == L"idle" || w == L"low")
+                r.prio = IDLE_PRIORITY_CLASS;
+            else if (w == L"below")
+                r.prio = BELOW_NORMAL_PRIORITY_CLASS;
+            else if (w == L"normal")
+                r.prio = NORMAL_PRIORITY_CLASS;
+            else if (w == L"above")
+                r.prio = ABOVE_NORMAL_PRIORITY_CLASS;
+            else if (w == L"high")
+                r.prio = HIGH_PRIORITY_CLASS;
+            else if (w == L"eco")
+                r.eco = 1;
+            else if (w == L"noeco")
+                r.eco = 0;
+            else if (w.rfind(L"cores:", 0) == 0) {
+                // 0-3,6 внутри одного слова через «;» или «+», запятая уже занята: cores:0-3+6
+                std::wstring list = w.substr(6);
+                size_t e = 0;
+                while (ok && e <= list.size()) {
+                    size_t f = list.find_first_of(L"+;", e);
+                    std::wstring span = list.substr(e, f == std::wstring::npos ? std::wstring::npos : f - e);
+                    e = f == std::wstring::npos ? list.size() + 1 : f + 1;
+                    if (span.empty()) continue;
+                    size_t dash = span.find(L'-');
+                    int lo = _wtoi(span.c_str()), hi = dash == std::wstring::npos ? lo : _wtoi(span.c_str() + dash + 1);
+                    if (!iswdigit(span[0]) || lo < 0 || hi < lo || hi > 63) {
+                        ok = false;
+                        break;
+                    }
+                    for (int k = lo; k <= hi; ++k) r.cores |= 1ull << k;
+                }
+                ok = ok && r.cores;
+            } else {
+                ok = false;
+            }
+        }
+        if (ok && (r.prio || r.eco >= 0 || r.cores))
+            out.push_back(r);
+        else if (bad)
+            *bad += (bad->empty() ? L"" : L"; ") + trim(part);
+    }
+    return out;
+}
+
+std::wstring DescribeRule(const ProcRule& r) {
+    std::wstring s;
+    auto add = [&](const std::wstring& w) { s += (s.empty() ? L"" : L", ") + w; };
+    if (r.prio == IDLE_PRIORITY_CLASS) add(L"низкий");
+    if (r.prio == BELOW_NORMAL_PRIORITY_CLASS) add(L"ниже обычного");
+    if (r.prio == NORMAL_PRIORITY_CLASS) add(L"обычный");
+    if (r.prio == ABOVE_NORMAL_PRIORITY_CLASS) add(L"выше обычного");
+    if (r.prio == HIGH_PRIORITY_CLASS) add(L"высокий");
+    if (r.eco == 1) add(L"экономия");
+    if (r.eco == 0) add(L"без экономии");
+    if (r.cores) {
+        int n = 0;
+        for (int k = 0; k < 64; ++k) n += (r.cores >> k) & 1;
+        add(L"ядер: " + std::to_wstring(n));
+    }
+    return r.mask + L": " + s;
+}
+
 bool Match(const std::wstring& name, const std::wstring& masks) {
     for (const std::wstring& m : Split(masks, L'|'))
         if (!m.empty() && PathMatchSpecW(name.c_str(), m.c_str())) return true;

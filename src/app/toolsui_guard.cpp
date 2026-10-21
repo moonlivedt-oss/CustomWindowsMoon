@@ -11,7 +11,7 @@ namespace {
 
 struct GuardCfg {
     bool balance = true, noSleep = true, longWatch = true;
-    std::wstring noSleepApps, longApps, keepFast;
+    std::wstring noSleepApps, longApps, keepFast, procRules;
     int longMin = 3;
 };
 
@@ -51,11 +51,38 @@ bool SetPrio(DWORD pid, DWORD from, DWORD to) {
     return ok;
 }
 
+// Правило процесса (И25): приоритет, ядра, EcoQoS - один раз на каждый новый процесс.
+bool ApplyRule(DWORD pid, const guard::ProcRule& r) {
+    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return false;
+    bool ok = true;
+    if (r.prio) ok = SetPriorityClass(h, r.prio) && ok;
+    if (r.cores) {
+        DWORD_PTR proc = 0, sys = 0;
+        if (GetProcessAffinityMask(h, &proc, &sys)) {
+            DWORD_PTR want = (DWORD_PTR)r.cores & sys;  // ядер больше, чем есть, - только существующие
+            ok = (want && SetProcessAffinityMask(h, want)) && ok;
+        }
+    }
+    if (r.eco >= 0) {
+        PROCESS_POWER_THROTTLING_STATE st{};
+        st.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        st.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        st.StateMask = r.eco ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+        ok = SetProcessInformation(h, ProcessPowerThrottling, &st, sizeof(st)) && ok;
+    }
+    CloseHandle(h);
+    return ok;
+}
+
 DWORD WINAPI GuardLoop(void*) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     guard::Balancer bal;
     guard::LongWatch lw;
     std::set<DWORD> lowered;          // кому приоритет понизили мы (возвращаем только им)
+    std::map<DWORD, ULONGLONG> ruled;  // кому правило уже применено (pid -> время создания: номер мог смениться)
+    std::wstring rulesText;
+    std::vector<guard::ProcRule> rules;
     std::map<DWORD, HANDLE> handles;  // долгие команды: держим, чтобы узнать код выхода
     DWORD self = GetCurrentProcessId();
     int cores = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
@@ -119,6 +146,36 @@ DWORD WINAPI GuardLoop(void*) {
             it = std::any_of(procs.begin(), procs.end(), [&](const guard::Proc& p) { return p.pid == *it; })
                      ? std::next(it)
                      : lowered.erase(it);
+
+        // ---- постоянные правила (И25) ----
+        if (c.procRules != rulesText) {  // правила поменяли - применить заново ко всем
+            rulesText = c.procRules;
+            rules = guard::ParseRules(rulesText);
+            ruled.clear();
+        }
+        if (!rules.empty()) {
+            std::map<DWORD, ULONGLONG> alive;
+            for (const guard::Proc& p : procs) {
+                auto was = ruled.find(p.pid);
+                if (was != ruled.end() && was->second == p.created) {
+                    alive[p.pid] = p.created;
+                    continue;
+                }
+                if (p.pid == self || guard::Match(p.name, L"explorer.exe|dwm.exe|csrss.exe|RadialMenu*.exe")) continue;
+                for (const guard::ProcRule& r : rules)
+                    if (guard::Match(p.name, r.mask)) {
+                        bool ok = ApplyRule(p.pid, r);
+                        alive[p.pid] = p.created;
+                        AcquireSRWLockExclusive(&g_guardLock);
+                        g_guardNotes.push_back(L"Правило: " + guard::DescribeRule(r) +
+                                               (ok ? L"" : L" (не всё получилось - процесс с правами?)") + L", pid " +
+                                               std::to_wstring(p.pid));
+                        ReleaseSRWLockExclusive(&g_guardLock);
+                        break;
+                    }
+            }
+            ruled = std::move(alive);
+        }
 
         // ---- не спать ----
         std::wstring awake = c.noSleep ? guard::KeepAwake(procs, c.noSleepApps) : L"";
@@ -198,6 +255,7 @@ void GuardTick() {
         c.balance = g_cfg->cpuBalance, c.noSleep = g_cfg->noSleep, c.longWatch = g_cfg->longWatch;
         c.noSleepApps = g_cfg->noSleepApps, c.longApps = g_cfg->longApps, c.keepFast = g_cfg->boostKeepFast;
         c.longMin = g_cfg->longMin;
+        c.procRules = g_cfg->procRules;
         AcquireSRWLockExclusive(&g_guardLock);
         g_gcfg = c;
         ReleaseSRWLockExclusive(&g_guardLock);

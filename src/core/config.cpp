@@ -240,6 +240,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.palette = ParseBool(val);
             else if (key == L"palette_key")
                 cfg.paletteKey = Lower(val);
+            else if (key == L"proc_rules")
+                cfg.procRules = val;
             else if (key == L"gamepad")
                 cfg.gamepad = ParseBool(val);
             else if (key == L"clip_history")
@@ -528,6 +530,9 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"palette_key = " << c.paletteKey << L"\n";
     o << L"clip_history = " << (c.clipHistory ? 1 : 0) << L"\n";
     o << L"gamepad = " << (c.gamepad ? 1 : 0) << L"\n";
+    o << L"# proc_rules - постоянные правила процессов: маска=idle|below|normal|above|high, eco, noeco, cores:0-3+6;\n"
+         L"# правила через | (chrome.exe=below,eco | blender.exe=high)\n";
+    o << L"proc_rules = " << c.procRules << L"\n";
     o << L"clip_secrets = " << (c.clipSecrets ? 1 : 0) << L"\n";
     o << L"clip_secret_sec = " << c.clipSecretSec << L"\n";
     o << L"win_drag = " << (c.winDrag ? 1 : 0) << L"\n";

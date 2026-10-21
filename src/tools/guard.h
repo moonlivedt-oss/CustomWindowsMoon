@@ -49,6 +49,18 @@ private:
     std::map<DWORD, St> st_;
 };
 
+// Постоянные правила процессов (И25): «маска=что, что | маска=...». Что: idle, below, normal, above, high -
+// приоритет; eco / noeco - EcoQoS (экономичное расписание Windows 11); cores:0-3,6 - на каких ядрах. Пример:
+// «chrome.exe=below,eco | blender.exe=high,cores:0-7». Нераспознанное слово - правило пропускается целиком.
+struct ProcRule {
+    std::wstring mask;
+    DWORD prio = 0;      // класс приоритета, 0 - не трогать
+    int eco = -1;        // 1 - EcoQoS, 0 - снять, -1 - не трогать
+    ULONGLONG cores = 0;  // маска ядер, 0 - не трогать
+};
+std::vector<ProcRule> ParseRules(const std::wstring& text, std::wstring* bad = nullptr);  // bad - что не понял
+std::wstring DescribeRule(const ProcRule& r);  // «chrome.exe: ниже обычного, экономия»
+
 // «Не спать»: идёт ли что-то из списка (сборка, копирование, загрузка Steam). Возвращает, что именно (пусто - нет).
 std::wstring KeepAwake(const std::vector<Proc>& procs, const std::wstring& masks);
 
