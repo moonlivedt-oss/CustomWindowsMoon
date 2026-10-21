@@ -67,6 +67,31 @@ void Describe(EXCEPTION_POINTERS* ep, wchar_t* out, size_t n) {
              (unsigned long long)((ULONG_PTR)addr - (ULONG_PTR)mod));
 }
 
+wchar_t g_restartExe[MAX_PATH] = {};
+wchar_t g_restartCmd[MAX_PATH + 32] = {};
+volatile LONG g_restart = 0;
+ULONGLONG g_startTick = GetTickCount64();
+
+// Новая копия после падения - только если жили дольше минуты (не петля падений на старте) и прошлый перезапуск
+// был больше 10 минут назад (время - в HKCU, переживает сами перезапуски).
+void RestartAfterCrash() {
+    if (!g_restart || GetTickCount64() - g_startTick < 60000) return;
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG now = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime, last = 0;
+    DWORD size = sizeof(last);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\MoonRadial", L"CrashRestartAt", RRF_RT_REG_QWORD, nullptr, &last,
+                 &size);
+    if (last && now - last < 10ull * 60 * 10000000) return;
+    RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\MoonRadial", L"CrashRestartAt", REG_QWORD, &now, sizeof(now));
+    STARTUPINFOW si{sizeof(si)};
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessW(g_restartExe, g_restartCmd, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+}
+
 LONG WINAPI Filter(EXCEPTION_POINTERS* ep) {
     if (InterlockedExchange(&g_once, 1) || !g_dir[0]) return EXCEPTION_CONTINUE_SEARCH;  // второе падение - не пишем
     SYSTEMTIME t;
@@ -98,6 +123,7 @@ LONG WINAPI Filter(EXCEPTION_POINTERS* ep) {
         if (len > 1) WriteFile(f, utf8, (DWORD)(len - 1), &wr, nullptr);
         CloseHandle(f);
     }
+    RestartAfterCrash();
     return EXCEPTION_EXECUTE_HANDLER;  // дальше Windows закроет процесс без окна «программа не отвечает»
 }
 
@@ -153,6 +179,14 @@ void Install(const std::wstring& dirIn) {
     std::set_terminate([] { RaiseTerminate(); });  // иначе MinGW молча зовёт abort - ни дампа, ни строки
     signal(SIGABRT, [](int) { RaiseTerminate(); });
     Prune(dir, kKeep - 1);  // место под ещё один: дампов не станет больше kKeep
+}
+
+void SetRestart(bool on) {
+    if (on && !g_restartExe[0]) {
+        GetModuleFileNameW(nullptr, g_restartExe, MAX_PATH);
+        swprintf(g_restartCmd, MAX_PATH + 32, L"\"%ls\" --after-crash", g_restartExe);
+    }
+    InterlockedExchange(&g_restart, on ? 1 : 0);
 }
 
 void Prune(const std::wstring& dir, int keep) {
