@@ -748,11 +748,13 @@ void Studio::AutoPage(const RectF& r) {
                   L"Вопросы и тревоги (новый автозапуск, мало места, обрыв сети) - сразу, как раньше.",
                   c.faint);
     });
-    cols.Card(L"Самовосстановление", 2.2f, [&](const RectF& b) {
+    cols.Card(L"Самовосстановление", 3.2f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Проверять раз в 15 минут");
         toggle(rr, ID_AUTO_REPAIR, cfg.autoRepair);
-        cols.Row(b, 1, L"Последняя проверка: " + autos::RepairStatus(), 0.95f);
-        cols.Note(b, 2.0f,
+        rr = cols.Row(b, 1, L"Упала - запуститься заново (не чаще раза в 10 минут)");
+        toggle(rr, ID_AUTO_CRASH_RESTART, cfg.crashRestart);
+        cols.Row(b, 2, L"Последняя проверка: " + autos::RepairStatus(), 0.95f);
+        cols.Note(b, 3.0f,
                   L"Пропал автозапуск (антивирус, чистильщик) - верну, если он был включён. Пропал или обнулился "
                   L"radial.cfg - достану последнюю копию. Пропал RadialTools.exe - скажу (пересоздать его нельзя). "
                   L"Антивирус не обхожу.",

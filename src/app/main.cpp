@@ -153,6 +153,7 @@ void Reload() {
     ApplyAccent();
     night::Set(night::Due(g_cfg));
     fx::SetMotion(g_cfg.motion);
+    crash::SetRestart(g_cfg.crashRestart);
     Sound::Init(night::On() ? g_cfg.volume / 2 : g_cfg.volume);  // ночью звуки вдвое тише
     g_media.Apply(g_cfg);
     g_winfx.Apply(g_cfg);
@@ -1648,6 +1649,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     if (int code = 0; devcli::Run(code)) return code;
     bool wantEditor = devcli::HasFlag(L"--editor");
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\MoonRadialMenu");
+    // перезапуск после падения: старая копия ещё умирает и держит мьютекс - он освободится (брошенным), когда её не станет
+    if (GetLastError() == ERROR_ALREADY_EXISTS && devcli::HasFlag(L"--after-crash") && mutex) {
+        DWORD w = WaitForSingleObject(mutex, 15000);
+        if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) SetLastError(0);
+    }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // уже запущено: попросить работающую копию открыть редактор
         if (HWND w = FindWindowW(kClass, nullptr); w && wantEditor) {

@@ -210,6 +210,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.netGame = ParseBool(val);
             else if (key == L"auto_clean")
                 cfg.autoClean = ParseBool(val);
+            else if (key == L"crash_restart")
+                cfg.crashRestart = ParseBool(val);
             else if (key == L"digest")
                 cfg.digest = ParseBool(val);
             else if (key == L"digest_hour")
@@ -515,6 +517,7 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"# автоматика: тихая чистка, разбор Загрузок (с вопросом, старше downloads_days), режим питания,\n";
     o << L"# самовосстановление автозапуска и настроек\n";
     o << L"auto_clean = " << (c.autoClean ? 1 : 0) << L"\n";
+    o << L"crash_restart = " << (c.crashRestart ? 1 : 0) << L"\n";
     o << L"digest = " << (c.digest ? 1 : 0) << L"\n";
     o << L"digest_hour = " << c.digestHour << L"\n";
     o << L"auto_downloads = " << (c.autoDownloads ? 1 : 0) << L"\n";
