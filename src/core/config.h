@@ -47,6 +47,7 @@ struct WorkSet {
 struct Config {
     bool desktopOnly = false;
     bool skipFullscreen = true;
+    bool innerEdges = true;  // край между мониторами: задержать курсор у него с Alt - кольцо
     double scale = 1.0;
     bool accentAuto = true;
     COLORREF accentManual = RGB(215, 38, 61);

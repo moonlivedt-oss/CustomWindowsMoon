@@ -82,6 +82,7 @@ enum Id {
     ID_LIB_CLOSE,
     ID_DESKTOP_ONLY,
     ID_SKIP_FULL,
+    ID_INNER_EDGE,
     ID_BLUR,
     ID_SCALE,
     ID_MAXCH_MINUS,

@@ -146,6 +146,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.desktopOnly = ParseBool(val);
             else if (key == L"skip_fullscreen")
                 cfg.skipFullscreen = ParseBool(val);
+            else if (key == L"inner_edges")
+                cfg.innerEdges = ParseBool(val);
             else if (key == L"motion")
                 cfg.motion = Lower(val) == L"calm" ? 0 : Lower(val) == L"lively" ? 2 : 1;
             else if (key == L"window_frame")
@@ -397,6 +399,7 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"[settings]\n";
     o << L"desktop_only = " << (c.desktopOnly ? 1 : 0) << L"\n";
     o << L"skip_fullscreen = " << (c.skipFullscreen ? 1 : 0) << L"\n";
+    o << L"inner_edges = " << (c.innerEdges ? 1 : 0) << L"\n";
     o << L"scale = " << c.scale << L"\n";
     o << L"# auto - цвет берётся из обоев\n";
     o << L"accent = " << (c.accentAuto ? L"auto" : ColorText(c.accentManual)) << L"\n";
@@ -588,8 +591,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     DWORD put = 0;
     // всё записано и сброшено на диск до переименования: иначе после внезапного выключения (села батарея) на месте
     // radial.cfg мог остаться пустой файл
-    BOOL ok = WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr) && put == bytes.size() &&
-              FlushFileBuffers(f);
+    BOOL ok =
+        WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr) && put == bytes.size() && FlushFileBuffers(f);
     CloseHandle(f);
     if (!ok) {
         DeleteFileW(tmp.c_str());

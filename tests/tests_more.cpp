@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/config.h"
+#include "core/edgecheck.h"
 
 namespace {
 
@@ -62,9 +63,20 @@ void TestConfigRoundTrip() {
     DeleteFileW((file + L".tmp").c_str());
 }
 
+void TestEdgeCheck() {
+    std::string on = "{\"startup\":true,\"enabled\":{\"AlwaysOnTop\":false,\"CursorWrap\" : true,\"FancyZones\":true}}";
+    std::string off = "{\"enabled\":{\"CursorWrap\":false},\"x\":{\"CursorWrap\":true}}";
+    CHECK(edgecheck::PowerToysEnabled(on, "CursorWrap"));
+    CHECK(edgecheck::PowerToysEnabled(on, "FancyZones"));
+    CHECK(!edgecheck::PowerToysEnabled(on, "AlwaysOnTop"));
+    CHECK(!edgecheck::PowerToysEnabled(off, "CursorWrap"));  // включён только вне "enabled" - не считается
+    CHECK(!edgecheck::PowerToysEnabled("", "CursorWrap"));
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
+    TestEdgeCheck();
 }

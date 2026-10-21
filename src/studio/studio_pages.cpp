@@ -12,6 +12,7 @@
 #include <ctime>
 
 #include "core/files.h"
+#include "core/edgecheck.h"
 #include "core/fx.h"
 #include "core/perf.h"
 #include "app/autostart.h"
@@ -49,9 +50,12 @@ void Studio::BehaviorPage(const RectF& r) {
             Save();
         }
     };
-    card(L"Где открывать", 2, [&](const RectF& b) {
+    std::wstring edgeWarn = edgecheck::Conflict();
+    card(L"Где открывать", edgeWarn.empty() ? 3.0f : 3.4f, [&](const RectF& b) {
         toggle(row(b, 0, L"Только когда активен рабочий стол"), ID_DESKTOP_ONLY, cfg.desktopOnly);
         toggle(row(b, 1, L"Не мешать играм и видео на весь экран"), ID_SKIP_FULL, cfg.skipFullscreen);
+        toggle(row(b, 2, L"Край между мониторами: задержать там курсор с Alt"), ID_INNER_EDGE, cfg.innerEdges);
+        if (!edgeWarn.empty()) cols.Note(b, 3, edgeWarn, c.warn);
     });
     card(L"Вид", 3, [&](const RectF& b) {
         toggle(row(b, 0, L"Стекло под кольцом"), ID_BLUR, cfg.blur);
