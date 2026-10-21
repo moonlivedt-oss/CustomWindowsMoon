@@ -10,6 +10,7 @@
 #include "desk/dropundo.h"
 #include "app/rules.h"
 #include "app/settingsio.h"
+#include "tools/healthscore.h"
 
 namespace {
 
@@ -164,6 +165,20 @@ void TestSettingsPack() {
     CHECK(!settingsio::Unpack(evil, out));  // выход из папки
 }
 
+void TestHealthScore() {
+    tools::HealthIn in;
+    CHECK(tools::HealthScore(in).score == 100 && tools::HealthScore(in).minus.empty());
+    in.disks = {{L"C:\\", 7, 10}, {L"D:\\", 50, -1}};
+    in.memLoad = 85;
+    in.danger = 3;  // штраф за находки - не больше 30
+    in.batteryWear = 12;
+    tools::HealthOut o = tools::HealthScore(in);
+    CHECK(o.score == 100 - 20 - 10 - 4 - 30);
+    CHECK(!o.minus.empty() && o.minus[0].points == 30);  // крупные первыми
+    in.smartBad = 5;
+    CHECK(tools::HealthScore(in).score == 0);  // не ниже нуля
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
@@ -173,4 +188,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestDropUndo();
     TestRules();
     TestSettingsPack();
+    TestHealthScore();
 }
