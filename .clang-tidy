@@ -1,0 +1,25 @@
+# build.cmd lint: только проверки на ошибки (bugprone), без стиля. Отключены шумные на этом коде: округление
+# (x + 0.5) у неотрицательных пикселей, сравнение wcscmp без «!= 0», сужение типов в отрисовке.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-branch-clone,
+  -bugprone-integer-division,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-switch-missing-default-case,
+  -bugprone-reserved-identifier,
+  -bugprone-suspicious-include,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-casting-through-void,
+  -bugprone-macro-parentheses,
+  -bugprone-signed-char-misuse,
+  -bugprone-misplaced-widening-cast,
+  -bugprone-exception-escape,
+  -bugprone-incorrect-roundings,
+  -bugprone-suspicious-string-compare,
+  -bugprone-unused-return-value
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/.*'

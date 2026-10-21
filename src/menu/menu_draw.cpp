@@ -74,14 +74,18 @@ void RadialMenu::CaptureBackdrop() {
     void* px = nullptr;
     HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &px, nullptr, 0);
     HGDIOBJ old = SelectObject(dc, bmp);
-    BitBlt(dc, 0, 0, w, h, scr, origin_.x, origin_.y, SRCCOPY);
-    GdiFlush();
+    {
+        PERF_SCOPE("menu.cap.BitBlt");
+        BitBlt(dc, 0, 0, w, h, scr, origin_.x, origin_.y, SRCCOPY);
+        GdiFlush();
+    }
     ReleaseDC(nullptr, scr);
 
     std::vector<uint32_t> small((size_t)sw * sh);
     Downscale((const uint32_t*)px, w, h, small.data(), sw, sh, kDown);
     BoxBlur(small.data(), sw, sh, std::max(1, (int)(2 * geo_.k)));
 
+    PERF_SCOPE("menu.cap.Up");
     blurPx_.resize((size_t)w * h);
     UpscaleBilinear(small.data(), sw, sh, blurPx_.data(), w, h, w);
     SelectObject(dc, old);
