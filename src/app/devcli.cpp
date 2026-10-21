@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <windows.h>
+#include <shlobj.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include <objidl.h>
@@ -678,6 +679,105 @@ int SceneFilm(const std::wstring& what, const std::wstring& out) {
     return 1;
 }
 
+// Эталонные снимки студии (И33): --snap-suite <эталоны> <выход> [update]. Каждый раздел снимается отдельным
+// процессом (--studio-snap с RADIAL_DEMO=1), потом сравнивается с эталоном попиксельно: пиксель «другой», если
+// канал разошёлся больше чем на 24; раздел не прошёл - если таких больше 0,5%. Разница - картинкой <раздел>-diff.png
+// (красным поверх бледного эталона). update - записать нынешние как эталоны. Итог - snaps_out.txt, код 0/1.
+struct SnapCase {
+    int page, tab;
+    const wchar_t* name;
+};
+const SnapCase kSnapCases[] = {{2, 0, L"behavior"}, {13, 0, L"aids"},  {1, 0, L"themes"},
+                               {9, 0, L"keys"},     {3, 0, L"desk"},  {7, 7, L"privacy"}};
+
+const CLSID kPngEncoder = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+
+bool SnapRun(const SnapCase& c, const std::wstring& out) {
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --studio-snap " + std::to_wstring(c.page) + L" " +
+                       std::to_wstring(c.tab) + L" \"" + out + L"\" 2500";
+    SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");
+    STARTUPINFOW si{sizeof(si)};
+    PROCESS_INFORMATION pi{};
+    std::vector<wchar_t> line(cmd.begin(), cmd.end());
+    line.push_back(0);
+    if (!CreateProcessW(exe, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) return false;
+    bool ok = WaitForSingleObject(pi.hProcess, 60000) == WAIT_OBJECT_0;
+    if (!ok) TerminateProcess(pi.hProcess, 1);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return ok && GetFileAttributesW(out.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+// Доля отличающихся пикселей; diff - картинка разницы (пустой путь - не писать). -1 - не открылось или размер другой.
+double SnapDiff(const std::wstring& ref, const std::wstring& now, const std::wstring& diff) {
+    Gdiplus::Bitmap a(ref.c_str()), b(now.c_str());
+    if (a.GetLastStatus() != Gdiplus::Ok || b.GetLastStatus() != Gdiplus::Ok || a.GetWidth() != b.GetWidth() ||
+        a.GetHeight() != b.GetHeight())
+        return -1;
+    int w = (int)a.GetWidth(), h = (int)a.GetHeight();
+    Gdiplus::Rect r(0, 0, w, h);
+    Gdiplus::BitmapData da, db;
+    a.LockBits(&r, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &da);
+    b.LockBits(&r, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &db);
+    Gdiplus::Bitmap out(w, h, PixelFormat32bppARGB);
+    Gdiplus::BitmapData dout;
+    out.LockBits(&r, Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &dout);
+    long bad = 0;
+    for (int y = 0; y < h; ++y) {
+        auto* pa = (const uint32_t*)((const BYTE*)da.Scan0 + y * da.Stride);
+        auto* pb = (const uint32_t*)((const BYTE*)db.Scan0 + y * db.Stride);
+        auto* po = (uint32_t*)((BYTE*)dout.Scan0 + y * dout.Stride);
+        for (int x = 0; x < w; ++x) {
+            uint32_t u = pa[x], v = pb[x];
+            int d = 0;
+            for (int sh = 0; sh < 32; sh += 8) d = std::max(d, std::abs((int)(u >> sh & 255) - (int)(v >> sh & 255)));
+            bool differs = d > 24;
+            bad += differs;
+            uint32_t g = ((u >> 16 & 255) + (u >> 8 & 255) + (u & 255)) / 3 / 3 + 170;  // бледный эталон
+            po[x] = differs ? 0xFFFF2040u : 0xFF000000u | g << 16 | g << 8 | g;
+        }
+    }
+    a.UnlockBits(&da);
+    b.UnlockBits(&db);
+    out.UnlockBits(&dout);
+    if (!diff.empty() && bad) out.Save(diff.c_str(), &kPngEncoder, nullptr);
+    return (double)bad / ((double)w * h);
+}
+
+int SnapSuite(const std::wstring& refDir, const std::wstring& outDir, bool update) {
+    Gdip gdip;
+    SHCreateDirectoryExW(nullptr, outDir.c_str(), nullptr);
+    if (update) SHCreateDirectoryExW(nullptr, refDir.c_str(), nullptr);
+    std::wstring report;
+    int failed = 0;
+    for (const SnapCase& c : kSnapCases) {
+        std::wstring now = outDir + L"\\" + c.name + L".png", ref = refDir + L"\\" + c.name + L".png";
+        if (!SnapRun(c, now)) {
+            report += std::wstring(c.name) + L": снимок не получился\r\n";
+            ++failed;
+            continue;
+        }
+        if (update) {
+            CopyFileW(now.c_str(), ref.c_str(), FALSE);
+            report += std::wstring(c.name) + L": эталон обновлён\r\n";
+            continue;
+        }
+        double d = SnapDiff(ref, now, outDir + L"\\" + c.name + L"-diff.png");
+        wchar_t line[160];
+        if (d < 0)
+            swprintf(line, 160, L"%ls: нет эталона или другой размер\r\n", c.name);
+        else
+            swprintf(line, 160, L"%ls: отличается %.2f%%%ls\r\n", c.name, d * 100, d > 0.005 ? L" - НЕ СОВПАЛО" : L"");
+        report += line;
+        failed += d < 0 || d > 0.005;
+    }
+    report += failed ? L"Не совпало: " + std::to_wstring(failed) + L"\r\n" : L"Все снимки совпали\r\n";
+    WriteOut(L"snaps_out.txt", report);
+    return failed ? 1 : 0;
+}
+
 // --ring-bench [мс]: кольцо левого края рисуется в скрытом окне, курсор водится по секторам; время по частям -
 // в profile.log, итог - в bench_out.txt. Для сравнения до и после оптимизаций отрисовки.
 int RingBench(int ms) {
@@ -1043,6 +1143,12 @@ bool Run(int& exitCode) {
         exitCode = SecDiag();
     } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
         exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--snap-suite")) {  // --snap-suite <эталоны> <выход> [update]
+        size_t i = std::find(args.begin(), args.end(), L"--snap-suite") - args.begin();
+        if (i + 2 < args.size())
+            exitCode = SnapSuite(args[i + 1], args[i + 2], i + 3 < args.size() && args[i + 3] == L"update");
+        else
+            exitCode = 2;
     } else if (Has(args, L"--monitors-diag")) {  // мониторы: DDC/CI, яркость, вход -> monitors_out.txt
         std::string u = Narrow(monitors::Diag());
         HANDLE f = CreateFileW((ExeDir() + L"\\monitors_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
