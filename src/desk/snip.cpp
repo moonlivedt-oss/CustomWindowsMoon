@@ -45,12 +45,20 @@ std::wstring OwnerExe() {
 std::unique_ptr<Bitmap> FromDib(const BYTE* dib, SIZE_T size) {
     if (size < sizeof(BITMAPINFOHEADER)) return nullptr;
     auto* bih = (const BITMAPINFOHEADER*)dib;
+    // заголовок и палитра приходят от чужой программы: размеры проверяем, а не верим им
+    if (bih->biSize < sizeof(BITMAPINFOHEADER) || bih->biSize > size || bih->biBitCount > 32) return nullptr;
     DWORD colors = bih->biClrUsed ? bih->biClrUsed : (bih->biBitCount <= 8 ? 1u << bih->biBitCount : 0);
-    DWORD masks = (bih->biSize == sizeof(BITMAPINFOHEADER) && bih->biCompression == BI_BITFIELDS) ? 12 : 0;
+    if (colors > 256) return nullptr;
+    // маски цветов идут после короткого заголовка; у V4/V5 они внутри заголовка
+    DWORD masks = 0;
+    if (bih->biSize == sizeof(BITMAPINFOHEADER))
+        masks = bih->biCompression == BI_BITFIELDS ? 12 : bih->biCompression == 6 /* BI_ALPHABITFIELDS */ ? 16 : 0;
+    ULONGLONG off = sizeof(BITMAPFILEHEADER) + (ULONGLONG)bih->biSize + masks + colors * 4ull;
+    if (off >= sizeof(BITMAPFILEHEADER) + size) return nullptr;
     BITMAPFILEHEADER fh{};
     fh.bfType = 0x4D42;
     fh.bfSize = (DWORD)(sizeof(fh) + size);
-    fh.bfOffBits = (DWORD)(sizeof(fh) + bih->biSize + masks + colors * 4);
+    fh.bfOffBits = (DWORD)off;
     std::vector<BYTE> file(sizeof(fh) + size);
     memcpy(file.data(), &fh, sizeof(fh));
     memcpy(file.data() + sizeof(fh), dib, size);

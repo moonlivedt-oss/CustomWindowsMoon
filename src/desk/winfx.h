@@ -28,6 +28,7 @@ public:
     void ResetAll();  // то же, но программа продолжает работать
     void TogglePin(HWND w);
     void SetBlocked(bool on);  // кольцо открыто или игра: Alt + мышь не трогаем
+    bool Dragging() const;     // идёт Alt + тяга окна: кольцо у края не открываем
 
 private:
     struct State {

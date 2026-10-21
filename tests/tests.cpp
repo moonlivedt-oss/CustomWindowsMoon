@@ -636,9 +636,11 @@ void TestBackground() {
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int));  // tests_top20.cpp
+void TestMore(void (*check)(bool, const char*, int));   // tests_more.cpp
 
 int wmain() {
     TestTop20(Check);
+    TestMore(Check);
     TestParseCleanLine();
     TestTempRemovable();
     TestWalk();
