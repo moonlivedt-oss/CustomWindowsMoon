@@ -620,6 +620,7 @@ private:
     std::vector<tools::Junk> toolsJunk_;
     std::vector<tools::StartItem> toolsStarts_;
     std::vector<tools::Tweak> toolsPriv_;  // вкладка «Приватность»
+    std::wstring ruleDraft_;               // «Помощники», «Если - то»: правило, что ещё набирают
     std::vector<tools::Listener> toolsPorts_;
     std::vector<tools::Locker> toolsLockers_;
     bool toolsLockChecked_ = false, toolsJunkAsked_ = false, toolsShowSys_ = false;

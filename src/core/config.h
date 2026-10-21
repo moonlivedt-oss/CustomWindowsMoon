@@ -144,6 +144,7 @@ struct Config {
     bool stroke = true;                      // росчерк: махнули с зажатым Alt и отпустили над пунктом - открыть
     bool palette = true;                     // командная палитра по сочетанию
     std::wstring paletteKey = L"alt+space";  // её сочетание
+    std::vector<std::wstring> rules;  // «если - то» (app/rules): строки rule = условие -> действия
     std::wstring procRules;  // постоянные правила процессов (И25): chrome.exe=below,eco | blender.exe=high
     bool gamepad = true;  // геймпад: зажать View - кольцо, стик - сектор, A - открыть (desk/gamepad)
     bool clipHistory = true;                 // история буфера: последние тексты и картинки
