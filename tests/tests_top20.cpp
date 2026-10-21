@@ -114,6 +114,9 @@ void TestSecrets() {
     CHECK(secrets::Kind(L"password: Hunter2!x") == L"пароль или ключ в строке");
     CHECK(secrets::Kind(L"пароль = qwerty123") == L"пароль или ключ в строке");
     CHECK(secrets::Kind(L"Xk9fQ2mZ7pLw4Rt8Vb6Nc3Jh5Gd1Sa0E") == L"похоже на ключ");
+    CHECK(secrets::Kind(L"Bearer eyJhbGciOiJIUzI1NiJ9.abcdefgh") == L"токен");
+    CHECK(secrets::Kind(L"Authorization: Bearer abcDEF123456ghiJKL789") == L"токен");
+    CHECK(secrets::Kind(L"the bearer of bad news").empty());
     // не секреты: код, пути, адреса, хэши, GUID, обычный текст
     CHECK(secrets::Kind(L"const token = getToken();").empty());
     CHECK(secrets::Kind(L"password = input").empty());
@@ -279,6 +282,26 @@ void TestGuard() {
     CHECK(done.size() == 1 && done[0].ancestors == std::vector<DWORD>({1}));
 }
 
+void TestCut() {
+    CHECK(tools::CutRefuse(L"C:\\Users\\Moon\\AppData\\Local\\Discord\\app-1.0\\Discord.exe").empty());
+    CHECK(tools::CutRefuse(L"D:\\Games\\Some Game\\game.exe").empty());
+    CHECK(!tools::CutRefuse(L"C:\\Windows\\System32\\svchost.exe").empty());  // часть Windows
+    CHECK(!tools::CutRefuse(L"c:\\windows\\explorer.exe").empty());
+    CHECK(!tools::CutRefuse(L"C:\\Program Files\\MoonRadial\\RadialMenu-1a2b.exe").empty());
+    CHECK(!tools::CutRefuse(L"D:\\Desktop\\components\\RadialMenu\\RadialMenu.exe").empty());
+    CHECK(!tools::CutRefuse(L"notepad.exe").empty());                         // не полный путь
+    CHECK(!tools::CutRefuse(L"C:\\x\\run.bat").empty());                      // не exe
+    CHECK(!tools::CutRefuse(L"C:\\x\\a\" dir=in action=allow.exe").empty());  // кавычка - подстановка в netsh
+    // защиту не отрезаем, обходы проверки папки Windows не проходят
+    CHECK(!tools::CutRefuse(L"C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18\\MsMpEng.exe").empty());
+    CHECK(!tools::CutRefuse(L"C:\\Program Files (x86)\\Kaspersky Lab\\Kaspersky 21\\avp.exe").empty());
+    CHECK(!tools::CutRefuse(L"D:\\x\\avp.exe").empty());
+    CHECK(!tools::CutRefuse(L"C:\\Program Files\\..\\Windows\\System32\\svchost.exe").empty());
+    CHECK(!tools::CutRefuse(L"C:\\WINDOW~1\\System32\\svchost.exe").empty());
+    CHECK(!tools::CutRefuse(L"C:\\x\\a.exe:stream.exe").empty());
+    CHECK(tools::CutRuleName(L"C:\\a\\b.exe") == std::wstring(tools::kCutPrefix) + L"C:\\a\\b.exe");
+}
+
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int)) {
@@ -292,4 +315,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestForecast();
     TestGiants();
     TestGuard();
+    TestCut();
 }

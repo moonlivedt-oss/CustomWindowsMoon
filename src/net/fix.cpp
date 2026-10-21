@@ -26,7 +26,7 @@ const wchar_t* const kJobKeys[kJobs] = {
     L"smart",       L"winhttp",       L"routes",    L"ip",     L"vpn",         L"dns-cf",        L"dns-google",
     L"dns-auto",    L"fw-restore",    L"adapter",   L"deep",   L"disk-health", L"syspath-clean", L"net-top",
     L"power",       L"restore-point", L"path-acl",  L"repair", L"wu-reset",    L"unbreak",       L"defender-offline",
-    L"vhd-compact", L"sys-clean",     L"mft-sizes", L"giants"};
+    L"vhd-compact", L"sys-clean",     L"mft-sizes", L"giants",  L"net-cut", L"net-uncut"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -505,6 +505,31 @@ bool Job_(Job j, const Log& log) {
             while (!lines.empty() && lines.back() == L'\n') lines.pop_back();
             log(lines);
             return lines.rfind(L"@mftok", 0) == 0;
+        }
+        case JOB_NET_CUT:
+        case JOB_NET_UNCUT: {
+            // путь присылает обычный процесс: проверяем заново - полный путь к существующему exe, не Windows и не мы
+            std::wstring exe = Trim(elevate::Take(L"CutExe")), why = tools::CutRefuse(exe);
+            DWORD a = GetFileAttributesW(exe.c_str());
+            if (why.empty() && j == JOB_NET_CUT && (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)))
+                why = L"файла нет";
+            if (!why.empty()) {
+                log(L"Не трогаю: " + why + L".");
+                return false;
+            }
+            std::wstring name = tools::CutRuleName(exe);
+            if (j == JOB_NET_UNCUT) {
+                int code = Exec(L"netsh.exe", L"advfirewall firewall delete rule name=" + Q(name), &out);
+                log(Okish(code, out) ? L"Правило убрано - программа снова в сети." : L"Правила не нашлось.");
+                return Okish(code, out);
+            }
+            Exec(L"netsh.exe", L"advfirewall firewall delete rule name=" + Q(name), &out);  // без дублей
+            int code = Exec(L"netsh.exe",
+                            L"advfirewall firewall add rule name=" + Q(name) + L" dir=out action=block program=" +
+                                Q(exe) + L" enable=yes profile=any",
+                            &out);
+            log(Okish(code, out) ? L"Исходящие соединения программы закрыты." : L"Брандмауэр не принял правило: " + Trim(out));
+            return Okish(code, out);
         }
         case JOB_GIANTS:
             return !tools::GiantsAdminMain(elevate::Take(L"GiantJob"), log).empty();

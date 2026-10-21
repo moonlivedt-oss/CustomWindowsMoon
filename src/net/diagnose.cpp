@@ -12,6 +12,7 @@
 #include "core/bg.h"
 #include "core/perf.h"
 #include "core/text.h"
+#include "tools/tools.h"
 
 namespace net {
 
@@ -193,10 +194,13 @@ std::vector<FwRule> FirewallBlocks(bool* readOk) {
                     rule->get_ApplicationName(&app);
                     FwRule r;
                     r.name = name ? name : L"";
+                    r.app = app ? app : L"";
                     std::wstring low = Lower(r.name + L" " + (app ? app : L""));
                     r.vpn = VpnName(low) || low.find(L"kill") != std::wstring::npos ||
                             low.find(L"block all") != std::wstring::npos ||
                             low.find(L"lockdown") != std::wstring::npos || low.find(L"vpn") != std::wstring::npos;
+                    // своё «отрезано» (И16) - не kill-switch, даже если в пути есть vpn / happ: починка его не трогает
+                    if (r.name.rfind(tools::kCutPrefix, 0) == 0) r.vpn = false;
                     out.push_back(r);
                     SysFreeString(name);
                     SysFreeString(app);
@@ -210,6 +214,14 @@ std::vector<FwRule> FirewallBlocks(bool* readOk) {
     if (unk) unk->Release();
     if (rules) rules->Release();
     pol->Release();
+    return out;
+}
+
+std::vector<CutApp> CutApps() {
+    std::vector<CutApp> out;
+    std::wstring prefix = tools::kCutPrefix;
+    for (const FwRule& r : FirewallBlocks())
+        if (r.name.rfind(prefix, 0) == 0) out.push_back({r.name, r.app.empty() ? r.name.substr(prefix.size()) : r.app});
     return out;
 }
 

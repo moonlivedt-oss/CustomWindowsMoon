@@ -120,6 +120,11 @@ std::vector<BigFile> BigFiles(ULONGLONG* age = nullptr);
 // Можно ли большой файл отдать в Корзину: пусто - можно, иначе почему нет (системный, программа, файл подкачки...).
 // Только по пути - одно правило для студии и RadialTools (тот ещё смотрит атрибуты).
 std::wstring BigFileKeep(const std::wstring& path);
+// Отрезать программу от интернета (И16): исходящее правило брандмауэра «MoonRadial: отрезано - <путь>». Одно правило
+// для обычного процесса и задачи с правами: пусто - можно, иначе почему нет (системная программа, не exe...).
+std::wstring CutRefuse(const std::wstring& exe);
+std::wstring CutRuleName(const std::wstring& exe);
+inline constexpr wchar_t kCutPrefix[] = L"MoonRadial: отрезано - ";
 
 // Системные гиганты (И11, giants.cpp): hiberfil, подкачка, Windows.old, точки восстановления, загрузки обновлений,
 // дампы. action - что предложить: hiber-off, old-windows, shadow-shrink (задача с правами), sys-clean («Остатки

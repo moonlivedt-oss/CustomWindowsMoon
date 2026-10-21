@@ -128,6 +128,8 @@ enum Job {
     JOB_SYS_CLEAN,         // место: кэш Delivery Optimization и старые версии компонентов (DISM, без ResetBase)
     JOB_MFT_SIZES,         // место: размеры папок чтением MFT (только чтение; папка - в HKCU MftDir)
     JOB_GIANTS,            // место: системные гиганты (действие - в HKCU GiantJob, только из списка giants.cpp)
+    JOB_NET_CUT,           // отрезать программу от интернета (путь - в HKCU CutExe, проверка tools::CutRefuse)
+    JOB_NET_UNCUT,         // вернуть: убрать своё правило для программы из HKCU CutExe
     kJobs
 };
 bool AdminReady();  // задача есть
@@ -138,6 +140,12 @@ int AdminMain();  // RadialMenu.exe --net-job: выполнить задание
 // Итог задания, брошенного по «Стоп», когда оно доработало в фоне: ok и последняя строка его журнала. Зовётся из
 // фонового потока; задаётся один раз при старте.
 void SetLeftDone(std::function<void(Job, bool ok, const std::wstring& last)> fn);
+
+// Отрезанные от интернета программы (И16): свои исходящие блок-правила (читаются без прав).
+struct CutApp {
+    std::wstring rule, exe;
+};
+std::vector<CutApp> CutApps();
 
 // «Починить умно»: шаги по порядку, пока интернет не вернётся. true - работает.
 bool SmartFix(const Log& log);

@@ -652,6 +652,54 @@ ULONGLONG ParseShadowUsed(const std::wstring& text) {
     return 0;
 }
 
+std::wstring CutRefuse(const std::wstring& exe) {
+    std::wstring l = Lower(exe);
+    if (l.size() < 8 || l[1] != L':' || l[2] != L'\\' || !EndsWithI(l, L".exe")) return L"нужен полный путь к .exe";
+    if (l.find_first_of(L"\"|<>*?") != std::wstring::npos || l.find(L':', 2) != std::wstring::npos)
+        return L"странные знаки в пути";
+    // «..», «.» и короткие имена (C:\WINDOW~1) обошли бы проверку папки Windows ниже
+    if (l.find(L"\\..") != std::wstring::npos || l.find(L"\\.\\") != std::wstring::npos ||
+        l.find(L'~') != std::wstring::npos || l.find(L"\\\\") != std::wstring::npos)
+        return L"путь не в полном виде";
+    wchar_t win[MAX_PATH] = {};
+    GetWindowsDirectoryW(win, MAX_PATH);
+    std::wstring w = Lower(win) + L"\\";
+    if (l.rfind(w, 0) == 0) return L"это часть Windows: без неё сломаются обновления, магазин или сама сеть";
+    for (const wchar_t* own : {L"\\moonradial\\", L"\\radialmenu.exe", L"\\radialtools.exe"})
+        if (l.find(own) != std::wstring::npos) return L"это сама RadialMenu";
+    // защита: отрезанный антивирус перестал бы обновляться и проверять в облаке. Задание с правами просит обычный
+    // процесс - вредонос не должен уметь сделать это нашими руками
+    for (const wchar_t* av : {L"\\programdata\\microsoft\\",
+                              L"\\windows defender",
+                              L"\\microsoft security client\\",
+                              L"\\kaspersky",
+                              L"\\eset\\",
+                              L"\\avast",
+                              L"\\avg\\",
+                              L"\\bitdefender",
+                              L"\\malwarebytes",
+                              L"\\norton",
+                              L"\\mcafee",
+                              L"\\drweb",
+                              L"\\dr.web",
+                              L"\\sophos",
+                              L"\\trend micro",
+                              L"\\f-secure",
+                              L"\\panda security",
+                              L"\\comodo",
+                              L"\\360\\",
+                              L"\\windowsapps\\microsoft.sechealthui"})
+        if (l.find(av) != std::wstring::npos) return L"это защита компьютера (антивирус или часть Windows)";
+    std::wstring leaf = l.substr(l.find_last_of(L'\\') + 1);
+    for (const wchar_t* av : {L"avp.exe", L"avpui.exe", L"msmpeng.exe", L"mpcmdrun.exe", L"nissrv.exe", L"ekrn.exe",
+                              L"egui.exe", L"avastsvc.exe", L"avgsvc.exe", L"mbamservice.exe", L"bdagent.exe",
+                              L"vsserv.exe", L"securityhealthservice.exe", L"smartscreen.exe"})
+        if (leaf == av) return L"это защита компьютера (антивирус или часть Windows)";
+    return L"";
+}
+
+std::wstring CutRuleName(const std::wstring& exe) { return std::wstring(kCutPrefix) + exe; }
+
 std::wstring BigFileKeep(const std::wstring& path) {
     std::wstring l = Lower(path);
     if (l.size() < 4 || l[1] != L':' || l[2] != L'\\') return L"не полный путь";

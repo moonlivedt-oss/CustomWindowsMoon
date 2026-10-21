@@ -1,10 +1,12 @@
 #include "app/netui.h"
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 
 #include "core/bg.h"
 #include "core/config.h"
+#include "core/elevate.h"
 #include "core/files.h"
 #include "core/text.h"
 #include "core/themes.h"
@@ -12,6 +14,7 @@
 #include "menu/menu.h"
 #include "net/net.h"
 #include "net/watch.h"
+#include "tools/tools.h"
 
 namespace netui {
 
@@ -24,6 +27,52 @@ net::Watch g_watch;
 std::function<void()> g_openStudio;
 std::atomic<bool> g_busy{false};
 bool g_downShown = false;  // карточка «пропал интернет» была - «вернулся» имеет смысл
+SRWLOCK g_topLock = SRWLOCK_INIT;
+std::vector<TopRow> g_top;  // под g_topLock: последний замер «Кто качает»
+ULONGLONG g_topAt = 0;
+std::wstring g_fgExe;  // программа, что была впереди, когда открыли кольцо (для «Отрезать то, что впереди»)
+// отрезанные (И16): чтение правил брандмауэра через COM - до сотни мс, поэтому в фоне и с кэшем на 5 с
+SRWLOCK g_cutLock = SRWLOCK_INIT;
+std::vector<net::CutApp> g_cut;  // под g_cutLock
+std::atomic<ULONGLONG> g_cutAt{0};
+std::atomic<bool> g_cutBusy{false};
+
+void StoreCut(std::vector<net::CutApp> v) {
+    AcquireSRWLockExclusive(&g_cutLock);
+    g_cut = std::move(v);
+    ReleaseSRWLockExclusive(&g_cutLock);
+    g_cutAt = GetTickCount64();
+}
+
+void RefreshCut() {
+    if (g_cutBusy.exchange(true)) return;
+    if (!bg::Run([] {
+            StoreCut(net::CutApps());
+            g_cutBusy = false;
+        }))
+        g_cutBusy = false;
+}
+
+std::wstring ExeOf(DWORD pid) {
+    HANDLE h = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
+    if (!h) return L"";
+    wchar_t buf[MAX_PATH];
+    DWORD n = MAX_PATH;
+    std::wstring out = QueryFullProcessImageNameW(h, 0, buf, &n) ? std::wstring(buf, n) : L"";
+    CloseHandle(h);
+    return out;
+}
+
+std::wstring Leaf(const std::wstring& p) { return p.substr(p.find_last_of(L'\\') + 1); }
+
+std::wstring Rate(ULONGLONG b) {
+    wchar_t s[32];
+    if (b >= 1024 * 1024)
+        swprintf(s, 32, L"%.1f МБ/с", b / 1048576.0);
+    else
+        swprintf(s, 32, L"%d КБ/с", (int)(b / 1024));
+    return s;
+}
 
 struct JobMsg {
     std::wstring title, text;
@@ -153,7 +202,31 @@ std::vector<Item> RingItems() {
 }
 
 void ShowRing(RadialMenu& menu) {
+    HWND fg = GetForegroundWindow();
+    DWORD pid = 0;
+    if (fg) GetWindowThreadProcessId(fg, &pid);
+    g_fgExe = ExeOf(pid);
     std::vector<Item> ring = RingItems();
+    // кто качает и отрезанные (И15, И16)
+    Item top = Act(L"Кто качает", L"net-procs.png", L"", L"Трафик по программам: замер 3 с (нужны права), рядом - «Отрезать»");
+    top.children.push_back(Act(L"Замерить", L"net-procs.png", L"top", L"Какие программы сейчас качают и отдают больше всего"));
+    for (const TopRow& r : TopRows())
+        if (!r.exe.empty() && tools::CutRefuse(r.exe).empty())
+            top.children.push_back(Act((L"Отрезать " + Leaf(r.name)).c_str(), L"tools-firewall.png", L"cut:" + r.exe,
+                                       L"Сейчас: приём " + Rate(r.down) + L", отдача " + Rate(r.up) +
+                                           L". 2 клика - запретить ей выход в интернет (правило брандмауэра)"));
+    if (!g_fgExe.empty() && tools::CutRefuse(g_fgExe).empty())
+        top.children.push_back(Act((L"Отрезать " + Leaf(g_fgExe)).c_str(), L"tools-firewall.png", L"cut:" + g_fgExe,
+                                   L"Программа, что была впереди. 2 клика - запретить ей выход в интернет"));
+    for (const net::CutApp& c : CutList())
+        top.children.push_back(Act((L"Вернуть " + Leaf(c.exe)).c_str(), L"tools-firewall.png", L"uncut:" + c.exe,
+                                   L"Отрезана от интернета. 2 клика - убрать правило"));
+    for (Item& c : top.children) {
+        std::wstring want = ExeDir() + L"\\icons\\tools-netcut.png";
+        if (c.path.rfind(L"cut:", 0) == 0 || c.path.rfind(L"uncut:", 0) == 0)
+            if (Exists(want)) c.iconFull = want;
+    }
+    ring.insert(ring.empty() ? ring.end() : ring.end() - 1, top);  // перед последним («Студия»)
     menu.onNet = [](const std::wstring& key) { Run(key); };
     menu.netStatus = [] { return Status(); };
     POINT pt;
@@ -167,7 +240,93 @@ void ShowRing(RadialMenu& menu) {
     g_watch.Kick(0);  // строка состояния освежится к тому, как кольцо раскроется
 }
 
+std::vector<net::CutApp> CutList() {
+    if (GetTickCount64() - g_cutAt > 5000) RefreshCut();
+    AcquireSRWLockShared(&g_cutLock);
+    std::vector<net::CutApp> v = g_cut;
+    ReleaseSRWLockShared(&g_cutLock);
+    return v;
+}
+
+std::vector<TopRow> TopRows(ULONGLONG* at) {
+    AcquireSRWLockShared(&g_topLock);
+    std::vector<TopRow> v = g_top;
+    if (at) *at = g_topAt;
+    ReleaseSRWLockShared(&g_topLock);
+    return v;
+}
+
+void Top() { Run(L"top"); }
+
+void Cut(const std::wstring& exe) {
+    std::wstring why = tools::CutRefuse(exe);
+    if (!why.empty()) {
+        g_card.Show(BoostCard::DONE, L"Не отрезаю", why + L".", Theme(), 8000, Toast::G_WARN);
+        return;
+    }
+    g_card.yesLabel = L"Отрезать";
+    g_card.noLabel = L"Не надо";
+    g_card.onYes = [exe] {
+        g_card.yesLabel.clear();
+        g_card.noLabel.clear();
+        RunJob(L"Отрезаю " + Leaf(exe), [exe](const net::Log& log, std::wstring& res) {
+            elevate::Put(L"CutExe", exe);
+            bool ok = net::RunAdmin(net::JOB_NET_CUT, log);
+            StoreCut(net::CutApps());
+            net::Remember(L"fix", L"Отрезана от интернета: " + exe + (ok ? L"" : L" (не получилось)"));
+            res = ok ? Leaf(exe) + L" больше не выходит в интернет. Вернуть - в кольце «Сеть» или в студии." : L"";
+            return ok;
+        });
+    };
+    g_card.Show(BoostCard::OFFER, L"Отрезать " + Leaf(exe) + L" от интернета?",
+                L"Исходящее правило брандмауэра на " + exe +
+                    L". Программа продолжит работать, но в сеть не выйдет (обновления, синхронизация, вход тоже).",
+                Theme(), 30000);
+}
+
+void Uncut(const std::wstring& exe) {
+    RunJob(L"Возвращаю " + Leaf(exe), [exe](const net::Log& log, std::wstring& res) {
+        elevate::Put(L"CutExe", exe);
+        bool ok = net::RunAdmin(net::JOB_NET_UNCUT, log);
+        StoreCut(net::CutApps());
+        net::Remember(L"fix", L"Снова в сети: " + exe);
+        res = ok ? Leaf(exe) + L" снова может выходить в интернет." : L"";
+        return ok;
+    });
+}
+
 void Run(const std::wstring& key) {
+    if (key.rfind(L"cut:", 0) == 0) return Cut(key.substr(4));
+    if (key.rfind(L"uncut:", 0) == 0) return Uncut(key.substr(6));
+    if (key == L"top")
+        return RunJob(L"Кто качает", [](const net::Log& log, std::wstring& res) {
+            std::vector<TopRow> rows;
+            bool ok = net::RunAdmin(net::JOB_NET_TOP, [&](const std::wstring& s) {
+                std::vector<std::wstring> f = Split(s, L'\t');
+                if (f.size() >= 5 && f[0] == L"@net") {
+                    TopRow r;
+                    r.name = f[2];
+                    r.exe = ExeOf((DWORD)_wtoi(f[1].c_str()));
+                    r.down = _wcstoui64(f[3].c_str(), nullptr, 10);
+                    r.up = _wcstoui64(f[4].c_str(), nullptr, 10);
+                    rows.push_back(r);
+                } else {
+                    log(s);
+                }
+            });
+            std::sort(rows.begin(), rows.end(),
+                      [](const TopRow& a, const TopRow& b) { return a.down + a.up > b.down + b.up; });
+            if (rows.size() > 5) rows.resize(5);
+            AcquireSRWLockExclusive(&g_topLock);
+            g_top = rows;
+            g_topAt = GetTickCount64();
+            ReleaseSRWLockExclusive(&g_topLock);
+            for (const TopRow& r : rows)
+                res += (res.empty() ? L"" : L"; ") + r.name + L" " + Rate(r.down) + L" / " + Rate(r.up);
+            if (ok && res.empty()) res = L"Сейчас почти ничего не качается (по TCP; QUIC браузеров не видно).";
+            else if (ok) res += L". «Отрезать» - в кольце «Сеть», группа «Кто качает».";
+            return ok;
+        });
     if (key == L"check") {
         if (g_openStudio) g_openStudio();
         return;
