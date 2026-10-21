@@ -130,6 +130,7 @@ enum Job {
     JOB_GIANTS,            // место: системные гиганты (действие - в HKCU GiantJob, только из списка giants.cpp)
     JOB_NET_CUT,           // отрезать программу от интернета (путь - в HKCU CutExe, проверка tools::CutRefuse)
     JOB_NET_UNCUT,         // вернуть: убрать своё правило для программы из HKCU CutExe
+    JOB_SYS_ITEM,          // новая служба или драйвер: выключить / вернуть (HKCU SysItem, tools::SysItemRefuse)
     kJobs
 };
 bool AdminReady();  // задача есть
