@@ -23,6 +23,7 @@
 #include "app/toolsui.h"
 #include "core/bg.h"
 #include "core/crash.h"
+#include "core/edgecheck.h"
 #include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -99,6 +100,7 @@ BoostPick g_pick;        // выбор по программам: закрыть
 BoostCard g_gbCard;      // новости Boost во время игры и работы: видеокарта, шейдеры, сборки, итог
 std::wstring g_pickFor;  // чей профиль выбора: exe игры, редактора или «вручную»
 ULONGLONG g_avHintAt = 0;
+BoostCard g_edgeCard;           // что мешает кольцам у края (CursorWrap)
 BoostCard g_mcCard, g_mcCard2;  // Minecraft: падение / AlwaysPreTouch и подкачка
 struct McGame {
     bool on = false;
@@ -121,7 +123,7 @@ std::wstring g_cfgPath;
 FILETIME g_cfgTime{};
 bool g_armed = true;
 bool g_restored = false;  // «Вернуть всё как было»: рамки окон на паузе до следующего перечитывания настроек
-bool g_altTab = false;  // за это нажатие Alt был Tab: идёт переключение окон, кольцо у края не открываем
+bool g_altTab = false;    // за это нажатие Alt был Tab: идёт переключение окон, кольцо у края не открываем
 
 FILETIME FileTime(const std::wstring& p) {
     WIN32_FILE_ATTRIBUTE_DATA d{};
@@ -269,11 +271,33 @@ void PollWork() {
     // край считается только внешний: за ним не должно быть другого монитора
     bool left = pt.x <= r.left && !MonitorFromPoint({pt.x - 1, pt.y}, MONITOR_DEFAULTTONULL);
     bool right = pt.x >= r.right - 1 && !MonitorFromPoint({pt.x + 1, pt.y}, MONITOR_DEFAULTTONULL);
+    // край между мониторами курсор проскакивает - там кольцо открывает задержка: 350 мс в полосе у края
+    bool inner = false;
+    if (!left && !right && g_cfg.innerEdges) {
+        static int side = 0;
+        static ULONGLONG since = 0;
+        static bool used = false;  // уже открывали отсюда: снова - только когда курсор ушёл из полосы
+        LONG band = 6 * (LONG)MonitorDpi(mon) / 96;
+        int now = pt.x < r.left + band && MonitorFromPoint({r.left - 1, pt.y}, MONITOR_DEFAULTTONULL)  ? 1
+                  : pt.x >= r.right - band && MonitorFromPoint({r.right, pt.y}, MONITOR_DEFAULTTONULL) ? 2
+                                                                                                       : 0;
+        if (now != side) {
+            side = now;
+            since = nowMs;
+            used = false;
+        }
+        if (side && !used && nowMs - since >= 350 && !other) {
+            used = true;
+            inner = true;
+            left = side == 1;
+            right = side == 2;
+        }
+    }
     if (!left && !right) {
         g_armed = true;
         return;
     }
-    if (!g_armed || other) return;
+    if (!inner && (!g_armed || other)) return;
     g_armed = false;
 
     FILETIME ft = FileTime(g_cfgPath);
@@ -1238,6 +1262,22 @@ void TrayMenu() {
     DestroyMenu(m);
 }
 
+// Кольца у края не откроются (PowerToys CursorWrap): карточка при запуске, не чаще раза в неделю.
+void WarnEdgeConflict() {
+    std::wstring why = edgecheck::Conflict();
+    if (why.empty()) return;
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    DWORD day = (DWORD)((((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 864000000000ull);
+    DWORD last = 0, size = sizeof(last);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\MoonRadial", L"EdgeWarnDay", RRF_RT_REG_DWORD, nullptr, &last, &size);
+    if (last && day - last < 7) return;
+    RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\MoonRadial", L"EdgeWarnDay", REG_DWORD, &day, sizeof(day));
+    g_edgeCard.yesLabel.clear();
+    g_edgeCard.noLabel.clear();
+    g_edgeCard.Show(BoostCard::DONE, L"Кольца у края не откроются", why, CurrentTheme(g_cfg), 20000, Toast::G_WARN);
+}
+
 // Прошлый запуск упал: строка в журнал автоматики и карточка с папкой дампа (core/crash). Раз на каждый дамп.
 void ReportCrashes() {
     std::vector<crash::Report> rs = crash::Unreported(crash::Dir(), true);
@@ -1281,6 +1321,7 @@ void ShutdownAll() {
     g_gbCard.Destroy();
     g_mcCard.Destroy();
     g_mcCard2.Destroy();
+    g_edgeCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
     toolsui::Shutdown();
@@ -1330,6 +1371,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 KillTimer(h, kAutostartTimer);
                 AutostartRefresh();
                 ReportCrashes();
+                WarnEdgeConflict();
             }
             if (wp == kIntroTimer) {
                 KillTimer(h, kIntroTimer);
