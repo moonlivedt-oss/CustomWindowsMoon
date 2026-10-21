@@ -73,7 +73,8 @@ enum Cmd {
     CMD_GAME,
     CMD_DEV,
     CMD_BOOST,
-    CMD_EXIT
+    CMD_EXIT,
+    CMD_RESTORE_ALL
 };
 constexpr UINT WM_BOOST_DONE = WM_APP + 60;  // поток Boost закончил: lParam - boost::Result*
 
@@ -119,6 +120,7 @@ Config g_cfg;
 std::wstring g_cfgPath;
 FILETIME g_cfgTime{};
 bool g_armed = true;
+bool g_restored = false;  // «Вернуть всё как было»: рамки окон на паузе до следующего перечитывания настроек
 bool g_altTab = false;  // за это нажатие Alt был Tab: идёт переключение окон, кольцо у края не открываем
 
 FILETIME FileTime(const std::wstring& p) {
@@ -149,6 +151,10 @@ void Reload() {
     g_menu.ResetIcons();
     if (g_wnd) {
         g_frame.Apply(g_cfg);
+        if (g_restored) {  // после «Вернуть всё как было» оформление окон возвращается с новыми настройками
+            g_restored = false;
+            if (!g_game.On()) g_frame.Suspend(false);
+        }
         g_reveal.Apply(g_cfg);
         UnregisterHotKey(g_wnd, kHotWindows);
         if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
@@ -1170,6 +1176,40 @@ void RemoveTray() {
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
+// Аварийная кнопка трея: всё, что программа поменяла в системе, - назад сразу, без выхода. Режимы выключаются,
+// приоритеты, тишина, курсор, прозрачность и рамки чужих окон возвращаются. Итог - карточкой.
+void RestoreEverything() {
+    std::vector<std::wstring> done;
+    if (g_game.On()) {
+        g_game.SetManual(false, g_cfg);
+        done.push_back(L"игровой режим выключен");
+    }
+    if (g_dev.On()) {
+        g_dev.SetManual(false, g_cfg);
+        done.push_back(L"режим разработки выключен");
+    }
+    gboost::RestoreAll();
+    gboost::Quiet(false);
+    boost::GameTweaks(boost::Load(BoostDir()), false);
+    done.push_back(L"приоритеты и уведомления");
+    if (!toolsui::BalanceLowered().empty()) done.push_back(L"фоновые процессы");
+    toolsui::BalanceRestoreAll();
+    g_winfx.ResetAll();
+    g_frame.Suspend(true);
+    g_restored = true;
+    done.push_back(L"окна (прозрачность, закрепление, рамки)");
+    cursor::Restore();
+    done.push_back(L"курсор");
+    std::wstring text;
+    for (const std::wstring& d : done) text += (text.empty() ? L"" : L", ") + d;
+    g_boostCard.yesLabel.clear();
+    g_boostCard.noLabel.clear();
+    g_boostCard.Show(BoostCard::DONE, L"Всё вернул как было",
+                     text + L". Оформление окон и курсор вернутся после «Перечитать настройки» или перезапуска.",
+                     CurrentTheme(g_cfg), 12000);
+    autos::Note(L"Вернул всё как было: " + text);
+}
+
 void TrayMenu() {
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING | MF_DEFAULT, CMD_EDITOR, L"Редактор колец");
@@ -1177,6 +1217,7 @@ void TrayMenu() {
     AppendMenuW(m, MF_STRING, CMD_FOLDER, L"Папка программы");
     AppendMenuW(m, MF_STRING, CMD_RELOAD, L"Перечитать настройки");
     AppendMenuW(m, MF_STRING, CMD_RESET_WINDOWS, L"Вернуть окнам прозрачность и закрепление");
+    AppendMenuW(m, MF_STRING, CMD_RESTORE_ALL, L"Вернуть всё как было");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     std::wstring game = L"Игровой режим";
     if (g_game.On() && !g_game.Manual()) game += L": " + g_game.Reason();
@@ -1331,6 +1372,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     break;
                 case CMD_RESET_WINDOWS:
                     g_winfx.ResetAll();
+                    break;
+                case CMD_RESTORE_ALL:
+                    RestoreEverything();
                     break;
                 case CMD_BOOST:
                     OfferBoost(true);
