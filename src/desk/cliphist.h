@@ -20,7 +20,8 @@ void Start(HINSTANCE inst, const Config* cfg);
 void Stop();
 std::vector<Item> Items(const std::wstring& tag);  // записи для кольца и палитры: special 3, ключ tag + номер
 void Use(int n);                                   // положить запись n в буфер и вставить
-void Clear();                                      // забыть всё
+void Clear();                                      // забыть всё, кроме закреплённого
+void TogglePin(int n);                             // закрепить / открепить запись n (на диске, DPAPI)
 void ShowRing(RadialMenu& menu);
 std::wstring Status();  // «запомнено 12, стёрто секретов 1»
 

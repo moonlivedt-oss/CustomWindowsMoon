@@ -1,6 +1,7 @@
 #include "desk/cliphist.h"
 
 #include <shlwapi.h>
+#include <wincrypt.h>
 #include <objidl.h>
 #include <gdiplus.h>
 
@@ -27,6 +28,8 @@ constexpr wchar_t kClass[] = L"MoonRadialClip";
 constexpr UINT_PTR kWipeTimer = 1;
 constexpr size_t kMax = 30;
 constexpr size_t kMaxDib = 48u << 20;  // картинка больше 48 МБ (скриншот 8K) в историю не идёт
+constexpr size_t kMaxPins = 20;
+constexpr size_t kMaxPinDib = 8u << 20;  // закреплённая картинка на диск - не больше 8 МБ
 
 struct Entry {
     std::wstring text;
@@ -34,6 +37,7 @@ struct Entry {
     std::wstring thumb;     // превью PNG во временной папке (значок пункта)
     int w = 0, h = 0;
     SYSTEMTIME at{};
+    bool pinned = false;  // закреплённое не вытесняется и хранится на диске (DPAPI), пока не открепят
 };
 
 HWND g_wnd = nullptr;
@@ -86,18 +90,109 @@ bool OpenRetry() {
 }
 
 void Remember(Entry e) {
-    // то же самое уже есть - поднимаем наверх, а не дублируем
+    // то же самое уже есть - поднимаем наверх, а не дублируем (закрепление остаётся)
     for (auto it = g_list.begin(); it != g_list.end(); ++it)
         if ((!e.text.empty() && it->text == e.text) || (!e.dib.empty() && it->dib == e.dib)) {
-            if (!it->thumb.empty() && it->thumb != e.thumb) DeleteFileW(it->thumb.c_str());
+            e.pinned = e.pinned || it->pinned;
+            if (!it->thumb.empty() && it->thumb != e.thumb) {
+                if (e.thumb.empty())
+                    e.thumb = it->thumb;
+                else
+                    DeleteFileW(it->thumb.c_str());
+            }
             g_list.erase(it);
             break;
         }
     g_list.push_front(std::move(e));
-    while (g_list.size() > kMax) {
-        if (!g_list.back().thumb.empty()) DeleteFileW(g_list.back().thumb.c_str());
-        g_list.pop_back();
+    // вытесняются только незакреплённые, самые старые
+    size_t loose = 0;
+    for (const Entry& x : g_list) loose += !x.pinned;
+    for (auto it = g_list.end(); loose > kMax && it != g_list.begin();) {
+        --it;
+        if (it->pinned) continue;
+        if (!it->thumb.empty()) DeleteFileW(it->thumb.c_str());
+        it = g_list.erase(it);
+        --loose;
     }
+}
+
+std::wstring PinFile() {
+    wchar_t p[MAX_PATH];
+    ExpandEnvironmentStringsW(L"%APPDATA%\\MoonDesk", p, MAX_PATH);
+    CreateDirectoryW(p, nullptr);
+    return std::wstring(p) + L"\\clip-pins.bin";
+}
+
+// Закреплённое - на диск, зашифровано DPAPI (расшифровать может только этот пользователь на этом ПК).
+// Запись: 1 байт вида (0 - текст UTF-16, 1 - DIB), 4 байта длины, данные, SYSTEMTIME.
+void SavePins() {
+    std::string raw;
+    auto put = [&](const void* d, size_t n) { raw.append((const char*)d, n); };
+    for (const Entry& e : g_list) {
+        if (!e.pinned) continue;
+        BYTE kind = e.dib.empty() ? 0 : 1;
+        if (kind && e.dib.size() > kMaxPinDib) continue;
+        DWORD n = kind ? (DWORD)e.dib.size() : (DWORD)(e.text.size() * sizeof(wchar_t));
+        put(&kind, 1);
+        put(&n, 4);
+        put(kind ? (const void*)e.dib.data() : (const void*)e.text.data(), n);
+        put(&e.at, sizeof(e.at));
+    }
+    std::wstring file = PinFile();
+    if (raw.empty()) {
+        DeleteFileW(file.c_str());
+        return;
+    }
+    DATA_BLOB in{(DWORD)raw.size(), (BYTE*)raw.data()}, out{};
+    if (!CryptProtectData(&in, L"MoonRadial clip pins", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out))
+        return;
+    std::wstring tmp = file + L".tmp";
+    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        DWORD wrote = 0;
+        BOOL ok = WriteFile(f, out.pbData, out.cbData, &wrote, nullptr) && wrote == out.cbData;
+        CloseHandle(f);
+        if (ok) MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+    LocalFree(out.pbData);
+}
+
+void MakeThumb(Entry& e);
+
+void LoadPins() {
+    HANDLE f = CreateFileW(PinFile().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    std::string raw;
+    char buf[65536];
+    DWORD got = 0;
+    while (raw.size() < (kMaxPins + 1) * kMaxPinDib && ReadFile(f, buf, sizeof(buf), &got, nullptr) && got)
+        raw.append(buf, got);
+    CloseHandle(f);
+    DATA_BLOB in{(DWORD)raw.size(), (BYTE*)raw.data()}, out{};
+    if (raw.empty() || !CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out))
+        return;
+    const BYTE* d = out.pbData;
+    size_t at = 0, size = out.cbData;
+    while (at + 5 <= size && g_list.size() < kMaxPins) {
+        BYTE kind = d[at];
+        DWORD n = 0;
+        memcpy(&n, d + at + 1, 4);
+        at += 5;
+        if (n > size - at || sizeof(SYSTEMTIME) > size - at - n) break;
+        Entry e;
+        e.pinned = true;
+        if (kind == 1)
+            e.dib.assign(d + at, d + at + n);
+        else
+            e.text.assign((const wchar_t*)(d + at), n / sizeof(wchar_t));
+        at += n;
+        memcpy(&e.at, d + at, sizeof(SYSTEMTIME));
+        at += sizeof(SYSTEMTIME);
+        if (!e.dib.empty()) MakeThumb(e);
+        g_list.push_back(std::move(e));
+    }
+    SecureZeroMemory(out.pbData, out.cbData);
+    LocalFree(out.pbData);
 }
 
 void OnUpdate() {
@@ -141,6 +236,11 @@ void OnUpdate() {
         return;
     }
     if (e.dib.empty() || !g_cfg->clipHistory) return;
+    MakeThumb(e);
+    Remember(std::move(e));
+}
+
+void MakeThumb(Entry& e) {
     if (auto bmp = snipimg::FromDib(e.dib.data(), e.dib.size())) {
         e.w = (int)bmp->GetWidth();
         e.h = (int)bmp->GetHeight();
@@ -164,7 +264,6 @@ void OnUpdate() {
             e.thumb.clear();
         }
     }
-    Remember(std::move(e));
 }
 
 void Wipe() {
@@ -210,6 +309,7 @@ void Start(HINSTANCE inst, const Config* cfg) {
     RegisterClassExW(&wc);
     g_wnd = CreateWindowExW(0, kClass, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, inst, nullptr);
     if (g_wnd) AddClipboardFormatListener(g_wnd);
+    if (g_list.empty()) LoadPins();
 }
 
 void Stop() {
@@ -224,13 +324,37 @@ void Stop() {
 }
 
 void Clear() {
-    g_list.clear();
-    ClearThumbs();
+    // закреплённое остаётся: его снимают по одному («Открепить»)
+    for (auto it = g_list.begin(); it != g_list.end();) {
+        if (it->pinned) {
+            ++it;
+            continue;
+        }
+        if (!it->thumb.empty()) DeleteFileW(it->thumb.c_str());
+        it = g_list.erase(it);
+    }
+}
+
+void TogglePin(int n) {
+    if (n < 0 || n >= (int)g_list.size()) return;
+    Entry& e = g_list[n];
+    if (!e.pinned) {
+        size_t pins = 0;
+        for (const Entry& x : g_list) pins += x.pinned;
+        if (pins >= kMaxPins) return;
+    }
+    e.pinned = !e.pinned;
+    SavePins();
 }
 
 std::vector<Item> Items(const std::wstring& tag) {
     std::vector<Item> out;
-    for (size_t i = 0; i < g_list.size(); ++i) {
+    // закреплённое - первым, номер в ключе - место в общем списке
+    std::vector<size_t> order;
+    for (int pass = 0; pass < 2; ++pass)
+        for (size_t i = 0; i < g_list.size(); ++i)
+            if (g_list[i].pinned == (pass == 0)) order.push_back(i);
+    for (size_t i : order) {
         const Entry& e = g_list[i];
         Item it;
         it.special = 3;
@@ -250,6 +374,7 @@ std::vector<Item> Items(const std::wstring& tag) {
             it.note = Hhmm(e.at) + (lines > 1 ? L", " + Plural(lines, L"строка", L"строки", L"строк") : L"") +
                       L". 2 клика - снова в буфер и вставить";
         }
+        if (e.pinned) it.note = L"Закреплено. " + it.note;
         out.push_back(std::move(it));
     }
     return out;
@@ -291,18 +416,39 @@ void ShowRing(RadialMenu& menu) {
         none.iconFull = ExeDir() + L"\\icons\\files.png";
         ring.push_back(none);
     }
-    if (ring.size() > 12) {  // первое кольцо - 12 свежих, остальное - во втором кольце сектора «Ещё»
+    // первое кольцо - 12 секторов вместе с «Закрепить»: 10 свежих и «Ещё» со всем, что постарше
+    if (ring.size() > 11) {
         Item more;
         more.special = 3;
-        more.name = L"Ещё " + std::to_wstring(ring.size() - 11);
+        more.name = L"Ещё " + std::to_wstring(ring.size() - 10);
         more.note = L"Записи постарше";
         more.iconFull = ExeDir() + L"\\icons\\more.png";
-        more.children.assign(ring.begin() + 11, ring.end());
-        ring.resize(11);
+        more.children.assign(ring.begin() + 10, ring.end());
+        ring.resize(10);
         ring.push_back(std::move(more));
     }
+    // сектор «Закрепить»: записи с ключом pin:номер - закрепить или открепить
+    if (!g_list.empty()) {
+        Item pin;
+        pin.special = 3;
+        pin.name = L"Закрепить";
+        pin.note = L"Закреплённое не вытесняется новым и переживает перезапуск (на диске - зашифровано)";
+        pin.iconFull = ExeDir() + L"\\icons\\tools-pin.png";
+        if (!Exists(pin.iconFull)) pin.iconFull = ExeDir() + L"\\icons\\more.png";
+        for (Item it : Items(L"pin:")) {
+            int n = _wtoi(it.path.c_str() + 4);
+            bool on = n >= 0 && n < (int)g_list.size() && g_list[n].pinned;
+            it.name = (on ? L"Открепить: " : L"") + it.name;
+            it.note = on ? L"2 клика - открепить" : L"2 клика - закрепить";
+            pin.children.push_back(std::move(it));
+        }
+        ring.push_back(std::move(pin));
+    }
     menu.onNet = [](const std::wstring& key) {
-        if (!key.empty()) Use(_wtoi(key.c_str()));
+        if (key.rfind(L"pin:", 0) == 0)
+            TogglePin(_wtoi(key.c_str() + 4));
+        else if (!key.empty())
+            Use(_wtoi(key.c_str()));
     };
     menu.netStatus = [] { return L"История буфера   |   " + Status(); };
     POINT pt;
