@@ -24,3 +24,8 @@ private:
     HMONITOR mon_ = nullptr;
     int pending_ = 0;
 };
+
+namespace brightness {
+bool Get(HMONITOR mon, int& level);  // 0..100; в потоке с COM (WMI)
+bool Set(HMONITOR mon, int level);
+}  // namespace brightness

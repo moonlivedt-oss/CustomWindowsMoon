@@ -60,6 +60,7 @@ const Action kActions[] = {
     {L"layout", L"Кольцо раскладки окон"},
     {L"sets", L"Рабочие наборы"},
     {L"recent", L"Недавние файлы"},
+    {L"monitors", L"Кольцо мониторов"},
 };
 
 const Action kWheel[] = {
@@ -191,11 +192,18 @@ void (*g_sets)() = nullptr;
 void SetSets(void (*sets)()) { g_sets = sets; }
 
 void (*g_recent)() = nullptr;
+void (*g_monitors)() = nullptr;
+
+void SetMonitors(void (*f)()) { g_monitors = f; }
 
 void SetRecent(void (*recent)()) { g_recent = recent; }
 
 void Run(const std::wstring& a) {
     if (a.empty()) return;
+    if (a == L"monitors") {
+        if (g_monitors) g_monitors();
+        return;
+    }
     if (a == L"recent") {
         if (g_recent) g_recent();
         return;

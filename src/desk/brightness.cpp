@@ -117,6 +117,17 @@ bool WmiSet(int level) {
 
 }  // namespace
 
+namespace brightness {
+
+// Для кольца «Мониторы»: сразу нужный уровень. DDC/CI у внешнего, WMI у экрана ноутбука. Медленно - только в фоне.
+bool Get(HMONITOR mon, int& level) { return DdcGet(mon, level) || WmiGet(level); }
+bool Set(HMONITOR mon, int level) {
+    level = std::clamp(level, 0, 100);
+    return DdcSet(mon, level) || WmiSet(level);
+}
+
+}  // namespace brightness
+
 void Brightness::Start(HWND notify, UINT msg) {
     if (thread_) return;
     notify_ = notify;

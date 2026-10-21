@@ -28,6 +28,7 @@
 #include "desk/lockscreen.h"
 #include "desk/gameboost.h"
 #include "desk/minecraft.h"
+#include "desk/monitors.h"
 #include "desk/recent.h"
 #include "desk/modefx.h"
 #include "desk/ocr.h"
@@ -1042,6 +1043,16 @@ bool Run(int& exitCode) {
         exitCode = SecDiag();
     } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
         exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--monitors-diag")) {  // мониторы: DDC/CI, яркость, вход -> monitors_out.txt
+        std::string u = Narrow(monitors::Diag());
+        HANDLE f = CreateFileW((ExeDir() + L"\\monitors_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
+                               nullptr);
+        DWORD put = 0;
+        if (f != INVALID_HANDLE_VALUE) {
+            WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
+            CloseHandle(f);
+        }
+        exitCode = 0;
     } else if (Has(args, L"--recent-diag")) {  // недавние файлы и папки -> recent_out.txt
         std::wstring s;
         ULONGLONG t0 = GetTickCount64();

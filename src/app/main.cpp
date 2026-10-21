@@ -39,6 +39,7 @@
 #include "desk/dropundo.h"
 #include "desk/gamepad.h"
 #include "desk/recent.h"
+#include "desk/monitors.h"
 #include "app/rules.h"
 #include "desk/boostpick.h"
 #include "desk/corners.h"
@@ -1796,6 +1797,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     });
     palette::AddRunner(L"z|", [](const std::wstring& key) { layout::Run(key); });
     recent::Init(&g_cfg);
+    monitors::Init(&g_cfg);
+    corners::SetMonitors([] { monitors::ShowRing(g_menu); });
     corners::SetRecent([] { recent::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {
         for (Item& it : recent::Items(L"r|")) out.push_back(std::move(it));
