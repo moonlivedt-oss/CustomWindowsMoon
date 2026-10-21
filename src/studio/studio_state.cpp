@@ -111,6 +111,25 @@ void Studio::StatePage(const RectF& r) {
         stateMem_ = tools::Memory();
         stateApps_ = tools::HeavyApps(4);
         homeAuto_ = AutostartOn();
+        // оценка здоровья - из того, что уже собрано; перезагрузка и батарея - раз в 3 с, это реестр и драйвер
+        tools::HealthIn hi;
+        for (const tools::Volume& v : stateVols_) {
+            if (v.type != DRIVE_FIXED || !v.total) continue;
+            tools::HealthIn::Disk d;
+            d.root = v.root;
+            d.freePct = (int)(v.free * 100 / v.total);
+            for (const tools::Forecast& f : stateFc_)
+                if (!_wcsicmp(f.root.c_str(), v.root.c_str())) d.days = f.days;
+            hi.disks.push_back(d);
+        }
+        hi.memLoad = stateMem_.loadPercent;
+        for (const tools::Physical& p : statePhys_) (p.health >= 2 ? hi.smartBad : p.health == 1 ? hi.smartWarn : hi.odd) += p.health > 0;
+        toolsui::SecurityView sv = toolsui::SecurityFinds();
+        for (const tools::Suspect& f : sv.finds) (f.score >= 6 ? hi.danger : hi.odd) += f.score >= 3;
+        tools::BatteryInfo bat = tools::Battery();
+        if (bat.present && bat.designed) hi.batteryWear = (int)(100 - bat.full * 100 / bat.designed);
+        hi.reboot = !tools::PendingReboot().empty();
+        stateHealth_ = tools::HealthScore(hi);
     }
     if (!statePhysAt_) {
         statePhysAt_ = now;
@@ -146,6 +165,34 @@ void Studio::StatePage(const RectF& r) {
     float x = col.X, w = col.Width, gap = ui.S(16), y = view.Y - off;
     int anim = 0;  // номер анимации появления
     auto appear = [&](bool ready) { return ui.Anim(ID_STATE_ANIM + anim++, ready, 5); };
+
+    // ---- оценка здоровья 0-100 ----
+    {
+        float h = ui.S(104);
+        RectF cr(x, y, w, h);
+        Card(cr);
+        float a = appear(true);
+        int score = stateHealth_.score;
+        float d = ui.S(72), cx = x + ui.S(22) + d / 2, cy = y + h / 2;
+        Color arc = score >= 85 ? c.accent : score >= 60 ? c.gold : c.warn;
+        Pen track(WithAlpha(c.text, 22), ui.S(8));
+        g.DrawEllipse(&track, cx - d / 2, cy - d / 2, d, d);
+        Pen p(arc, ui.S(8));
+        p.SetStartCap(LineCapRound);
+        p.SetEndCap(LineCapRound);
+        g.DrawArc(&p, cx - d / 2, cy - d / 2, d, d, -90, 360 * std::max(0.01f, score / 100.0f) * (float)EaseOut(a));
+        ui.Text(std::to_wstring(score), RectF(cx - d / 2, cy - ui.S(13), d, ui.S(26)), c.text, 17, true, ui::Center);
+        float tx = cx + d / 2 + ui.S(18), tw = cr.GetRight() - tx - ui.S(18);
+        ui.Text(score >= 85 ? L"Компьютер в порядке" : score >= 60 ? L"Есть что поправить" : L"Нужно внимание",
+                RectF(tx, y + ui.S(16), tw, ui.S(24)), c.text, 14, true);
+        std::wstring why;
+        for (size_t i = 0; i < stateHealth_.minus.size() && i < 3; ++i)
+            why += (i ? L"\n" : L"") + std::wstring(L"-") + std::to_wstring(stateHealth_.minus[i].points) + L"  " +
+                   stateHealth_.minus[i].why;
+        if (why.empty()) why = L"Место, память, диски, защита и батарея - без замечаний.";
+        ui.Text(why, RectF(tx, y + ui.S(42), tw, h - ui.S(46)), c.muted, 11.5f);
+        y += h + gap;
+    }
 
     // ---- шкалы: диски, память, питание ----
     {

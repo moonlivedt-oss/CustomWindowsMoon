@@ -14,6 +14,7 @@
 
 #include "desk/lockscreen.h"
 #include "net/net.h"
+#include "tools/healthscore.h"
 #include "tools/tools.h"
 #include "core/config.h"
 #include "core/themes.h"
@@ -624,6 +625,7 @@ private:
     std::vector<tools::Junk> toolsJunk_;
     std::vector<tools::StartItem> toolsStarts_;
     std::vector<tools::Tweak> toolsPriv_;  // вкладка «Приватность»
+    tools::HealthOut stateHealth_;         // «Состояние»: оценка 0-100 и за что снято
     std::wstring ruleDraft_;               // «Помощники», «Если - то»: правило, что ещё набирают
     std::vector<tools::Listener> toolsPorts_;
     std::vector<tools::Locker> toolsLockers_;
