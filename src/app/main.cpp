@@ -37,6 +37,7 @@
 #include "desk/boost.h"
 #include "desk/boostcard.h"
 #include "desk/dropundo.h"
+#include "desk/gamepad.h"
 #include "desk/boostpick.h"
 #include "desk/corners.h"
 #include "desk/cursor.h"
@@ -166,6 +167,7 @@ void Reload() {
     }
     if (g_wnd) netui::Apply(g_cfg);
     if (g_wnd) palette::Apply();
+    if (g_wnd) gamepad::Start(g_wnd, g_cfg.gamepad);
     if (g_wnd) SetTimer(g_wnd, kWarmTimer, 500, nullptr);  // прогреть новые значки
 }
 
@@ -1307,6 +1309,25 @@ void ShowDropped(std::unique_ptr<DropMsg> m) {
     g_dropCard.Show(BoostCard::OFFER, dropundo::Title(m->done, m->dir), names, CurrentTheme(g_cfg), 12000);
 }
 
+// Геймпад: View на 0,6 с - целое кольцо в середине экрана, где курсор; дальше стик и кнопки - самому кольцу.
+void OnPad(int action, LPARAM lp) {
+    if (action == gamepad::OPEN) {
+        if (g_menu.IsOpen()) return;
+        POINT pt;
+        GetCursorPos(&pt);
+        HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(mon, &mi);
+        POINT mid{(mi.rcWork.left + mi.rcWork.right) / 2, (mi.rcWork.top + mi.rcWork.bottom) / 2};
+        SetCursorPos(mid.x, mid.y);
+        g_menu.ShowAround(&g_cfg, mid, mi.rcWork, MonitorDpi(mon));
+    } else if (action == gamepad::MOVE) {
+        g_menu.PadStick((int)LOWORD(lp) - 32768, (int)HIWORD(lp) - 32768);
+    } else {
+        g_menu.PadKey(action);
+    }
+}
+
 // Кольца у края не откроются (PowerToys CursorWrap): карточка при запуске, не чаще раза в неделю.
 void WarnEdgeConflict() {
     std::wstring why = edgecheck::Conflict();
@@ -1383,6 +1404,7 @@ void ShutdownAll() {
     g_winfx.Destroy();
     g_deskClick.Destroy();
     llmouse::Shutdown();
+    gamepad::Stop();
     g_snip.Destroy();
     cursor::Restore();
     RemoveTray();
@@ -1483,6 +1505,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_SETTINGCHANGE:
             if (wp == SPI_SETDESKWALLPAPER && g_cfg.accentAuto) ApplyAccent();
+            return 0;
+        case gamepad::WM_PAD:
+            OnPad((int)wp, lp);
             return 0;
         case WM_DROP_DONE:
             ShowDropped(std::unique_ptr<DropMsg>(reinterpret_cast<DropMsg*>(lp)));
@@ -1739,6 +1764,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         EditorGoPage(page);
     });
     palette::Apply();
+    gamepad::Start(g_wnd, g_cfg.gamepad);
     cliphist::Start(inst, &g_cfg);
     corners::SetClip([] { cliphist::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {

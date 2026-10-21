@@ -43,6 +43,10 @@ public:
     // палитра: пункты по самому запросу (папки из таблицы MFT) - дописываются после найденного в кольцах
     std::function<std::vector<Item>(const std::wstring& query)> paletteQuery;
     void Close();
+    // геймпад (desk/gamepad): стик x, y (-32768..32767) ставит курсор на сектор - чем дальше, тем дальше кольцо;
+    // кнопки - как Enter, Esc, назад и «войти в папку»
+    void PadStick(int x, int y);
+    void PadKey(int action);  // gamepad::ACCEPT / CANCEL / BACK / DRILL
     bool IsOpen() const { return open_; }
     void Guard();  // раз в секунду: закрытое кольцо не остаётся видимым, оборванное угасание доводится до конца
     // Заранее грузит значки, чтобы первое открытие не подтормаживало. Работает порциями не дольше budgetMs,
