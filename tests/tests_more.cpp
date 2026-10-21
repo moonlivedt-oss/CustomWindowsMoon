@@ -9,6 +9,7 @@
 #include "core/edgecheck.h"
 #include "desk/dropundo.h"
 #include "app/rules.h"
+#include "app/settingsio.h"
 
 namespace {
 
@@ -144,6 +145,25 @@ void TestRules() {
     CHECK(low.size() == 1 && !rules::Holds(low[0], g));
 }
 
+void TestSettingsPack() {
+    std::vector<settingsio::Part> in = {{L"radial.cfg", "[settings]\nx = 1\n"},
+                                        {L"tools/ignored.tsv", std::string("a\tb\n\0bin", 9)},
+                                        {L"data/empty.tsv", ""}};
+    std::string blob = settingsio::Pack(in);
+    std::vector<settingsio::Part> out;
+    CHECK(settingsio::Unpack(blob, out));
+    CHECK(out.size() == 3);
+    if (out.size() == 3) {
+        CHECK(out[0].name == L"radial.cfg" && out[0].bytes == in[0].bytes);
+        CHECK(out[1].bytes == in[1].bytes);  // двоичное и переводы строк внутри - как были
+        CHECK(out[2].bytes.empty());
+    }
+    CHECK(!settingsio::Unpack("not ours", out));
+    CHECK(!settingsio::Unpack(blob.substr(0, blob.size() - 3), out));  // обрезанный
+    std::string evil = settingsio::Pack({{L"../../x.cfg", "a"}});
+    CHECK(!settingsio::Unpack(evil, out));  // выход из папки
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
@@ -152,4 +172,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestEdgeCheck();
     TestDropUndo();
     TestRules();
+    TestSettingsPack();
 }

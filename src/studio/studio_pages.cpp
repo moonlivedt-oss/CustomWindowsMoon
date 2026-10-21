@@ -16,6 +16,7 @@
 #include "core/fx.h"
 #include "core/perf.h"
 #include "app/autostart.h"
+#include "app/settingsio.h"
 #include "core/text.h"
 #include "desk/corners.h"
 #include "gfx/accent.h"
@@ -106,6 +107,49 @@ void Studio::BehaviorPage(const RectF& r) {
             cfg.terminal = sel == 1 ? L"powershell" : sel == 2 ? L"cmd" : L"wt";
             Save();
         }
+    });
+    card(L"Перенос на другой ПК", 2.4f, [&](const RectF& b) {
+        RectF a = row(b, 0, L"Все настройки одним файлом");
+        auto pick = [this](bool save) {
+            wchar_t file[MAX_PATH] = L"RadialMenu.moonradial";
+            OPENFILENAMEW of{sizeof(of)};
+            of.hwndOwner = wnd;
+            of.lpstrFilter = L"Настройки RadialMenu (*.moonradial)\0*.moonradial\0Все файлы\0*.*\0";
+            of.lpstrFile = file;
+            of.nMaxFile = MAX_PATH;
+            of.lpstrDefExt = L"moonradial";
+            of.Flags = OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+            if (!(save ? GetSaveFileNameW(&of) : GetOpenFileNameW(&of))) return std::wstring();
+            return std::wstring(file);
+        };
+        if (ui.Button(ID_SETTINGS_EXPORT, RectF(a.X + a.Width - ui.S(290), a.Y + ui.S(4), ui.S(150), ui.S(36)),
+                      L"Сохранить"))
+            Defer([this, pick] {
+                std::wstring f = pick(true), msg;
+                if (f.empty()) return;
+                settingsio::Export(f, msg);
+                Toast(msg);
+            });
+        if (ui.Button(ID_SETTINGS_IMPORT, RectF(a.X + a.Width - ui.S(132), a.Y + ui.S(4), ui.S(132), ui.S(36)),
+                      L"Загрузить"))
+            Defer([this, pick] {
+                std::wstring f = pick(false), msg;
+                if (f.empty()) return;
+                Save();  // несохранённое - сначала в файл, чтобы оно попало в копию перед загрузкой
+                if (settingsio::Import(f, msg)) {
+                    Config fresh;
+                    if (LoadConfig(cfgPath, fresh)) {
+                        Change();
+                        cfg = std::move(fresh);
+                        Save();  // основная программа перечитает
+                    }
+                }
+                Toast(msg);
+            });
+        cols.Note(b, 1.0f,
+                  L"Кольца, правила, профили Boost и «Это моё» - в файл .moonradial. Загрузка кладёт нынешние в "
+                  L"backups. Пути старого ПК, которых здесь нет, кольцо покажет серым.",
+                  c.faint);
     });
     card(L"Система", 2, [&](const RectF& b) {
         RectF a = row(b, 0, L"Запускать вместе с Windows");
