@@ -219,6 +219,8 @@ enum Id {
     ID_AUTO_DL_DAYS,
     ID_AUTO_DL_NOW,
     ID_AUTO_POWER,
+    ID_AUTO_DIGEST,
+    ID_AUTO_DIGEST_HOUR,
     ID_AUTO_REPAIR,
     ID_LIVE_ROUTE,   // живые сцены (studio_live.cpp): маршрут сети
     ID_LIVE_PORTS,   // кабели портов

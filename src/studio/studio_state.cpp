@@ -683,6 +683,24 @@ void Studio::AutoPage(const RectF& r) {
             L"максимальная производительность (от батареи - сбалансированный). Тот же ползунок, что в Параметрах.",
             c.faint);
     });
+    cols.Card(L"Дайджест", 3.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Несрочное - одной карточкой вечером");
+        toggle(rr, ID_AUTO_DIGEST, cfg.digest);
+        rr = cols.Row(b, 1, L"Не раньше " + std::to_wstring(cfg.digestHour) + L":00", 0.62f);
+        int hour = cfg.digestHour;
+        if (ui.Slider(ID_AUTO_DIGEST_HOUR, RectF(rr.GetRight() - ui.S(170), rr.Y + ui.S(8), ui.S(170), ui.S(28)), hour,
+                      12, 23)) {
+            Change();
+            cfg.digestHour = hour;
+            Save();
+        }
+        int waiting = autos::DigestCount();
+        cols.Row(b, 2, waiting ? L"Ждёт вечера: " + std::to_wstring(waiting) : std::wstring(L"Пока ничего не ждёт"), 0.95f);
+        cols.Note(b, 3.0f,
+                  L"Итоги тихой чистки и самовосстановления не всплывают по одному, а приходят вечером списком. "
+                  L"Вопросы и тревоги (новый автозапуск, мало места, обрыв сети) - сразу, как раньше.",
+                  c.faint);
+    });
     cols.Card(L"Самовосстановление", 2.2f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Проверять раз в 15 минут");
         toggle(rr, ID_AUTO_REPAIR, cfg.autoRepair);

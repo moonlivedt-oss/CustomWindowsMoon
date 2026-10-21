@@ -1763,9 +1763,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     });
     autos::Init(
         inst, g_wnd, &g_cfg, g_cfgPath, [] { Reload(); },
-        [](int, const std::wstring& focus) {
+        [](int page, const std::wstring& focus) {
             OpenEditor(g_inst, g_cfgPath, [] { Reload(); }, ShowFromStudio);
-            EditorGoState(focus);
+            if (page >= 0)
+                EditorGoPage(page);
+            else
+                EditorGoState(focus);
         });
     corners::SetTools([] {
         if (g_menu.IsOpen()) return;

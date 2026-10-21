@@ -34,6 +34,10 @@ void Shutdown();
 using Entry = tools::JournalEntry;            // «16.10 14:05», что сделано
 std::vector<Entry> Journal(size_t max = 60);  // новые сверху
 void Note(const std::wstring& text);          // записать в журнал
+// Несрочный итог (И30): при включённом дайджесте копится и приходит одной карточкой вечером - тогда true, и
+// показывать самому не надо; выключен - false.
+bool Digest(const std::wstring& title, const std::wstring& text);
+int DigestCount();  // сколько ждёт вечера (для студии)
 void CleanNow();                              // тихая чистка прямо сейчас (ход и итог - в карточке)
 bool Cleaning();
 int LastCleanDays();                           // сколько дней назад была тихая чистка, -1 - не было
