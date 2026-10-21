@@ -246,6 +246,7 @@ enum Id {
     ID_TOOLS_FOUND = 18600,  // +i*2: «Посчитать» и «Открыть» у найденной папки
     ID_TOOLS_BIG = 18700,    // +i*2: «Показать» и «В Корзину» у большого файла
     ID_NET_TOP = 18900,      // «Сеть»: «Замерить» (+0), «Отрезать» у программы (+1+i), «Вернуть» (+20+i), +50 - данные Windows
+    ID_TOOLS_PRIV = 19100,   // +i: переключатель приватности; +60 - «Вернуть всё как было»
     ID_TOOLS_GIANT = 18800,  // +i: действие у системного гиганта; +40 - «Точно, с правами», +41 - вернуть гибернацию
     ID_BACKUP = 7000,        // +i
     ID_NET_KILL = 8000,      // +i: «Завершить» у прокси-процесса
@@ -618,6 +619,7 @@ private:
     std::vector<tools::Physical> toolsPhys_;
     std::vector<tools::Junk> toolsJunk_;
     std::vector<tools::StartItem> toolsStarts_;
+    std::vector<tools::Tweak> toolsPriv_;  // вкладка «Приватность»
     std::vector<tools::Listener> toolsPorts_;
     std::vector<tools::Locker> toolsLockers_;
     bool toolsLockChecked_ = false, toolsJunkAsked_ = false, toolsShowSys_ = false;

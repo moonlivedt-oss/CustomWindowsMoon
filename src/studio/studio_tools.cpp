@@ -8,6 +8,7 @@
 
 #include "app/toolsui.h"
 #include "core/bg.h"
+#include "core/elevate.h"
 #include "core/files.h"
 #include "core/fx.h"
 #include "core/text.h"
@@ -332,7 +333,7 @@ void Studio::ToolsScan(const std::wstring& dir, bool setup) {
 }
 
 void Studio::GoTools(int tab, const std::wstring& scan) {
-    toolsTab_ = std::clamp(tab, 0, 6);
+    toolsTab_ = std::clamp(tab, 0, 7);
     toolsAt_ = 0;
     GoPage(PAGE_TOOLS);
     if (!scan.empty()) ToolsScan(scan);
@@ -346,7 +347,8 @@ void Studio::ToolsPage(const RectF& r) {
     RectF tabs(Column(in, ui.S(900)).X, in.Y + ui.S(58), std::min(in.Width, ui.S(840)), ui.S(38));
     int tab = toolsTab_;
     if (ui.Segmented(ID_TOOLS_TAB, tabs,
-                     {L"PATH", L"Диски", L"Автозагрузка", L"Порты", L"Процессы", L"Версии", L"Защита"}, tab)) {
+                     {L"PATH", L"Диски", L"Автозагрузка", L"Порты", L"Процессы", L"Версии", L"Защита", L"Приватность"},
+                     tab)) {
         toolsTab_ = tab;
         toolsAt_ = 0;
         ui.ResetScroll(ID_PAGE_SCROLL);
@@ -411,6 +413,8 @@ void Studio::ToolsPage(const RectF& r) {
             versions_ = toolsui::Versions();
         } else if (toolsTab_ == 6) {
             secView_ = toolsui::SecurityFinds();
+        } else if (toolsTab_ == 7) {
+            toolsPriv_ = tools::PrivacyTweaks();
         }
     }
     auto log = [&]() -> std::wstring {
@@ -1100,6 +1104,56 @@ void Studio::ToolsPage(const RectF& r) {
                 });
             if (toolsJob_ && toolsJob_->title != L"Что занимает место")
                 note(b, (y + ui.S(48) - b.Y) / rowH, log(), c.muted);
+        });
+    } else if (toolsTab_ == 7) {  // ---------------- приватность ----------------
+        wide(L"Приватность Windows", rowsFor(toolsPriv_.size()) * 1.5f + 2.2f, [&](const RectF& b) {
+            float y = b.Y;
+            auto adminRun = [&](const std::wstring& req, const std::wstring& title) {
+                ToolsRun(title, [req](const tools::Log& l, ToolsJob&) {
+                    elevate::Put(L"PrivacyJob", req);
+                    return net::RunAdmin(net::JOB_PRIVACY, l);
+                });
+            };
+            for (size_t i = 0; i < toolsPriv_.size(); ++i) {
+                tools::Tweak& t = toolsPriv_[i];
+                bool on = t.on;
+                if (ui.Toggle(ID_TOOLS_PRIV + (int)i, RectF(b.X, y + ui.S(4), ui.S(42), ui.S(30)), on) && !busy) {
+                    if (t.admin) {
+                        adminRun((on ? L"on|" : L"off|") + t.id, t.title);
+                    } else if (!on && !t.ours) {
+                        Toast(L"Это выключено не RadialMenu - возвращать нечего (настройка самой Windows).");
+                    } else {
+                        std::wstring msg;
+                        tools::SetPrivacyTweak(t.id, on, [&](const std::wstring& s) { msg = s; });
+                        Toast(msg);
+                    }
+                    refresh();
+                }
+                ui.Text(t.title, RectF(b.X + ui.S(56), y, b.Width * 0.6f, ui.S(24)), t.on ? c.text : c.muted, 12.5f,
+                        true);
+                if (t.admin)
+                    ui.Text(L"для всего компьютера, нужны права", RectF(b.X + b.Width * 0.6f, y, b.Width * 0.4f, ui.S(24)),
+                            c.faint, 10.5f, false, ui::Right);
+                ui.Text(t.why, RectF(b.X + ui.S(56), y + ui.S(20), b.Width - ui.S(56), ui.S(22)), c.muted, 10.5f);
+                y += lineH * 1.5f;
+            }
+            y += ui.S(8);
+            if (ui.Button(ID_TOOLS_PRIV + 60, RectF(b.X, y, ui.S(220), ui.S(36)), L"Вернуть всё как было",
+                          Kind::Secondary) &&
+                !busy) {
+                std::wstring msg;
+                tools::RevertPrivacy([&](const std::wstring& s) { msg = s; });
+                bool anyAdmin = false;
+                for (const tools::Tweak& t : toolsPriv_) anyAdmin = anyAdmin || (t.admin && t.on);
+                if (anyAdmin) adminRun(L"off|*", L"Приватность: как было");
+                Toast(msg);
+                refresh();
+            }
+            note(b, (y + ui.S(46) - b.Y) / rowH,
+                 L"Каждый переключатель пишет известные значения реестра, прежние - в бэкап до первой правки; «как "
+                 L"было» возвращает их (или убирает значение, если его не было). Свои настройки - сразу, для всего "
+                 L"компьютера - одно окно UAC.",
+                 c.muted);
         });
     } else if (toolsTab_ == 2) {  // ---------------- автозагрузка ----------------
         float sh = scene::StartScene::Height((float)ui.K());

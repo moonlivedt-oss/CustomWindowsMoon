@@ -395,7 +395,18 @@ std::wstring ImageOf(const std::wstring& command);  // exe или sys из ст�
 std::wstring SysItemKey(const SysItem& it);  // ключ снимка: без версии и GUID в хвосте имени
 std::wstring SysItemRefuse(const SysItem& it);      // пусто - службу можно выключить задачей с правами
 bool SetTaskEnabled(const std::wstring& path, bool on);
-bool SysItemAdminMain(const std::wstring& req, const Log& log);  // JOB_SYS_ITEM: «svc|имя», «on|svc|имя|тип»
+bool SysItemAdminMain(const std::wstring& req, const Log& log);
+
+// Приватность Windows с откатом (И18, tweaks.cpp). on - всё «приватно» уже стоит; ours - менял RadialMenu (есть что
+// вернуть); admin - для всего компьютера (HKLM), меняется задачей с правами JOB_PRIVACY («on|id», «off|id», «off|*»).
+struct Tweak {
+    std::wstring id, title, why;
+    bool admin = false, on = false, ours = false;
+};
+std::vector<Tweak> PrivacyTweaks();
+bool SetPrivacyTweak(const std::wstring& id, bool priv, const Log& log);  // только свои (HKCU)
+int RevertPrivacy(const Log& log);                                        // свои - как были до нас
+bool PrivacyAdminMain(const std::wstring& req, const Log& log);  // JOB_SYS_ITEM: «svc|имя», «on|svc|имя|тип»
 
 constexpr int kSuspectScore = 3;  // с какого счёта показывать; 6 и выше - «опасно»
 enum FindKind {

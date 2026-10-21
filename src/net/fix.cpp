@@ -26,7 +26,7 @@ const wchar_t* const kJobKeys[kJobs] = {
     L"smart",       L"winhttp",       L"routes",    L"ip",     L"vpn",         L"dns-cf",        L"dns-google",
     L"dns-auto",    L"fw-restore",    L"adapter",   L"deep",   L"disk-health", L"syspath-clean", L"net-top",
     L"power",       L"restore-point", L"path-acl",  L"repair", L"wu-reset",    L"unbreak",       L"defender-offline",
-    L"vhd-compact", L"sys-clean",     L"mft-sizes", L"giants",  L"net-cut", L"net-uncut", L"sys-item"};
+    L"vhd-compact", L"sys-clean",     L"mft-sizes", L"giants",  L"net-cut", L"net-uncut", L"sys-item", L"privacy"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -531,6 +531,8 @@ bool Job_(Job j, const Log& log) {
             log(Okish(code, out) ? L"Исходящие соединения программы закрыты." : L"Брандмауэр не принял правило: " + Trim(out));
             return Okish(code, out);
         }
+        case JOB_PRIVACY:
+            return tools::PrivacyAdminMain(Trim(elevate::Take(L"PrivacyJob")), log);
         case JOB_SYS_ITEM:
             return tools::SysItemAdminMain(Trim(elevate::Take(L"SysItem")), log);
         case JOB_GIANTS:
