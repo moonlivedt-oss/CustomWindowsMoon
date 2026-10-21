@@ -535,6 +535,8 @@ struct Leftover2 {
 std::vector<Leftover2> AppLeftovers(int idleDays = 90, ULONGLONG minBytes = 50ull * 1024 * 1024);
 int RecycleLeftovers(const std::vector<std::wstring>& paths, const Log& log);  // через RadialTools.exe
 bool ResetExplorer(const Log& log);                                            // через RadialTools.exe
+// отмена броска на папку кольца: копии в Корзину; pairs - оригинал, копия, оригинал, копия... (RadialTools recycle-copy)
+int RecycleCopies(const std::vector<std::wstring>& pairs, const Log& log);
 
 // Песочница Windows (sandbox.cpp): одноразовая Windows для незнакомой программы.
 bool SandboxAvailable();    // компонент «Песочница Windows» включён

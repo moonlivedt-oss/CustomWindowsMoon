@@ -153,11 +153,32 @@ void RadialMenu::OnDragLeave() {
 DWORD RadialMenu::OnDrop(IDataObject* data, DWORD keys, POINTL pt, DWORD allowed) {
     DWORD e = DROPEFFECT_NONE;
     if (shellTarget_) {
+        // что бросили - до Drop: после него Проводник может уже переносить файлы в фоне
+        std::vector<std::wstring> files;
+        FORMATETC fe{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        STGMEDIUM sm{};
+        if (targetDir_ && onDropped && data && SUCCEEDED(data->GetData(&fe, &sm))) {
+            if (auto* hd = (HDROP)GlobalLock(sm.hGlobal)) {
+                UINT n = DragQueryFileW(hd, 0xFFFFFFFF, nullptr, 0);
+                for (UINT i = 0; i < n && i < 500; ++i) {
+                    UINT len = DragQueryFileW(hd, i, nullptr, 0);
+                    std::wstring f(len + 1, L'\0');
+                    DragQueryFileW(hd, i, f.data(), len + 1);
+                    f.resize(len);
+                    files.push_back(f);
+                }
+                GlobalUnlock(sm.hGlobal);
+            }
+            ReleaseStgMedium(&sm);
+        }
+        std::wstring dir = targetKey_;
         e = allowed;
         if (FAILED(shellTarget_->Drop(data, keys & ~MK_ALT, pt, &e))) e = DROPEFFECT_NONE;
         shellTarget_->Release();  // после Drop цель сама завершила перетаскивание
         shellTarget_ = nullptr;
         if (e != DROPEFFECT_NONE && cfg_->sounds) Sound::Play(Sound::Drop);
+        // перенос «оптимизированный» возвращает NONE, хотя файлы переехали: что было на деле - смотрит onDropped
+        if (!files.empty()) onDropped(std::move(files), dir);
     }
     targetKey_.clear();
     dragging_ = false;

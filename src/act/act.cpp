@@ -12,6 +12,8 @@
 //   empty-bin                 очистить корзину
 //   recycle-dup <оставить> <копии>  копии в Корзину, если размер и SHA-256 совпадают с оставляемым
 //   recycle-big <файл>        большой файл из списка MFT - в Корзину, если tools::BigFileKeep не против
+//   recycle-copy <оригинал> <копия>...  отмена броска на папку кольца: копию в Корзину, если оригинал на месте,
+//                             копия того же вида (и размера у файла) и создана за последние сутки
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
@@ -508,6 +510,46 @@ int RecycleBig(const std::wstring& p) {
     return ok ? 0 : 1;
 }
 
+// Отмена броска: только то, что действительно копия - оригинал жив, имя то же, вид и размер совпадают, создана
+// недавно. Остальное не трогаем.
+int RecycleCopy(const std::vector<std::wstring>& a) {
+    std::wstring list;
+    int ok = 0;
+    for (size_t i = 0; i + 1 < a.size(); i += 2) {
+        const std::wstring &orig = a[i], &copy = a[i + 1];
+        WIN32_FILE_ATTRIBUTE_DATA o{}, c{};
+        auto leaf = [](const std::wstring& p) { return Lower(p.substr(p.find_last_of(L'\\') + 1)); };
+        bool same = GetFileAttributesExW(orig.c_str(), GetFileExInfoStandard, &o) &&
+                    GetFileAttributesExW(copy.c_str(), GetFileExInfoStandard, &c) && leaf(orig) == leaf(copy) &&
+                    Lower(orig) != Lower(copy) &&
+                    ((o.dwFileAttributes ^ c.dwFileAttributes) & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
+                    !(c.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_SYSTEM)) &&
+                    ((c.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                     (o.nFileSizeLow == c.nFileSizeLow && o.nFileSizeHigh == c.nFileSizeHigh)) &&
+                    NowStamp() - Stamp(c.ftCreationTime) < 864000000000ull;
+        if (!same) {
+            Out(L"Не трогаю (не похоже на свежую копию): " + copy);
+            continue;
+        }
+        list += copy;
+        list.push_back(L'\0');
+        ++ok;
+    }
+    if (!ok) {
+        Out(L"@moved=0");
+        return 1;
+    }
+    list.push_back(L'\0');
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = FO_DELETE;
+    op.pFrom = list.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int rc = SHFileOperationW(&op);
+    if (rc != 0 || op.fAnyOperationsAborted) ok = 0;
+    Out(L"@moved=" + std::to_wstring(ok));
+    return ok ? 0 : 1;
+}
+
 // Сбросить Проводник: закрыть, удалить кэш значков и эскизов, запустить заново. Окна Проводника закроются.
 int ExplorerReset() {
     DWORD mySession = 0;
@@ -595,6 +637,7 @@ int wmain(int argc, wchar_t** argv) {
         return RecycleLeftovers(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"explorer-reset") return ExplorerReset();
     if (cmd == L"recycle-big" && a.size() >= 2) return RecycleBig(a[1]);
+    if (cmd == L"recycle-copy" && a.size() >= 3) return RecycleCopy(std::vector<std::wstring>(a.begin() + 1, a.end()));
     if (cmd == L"empty-bin") {
         bool ok =
             SUCCEEDED(SHEmptyRecycleBinW(nullptr, nullptr, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND));
