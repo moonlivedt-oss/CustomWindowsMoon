@@ -21,6 +21,46 @@ bool ParseColor(const std::wstring& v, COLORREF& out) {
     return true;
 }
 
+// Поле строки «item = подпись | путь | значок»: «|» внутри подписи или макроса (text a|b) пишется как «\|», переводы
+// строк выбрасываются - иначе пункт развалится при следующем чтении.
+std::wstring Field(const std::wstring& v) {
+    std::wstring o;
+    for (wchar_t ch : v) {
+        if (ch == L'\r' || ch == L'\n') continue;
+        if (ch == L'|') o += L'\\';
+        o += ch;
+    }
+    return o;
+}
+
+// Разбор строки item: делит по «|», кроме «\|».
+std::vector<std::wstring> SplitItem(const std::wstring& v) {
+    std::vector<std::wstring> out(1);
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (v[i] == L'\\' && i + 1 < v.size() && v[i + 1] == L'|') {
+            out.back() += L'|';
+            ++i;
+        } else if (v[i] == L'|') {
+            out.emplace_back();
+        } else {
+            out.back() += v[i];
+        }
+    }
+    for (std::wstring& part : out) part = Trim(part);
+    return out;
+}
+
+// Имя группы в [скобках]: «settings», «@left» и прочие служебные имена (и всё, что начинается с «\») пишутся с «\»
+// впереди - при чтении он снимается, и группа остаётся группой.
+std::wstring SectionName(const std::wstring& name) {
+    std::wstring n;
+    for (wchar_t ch : name)
+        if (ch != L'\r' && ch != L'\n') n += ch;
+    std::wstring low = Lower(Trim(n));
+    if (low == L"settings" || (!low.empty() && (low[0] == L'@' || low[0] == L'\\'))) n = L"\\" + n;
+    return n;
+}
+
 std::wstring ColorText(COLORREF c) {
     wchar_t b[8];
     swprintf(b, 8, L"#%02X%02X%02X", GetRValue(c), GetGValue(c), GetBValue(c));
@@ -72,6 +112,11 @@ bool LoadConfig(const std::wstring& file, Config& out) {
             std::wstring name = Trim(line.substr(1, line.size() - 2));
             std::wstring low = Lower(name);
             cur = nullptr;
+            bool escaped = !name.empty() && name[0] == L'\\';  // \Settings - группа с таким именем (SectionName)
+            if (escaped) {
+                name.erase(0, 1);
+                low = L"";
+            }
             inSettings = low == L"settings";
             if (inSettings) continue;
             if (low == L"@left")
@@ -299,7 +344,7 @@ bool LoadConfig(const std::wstring& file, Config& out) {
         else if (key == L"files")
             cur->files = ParseBool(val);
         else if (key == L"item") {
-            auto parts = Split(val, L'|');
+            auto parts = SplitItem(val);
             if (parts.size() < 2 || parts[1].empty()) continue;
             Item child;
             child.path = parts[1];
@@ -493,14 +538,14 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     auto ring = [&](const wchar_t* tag, const std::vector<Item>& v) {
         o << L"\n" << tag << L"\n";
         for (const Item& it : v) {
-            o << L"\n[" << it.name << L"]\n";
+            o << L"\n[" << SectionName(it.name) << L"]\n";
             if (!it.icon.empty()) o << L"icon = " << it.icon << L"\n";
             if (!it.path.empty()) o << L"path = " << it.path << L"\n";
             if (it.expand) o << L"expand = 1\n";
             if (it.files) o << L"files = 1\n";
             for (const Item& ch : it.children) {
-                o << L"item = " << ch.name << L" | " << ch.path;
-                if (!ch.icon.empty()) o << L" | " << ch.icon;
+                o << L"item = " << Field(ch.name) << L" | " << Field(ch.path);
+                if (!ch.icon.empty()) o << L" | " << Field(ch.icon);
                 o << L"\n";
             }
         }
@@ -512,12 +557,12 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
              L"# item = Подпись | keys:ctrl+shift+p   или   macro:ctrl+l; wait 200; text адрес; enter\n";
         o << L"\n[@apps]\n";
         for (const AppRing& a : c.apps) {
-            o << L"\n[" << a.ring.name << L"]\n";
+            o << L"\n[" << SectionName(a.ring.name) << L"]\n";
             o << L"exe = " << a.exes << L"\n";
             if (!a.ring.icon.empty()) o << L"icon = " << a.ring.icon << L"\n";
             for (const Item& ch : a.ring.children) {
-                o << L"item = " << ch.name << L" | " << ch.path;
-                if (!ch.icon.empty()) o << L" | " << ch.icon;
+                o << L"item = " << Field(ch.name) << L" | " << Field(ch.path);
+                if (!ch.icon.empty()) o << L" | " << Field(ch.icon);
                 o << L"\n";
             }
         }
@@ -528,10 +573,11 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
              L"# layout = l:2 / l:3 / l:main2 / l:4 - как разложить открывшиеся окна\n";
         o << L"\n[@sets]\n";
         for (const WorkSet& w : c.sets) {
-            o << L"\n[" << w.ring.name << L"]\n";
+            o << L"\n[" << SectionName(w.ring.name) << L"]\n";
             if (!w.layout.empty()) o << L"layout = " << w.layout << L"\n";
             if (!w.ring.icon.empty()) o << L"icon = " << w.ring.icon << L"\n";
-            for (const Item& ch : w.ring.children) o << L"item = " << ch.name << L" | " << ch.path << L"\n";
+            for (const Item& ch : w.ring.children)
+                o << L"item = " << Field(ch.name) << L" | " << Field(ch.path) << L"\n";
         }
     }
 
@@ -540,7 +586,14 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
     if (f == INVALID_HANDLE_VALUE) return false;
     DWORD put = 0;
-    BOOL ok = WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr);
+    // всё записано и сброшено на диск до переименования: иначе после внезапного выключения (села батарея) на месте
+    // radial.cfg мог остаться пустой файл
+    BOOL ok = WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr) && put == bytes.size() &&
+              FlushFileBuffers(f);
     CloseHandle(f);
-    return ok && MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING);
+    if (!ok) {
+        DeleteFileW(tmp.c_str());
+        return false;
+    }
+    return MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }

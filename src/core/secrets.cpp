@@ -99,8 +99,14 @@ std::wstring Kind(const std::wstring& text) {
         while (!v.empty() && (v[0] == L'"' || v[0] == L'\'')) v.erase(0, 1);
         if (v.size() >= 6 && v.find_first_of(L" ()[]{}") == std::wstring::npos) return L"пароль или ключ в строке";
     }
+    // «Bearer <токен>» и «Authorization: Bearer <токен>» - с пробелом, поэтому раньше проверки одиночных токенов
+    if (size_t at = low.find(L"bearer "); at != std::wstring::npos && std::count(t.begin(), t.end(), L'\n') <= 2) {
+        size_t a = t.find_first_not_of(L" \t", at + 7);
+        size_t b = a == std::wstring::npos ? a : t.find_first_of(L" \t\r\n", a);
+        std::wstring v = a == std::wstring::npos ? L"" : t.substr(a, b == std::wstring::npos ? b : b - a);
+        if (v.size() >= 16 && std::all_of(v.begin(), v.end(), TokenChar)) return L"токен";
+    }
     if (t.find_first_of(L" \t\r\n") != std::wstring::npos) return L"";  // дальше - только одиночные токены
-    if (Starts(t, L"Bearer")) return L"токен";
     struct Pre {
         const wchar_t* p;
         size_t min;

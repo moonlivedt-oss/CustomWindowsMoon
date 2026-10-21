@@ -119,6 +119,7 @@ Config g_cfg;
 std::wstring g_cfgPath;
 FILETIME g_cfgTime{};
 bool g_armed = true;
+bool g_altTab = false;  // за это нажатие Alt был Tab: идёт переключение окон, кольцо у края не открываем
 
 FILETIME FileTime(const std::wstring& p) {
     WIN32_FILE_ATTRIBUTE_DATA d{};
@@ -169,6 +170,16 @@ bool IsDesktopForeground() {
     wchar_t cls[64];
     GetClassNameW(fg, cls, 64);
     return !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW");
+}
+
+// Впереди переключатель окон Alt + Tab (Windows 11 - XAML-остров, Windows 10 - MultitaskingViewFrame).
+bool IsTaskSwitcher() {
+    HWND fg = GetForegroundWindow();
+    if (!fg) return false;
+    wchar_t cls[64];
+    GetClassNameW(fg, cls, 64);
+    return !wcscmp(cls, L"XamlExplorerHostIslandWindow") || !wcscmp(cls, L"MultitaskingViewFrame") ||
+           !wcscmp(cls, L"TaskSwitcherWnd") || !wcscmp(cls, L"ForegroundStaging");
 }
 
 // Полноэкранное окно (игра, видео) - меню не мешает.
@@ -231,9 +242,13 @@ void PollWork() {
     autos::Tick();
     if (!alt) {
         g_armed = true;
+        g_altTab = false;
         return;
     }
+    if (GetAsyncKeyState(VK_TAB) & 0x8000) g_altTab = true;
     if (g_menu.IsOpen()) return;
+    // Alt + Tab (переключатель окон) и Alt + тяга окна к краю - это не просьба о кольце
+    if (g_altTab || IsTaskSwitcher() || g_winfx.Dragging()) return;
     // во время перетаскивания файла Shift и Ctrl выбирают перенос или копию, им не мешаем
     bool dragging = GetAsyncKeyState(VK_LBUTTON) & 0x8000;
     bool other = ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) ||
@@ -1205,7 +1220,64 @@ void ReportCrashes() {
                      CurrentTheme(g_cfg), 30000, Toast::G_WARN);
 }
 
+// Вернуть всё, что программа меняла в системе, и остановить потоки. Зовётся при выходе и при выключении / выходе из
+// сеанса (WM_ENDSESSION: WM_DESTROY тогда не приходит, а тишина, приоритеты и прозрачность иначе ждали бы следующего
+// запуска). Второй вызов ничего не делает.
+void ShutdownAll() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    WTSUnRegisterSessionNotification(g_wnd);
+    if (g_displayNotify) UnregisterPowerSettingNotification(g_displayNotify);
+    if (g_acdcNotify) UnregisterPowerSettingNotification(g_acdcNotify);
+    g_wave.Destroy();
+    g_modefx.Destroy();
+    gboost::Stop();
+    gboost::RestoreAll();
+    gboost::Quiet(false);
+    g_boostCard.Destroy();
+    g_pick.Destroy();
+    g_gbCard.Destroy();
+    g_mcCard.Destroy();
+    g_mcCard2.Destroy();
+    mc::StopWatch();
+    netui::Shutdown();
+    toolsui::Shutdown();
+    cliphist::Stop();
+    autos::Shutdown();
+    boost::GameTweaks(boost::Load(BoostDir()), false);
+    g_frame.Destroy();
+    g_dev.Shutdown();
+    g_game.Shutdown();
+    g_reveal.Destroy();
+    g_media.Destroy();
+    g_corners.Destroy();
+    g_winfx.Destroy();
+    g_deskClick.Destroy();
+    llmouse::Shutdown();
+    g_snip.Destroy();
+    cursor::Restore();
+    RemoveTray();
+    bg::Quit(1500);  // фоновые задачи видят Quitting() и не пишут в уже убранное; дольше выход не ждёт
+}
+
+// Отладочные сообщения (WM_APP + 50..58, 66..68: кольца, портал, «выключить экран», карточки на выдуманных данных)
+// принимаются только при RADIAL_DEV=1 или файле dev.on рядом с exe: иначе их мог бы послать любой процесс.
+bool IsDevMsg(UINT msg) {
+    return (msg >= WM_APP + 50 && msg <= WM_APP + 58) || (msg >= WM_APP + 66 && msg <= WM_APP + 68);
+}
+
+bool DevMsgsOn() {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("RADIAL_DEV");
+        on = (e && *e == '1') || GetFileAttributesW((ExeDir() + L"\\dev.on").c_str()) != INVALID_FILE_ATTRIBUTES;
+    }
+    return on == 1;
+}
+
 LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    if (IsDevMsg(msg) && !DevMsgsOn()) return 0;
     switch (msg) {
         case WM_TIMER:
             if (wp == kPollTimer) Poll();
@@ -1379,39 +1451,13 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) netui::Wake();
             }
             return TRUE;
+        case WM_QUERYENDSESSION:
+            return TRUE;
+        case WM_ENDSESSION:
+            if (wp) ShutdownAll();  // после ответа процесс завершат без WM_DESTROY
+            return 0;
         case WM_DESTROY:
-            WTSUnRegisterSessionNotification(h);
-            if (g_displayNotify) UnregisterPowerSettingNotification(g_displayNotify);
-            if (g_acdcNotify) UnregisterPowerSettingNotification(g_acdcNotify);
-            g_wave.Destroy();
-            g_modefx.Destroy();
-            gboost::Stop();
-            gboost::RestoreAll();
-            gboost::Quiet(false);
-            g_boostCard.Destroy();
-            g_pick.Destroy();
-            g_gbCard.Destroy();
-            g_mcCard.Destroy();
-            g_mcCard2.Destroy();
-            mc::StopWatch();
-            netui::Shutdown();
-            toolsui::Shutdown();
-            cliphist::Stop();
-            autos::Shutdown();
-            boost::GameTweaks(boost::Load(BoostDir()), false);
-            g_frame.Destroy();
-            g_dev.Shutdown();
-            g_game.Shutdown();
-            g_reveal.Destroy();
-            g_media.Destroy();
-            g_corners.Destroy();
-            g_winfx.Destroy();
-            g_deskClick.Destroy();
-            llmouse::Shutdown();
-            g_snip.Destroy();
-            cursor::Restore();
-            RemoveTray();
-            bg::Quit(1500);  // фоновые задачи видят Quitting() и не пишут в уже убранное; дольше выход не ждёт
+            ShutdownAll();
             PostQuitMessage(0);
             return 0;
     }

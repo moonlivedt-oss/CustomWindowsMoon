@@ -35,7 +35,8 @@ WindowFx* g_fx = nullptr;
 bool g_swallowMiddleUp = false;  // только поток перехвата
 // Alt + мышь: включено ли (снимок настроек для потока перехвата), заблокировано ли (кольцо, игра), кто тащит
 std::atomic<bool> g_dragOn{true}, g_blocked{false};
-UINT g_dragUp = 0;  // только поток перехвата: какое отпускание съесть (WM_LBUTTONUP / WM_RBUTTONUP), 0 - не тащим
+// какое отпускание съесть (WM_LBUTTONUP / WM_RBUTTONUP), 0 - не тащим; пишет поток перехвата, читает и основной
+std::atomic<UINT> g_dragUp{0};
 
 // программы, где Alt + мышь - своё управление (камера, кисть): там не перехватываем
 bool OwnAltMouse(HWND w) {
@@ -128,6 +129,11 @@ void WindowFx::Create(HINSTANCE inst) {
 
 void WindowFx::SetBlocked(bool on) { g_blocked = on; }
 
+// по самой кнопке: если перехват сняли посреди тяги, dragWin_ так и останется, а кольцо всё равно должно открываться
+bool WindowFx::Dragging() const {
+    return (g_dragUp != 0 || dragWin_) && ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) & 0x8000);
+}
+
 void WindowFx::DragBegin(HWND w, POINT at, bool size) {
     dragWin_ = w;
     dragAt_ = at;
@@ -216,9 +222,17 @@ bool WindowFx::OnMouse(WPARAM wp, const MSLLHOOKSTRUCT& m) {
         return true;
     }
     // Alt + левая / правая: тащить окно или менять размер
-    if (g_dragUp) {
+    if (UINT up = g_dragUp) {
+        // отпускание могло не дойти (Ctrl+Alt+Del, окно UAC, перехват снимали посреди тяги): кнопка уже не нажата -
+        // тяга кончилась, иначе хук глотал бы клики до следующего нажатия той же кнопки
+        bool held = GetAsyncKeyState(up == WM_LBUTTONUP ? VK_LBUTTON : VK_RBUTTON) & 0x8000;
+        if (!held && wp != up) {
+            g_dragUp = 0;
+            PostMessageW(g_fx->wnd_, WM_FX_DRAG, 0, 0);
+            return false;
+        }
         if (wp == WM_MOUSEMOVE) PostMessageW(g_fx->wnd_, WM_FX_DRAG_MOVE, 0, MAKELPARAM(m.pt.x, m.pt.y));
-        if (wp == g_dragUp) {
+        if (wp == up) {
             g_dragUp = 0;
             PostMessageW(g_fx->wnd_, WM_FX_DRAG, 0, 0);
             return true;
