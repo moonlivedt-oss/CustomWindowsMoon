@@ -59,6 +59,7 @@ const Action kActions[] = {
     {L"clip", L"Кольцо буфера"},
     {L"layout", L"Кольцо раскладки окон"},
     {L"sets", L"Рабочие наборы"},
+    {L"recent", L"Недавние файлы"},
 };
 
 const Action kWheel[] = {
@@ -189,8 +190,16 @@ void (*g_sets)() = nullptr;
 
 void SetSets(void (*sets)()) { g_sets = sets; }
 
+void (*g_recent)() = nullptr;
+
+void SetRecent(void (*recent)()) { g_recent = recent; }
+
 void Run(const std::wstring& a) {
     if (a.empty()) return;
+    if (a == L"recent") {
+        if (g_recent) g_recent();
+        return;
+    }
     if (a == L"sets") {
         if (g_sets) g_sets();
         return;
