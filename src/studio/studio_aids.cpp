@@ -10,6 +10,7 @@
 #include "desk/cliphist.h"
 #include "core/text.h"
 #include "desk/gamepad.h"
+#include "tools/guard.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "studio/studio.h"
@@ -67,6 +68,36 @@ void Studio::AidsPage(const RectF& r) {
                   L"второе кольцо. Медленный подход к кольцу работает как раньше.",
                   c.faint);
     });
+    {
+        std::wstring bad;
+        std::vector<guard::ProcRule> rules = guard::ParseRules(cfg.procRules, &bad);
+        float rows = 3.0f + rules.size() * 0.6f + (bad.empty() ? 0 : 0.6f);
+        cols.Card(L"Правила процессов", rows, [&](const RectF& b) {
+            RectF rr = cols.Row(b, 0, L"Правила", 0.2f);
+            FieldOrText(
+                ID_AID + 41, RectF(rr.X + rr.Width * 0.22f, rr.Y + ui.S(4), rr.Width * 0.78f, ui.S(36)), view,
+                cfg.procRules,
+                [this](const std::wstring& s) {
+                    FieldEdit(ID_AID + 41);
+                    cfg.procRules = s;
+                },
+                L"chrome.exe=below,eco | blender.exe=high");
+            float y = b.Y + cols.RowH();
+            for (const guard::ProcRule& r : rules) {
+                ui.Text(guard::DescribeRule(r), RectF(b.X, y, b.Width, ui.S(24)), c.text, 11.5f);
+                y += cols.RowH() * 0.6f;
+            }
+            if (!bad.empty()) {
+                ui.Text(L"Не понял: " + bad, RectF(b.X, y, b.Width, ui.S(24)), c.warn, 11.5f);
+                y += cols.RowH() * 0.6f;
+            }
+            cols.Note(b, (y - b.Y) / cols.RowH() + 0.1f,
+                      L"Каждому новому процессу с таким именем - сразу свой приоритет, ядра или экономия (EcoQoS). Слова: "
+                      L"idle, below, normal, above, high, eco, noeco, cores:0-3+6. Правила через «|», маски как "
+                      L"*Editor*.exe. Игровой режим и баланс продолжают работать поверх.",
+                      c.faint);
+        });
+    }
     cols.Card(L"Геймпад", 2.2f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, gamepad::Connected() ? L"Кольцо с геймпада (подключён)" : L"Кольцо с геймпада");
         toggle(rr, ID_AID + 40, cfg.gamepad);

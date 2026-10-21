@@ -282,6 +282,21 @@ void TestGuard() {
     CHECK(done.size() == 1 && done[0].ancestors == std::vector<DWORD>({1}));
 }
 
+void TestProcRules() {
+    std::wstring bad;
+    auto r = guard::ParseRules(L"chrome.exe=below,eco | blender.exe = high, cores:0-3+6 | x.exe=fast | y.exe=", &bad);
+    CHECK(r.size() == 2);
+    if (r.size() == 2) {
+        CHECK(r[0].mask == L"chrome.exe" && r[0].prio == BELOW_NORMAL_PRIORITY_CLASS && r[0].eco == 1 && !r[0].cores);
+        CHECK(r[1].mask == L"blender.exe" && r[1].prio == HIGH_PRIORITY_CLASS && r[1].eco == -1 &&
+              r[1].cores == 0x4Full);
+        CHECK(guard::DescribeRule(r[1]) == L"blender.exe: высокий, ядер: 5");
+    }
+    CHECK(bad == L"x.exe=fast; y.exe=");
+    CHECK(guard::ParseRules(L"a.exe=cores:5-2").empty());  // обратный диапазон
+    CHECK(guard::ParseRules(L"").empty());
+}
+
 void TestCut() {
     CHECK(tools::CutRefuse(L"C:\\Users\\Moon\\AppData\\Local\\Discord\\app-1.0\\Discord.exe").empty());
     CHECK(tools::CutRefuse(L"D:\\Games\\Some Game\\game.exe").empty());
@@ -316,4 +331,5 @@ void TestTop20(void (*check)(bool, const char*, int)) {
     TestGiants();
     TestGuard();
     TestCut();
+    TestProcRules();
 }
