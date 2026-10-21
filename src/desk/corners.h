@@ -33,6 +33,7 @@ void SetNet(void (*net)());           // net: кольцо «Сеть»
 void SetTools(void (*tools)());       // tools: кольцо «Утилиты»
 void SetMinecraft(void (*mc)());      // minecraft: кольцо сборок Minecraft
 void SetClip(void (*clip)());
+void SetMonitors(void (*monitors)());  // monitors: кольцо мониторов (яркость, вход, питание)
 void SetRecent(void (*recent)());  // recent: кольцо недавних файлов и папок
 void SetLayout(void (*layout)());  // layout: кольцо раскладки окон
 void SetSets(void (*sets)());      // sets: кольцо рабочих наборов         // clip: кольцо истории буфера
