@@ -329,6 +329,24 @@ build.cmd test
 
 собирает и прогоняет их, не трогая работающий `RadialMenu.exe`; упали - код ошибки. Вручную: `cmake --build build-check --target radial_tests`, потом `ctest --test-dir build-check`.
 
+```
+build.cmd lint
+build.cmd snaps
+```
+
+`lint` - clang-tidy по всему `src` (проверки на ошибки из `.clang-tidy`, без стиля). `snaps` - эталонные снимки студии:
+шесть разделов снимаются в `build-check` с выдуманными данными (`RADIAL_DEMO=1`) и сравниваются с `tests\snaps`
+попиксельно (порог 0,5%); разница - картинкой `build-check\snaps\<раздел>-diff.png`, итог - `snaps_out.txt`.
+`build.cmd snaps update` - записать нынешние снимки как эталоны.
+
+Отладочные сообщения окну программы (`WM_APP + 50..58`, `66..68`: кольца, портал, карточки на выдуманных данных)
+принимаются только при `RADIAL_DEV=1` или файле `dev.on` рядом с exe - иначе их мог бы послать любой процесс.
+
+Установщик для других людей - набор `radialmenu` в Moon bundle (`D:\Desktop\components\moon-bundle`):
+`node build.js radialmenu --test` (проверка в песочнице; работающую RadialMenu на время закрыть - установщик
+ждёт её закрытия), архив - `dist\radialmenu-install.zip`. Свой `radial.cfg`, бэкапы, исходники и картинки `art` в
+него не попадают.
+
 ## Устройство
 
 ```
