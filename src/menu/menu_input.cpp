@@ -18,6 +18,7 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "core/winlist.h"
+#include "desk/gamepad.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "gfx/sound.h"
@@ -446,5 +447,35 @@ void RadialMenu::ActivateHover() {
     if (const Item* it = HoveredItem()) {
         Item copy = *it;  // Activate закрывает меню и чистит списки
         Activate(copy);
+    }
+}
+
+void RadialMenu::PadStick(int x, int y) {
+    if (!open_ || closing_ || winMode_) return;
+    double m = std::sqrt((double)x * x + (double)y * y) / 32767.0;
+    if (m < 0.2) return;
+    // второе кольцо - если оно открыто и стик отклонён почти до упора
+    double r = mode_ != Mode::None && m > 0.8 ? (geo_.r3 + geo_.r4) / 2 : (geo_.r1 + geo_.r2) / 2;
+    double a = std::atan2((double)y, (double)x);
+    POINT p{origin_.x + center_.x + (LONG)std::lround(std::cos(a) * r),
+            origin_.y + center_.y - (LONG)std::lround(std::sin(a) * r)};
+    SetCursorPos(p.x, p.y);  // наведение дальше считает обычный кадр - как от мыши
+}
+
+void RadialMenu::PadKey(int action) {
+    if (!open_ || closing_) return;
+    switch (action) {
+        case gamepad::ACCEPT:
+            OnKey(VK_RETURN);
+            break;
+        case gamepad::CANCEL:
+            OnKey(VK_ESCAPE);
+            break;
+        case gamepad::BACK:
+            Back();
+            break;
+        case gamepad::DRILL:
+            OnRightClick();
+            break;
     }
 }

@@ -240,6 +240,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.palette = ParseBool(val);
             else if (key == L"palette_key")
                 cfg.paletteKey = Lower(val);
+            else if (key == L"gamepad")
+                cfg.gamepad = ParseBool(val);
             else if (key == L"clip_history")
                 cfg.clipHistory = ParseBool(val);
             else if (key == L"clip_secrets")
@@ -525,6 +527,7 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"palette = " << (c.palette ? 1 : 0) << L"\n";
     o << L"palette_key = " << c.paletteKey << L"\n";
     o << L"clip_history = " << (c.clipHistory ? 1 : 0) << L"\n";
+    o << L"gamepad = " << (c.gamepad ? 1 : 0) << L"\n";
     o << L"clip_secrets = " << (c.clipSecrets ? 1 : 0) << L"\n";
     o << L"clip_secret_sec = " << c.clipSecretSec << L"\n";
     o << L"win_drag = " << (c.winDrag ? 1 : 0) << L"\n";
