@@ -400,6 +400,7 @@ tools::ProcHistory g_hist;
 std::vector<tools::ProcInfo> g_procs;  // последний снимок
 std::vector<tools::ProcHistory::Leak> g_leaks;
 std::vector<tools::StartItem> g_newStarts;  // ждут вопроса
+std::vector<tools::SysItem> g_newSys;       // новые службы, драйверы, задачи (И17) - ждут вопроса
 std::vector<std::wstring> g_wakeCache;      // кто будит: powercfg раз в полчаса, не при открытии кольца
 tools::CommitInfo g_commit;
 double g_netDown = 0, g_netUp = 0;  // байт/с за последнюю минуту
@@ -514,7 +515,9 @@ DWORD WINAPI WatchLoop(void*) {
             tools::NetCounters(in, out);
             tools::CommitInfo c = tools::Commit();
             std::vector<tools::StartItem> fresh;
+            std::vector<tools::SysItem> freshSys;
             if (n % 5 == 0) fresh = tools::NewStartupItems();
+            if (n % 5 == 2) freshSys = tools::NewSysItems();  // службы и задачи - раз в 5 минут, не в тот же проход
             std::vector<std::wstring> wake;
             bool wakeNew = n % 30 == 0;
             if (wakeNew) wake = tools::WakeDevices();
@@ -529,6 +532,7 @@ DWORD WINAPI WatchLoop(void*) {
                 g_netUp = (out - lastOut) / dt;
             }
             g_newStarts.insert(g_newStarts.end(), fresh.begin(), fresh.end());
+            g_newSys.insert(g_newSys.end(), freshSys.begin(), freshSys.end());
             if (wakeNew) g_wakeCache = std::move(wake);
             ReleaseSRWLockExclusive(&g_watchLock);
             lastIn = in, lastOut = out, lastAt = now;
@@ -659,6 +663,49 @@ int BootMinute() {
     return (int)(now / 600000000ull - GetTickCount64() / 60000);
 }
 
+// Новая служба, драйвер или задача планировщика (И17): «Оставить / Выключить». Задача выключается сама (если права
+// позволяют), служба и драйвер - задачей с правами; прежний тип запуска - в журнал автоматики, чтобы вернуть.
+void AskSysItem(const tools::SysItem& it) {
+    std::wstring what = it.kind == L"svc" ? L"Новая служба: " : it.kind == L"drv" ? L"Новый драйвер: " : L"Новая задача: ";
+    std::wstring sign = it.sign == tools::SIGN_OK      ? L"подпись: " + it.signer
+                        : it.sign == tools::SIGN_NONE  ? L"без подписи"
+                        : it.sign == tools::SIGN_NOFILE ? L"файла нет"
+                                                        : L"подпись не проходит проверку";
+    std::wstring sub = Short(it.path.empty() ? it.command : it.path, 90) + L". Запуск: " + it.how + L", " + sign + L".";
+    bool canOff = it.kind == L"task" || tools::SysItemRefuse(it).empty();
+    tools::SysItem copy = it;
+    Ask(
+        what + it.display, sub, L"Оставить", canOff ? L"Выключить" : L"Понятно", nullptr,
+        [copy, canOff] {
+            if (!canOff) return;
+            if (copy.kind == L"task") {
+                bool ok = tools::SetTaskEnabled(copy.name, false);
+                autos::Note(L"Задача " + copy.name + (ok ? L" выключена" : L": выключить не получилось (нужны права?)"));
+                g_card.Show(BoostCard::DONE, ok ? L"Задача выключена" : L"Не получилось",
+                            ok ? copy.display + L" больше не запускается. Включить - Планировщик заданий."
+                               : L"Похоже, задача создана с правами администратора - выключите её в Планировщике.",
+                            Theme());
+                return;
+            }
+            RunJob(L"Выключаю " + copy.display, [copy](const tools::Log& log, std::wstring& res) {
+                elevate::Put(L"SysItem", copy.kind + L"|" + copy.name);
+                std::wstring start;
+                bool ok = net::RunAdmin(net::JOB_SYS_ITEM, [&](const std::wstring& s) {
+                    if (s.rfind(L"@start=", 0) == 0)
+                        start = s.substr(7);
+                    else
+                        log(s);
+                });
+                if (ok)
+                    autos::Note(L"Отключена " + copy.kind + L" " + copy.name + L" (прежний запуск " + start +
+                                L"; вернуть: sc config " + copy.name + L" start= demand)");
+                res = ok ? copy.display + L" отключена." : L"";
+                return ok;
+            });
+        },
+        40000, it.sign == tools::SIGN_OK ? Toast::G_INFO : Toast::G_WARN);
+}
+
 // По одной карточке: новый автозапуск, утечка, память на пределе, хвосты Unreal. Не в игре и не поверх другой.
 void TryProactive() {
     ULONGLONG now = GetTickCount64();
@@ -667,6 +714,9 @@ void TryProactive() {
     bool haveStart = !g_newStarts.empty();
     tools::StartItem st = haveStart ? g_newStarts.front() : tools::StartItem{};
     if (haveStart) g_newStarts.erase(g_newStarts.begin());
+    bool haveSys = !haveStart && !g_newSys.empty();
+    tools::SysItem sys = haveSys ? g_newSys.front() : tools::SysItem{};
+    if (haveSys) g_newSys.erase(g_newSys.begin());
     std::vector<tools::ProcHistory::Leak> leaks = g_leaks;
     tools::CommitInfo c = g_commit;
     std::vector<tools::ProcInfo> procs = g_dev || !g_devEnded ? std::vector<tools::ProcInfo>{} : g_procs;
@@ -691,6 +741,10 @@ void TryProactive() {
                 g_card.Show(BoostCard::DONE, ok ? L"Автозагрузка" : L"Не получилось", msg, Theme());
             },
             40000, Toast::G_INFO);
+        return;
+    }
+    if (haveSys) {
+        AskSysItem(sys);
         return;
     }
     for (const tools::ProcHistory::Leak& l : leaks) {

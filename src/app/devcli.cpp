@@ -430,6 +430,17 @@ int SysDiag() {
         s += L"  " + u.capability + L" | " + u.app + (u.inUse ? L" | СЕЙЧАС" : L"") +
              (u.unsignedApp ? L" | без подписи" : L"") + L" | " + u.path + nl;
     lap(L"PrivacyUses");
+    {
+        std::vector<tools::SysItem> items = tools::SysItems();
+        int svc = 0, drv = 0, task = 0;
+        for (const tools::SysItem& it : items) (it.kind == L"svc" ? svc : it.kind == L"drv" ? drv : task)++;
+        s += nl + L"Службы " + std::to_wstring(svc) + L", драйверы " + std::to_wstring(drv) + L", задачи " +
+             std::to_wstring(task) + L" (не Microsoft, не при входе):" + nl;
+        for (const tools::SysItem& it : items)
+            if (it.kind == L"task" || it.path.find(L"\\Program Files") != std::wstring::npos)
+                s += L"  " + it.kind + L" | " + it.name + L" | " + it.how + L" | " + it.path + nl;
+        lap(L"SysItems");
+    }
     std::vector<tools::Suspect> f;
     tools::CheckCerts(f);
     lap(L"CheckCerts");

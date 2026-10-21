@@ -307,6 +307,7 @@ struct StartItem {
     ULONGLONG memory = 0;
 };
 std::vector<StartItem> StartupItems();
+
 bool SetStartup(const StartItem& it, bool on, const Log& log);
 // Та же запись: откуда, ключ и команда. Перед выключением показанной записи сверяем её со свежим списком -
 // пока карточка висела, запись могли поменять или убрать.
@@ -380,6 +381,21 @@ MemoryState Memory();
 
 enum SignState { SIGN_NOFILE, SIGN_OK, SIGN_NONE, SIGN_UNTRUSTED, SIGN_BAD };
 SignState CheckSign(const std::wstring& path, std::wstring* signer = nullptr);  // кэш по пути, размеру и времени
+
+// Службы, драйверы и задачи планировщика (И17, sysitems.cpp). kind: svc / drv / task; name - имя службы или путь
+// задачи, display - для людей, command - строка запуска, path - сам exe/sys, how - когда запускается.
+struct SysItem {
+    std::wstring kind, name, display, command, path, how, signer;
+    int start = 0;  // тип запуска службы (SERVICE_AUTO_START...)
+    SignState sign = SIGN_NOFILE;
+};
+std::vector<SysItem> SysItems();
+std::vector<SysItem> NewSysItems();  // новое против sysitems.tsv (первый раз - только снимок); подписанное Microsoft - нет
+std::wstring ImageOf(const std::wstring& command);  // exe или sys из строки запуска (\SystemRoot\, \??\, кавычки)
+std::wstring SysItemKey(const SysItem& it);  // ключ снимка: без версии и GUID в хвосте имени
+std::wstring SysItemRefuse(const SysItem& it);      // пусто - службу можно выключить задачей с правами
+bool SetTaskEnabled(const std::wstring& path, bool on);
+bool SysItemAdminMain(const std::wstring& req, const Log& log);  // JOB_SYS_ITEM: «svc|имя», «on|svc|имя|тип»
 
 constexpr int kSuspectScore = 3;  // с какого счёта показывать; 6 и выше - «опасно»
 enum FindKind {
