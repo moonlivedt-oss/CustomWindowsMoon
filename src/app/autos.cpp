@@ -234,8 +234,9 @@ void Repair() {
     if (!done.empty()) {
         std::wstring list;
         for (const std::wstring& d : done) list += (list.empty() ? L"" : L", ") + d;
-        g_card.Show(BoostCard::DONE, L"Восстановлено", list + L". Подробности - в журнале автоматики.", Theme(), 9000,
-                    Toast::G_OK);
+        if (!Digest(L"Восстановлено: " + list, L""))
+            g_card.Show(BoostCard::DONE, L"Восстановлено", list + L". Подробности - в журнале автоматики.", Theme(),
+                        9000, Toast::G_OK);
     }
     SYSTEMTIME st;
     GetLocalTime(&st);
@@ -250,6 +251,68 @@ void Repair() {
 // Два файла: journal.tsv дописывается, а перевалив за 64 КБ, становится
 // journal.old.tsv (прежний старый уходит). Раньше при переполнении весь файл
 // перечитывался и переписывался под замком - теперь только переименование.
+
+std::wstring DigestFile() { return tools::DataDir() + L"\\digest.tsv"; }
+
+std::vector<std::pair<std::wstring, std::wstring>> DigestRead() {
+    std::vector<std::pair<std::wstring, std::wstring>> out;
+    HANDLE f = CreateFileW(DigestFile().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return out;
+    std::string bytes;
+    char buf[8192];
+    DWORD got = 0;
+    while (bytes.size() < (1 << 20) && ReadFile(f, buf, sizeof(buf), &got, nullptr) && got) bytes.append(buf, got);
+    CloseHandle(f);
+    for (const std::wstring& line : Split(Widen(bytes), L'\n')) {
+        size_t tab = line.find(L'\t');
+        if (tab != std::wstring::npos) out.push_back({line.substr(0, tab), line.substr(tab + 1)});
+    }
+    return out;
+}
+
+bool Digest(const std::wstring& title, const std::wstring& text) {
+    if (!g_cfg || !g_cfg->digest) return false;
+    auto flat = [](std::wstring s) {
+        for (wchar_t& ch : s)
+            if (ch == L'\t' || ch == L'\n' || ch == L'\r') ch = L' ';
+        return s;
+    };
+    std::string line = Narrow(flat(title) + L"\t" + flat(text) + L"\n");
+    HANDLE f = CreateFileW(DigestFile().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD put = 0;
+    bool ok = WriteFile(f, line.data(), (DWORD)line.size(), &put, nullptr);
+    CloseHandle(f);
+    return ok;
+}
+
+int DigestCount() { return (int)DigestRead().size(); }
+
+// Вечером (digest_hour и позже), не в игре и не поверх другой карточки - всё накопленное одной карточкой.
+void DigestTick() {
+    static ULONGLONG at = 0;
+    ULONGLONG now = GetTickCount64();
+    if (now - at < 60000 || !g_cfg || !g_cfg->digest || g_game || g_card.Visible()) return;
+    at = now;
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    if (st.wHour < g_cfg->digestHour || Get(L"digest_day") == std::to_wstring(Today())) return;
+    std::vector<std::pair<std::wstring, std::wstring>> items = DigestRead();
+    if (items.empty()) return;
+    Put(L"digest_day", std::to_wstring(Today()));
+    DeleteFileW(DigestFile().c_str());
+    std::wstring sub;
+    for (size_t i = 0; i < items.size() && i < 4; ++i) sub += (i ? L"; " : L"") + items[i].first;
+    if (items.size() > 4) sub += L" и ещё " + std::to_wstring(items.size() - 4);
+    g_card.yesLabel = L"Журнал";
+    g_card.noLabel = L"Понятно";
+    g_card.onYes = [] {
+        if (g_openStudio) g_openStudio(11, L"");  // «Автоматика»: журнал целиком
+    };
+    g_card.onNo = nullptr;
+    g_card.Show(BoostCard::OFFER, L"За день: " + Plural((int)items.size(), L"событие", L"события", L"событий"), sub,
+                Theme(), 30000, Toast::G_INFO);
+}
 
 void Note(const std::wstring& text) {
     SYSTEMTIME st;
@@ -329,6 +392,7 @@ void OnModes(bool game, bool dev) {
 void Tick() {
     if (!g_cfg) return;
     g_card.Tick();
+    DigestTick();
     ULONGLONG now = GetTickCount64();
     // самовосстановление: через 45 с после старта, дальше раз в 15 минут
     if (now - g_repairCheck > (g_repairCheck == g_started ? 45000ull : 15 * 60 * 1000ull)) {
@@ -376,7 +440,8 @@ void OnJob(WPARAM, LPARAM lp) {
             Note(L"Тихая чистка (" + m->text + L"): освобождено " + tools::Bytes(m->bytes) +
                  (m->lockers.empty() ? L"" : L"; не дали удалить: " + m->lockers));
             // по расписанию мелочь не показываем - только в журнал
-            if (m->silent && m->bytes >= 200ull * 1024 * 1024)  // по просьбе итог уже в сцене
+            if (m->silent && m->bytes >= 200ull * 1024 * 1024 &&  // по просьбе итог уже в сцене
+                !Digest(L"Тихая чистка: " + tools::Bytes(m->bytes), m->text))
                 g_card.Show(BoostCard::DONE, L"Тихая чистка: " + tools::Bytes(m->bytes),
                             L"Временные файлы (старые и не занятые) и кэши npm, pip и других; " + m->text +
                                 L". Кэши шейдеров не трогал.",
