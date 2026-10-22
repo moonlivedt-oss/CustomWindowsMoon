@@ -17,6 +17,7 @@
 #include "app/devcli.h"
 #include "app/netui.h"
 #include "app/palette.h"
+#include "app/resume.h"
 #include "app/worksets.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
@@ -244,6 +245,7 @@ void PollWork() {
             g_cfgTime = {};  // перечитать: Reload поставит тему правила или вернёт свою и перекрасит всё
         });
     autos::Tick();
+    resume::Tick();
     if (!alt) {
         g_armed = true;
         g_altTab = false;
@@ -710,6 +712,7 @@ void ShutdownAll() {
     g_mcCard2.Destroy();
     g_edgeCard.Destroy();
     g_askCard.Destroy();
+    resume::Shutdown();
     g_dropCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
@@ -874,6 +877,11 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_WTSSESSION_CHANGE:
             g_reveal.OnSession(wp);
             if (wp == WTS_SESSION_UNLOCK) netui::Wake();
+            if (wp == WTS_SESSION_LOCK) resume::OnLock();  // Л4: запомнить, что открыто
+            if (wp == WTS_SESSION_UNLOCK) resume::OnUnlock();
+            return 0;
+        case resume::WM_RESUME:
+            resume::OnMessage(wp, lp);
             return 0;
         case netui::WM_NET_EVENT:
             netui::OnEvent(lp);
@@ -936,9 +944,12 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 g_reveal.OnPower(wp);
                 if (wp == PBT_APMPOWERSTATUSCHANGE) autos::OnPower();  // зарядку подключили или отключили
                 if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) netui::Wake();
+                if (wp == PBT_APMSUSPEND) resume::OnLock();
+                if (wp == PBT_APMRESUMESUSPEND) resume::OnUnlock();
             }
             return TRUE;
         case WM_QUERYENDSESSION:
+            resume::SaveNow();  // Л4: выключают - запомнить, что было открыто
             return TRUE;
         case WM_ENDSESSION:
             if (wp) ShutdownAll();  // после ответа процесс завершат без WM_DESTROY
@@ -1126,7 +1137,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     palette::Apply();
     gamepad::Start(g_wnd, g_cfg.gamepad);
     cliphist::Start(inst, &g_cfg);
-    appvol::Start(g_cfg.appVolume);  // Л36: громкость по программам
+    appvol::Start(g_cfg.appVolume);     // Л36: громкость по программам
+    resume::Init(inst, g_wnd, &g_cfg);  // Л4: продолжить, где остановился
     corners::SetClip([] { cliphist::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {
         for (Item& it : cliphist::Items(L"b|")) {

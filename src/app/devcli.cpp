@@ -23,6 +23,7 @@
 #include "core/files.h"
 #include "core/text.h"
 #include "core/themes.h"
+#include "app/resume.h"
 #include "desk/appvol.h"
 #include "desk/boost.h"
 #include "desk/gamemode.h"
@@ -392,6 +393,14 @@ bool Run(int& exitCode) {
             WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
             CloseHandle(f);
         }
+        exitCode = 0;
+    } else if (Has(args, L"--resume-diag")) {  // Л4: что открыто сейчас и что запомнено -> resume_out.txt
+        HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        std::vector<resume::Thing> now = resume::Now();
+        if (SUCCEEDED(co)) CoUninitialize();
+        std::wstring o = L"сейчас: " + resume::Describe(now, 4000) + L"\r\n";
+        for (const resume::Thing& t : now) o += L"  " + t.path + L"\r\n";
+        WriteOut(L"resume_out.txt", o);
         exitCode = 0;
     } else if (Has(args, L"--appvol-diag")) {  // Л36: звуковые сеансы и запомненные уровни -> appvol_out.txt
         std::wstring o;
