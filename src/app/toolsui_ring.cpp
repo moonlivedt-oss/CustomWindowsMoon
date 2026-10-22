@@ -377,7 +377,7 @@ Item SecurityItem() {
         const tools::Suspect& s = g_finds[i];
         std::wstring what = FindWhat(s.kind);
         item.children.push_back(
-            Act(Short(NoExe(s.name), 14), FindIcon(s.kind), L"sec-find:" + std::to_wstring(i),
+            Act(Short(RingName(NoExe(s.name)), 22), FindIcon(s.kind), L"sec-find:" + std::to_wstring(i),
                 Level(s.score) + what + L". " + s.why + L". " + Short(s.path, 90) + L". 2 клика - что с этим сделать"));
     }
     item.children.push_back(Act(L"Заново", L"tools-scan.png", L"sec-rescan",
@@ -417,7 +417,7 @@ Item SecurityItem() {
         for (size_t i = 0; i < g_exts.size() && i < 14; ++i) {
             const tools::BrowserExt& e = g_exts[i];
             ext.children.push_back(Act(
-                Short(e.name, 14), Have(L"tools-extension.png", L"tools-shield.png"), L"sec-ext:" + std::to_wstring(i),
+                Short(e.name, 22), Have(L"tools-extension.png", L"tools-shield.png"), L"sec-ext:" + std::to_wstring(i),
                 e.browser + (e.profile.empty() ? L"" : L", " + e.profile) + L": " + tools::ExtRightsText(e.rights) +
                     (e.store ? L"" : L". Поставлено не из магазина") +
                     L". 2 клика - страница расширения в браузере (там - удалить)"));
@@ -520,7 +520,7 @@ Item SystemItem(const Scan& scan) {
                 (failed.empty() ? L"" : L". Не установились за 30 дней: " + failed) + L". 2 клика - Центр обновления"));
     }
     for (size_t i = 0; i < g_devs.size() && i < 4; ++i)
-        item.children.push_back(Act(Short(g_devs[i].name, 14), L"tools-devices.png", L"sys-dev",
+        item.children.push_back(Act(Short(g_devs[i].name, 22), L"tools-devices.png", L"sys-dev",
                                     g_devs[i].name + L": " + g_devs[i].text + L". 2 клика - Диспетчер устройств"));
     if (g_devs.empty() && g_scanAt)
         item.children.push_back(Act(L"Устройства", L"tools-devices.png", L"sys-dev",
