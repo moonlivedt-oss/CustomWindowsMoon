@@ -307,6 +307,7 @@ void Studio::WifiCard(CardColumns& cols) {
         if (Demo()) {
             if (const char* w = getenv("RADIAL_WIFI"); w && !strcmp(w, "off")) {
                 job->info.locationOff = true;
+                job->info.linkRx = job->info.linkTx = 1201;
                 job->profile = L"Bubuka_5G";
             } else {
                 job->info = DemoWifi();
@@ -331,13 +332,19 @@ void Studio::WifiCard(CardColumns& cols) {
     bool qrOk = !ssid.empty() && !Demo();
 
     if (done && !w.ok) {
+        // без местоположения канала нет, а скорость связи с роутером есть - по ней хотя бы диапазон (О8)
+        std::wstring band = net::WifiBandGuess(w.linkRx);
+        std::wstring link = w.linkRx ? L", связь с роутером " + std::to_wstring(w.linkRx) + L" Мбит/с" +
+                                           (band.empty() ? L"" : L" (" + band + L")")
+                                     : L"";
         cols.Wide(L"Wi-Fi", 1.8f, [&](const RectF& b) {
             std::wstring t =
                 w.locationOff
                     ? L"Windows 11 показывает сигнал, канал и соседние сети только при включённом "
                       L"определении местоположения (Параметры - Конфиденциальность - Расположение, и "
                       L"«Разрешить классическим приложениям»). Сейчас оно выключено - схемы каналов не будет." +
-                          (ssid.empty() ? std::wstring() : L" Подключены к «" + ssid + L"».")
+                          (ssid.empty() ? std::wstring() : L" Подключены к «" + ssid + L"»") + link +
+                          (ssid.empty() && link.empty() ? L"" : L".")
                     : std::wstring(L"Wi-Fi не подключён (или адаптера нет).");
             float th = ui.MeasureWrapped(t, 11.5f, false, b.Width) + ui.S(4);
             ui.Text(t, RectF(b.X, b.Y, b.Width, th), c.muted, 11.5f, false, ui::Left, true);

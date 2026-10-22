@@ -356,6 +356,14 @@ void TestSafeUrl() {
 }  // namespace
 
 // «Важное»: опасное раньше всего, порядок по важности, не больше 6, пустой снимок - пусто.
+// О8: диапазон Wi-Fi по скорости связи, когда канал не отдают
+void TestWifiBand() {
+    CHECK(net::WifiBandGuess(1201) == L"скорее 5 или 6 ГГц");
+    CHECK(net::WifiBandGuess(144) == L"скорее 2,4 ГГц");
+    CHECK(net::WifiBandGuess(300).empty());  // бывает и там, и там
+    CHECK(net::WifiBandGuess(0).empty());
+}
+
 void TestImportant() {
     tools::ImportantIn in;
     CHECK(tools::ImportantTodos(in).empty());
@@ -404,4 +412,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestExtRights();
     TestSafeUrl();
     TestImportant();
+    TestWifiBand();
 }
