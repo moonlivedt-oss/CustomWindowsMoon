@@ -713,6 +713,13 @@ void OnJob(WPARAM wp, LPARAM lp) {
                     Theme(), 20000, m->ok ? Toast::G_OK : Toast::G_FAIL);
         return;
     }
+    if (wp == kDrainTag) {  // Л38: журнал всегда, карточка - если не занята и не игра
+        std::unique_ptr<DrainMsg> m((DrainMsg*)lp);
+        autos::Note(m->out.title + L". " + m->out.text);
+        if (!g_busy && !g_game && !autos::Digest(m->out.title, m->out.text))
+            g_card.Show(BoostCard::DONE, m->out.title, m->out.text, Theme(), 15000, Toast::G_INFO);
+        return;
+    }
     if (wp == kBuildTag) {
         std::unique_ptr<BuildMsg> m((BuildMsg*)lp);
         BuildFound(*m);

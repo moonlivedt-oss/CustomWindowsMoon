@@ -7,6 +7,7 @@
 
 #include "core/perf.h"
 #include "tools/devserv.h"
+#include "tools/drain.h"
 
 namespace toolsui {
 
@@ -44,6 +45,49 @@ BOOL CALLBACK TitleProc(HWND w, LPARAM lp) {
     int n = GetWindowTextW(w, t, 512);
     if (n > 0) ((std::vector<std::wstring>*)lp)->push_back(std::wstring(t, n));
     return TRUE;
+}
+
+// Л38: проход сеанса от батареи. Начался - запомнить заряд и процессор; идёт - копить прирост процессора по
+// именам; кончился (зарядку подключили) - итог основному потоку (DrainMsg), если было что сказать.
+void BatteryPass(const std::vector<tools::ProcInfo>& ps, bool& on, ULONGLONG& at, int& from,
+                 std::map<std::wstring, ULONGLONG>& cpu, std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>>& prev) {
+    tools::BatteryInfo b = tools::Battery();
+    if (!b.present) return;
+    bool bat = !b.ac;
+    auto feed = [&](bool add) {
+        std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> now;
+        for (const tools::ProcInfo& p : ps) {
+            now[p.pid] = {p.created, p.cpu};
+            auto it = prev.find(p.pid);
+            ULONGLONG was = it != prev.end() && it->second.first == p.created ? it->second.second : p.cpu;
+            if (add && p.cpu > was) cpu[p.name] += p.cpu - was;
+        }
+        prev.swap(now);
+    };
+    if (bat && !on) {
+        on = true;
+        at = GetTickCount64();
+        from = b.percent;
+        cpu.clear();
+        feed(false);
+    } else if (bat && on) {
+        feed(true);
+    } else if (!bat && on) {
+        on = false;
+        tools::DrainIn in;
+        in.minutes = (int)((GetTickCount64() - at) / 60000);
+        in.fromPct = from;
+        in.toPct = b.percent;
+        in.cpu = cpu;
+        auto* m = new DrainMsg;
+        if (tools::DrainSummary(in, m->out)) {
+            if (!PostMessageW(g_app, WM_TOOLS_JOB, kDrainTag, (LPARAM)m)) delete m;
+        } else {
+            delete m;
+        }
+        cpu.clear();
+        prev.clear();
+    }
 }
 
 // Л19: серверы разработки (слушают порт, процесс вроде node/python) и заголовки окон - решение в tools/devserv
@@ -142,7 +186,14 @@ DWORD WINAPI WatchLoop(void*) {
 
     ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0, nextFull = 0, quickAt = 0, gpuAt = 0, selfAt = 0;
     std::map<std::wstring, ULONGLONG> devSeen;  // Л19: когда проект последний раз был виден в окнах
-    std::vector<tools::SelfSample> self;        // раз в час, за последние сутки с запасом
+    // Л38: сеанс от батареи - когда начался, с какого заряда, процессор по программам (pid -> время создания и
+    // процессор на прошлом проходе: прирост складываем по имени)
+    bool batOn = false;
+    ULONGLONG batAt = 0;
+    int batFrom = -1;
+    std::map<std::wstring, ULONGLONG> batCpu;
+    std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> batPrev;
+    std::vector<tools::SelfSample> self;  // раз в час, за последние сутки с запасом
     int n = 0;
     for (;;) {
         ULONGLONG now = GetTickCount64();
@@ -192,6 +243,7 @@ DWORD WINAPI WatchLoop(void*) {
             g_watchBeat = GetTickCount64();
             nextFull = now + (g_game ? 300000 : 60000);  // в игре реже: и так ни о чём не спросим
             tools::RecordBattery();                      // износ по дням и сколько времени на зарядке
+            BatteryPass(g_procs, batOn, batAt, batFrom, batCpu, batPrev);
         }
         if (quickAt && now >= quickAt) {
             quickAt = 0;
