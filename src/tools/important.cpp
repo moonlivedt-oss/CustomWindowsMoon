@@ -26,4 +26,8 @@ std::vector<ImportantTodo> ImportantTodos(const ImportantIn& in, size_t limit) {
     return out;
 }
 
+bool HeavyDefer(bool onBattery, LONGLONG now, LONGLONG last) {
+    return onBattery && last > 0 && last <= now && now - last < 24 * 3600;
+}
+
 }  // namespace tools

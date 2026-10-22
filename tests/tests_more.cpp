@@ -378,6 +378,14 @@ void TestImportant() {
     CHECK(tools::ImportantTodos(in, 100).size() == 10);
     in.freeable = 5ull << 30;
     CHECK(tools::ImportantTodos(in, 100)[5].key == L"clean-all");
+
+    // О6: от батареи ждём, пока прошлый раз моложе суток; от сети, ни разу и с часами назад - не ждём
+    const LONGLONG now = 1792700000, day = 24 * 3600;
+    CHECK(tools::HeavyDefer(true, now, now - 3600));
+    CHECK(!tools::HeavyDefer(true, now, now - day));
+    CHECK(!tools::HeavyDefer(false, now, now - 3600));
+    CHECK(!tools::HeavyDefer(true, now, 0));
+    CHECK(!tools::HeavyDefer(true, now, now + 3600));
 }
 
 void TestMore(void (*check)(bool, const char*, int)) {

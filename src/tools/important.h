@@ -30,4 +30,8 @@ struct ImportantTodo {
 // драйвер, придержанный приоритет, неотправленный git; не больше limit.
 std::vector<ImportantTodo> ImportantTodos(const ImportantIn& in, size_t limit = 6);
 
+// Тяжёлый фоновый проход от батареи (Н8): ждать зарядки, пока прошлый раз был меньше суток назад. Время - секунды
+// unix; last 0 - ещё ни разу (не ждать), часы назад (last в будущем) - не ждать, иначе прохода не будет никогда.
+bool HeavyDefer(bool onBattery, LONGLONG now, LONGLONG last);
+
 }  // namespace tools
