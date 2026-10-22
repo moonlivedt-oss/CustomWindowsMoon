@@ -23,6 +23,7 @@
 #include "net/net.h"
 #include "app/autos.h"
 #include "tools/selfwatch.h"
+#include "tools/drain.h"
 #include "tools/tools.h"
 #include "tools/weekdiff.h"
 
@@ -35,6 +36,7 @@ constexpr UINT kWatchTag = 0x5F;   // wParam у WM_TOOLS_JOB: новый сни�
 constexpr UINT kWeeklyTag = 0x57;  // wParam у WM_TOOLS_JOB: итог недельной проверки
 constexpr UINT kLeftTag = 0x5B;    // wParam у WM_TOOLS_JOB: задание, брошенное по «Стоп», доработало (LeftMsg)
 constexpr UINT kBuildTag = 0x5A;   // wParam у WM_TOOLS_JOB: повторная сборка CMake нашла ошибку (BuildMsg, Л31)
+constexpr UINT kDrainTag = 0x59;   // wParam у WM_TOOLS_JOB: сеанс от батареи кончился (DrainMsg, Л38)
 constexpr UINT kSelfTag = 0x5C;    // wParam у WM_TOOLS_JOB: часовой снимок своей памяти (SelfMsg)
 constexpr UINT kDiskTag = 0x5D;    // wParam у WM_TOOLS_JOB: карточка «Мало места» собрана
 
@@ -138,6 +140,9 @@ struct BuildMsg {  // kBuildTag: итог повторной сборки CMake
     std::wstring dir, plain, hint, go;
 };
 void BuildFound(const BuildMsg& m);
+struct DrainMsg {  // kDrainTag: что посадило батарею
+    tools::DrainOut out;
+};
 struct SelfMsg {  // kSelfTag: часовой снимок своей памяти
     std::wstring line, leak;
 };

@@ -22,6 +22,7 @@
 #include "tools/journal.h"
 #include "tools/builderr.h"
 #include "tools/devserv.h"
+#include "tools/drain.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
 #include "desk/cardlog.h"
@@ -638,6 +639,32 @@ void TestProjectPorts() {
     CHECK(tools::ProjectPorts(L"node index.js", L"{\"scripts\":{\"test\":\"jest\"}}", L"").empty());  // не угадать
 }
 
+// Что посадило батарею (Л38): программы складываются в группы, мелочь не в счёт, коротко - молчим
+void TestDrain() {
+    CHECK(tools::DrainGroup(L"msedge.exe") == L"браузер" && tools::DrainGroup(L"ShaderCompileWorker.exe") == L"Unreal");
+    CHECK(tools::DrainGroup(L"Telegram.exe") == L"Telegram" && tools::DrainGroup(L"foo.exe") == L"foo");
+    tools::DrainIn in;
+    in.minutes = 125;
+    in.fromPct = 95;
+    in.toPct = 35;
+    in.cpu = {{L"chrome.exe", 400},
+              {L"msedge.exe", 100},
+              {L"UnrealEditor.exe", 300},
+              {L"Discord.exe", 160},
+              {L"svchost.exe", 40}};
+    tools::DrainOut o;
+    CHECK(tools::DrainSummary(in, o));
+    CHECK(o.title == L"От батареи 2 ч 5 мин: ушло 60%");
+    CHECK(o.top.size() == 3 && o.top[0].first == L"браузер" && o.top[0].second == 50 && o.top[1].first == L"Unreal" &&
+          o.top[2].first == L"Discord");  // svchost - 4%, не в счёт
+    CHECK(o.text == L"Больше всего процессора: браузер (50%), Unreal (30%) и Discord (16%). Расход 28% в час.");
+    in.minutes = 15;
+    CHECK(!tools::DrainSummary(in, o));  // меньше 20 минут
+    in.minutes = 60;
+    in.toPct = 93;
+    CHECK(!tools::DrainSummary(in, o));  // ушло 2%
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -664,4 +691,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestBuildErr();
     TestDevServers();
     TestProjectPorts();
+    TestDrain();
 }
