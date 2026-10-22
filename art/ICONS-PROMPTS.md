@@ -34,6 +34,7 @@
 | `sheet-tools.png` | 16 | кольцо «Утилиты» |
 | `sheet-guard.png` | 5 | «Защита» |
 | `sheet-net.png` | 10 | кольцо «Сеть» |
+| `sheet-tools4.png` | 8 | набор 6: пункты, что пока берут запасной значок |
 | `app.png`, `hub.png` | 1 + 1 | значок программы, эмблема в центре кольца |
 | `sheet-mascot.png` | 5 | по желанию: маскот тура в новой гамме |
 
@@ -238,6 +239,31 @@ Avoid: SSD sticks, memory modules, microchips, branching trees, brooms, swirls, 
 ```
 
 ---
+
+# Набор 6: пункты с запасным значком
+
+Пункты, добавленные 21-22.10, пока показывают чужой значок (`Have(новый, запасной)` в `toolsui_ring.cpp`): как
+только файл с новым именем появится в `icons\`, он встанет сам. Нынешние значки не меняются; каждый предмет
+сверен с листами 1-14, чтобы не повторять уже занятое (будильник, щит, куб песочницы, SSD, метла).
+
+| # | имя | где | сейчас | предмет |
+|---|---|---|---|---|
+| 1 | `tools-important` | сектор «Важное» | `tools-alarm` | сигнальный фонарь-маяк |
+| 2 | `tools-week` | «Новое за неделю» | `tools-update` | отрывной календарь без чисел |
+| 3 | `tools-extension` | «Расширения» в «Защите», студия | `tools-shield` | кусочек пазла |
+| 4 | `tools-sandbox-link` | «Ссылка в песочнице» | `tools-sandbox` | звено цепи под стеклянным колпаком |
+| 5 | `tools-bigfiles` | «Большие файлы» | `tools-disk` | гиря |
+| 6 | `tools-balance` | «Баланс: N» в «Памяти» | `tools-procs` | весы |
+| 7 | `tools-giants` | «Гиганты» | `tools-wmi` | монолит |
+| 8 | `tools-forecast` | «C: на N дн.» в «Дисках» | `tools-disk` | барометр |
+
+## 15. `sheet-tools4.png`: пункты с запасным значком, 8 штук, сетка 4 x 2
+
+```
+A premium icon sheet of exactly eight finely crafted miniature objects on a fully transparent background, arranged in a strict 4 x 2 grid of equal square cells, each object centered in its own cell with generous empty space around it, nothing crossing the cell borders. Reading order left to right, top to bottom: (1) a small graphite signal beacon lantern on a short stand, a polished silver cage around a glowing crimson lens, faint crimson rays, (2) a compact tear-off desk calendar block of graphite with two silver binding rings on top and a row of seven small tabs along its edge, one tab glowing crimson, completely blank pages, (3) a single jigsaw puzzle piece made of brushed graphite with a polished silver rim, its round knob glowing crimson, (4) a small dome of frosted glass on a graphite base, a polished silver chain link floating safely inside with a crimson glow at its center, (5) a heavy graphite kettlebell weight with a polished silver handle and a deep crimson enamel band around its belly, (6) a polished silver balance scale with two shallow graphite pans held level, a small crimson glowing weight on one pan and two small graphite weights on the other, (7) a tall rough graphite monolith slab with thin silver bands across it and glowing crimson seams running through the stone, (8) a round graphite barometer with a silver bezel, a single crimson needle on a blank dial without marks or numbers.
+Shared style for every object: premium dark fantasy UI icon set in the spirit of a high-end game inventory, NieR Automata inspired minimalism, real materials (brushed graphite metal, frosted glass, polished silver edges, deep crimson enamel, soft crimson inner glow), cinematic soft rim light from the upper left with cool steel blue reflections (#8FA3BF), gentle ambient occlusion, crisp clean silhouette, subtle fine detail (engraved lines, tiny screws, soft wear) that stays readable when shrunk to 34 pixels, the same three-quarter front camera and the same lighting for all objects, colors limited to graphite (#12141C, #2A2F3A), steel (#8FA3BF), silver (#D9DEE6), crimson (#C8323F) and deep crimson (#7E1A23), no outline, no sticker border, objects float on nothing. Fully transparent background, no text anywhere.
+Avoid: alarm clocks, shields, padlocks, cubes, SSD sticks, memory modules, brooms, swirls, toolboxes, crates, hourglasses, gears, magnifying glasses, sticker style, white outline or die-cut border, cartoon look, cute faces or eyes, pastel or candy colors, pink, orange, green, teal, purple, gold, letters, numbers, dates, labels, browser logos, brand logos, watermark, signature, background color or scenery, floor, pedestals, cast shadows on the background, grid lines drawn on the image, frames, glow spilling far outside the object, objects touching each other, uneven object sizes, two objects that look alike
+```
 
 # Набор 5: свои инструменты - в стиле самих проектов
 
