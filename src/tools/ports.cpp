@@ -192,6 +192,10 @@ std::vector<std::wstring> Tokens(const std::wstring& cmd) {
 
 }  // namespace
 
+std::wstring ProcCommandLine(HANDLE h) { return CommandLine(h); }
+std::wstring ProcCurrentDir(HANDLE h) { return CurrentDir(h); }
+std::vector<std::wstring> CmdTokens(const std::wstring& cmd) { return Tokens(cmd); }
+
 void ListenerProjects(std::vector<Listener>& ls) {
     std::map<DWORD, std::pair<std::wstring, std::wstring>> done;  // pid -> проект, команда
     for (Listener& l : ls) {

@@ -13,6 +13,7 @@
 #include "core/files.h"
 #include "core/text.h"
 #include "desk/boost.h"
+#include "tools/builderr.h"
 #include "tools/tools.h"
 
 namespace gboost {
@@ -298,9 +299,10 @@ Session g_sess[2];  // 0 - игра, 1 - редактор
 bool g_sessOn[2] = {};
 double g_pageStart[2] = {};
 
-void Post(Event ev, double a = 0, double b = 0, const std::wstring& text = L"", const std::wstring& sub = L"") {
+void Post(Event ev, double a = 0, double b = 0, const std::wstring& text = L"", const std::wstring& sub = L"",
+          const std::wstring& go = L"") {
     if (!g_notify) return;
-    auto* n = new Note{ev, a, b, text, sub};
+    auto* n = new Note{ev, a, b, text, sub, go};
     if (!PostMessageW(g_notify, WM_GBOOST, ev, (LPARAM)n)) delete n;
 }
 
@@ -326,23 +328,22 @@ void ParseBuild(bool dev) {
     size_t e = t.rfind(L"Total execution time: ");
     if (e != std::wstring::npos) secs = _wtof(t.c_str() + e + 22);
     if (!dev && secs < 20) return;  // мелкая сборка из IDE без редактора - не новость
-    std::wstring err, target;
+    std::wstring err, target, go;
     for (std::wstring& line : Split(t, L'\n')) {
         if (target.empty() && line.rfind(L"Building ", 0) == 0) {
             target = line.substr(9);
             if (!target.empty() && target.back() == L'.') target.erase(target.find_last_not_of(L'.') + 1);
         }
-        if (!ok && err.empty() &&
-            (line.find(L": error") != std::wstring::npos || line.find(L"error C") != std::wstring::npos ||
-             line.find(L"error LNK") != std::wstring::npos)) {
-            // путь к файлу длинный: оставляем имя файла и текст ошибки
-            size_t paren = line.find(L'(');
-            size_t slash = line.find_last_of(L"\\/", paren == std::wstring::npos ? line.size() : paren);
-            err = slash != std::wstring::npos ? line.substr(slash + 1) : line;
-            if (err.size() > 180) err = err.substr(0, 177) + L"...";
-        }
     }
-    Post(EV_BUILD_DONE, secs, ok ? 1 : 0, err, target);
+    // первая настоящая ошибка понятным языком (Л31): файл и строка, что обычно помогает, место для VS Code
+    builderr::Error be;
+    if (!ok && builderr::First(t, be)) {
+        err = builderr::Plain(be);
+        std::wstring hint = builderr::Hint(be);
+        if (!hint.empty()) err += L"\n" + hint;
+        go = builderr::GotoArg(be, L"");
+    }
+    Post(EV_BUILD_DONE, secs, ok ? 1 : 0, err, target, go);
 }
 
 int CountWorkers() {
