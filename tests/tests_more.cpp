@@ -10,7 +10,10 @@
 #include "core/procsnap.h"
 #include "core/themes.h"
 #include "net/speed.h"
+#include "tools/tools.h"
 #include "tools/weekdiff.h"
+#include "gfx/qr.h"
+#include "net/wifi.h"
 #include "desk/dropundo.h"
 #include "app/rules.h"
 #include "app/settingsio.h"
@@ -261,6 +264,47 @@ void TestWeekDiff() {
     CHECK(tools::WeekDiff(now, back).empty());
 }
 
+// QR: матрица сверена с библиотекой qrcode (Python) бит в бит на версиях 1-10 - здесь её отпечаток, чтобы правка
+// кодировщика не сломала его молча. Строка Wi-Fi экранирует спецсимволы; каналы Wi-Fi по частоте.
+void TestQr() {
+    qr::Code c = qr::Encode(qr::WifiText("MoonNet", "secret123", false));
+    CHECK(c.version == 3 && c.mask == 3 && c.size == 29);
+    unsigned long long h = 1469598103934665603ULL;
+    for (bool d : c.dark) h = (h ^ (d ? 1 : 0)) * 1099511628211ULL;
+    CHECK(h == 0xca221449c689ff79ULL);
+    CHECK(qr::WifiText("a;b", "p:1", false) == "WIFI:T:WPA;S:a\\;b;P:p\\:1;;");
+    CHECK(qr::WifiText("Free", "", true) == "WIFI:T:nopass;S:Free;;");
+    CHECK(qr::Encode(std::string(214, 'x')).size == 0);  // больше версии 10 - не берёмся
+    CHECK(net::WifiChannel(2437000) == 6 && net::WifiChannel(5180000) == 36 && net::WifiChannel(2484000) == 14);
+    CHECK(net::ChannelsOverlap(6, 9) && !net::ChannelsOverlap(1, 6) && !net::ChannelsOverlap(36, 40));
+}
+
+// Права расширений по manifest.json: хосты в host_permissions и content_scripts тоже считаются.
+void TestExtRights() {
+    std::string mv3 = R"({"manifest_version":3,"permissions":["storage","clipboardRead","nativeMessaging"],
+        "host_permissions":["<all_urls>"]})";
+    int r = tools::ExtRightsOf(mv3);
+    CHECK(r == (tools::EXT_ALL_SITES | tools::EXT_CLIPBOARD | tools::EXT_NATIVE));
+    CHECK(tools::ExtRisk(r) >= 4);
+    std::string cs = R"({"content_scripts":[{"matches":["https://*/*"],"js":["a.js"]}],"permissions":["tabs"]})";
+    CHECK(tools::ExtRightsOf(cs) == tools::EXT_ALL_SITES);
+    CHECK(tools::ExtRisk(tools::ExtRightsOf(cs)) == 2);
+    CHECK(tools::ExtRightsOf(R"({"permissions":["https://example.com/*","storage"]})") == 0);
+    CHECK(tools::ExtRightsText(tools::EXT_CLIPBOARD | tools::EXT_COOKIES) ==
+          L"читает буфер обмена, читает куки (входы на сайты)");
+}
+
+// Ссылка в песочнице: годится только http(s) без кавычек и пробелов - иначе адрес вышел бы из кавычек команды.
+void TestSafeUrl() {
+    CHECK(tools::SafeUrl(L"  https://example.com/a?b=1&c=2  ") == L"https://example.com/a?b=1&c=2");
+    CHECK(tools::SafeUrl(L"HTTP://x.ru") == L"HTTP://x.ru");
+    CHECK(tools::SafeUrl(L"https://x.ru/\" & calc").empty());
+    CHECK(tools::SafeUrl(L"https://x.ru/a b").empty());
+    CHECK(tools::SafeUrl(L"file:///C:/Windows").empty());
+    CHECK(tools::SafeUrl(L"javascript:alert(1)").empty());
+    CHECK(tools::SafeUrl(L"https://").empty());
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
@@ -275,4 +319,7 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestDayTint();
     TestSpeedLog();
     TestWeekDiff();
+    TestQr();
+    TestExtRights();
+    TestSafeUrl();
 }

@@ -2,6 +2,7 @@
 // Раскладка страниц настроек из карточек («Поведение», «Система», «Красота»).
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <string>
 
@@ -101,6 +102,40 @@ private:
     float rowH_, x_ = 0, w_ = 0, gap_ = 0, cw_ = 0, y0_ = 0, need_ = 0;
     float colY_[2] = {0, 0};
     bool two_ = false;
+};
+
+// Общее для вкладок «Утилит», разнесённых по файлам: колонки карточек, размеры строк, ход фоновой работы.
+struct ToolsKit {
+    using RectF = Gdiplus::RectF;
+    ui::Ui& ui;
+    CardColumns& cols;
+    RectF view;
+    float rowH, lineH;
+    bool busy;
+    ULONGLONG now;
+    std::function<std::wstring()> Log;  // последние строки хода работы
+    std::function<void()> Refresh;      // перечитать данные вкладки
+    template <class Body>
+    void Card(const wchar_t* title, float rows, Body&& body) {
+        cols.Card(title, rows, body);
+    }
+    template <class Body>
+    void Wide(const wchar_t* title, float rows, Body&& body) {
+        cols.Wide(title, rows, body);
+    }
+    // строка списка: подсветка при наведении, по клику - действие (если есть)
+    bool RowHover(int id, const RectF& rr) {
+        bool click = ui.Click(id, rr);
+        if (ui.Hot(id)) ui.Fill(rr, WithAlpha(ui.C().cardHi, 200), ui.S(6));
+        return click;
+    }
+    // курсор над строкой: кнопки строки показываются только тогда, иначе список - лес одинаковых кнопок
+    bool RowHot(const RectF& rr) const {
+        POINT m = ui.Mouse();
+        return ui.interactive && m.x >= rr.X && m.x < rr.X + rr.Width && m.y >= rr.Y && m.y < rr.Y + rr.Height;
+    }
+    void Note(const RectF& b, float n, const std::wstring& s, Gdiplus::Color col) { cols.Note(b, n, s, col); }
+    float RowsFor(size_t n) const { return (float)(n * lineH / rowH); }
 };
 
 }  // namespace studio

@@ -41,6 +41,8 @@
 #include "menu/menu.h"
 #include "net/net.h"
 #include "net/speed.h"
+#include "net/wifi.h"
+#include "gfx/qr.h"
 #include "studio/studio.h"
 #include "tools/tools.h"
 
@@ -353,6 +355,10 @@ int SecDiag() {
     s += nl + L"Программы из папки защиты:" + nl;
     for (const tools::SecurityApp& a : tools::SecurityApps(LoadOwnConfig().securityDir))
         s += L"  " + a.name + L" = " + a.exe + nl;
+    s += nl + L"Расширения браузеров (права):" + nl;
+    for (const tools::BrowserExt& e : r.extList)
+        s += L"  [" + std::to_wstring(tools::ExtRisk(e.rights)) + L"] " + e.browser + L" " + e.name +
+             (e.store ? L"" : L" (не из магазина)") + L": " + tools::ExtRightsText(e.rights) + nl;
     s += L"Антивирус: " + tools::AntivirusUi() + nl;
     s += L"SHA-256 RadialMenu.exe: " + tools::FileSha256(ExeDir() + L"\\RadialMenu.exe") + nl;
     WriteOut(L"sec_out.txt", s);
@@ -1081,6 +1087,8 @@ bool Run(int& exitCode) {
         size_t i = std::find(args.begin(), args.end(), L"--tools-ring-snap") - args.begin();
         std::wstring out = i + 1 < args.size() ? args[i + 1] : ExeDir() + L"\\tools_ring.png";
         int root = i + 2 < args.size() ? _wtoi(args[i + 2].c_str()) : 0;
+        SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");  // цвета темы - без поправки на время суток
+        _putenv("RADIAL_DEMO=1");
         OleInitialize(nullptr);
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         Gdip gdip;
@@ -1092,7 +1100,7 @@ bool Run(int& exitCode) {
             toolsui::SnapRing(menu, &cfg, dpi, root, out);
         }
         TerminateProcess(GetCurrentProcess(), 0);  // как --ring-bench: разбирать окна и кэши GDI+ незачем
-    } else if (Has(args, L"--modefx-film")) {  // --modefx-film game|dev on|off out.png: кадры анимации режима
+    } else if (Has(args, L"--modefx-film")) {      // --modefx-film game|dev on|off out.png: кадры анимации режима
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--modefx-film") - args.begin();
         bool game = i + 1 >= args.size() || args[i + 1] != L"dev", on = i + 2 >= args.size() || args[i + 2] != L"off";
@@ -1208,6 +1216,43 @@ bool Run(int& exitCode) {
         exitCode = SysDiag();
     } else if (Has(args, L"--watch-selftest")) {  // логика слежки на выдуманных данных -> selftest_out.txt
         exitCode = WatchSelftest();
+    } else if (Value(args, L"--qr-dump",
+                     v)) {  // --qr-dump <текст>: матрица QR (версия, маска, строки 0/1) -> qr_out.txt
+        qr::Code c = qr::Encode(Narrow(v));
+        std::wstring s = std::to_wstring(c.version) + L" " + std::to_wstring(c.mask) + L"\n";
+        for (int y = 0; y < c.size; ++y) {
+            for (int x = 0; x < c.size; ++x) s += c.At(x, y) ? L'1' : L'0';
+            s += L"\n";
+        }
+        WriteOut(L"qr_out.txt", s);
+    } else if (Has(args, L"--wifi-diag")) {  // Wi-Fi: сигнал, канал, соседи, есть ли пароль -> wifi_out.txt
+        const std::wstring nl = L"\r\n";
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        net::WifiInfo w = net::Wifi(true);
+        if (!w.ok && w.locationOff) {
+            w.now.ssid = net::WifiProfileNow();
+            w.ok = !w.now.ssid.empty();
+        }
+        std::wstring s = w.locationOff ? L"местоположение выключено: сигнал и соседи недоступны" + nl : L"";
+        s += w.ok ? w.adapter + nl + L"сеть «" + w.now.ssid + L"» сигнал " + std::to_wstring(w.now.signal) + L"% " +
+                        std::to_wstring(w.now.rssi) + L" дБм канал " + std::to_wstring(w.now.channel) + nl
+                  : L"Wi-Fi не подключён" + nl;
+        for (const net::WifiNet& n : w.all)
+            s += L"  " + n.ssid + L" канал " + std::to_wstring(n.channel) + L" " + std::to_wstring(n.rssi) + L" дБм" +
+                 (net::ChannelsOverlap(n.channel, w.now.channel) ? L" (мешает)" : L"") + nl;
+        s += w.advice + nl;
+        if (w.ok) {
+            bool open = w.now.open;
+            std::wstring pass = net::WifiPassword(w.now.ssid, &open);
+            s += open           ? L"сеть открытая"
+                 : pass.empty() ? L"пароль Windows не отдала"
+                                : L"пароль есть, символов: " + std::to_wstring(pass.size());
+            Gdip gdip;
+            if (open || !pass.empty())
+                s += net::WifiQrPng(w.now.ssid, pass, open, ExeDir() + L"\\wifi_qr.png") ? L", QR - wifi_qr.png"
+                                                                                         : L", QR не вышел";
+        }
+        WriteOut(L"wifi_out.txt", s + nl);
     } else if (Has(args, L"--speed-test")) {
         exitCode = SpeedDiag();
     } else if (Has(args, L"--net-diag")) {

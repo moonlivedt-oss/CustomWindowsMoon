@@ -93,6 +93,7 @@ extern ULONGLONG g_dupsAt;
 extern std::vector<tools::DupGroup> g_dupList;
 extern std::vector<tools::Suspect> g_finds;
 extern std::vector<tools::SecurityApp> g_secApps;
+extern std::vector<tools::BrowserExt> g_exts;  // расширения с заметными правами - как в кольце (sec-ext:i)
 extern std::vector<tools::VirtualDisk> g_vhd;
 extern std::vector<tools::Leftover2> g_leftovers;
 extern std::vector<tools::GitRepo> g_git;
@@ -130,6 +131,30 @@ extern bool g_ddcAsk;
 extern ULONGLONG g_devEnded;
 extern std::set<std::wstring> g_leakWarned;
 extern ULONGLONG g_commitWarned, g_proactiveAt;
+// сообщения фоновых потоков основному (WM_TOOLS_JOB, lParam): разбирает OnJob
+struct SelfMsg {  // kSelfTag: часовой снимок своей памяти
+    std::wstring line, leak;
+};
+struct LeftMsg {  // kLeftTag: задание, брошенное по «Стоп», доработало
+    net::Job job;
+    bool ok;
+    std::wstring last;
+};
+struct WeeklyMsg {  // kWeeklyTag: итог недельной проверки
+    std::wstring growth, health;
+    tools::Driver driver;
+    std::vector<tools::ToolVersion> versions;
+    bool versionsChecked = false;
+};
+// видеокарта за игру: собирает поток слежки, итог - карточкой после игры (toolsui_watch.cpp)
+struct GpuStats {
+    int max = 0, samples = 0, thermal = 0, power = 0;
+};
+extern GpuStats g_gpu;
+std::wstring JobTitle(net::Job j);
+void OnWeekly(WeeklyMsg* m);
+void WeekNews();            // раз в неделю - новое за неделю в дайджест (toolsui_weekly.cpp)
+extern unsigned g_scanGen;  // номер фонового подсчёта: растёт с каждым
 extern std::vector<tools::Suspect> g_netAlerts;
 extern std::set<std::wstring> g_netKnown;
 

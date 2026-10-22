@@ -183,6 +183,7 @@ enum Id {
     ID_NET_WATCH,
     ID_NET_EXIT,
     ID_NET_GAME,
+    ID_NET_SPEED_AUTO,
     ID_NET_INTERVAL,
     ID_TOOLS_TAB,
     ID_TOOLS_ADD,
@@ -394,6 +395,11 @@ void GameToggle();                                     // studio.h: SetEditorGam
 const wchar_t* ThemeTagline(const std::wstring& key);  // настроение темы одной строкой (studio_themes.cpp)
 std::wstring DevStatus();                              // studio.h: SetEditorDevStatus
 
+// «Утилиты» (studio_tools.cpp): общее для вкладок, разнесённых по файлам
+std::wstring Ellip(const std::wstring& s, size_t n);  // обрезать с многоточием
+constexpr size_t kRingParts = 12;                     // в кольце места - столько крупных папок, остальное серым
+Gdiplus::Color SizeColor(const UiColors& c, int i, int n);
+
 class Studio {
 public:
     HWND wnd = nullptr;
@@ -519,6 +525,8 @@ private:
     void AutoPage(const RectF& r);     // «Автоматика»: переключатели и журнал
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
     void ToolsPage(const RectF& r);
+    void ToolsPathTab(struct ToolsKit& tk);  // studio_tools_path.cpp
+    void ToolsDiskTab(struct ToolsKit& tk);  // studio_tools_disks.cpp
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
     void ToolsScan(const std::wstring& dir, bool setup = false);  // setup - сперва настроить задачу с правами
     void NetCheck();

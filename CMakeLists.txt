@@ -14,7 +14,7 @@ list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/act/")  # src/act - отдель�
 add_executable(RadialMenu WIN32 ${RADIAL_SOURCES} src/res/app.rc)
 target_include_directories(RadialMenu PRIVATE src)
 target_compile_definitions(RadialMenu PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
-target_link_libraries(RadialMenu PRIVATE gdiplus shcore shlwapi shell32 ole32 oleaut32 wtsapi32 user32 gdi32 comctl32 comdlg32 uxtheme windowscodecs winmm uuid dwmapi version propsys winhttp dxva2 wbemuuid oleacc taskschd iphlpapi ws2_32 wininet rstrtmgr wintrust crypt32 bcrypt setupapi pdh userenv cfgmgr32 dxgi)
+target_link_libraries(RadialMenu PRIVATE gdiplus shcore shlwapi shell32 ole32 oleaut32 wtsapi32 user32 gdi32 comctl32 comdlg32 uxtheme windowscodecs winmm uuid dwmapi version propsys winhttp dxva2 wbemuuid oleacc taskschd iphlpapi ws2_32 wininet rstrtmgr wintrust crypt32 bcrypt setupapi pdh userenv cfgmgr32 dxgi wlanapi)
 
 # свой код - без предупреждений: любое (вроде L"\*" - неизвестная escape-последовательность) ломает сборку
 set(RADIAL_WERROR -Werror)
@@ -47,11 +47,11 @@ set_target_properties(RadialTools PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_L
 # тесты без окон (tests/): правило TEMP, разбор хода чистки, обход папок, разбор MFT, журнал, дампы падений, фоновые
 # задачи; запуск - ctest или build.cmd test
 enable_testing()
-add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.cpp tests/tests_more.cpp src/core/edgecheck.cpp src/core/procsnap.cpp src/core/themes.cpp src/gfx/color.cpp src/net/speedlog.cpp src/tools/weekdiff.cpp src/desk/dropundo.cpp src/tools/helper.cpp src/app/rules_logic.cpp src/app/settingsio.cpp src/tools/healthscore.cpp src/core/config.cpp src/core/files.cpp src/core/perf.cpp src/core/macro.cpp src/core/stroke.cpp src/core/fuzzy.cpp src/core/secrets.cpp src/desk/zones.cpp src/tools/guard.cpp src/tools/common.cpp src/tools/livesize.cpp
+add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.cpp tests/tests_more.cpp src/core/edgecheck.cpp src/core/procsnap.cpp src/core/themes.cpp src/gfx/color.cpp src/net/speedlog.cpp src/tools/weekdiff.cpp src/gfx/qr.cpp src/net/wifi.cpp src/tools/extrights.cpp src/tools/sandbox.cpp src/desk/dropundo.cpp src/tools/helper.cpp src/app/rules_logic.cpp src/app/settingsio.cpp src/tools/healthscore.cpp src/core/config.cpp src/core/files.cpp src/core/perf.cpp src/core/macro.cpp src/core/stroke.cpp src/core/fuzzy.cpp src/core/secrets.cpp src/desk/zones.cpp src/tools/guard.cpp src/tools/common.cpp src/tools/livesize.cpp
   src/tools/mft_parse.cpp src/tools/journal.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/tools/selfwatch.cpp)
 target_include_directories(radial_tests PRIVATE src)
 target_compile_definitions(radial_tests PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
-target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 uuid bcrypt gdiplus)
+target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 uuid bcrypt gdiplus wlanapi)
 target_compile_options(radial_tests PRIVATE ${RADIAL_WERROR})
 if(MINGW)
   target_link_options(radial_tests PRIVATE -municode -static)

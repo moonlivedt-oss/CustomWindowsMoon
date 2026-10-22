@@ -8,12 +8,14 @@
 #include "core/config.h"
 #include "core/elevate.h"
 #include "core/files.h"
+#include "core/fx.h"
 #include "core/text.h"
 #include "core/themes.h"
 #include "desk/boostcard.h"
 #include "menu/menu.h"
 #include "net/net.h"
 #include "net/speed.h"
+#include "net/wifi.h"
 #include "net/watch.h"
 #include "tools/tools.h"
 
@@ -23,6 +25,7 @@ namespace {
 
 HWND g_app = nullptr;
 const Config* g_cfg = nullptr;
+bool g_dev = false;  // открыт Unreal: тихий замер скорости ждёт
 BoostCard g_card;
 net::Watch g_watch;
 std::function<void()> g_openStudio;
@@ -197,6 +200,13 @@ std::vector<Item> RingItems() {
                      Act(L"Яндекс", L"net-ping.png", L"ping:ya.ru", L"ya.ru"),
                      Act(L"GitHub", L"net-ping.png", L"ping:github.com", L"github.com")};
     ring.push_back(ping);
+    // Wi-Fi (И27): сигнал, канал и соседи - по щелчку (свежий список сетей - секунды), пароль и QR для телефона
+    Item wifi = Act(L"Wi-Fi", L"net-router.png", L"", L"Сигнал, канал, соседние сети на том же канале, пароль и QR");
+    wifi.children = {Act(L"Сигнал и соседи", L"net-router.png", L"wifi",
+                         L"Качество сигнала, канал, сколько сетей мешают на том же канале и какой свободнее"),
+                     Act(L"QR для телефона", L"net-globe.png", L"wifi-qr",
+                         L"Картинка: навести камеру телефона - и он подключится. Пароль - в карточке")};
+    ring.push_back(wifi);
     // скорость (И26): последний замер и сравнение «через туннель / напрямую» по истории
     std::vector<net::Speed> hist = net::SpeedHistory();
     std::wstring compare = net::SpeedCompare(hist);
@@ -216,8 +226,10 @@ void ShowRing(RadialMenu& menu) {
     g_fgExe = ExeOf(pid);
     std::vector<Item> ring = RingItems();
     // кто качает и отрезанные (И15, И16)
-    Item top = Act(L"Кто качает", L"net-procs.png", L"", L"Трафик по программам: замер 3 с (нужны права), рядом - «Отрезать»");
-    top.children.push_back(Act(L"Замерить", L"net-procs.png", L"top", L"Какие программы сейчас качают и отдают больше всего"));
+    Item top =
+        Act(L"Кто качает", L"net-procs.png", L"", L"Трафик по программам: замер 3 с (нужны права), рядом - «Отрезать»");
+    top.children.push_back(
+        Act(L"Замерить", L"net-procs.png", L"top", L"Какие программы сейчас качают и отдают больше всего"));
     for (const TopRow& r : TopRows())
         if (!r.exe.empty() && tools::CutRefuse(r.exe).empty())
             top.children.push_back(Act((L"Отрезать " + Leaf(r.name)).c_str(), L"tools-firewall.png", L"cut:" + r.exe,
@@ -331,8 +343,10 @@ void Run(const std::wstring& key) {
             ReleaseSRWLockExclusive(&g_topLock);
             for (const TopRow& r : rows)
                 res += (res.empty() ? L"" : L"; ") + r.name + L" " + Rate(r.down) + L" / " + Rate(r.up);
-            if (ok && res.empty()) res = L"Сейчас почти ничего не качается (по TCP; QUIC браузеров не видно).";
-            else if (ok) res += L". «Отрезать» - в кольце «Сеть», группа «Кто качает».";
+            if (ok && res.empty())
+                res = L"Сейчас почти ничего не качается (по TCP; QUIC браузеров не видно).";
+            else if (ok)
+                res += L". «Отрезать» - в кольце «Сеть», группа «Кто качает».";
             return ok;
         });
     if (key == L"check") {
@@ -415,6 +429,61 @@ void Run(const std::wstring& key) {
                     Theme());
         return;
     }
+    if (key == L"wifi")
+        return RunJob(L"Wi-Fi", [](const net::Log& log, std::wstring& res) {
+            log(L"Слушаю эфир...");
+            net::WifiInfo w = net::Wifi(true);
+            if (w.locationOff) {
+                res =
+                    L"Windows 11 показывает сигнал и соседние сети только с включённым местоположением: Параметры - "
+                    L"Конфиденциальность - Расположение, и «Разрешить классическим приложениям». Открываю.";
+                ShellExecuteW(nullptr, L"open", L"ms-settings:privacy-location", nullptr, nullptr, SW_SHOWNORMAL);
+                return false;
+            }
+            if (!w.ok) {
+                res = L"Wi-Fi не подключён (или адаптера нет).";
+                return false;
+            }
+            res = L"«" + w.now.ssid + L"»: сигнал " + std::to_wstring(w.now.signal) + L"%" +
+                  (w.now.rssi ? L" (" + std::to_wstring(w.now.rssi) + L" дБм)" : L"") +
+                  (w.now.channel
+                       ? L", канал " + std::to_wstring(w.now.channel) + (w.now.band5 ? L" (5 ГГц)" : L" (2,4 ГГц)")
+                       : L"") +
+                  L". Рядом сетей: " + std::to_wstring(w.all.size()) + L", на этом канале: " +
+                  std::to_wstring(w.same.size()) + L"." + (w.advice.empty() ? L"" : L" " + w.advice);
+            return true;
+        });
+    if (key == L"wifi-qr")
+        return RunJob(L"QR для Wi-Fi", [](const net::Log&, std::wstring& res) {
+            net::WifiInfo w = net::Wifi(false);
+            if (!w.ok) w.now.ssid = net::WifiProfileNow();  // местоположение выключено - имя через список сетей
+            if (w.now.ssid.empty()) {
+                res = L"Wi-Fi не подключён.";
+                return false;
+            }
+            bool open = w.now.open;
+            std::wstring pass = net::WifiPassword(w.now.ssid, &open);
+            if (!open && pass.empty()) {
+                res = L"Windows не отдала пароль «" + w.now.ssid +
+                      L"» (профиль защищён). Он есть в Параметрах - "
+                      L"Сеть - Wi-Fi - свойства сети - «Просмотреть ключ».";
+                return false;
+            }
+            wchar_t tmp[MAX_PATH];
+            GetTempPathW(MAX_PATH, tmp);
+            std::wstring png = std::wstring(tmp) + L"moon-wifi-qr.png";
+            if (!net::WifiQrPng(w.now.ssid, pass, open, png)) {
+                res = L"Не получилось нарисовать QR (слишком длинные имя и пароль).";
+                return false;
+            }
+            ShellExecuteW(nullptr, L"open", png.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            bg::Run([png] {  // картинка с паролем не лежит во временной папке дольше пары минут
+                for (int i = 0; i < 1200 && !bg::Quitting(); ++i) Sleep(100);
+                DeleteFileW(png.c_str());
+            });
+            res = L"«" + w.now.ssid + L"»" + (open ? L": открытая сеть." : L", пароль: " + pass);
+            return true;
+        });
     if (key == L"speed")
         return RunJob(L"Скорость", [](const net::Log& log, std::wstring& res) {
             net::Speed s = net::MeasureSpeed(log);
@@ -506,7 +575,39 @@ void Game(bool on, const std::vector<DWORD>& pids, const std::wstring& name) {
 
 void Wake() { g_watch.Kick(25000); }
 
-void Tick() { g_card.Tick(); }
+void Dev(bool on) { g_dev = on; }
+
+// Тихий замер скорости (И26): раз в сутки, когда компьютер простаивает 5 минут, не в игре и не в Unreal и ничего
+// с сетью не идёт. Без карточки: замер ложится в историю, сравнение «через туннель / напрямую» копится само.
+void AutoSpeed() {
+    static ULONGLONG checkAt = 0;
+    static std::atomic<bool> running{false};
+    ULONGLONG now = GetTickCount64();
+    if (now < checkAt || running || g_busy || !g_cfg || !g_cfg->speedAuto) return;
+    checkAt = now + 10 * 60 * 1000;
+    LASTINPUTINFO li{sizeof(li)};
+    if (!GetLastInputInfo(&li) || GetTickCount() - li.dwTime < 5 * 60 * 1000 || fx::Game() || g_dev) return;
+    std::vector<net::Speed> h = net::SpeedHistory();
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG nowFt = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    if (!h.empty() && nowFt - h.back().when < 20ull * 3600 * 10000000) return;
+    running = true;
+    if (!bg::Run(
+            [] {
+                SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+                net::Speed s = net::MeasureSpeed([](const std::wstring&) {});
+                if (s.down > 0) net::SaveSpeed(s);
+                running = false;
+            },
+            THREAD_PRIORITY_LOWEST))
+        running = false;
+}
+
+void Tick() {
+    g_card.Tick();
+    AutoSpeed();
+}
 
 void Shutdown() {
     g_watch.Stop();

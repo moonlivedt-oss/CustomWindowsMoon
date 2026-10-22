@@ -202,6 +202,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.boostSummary = ParseBool(val);
             else if (key == L"dev_watch")
                 cfg.devWatch = ParseBool(val);
+            else if (key == L"speed_auto")
+                cfg.speedAuto = ParseBool(val);
             else if (key == L"net_watch")
                 cfg.netWatch = ParseBool(val);
             else if (key == L"net_exit")
@@ -514,6 +516,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"net_exit = " << (c.netExit ? 1 : 0) << L"\n";
     o << L"net_game = " << (c.netGame ? 1 : 0) << L"\n";
     o << L"net_interval = " << c.netInterval << L"\n";
+    o << L"# раз в сутки, пока компьютер простаивает (не в игре), тихо замерить скорость: 50-130 МБ трафика\n";
+    o << L"speed_auto = " << (c.speedAuto ? 1 : 0) << L"\n";
     o << L"# утилиты: карточка, когда на диске мало места\n";
     o << L"tools_disk_warn = " << (c.toolsDiskWarn ? 1 : 0) << L"\n";
     o << L"# автоматика: тихая чистка, разбор Загрузок (с вопросом, старше downloads_days), режим питания,\n";

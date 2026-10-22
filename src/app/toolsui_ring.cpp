@@ -398,6 +398,36 @@ Item SecurityItem() {
                                     ? L"Скопируйте exe в Проводнике (Ctrl+C) и 2 клика: он откроется в одноразовой "
                                       L"Windows - закрыли окно, и всё, что он сделал, исчезло"
                                     : L"Песочница Windows выключена: 2 клика - как включить"));
+    // расширения браузеров по правам (И35): что может читать все сайты, буфер, куки, говорить с программами
+    g_exts.clear();
+    for (const tools::BrowserExt& e : sec.extList)
+        if (tools::ExtRisk(e.rights) >= 2) g_exts.push_back(e);
+    if (checked) {
+        int risky = 0;
+        for (const tools::BrowserExt& e : g_exts) risky += tools::ExtRisk(e.rights) >= 4;
+        Item ext =
+            Act(g_exts.empty() ? L"Расширения" : L"Расширения " + std::to_wstring(g_exts.size()),
+                Have(L"tools-extension.png", L"tools-shield.png"), L"",
+                g_exts.empty()
+                    ? L"Ни одно расширение браузера не читает все сайты и буфер обмена"
+                    : L"Доступ ко всем сайтам: " + std::to_wstring(g_exts.size()) +
+                          (risky ? L", из них к входам и паролям (буфер, куки, программы): " + std::to_wstring(risky)
+                                 : L"") +
+                          L". Щелчок - список");
+        for (size_t i = 0; i < g_exts.size() && i < 14; ++i) {
+            const tools::BrowserExt& e = g_exts[i];
+            ext.children.push_back(Act(
+                Short(e.name, 14), Have(L"tools-extension.png", L"tools-shield.png"), L"sec-ext:" + std::to_wstring(i),
+                e.browser + (e.profile.empty() ? L"" : L", " + e.profile) + L": " + tools::ExtRightsText(e.rights) +
+                    (e.store ? L"" : L". Поставлено не из магазина") +
+                    L". 2 клика - страница расширения в браузере (там - удалить)"));
+        }
+        item.children.push_back(std::move(ext));
+    }
+    item.children.push_back(
+        Act(L"Ссылка в песочнице", Have(L"tools-sandbox-link.png", L"tools-sandbox.png"), L"sec-url",
+            L"Скопируйте подозрительный адрес (Ctrl+C) и 2 клика: он откроется в одноразовой Windows "
+            L"без доступа к вашим файлам; закрыли окно - всего этого не было"));
     item.children.push_back(Act(L"Камера и микрофон", L"tools-privacy.png", L"sec-privacy",
                                 L"Кто и когда брал камеру, микрофон и геопозицию (Windows записывает сама)"));
     g_secApps = tools::SecurityApps(g_cfg->securityDir);
@@ -1053,7 +1083,8 @@ std::vector<Item> RingItems(std::wstring& status) {
             take(find(G_DEV, L"git:" + std::to_wstring(i)), L"Давно не отправлено");
     if (imp.children.empty()) {
         imp.iconFull = Act(L"", L"tools-ok.png", L"", L"").iconFull;
-        imp.note = L"Всё спокойно: ни место, ни защита, ни Windows не требуют внимания";
+        imp.note = L"Всё спокойно: ни место, ни защита, ни Windows не требуют внимания. 2 клика - «Состояние» в студии";
+        imp.path = L"state";
         imp.calm = true;
     } else {
         imp.badge = std::to_wstring(imp.children.size());

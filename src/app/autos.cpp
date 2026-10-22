@@ -365,6 +365,10 @@ std::wstring RepairStatus() { return g_repair.empty() ? L"ещё не прове
 
 // ---------------- жизненный цикл ----------------
 
+void OpenState() {
+    if (g_openStudio) g_openStudio(-1, L"");
+}
+
 void Init(HINSTANCE inst, HWND app, const Config* cfg, const std::wstring& cfgPath, std::function<void()> reload,
           std::function<void(int, const std::wstring&)> openStudio) {
     g_app = app;
