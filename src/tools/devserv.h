@@ -35,4 +35,10 @@ std::vector<Forgotten> ForgottenServers(const std::vector<DevServer>& servers, c
                                         std::map<std::wstring, ULONGLONG>& lastSeen, ULONGLONG now,
                                         ULONGLONG idleMs = 60 * 60 * 1000, ULONGLONG minBytes = 100ull << 20);
 
+// Порт занят (Л18): на каких портах сервер проекта собирался слушать - из командной строки (--port 3000, -p 8080,
+// PORT=, http.server 8000, runserver 0.0.0.0:8000), скриптов package.json (dev, start, serve: флаги и порты по
+// умолчанию vite 5173, next 3000, ng 4200...), PORT= из .env и обычных портов Python (Django 8000, Flask 5000).
+// Первым - самое точное (явный флаг).
+std::vector<int> ProjectPorts(const std::wstring& cmdline, const std::wstring& packageJson, const std::wstring& env);
+
 }  // namespace tools

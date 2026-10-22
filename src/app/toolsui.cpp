@@ -559,6 +559,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
     g_watchStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     g_watchThread = CreateThread(nullptr, 0, WatchLoop, nullptr, 0, nullptr);
     GuardStart();
+    DevrunStart();
     // живой рост: Загрузки и TEMP - чаще всего именно они съедают место незаметно
     tools::LiveStart({{L"Загрузки", KnownFolder(FOLDERID_Downloads)}, {L"TEMP", tools::TempDir()}});
 }
@@ -861,6 +862,7 @@ void Tick() {
 void Shutdown() {
     tools::LiveStop();
     GuardStop();  // приоритеты и запрет сна - как были
+    DevrunStop();
     if (g_watchStop) SetEvent(g_watchStop);
     if (g_watchThread) WaitForSingleObject(g_watchThread, 3000), CloseHandle(g_watchThread);
     g_card.Destroy();

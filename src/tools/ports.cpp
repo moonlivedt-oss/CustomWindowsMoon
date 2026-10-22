@@ -194,6 +194,7 @@ std::vector<std::wstring> Tokens(const std::wstring& cmd) {
 
 std::wstring ProcCommandLine(HANDLE h) { return CommandLine(h); }
 std::wstring ProcCurrentDir(HANDLE h) { return CurrentDir(h); }
+std::wstring ProjectOfPath(const std::wstring& p) { return ProjectOf(p); }
 std::vector<std::wstring> CmdTokens(const std::wstring& cmd) { return Tokens(cmd); }
 
 void ListenerProjects(std::vector<Listener>& ls) {

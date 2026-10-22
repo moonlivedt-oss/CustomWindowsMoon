@@ -1,6 +1,8 @@
 // Забытые серверы разработки (Л19): решение по снимку - без окон и процессов, под тестами.
 #include "tools/devserv.h"
 
+#include <algorithm>
+#include <cwchar>
 #include <cwctype>
 
 namespace tools {
@@ -74,6 +76,91 @@ std::vector<Forgotten> ForgottenServers(const std::vector<DevServer>& servers, c
         f.minutes = (int)(gone / 60000);
         out.push_back(f);
     }
+    return out;
+}
+
+namespace {
+
+// явные порты в тексте команды: --port 3000, --port=3000, -p 3000, PORT=3000, host:8000 после runserver,
+// число после http.server
+void FlagPorts(const std::wstring& text, std::vector<int>& out) {
+    std::wstring t = Low(text);
+    auto add = [&](int p) {
+        if (p >= 80 && p < 65536 && std::find(out.begin(), out.end(), p) == out.end()) out.push_back(p);
+    };
+    auto numAt = [&](size_t at) {
+        while (at < t.size() && (t[at] == L' ' || t[at] == L'=' || t[at] == L'"' || t[at] == L'\'')) ++at;
+        int n = 0, d = 0;
+        while (at < t.size() && iswdigit(t[at]) && d < 6) n = n * 10 + (t[at++] - L'0'), ++d;
+        return d ? n : 0;
+    };
+    for (const wchar_t* f : {L"--port", L"port=", L" -p ", L"http.server", L"--listen"})
+        for (size_t at = t.find(f); at != std::wstring::npos; at = t.find(f, at + 1)) add(numAt(at + wcslen(f)));
+    for (size_t at = t.find(L"runserver"); at != std::wstring::npos; at = t.find(L"runserver", at + 1)) {
+        size_t end = t.find_first_of(L" \"'&|", at + 10);
+        std::wstring arg = t.substr(at + 9, end == std::wstring::npos ? std::wstring::npos : end - at - 9);
+        size_t colon = arg.rfind(L':');  // «0.0.0.0:8000» или просто «8000»
+        int p = 0;
+        for (wchar_t c : arg.substr(colon == std::wstring::npos ? 0 : colon + 1))
+            if (iswdigit(c)) p = p * 10 + (c - L'0');
+        add(p);
+    }
+}
+
+// порт по умолчанию у знакомых запусков
+void DefaultPorts(const std::wstring& text, std::vector<int>& out) {
+    std::wstring t = Low(text);
+    struct D {
+        const wchar_t* word;
+        int port;
+    } kDefs[] = {{L"vite", 5173},          {L"svelte-kit", 5173},
+                 {L"next", 3000},          {L"react-scripts", 3000},
+                 {L"nuxt", 3000},          {L"remix", 3000},
+                 {L"astro", 4321},         {L"ng serve", 4200},
+                 {L"webpack serve", 8080}, {L"webpack-dev-server", 8080},
+                 {L"gatsby", 8000},        {L"expo", 8081},
+                 {L"runserver", 8000},     {L"flask", 5000},
+                 {L"uvicorn", 8000},       {L"http.server", 8000},
+                 {L"streamlit", 8501},     {L"jupyter", 8888},
+                 {L"hugo server", 1313},   {L"parcel", 1234}};
+    for (const D& d : kDefs)
+        if (t.find(d.word) != std::wstring::npos && std::find(out.begin(), out.end(), d.port) == out.end())
+            out.push_back(d.port);
+}
+
+// текст скрипта "имя": "..." из package.json (без разбора JSON целиком: скрипты - простые строки)
+std::wstring Script(const std::wstring& json, const wchar_t* name) {
+    std::wstring key = std::wstring(L"\"") + name + L"\"";
+    size_t scripts = json.find(L"\"scripts\"");
+    if (scripts == std::wstring::npos) return L"";
+    size_t at = json.find(key, scripts);
+    size_t close = json.find(L'}', scripts);
+    if (at == std::wstring::npos || (close != std::wstring::npos && at > close)) return L"";
+    size_t q1 = json.find(L'"', json.find(L':', at + key.size()) + 1);
+    if (q1 == std::wstring::npos) return L"";
+    size_t q2 = q1 + 1;
+    while (q2 < json.size() && (json[q2] != L'"' || json[q2 - 1] == L'\\')) ++q2;
+    return json.substr(q1 + 1, q2 - q1 - 1);
+}
+
+}  // namespace
+
+std::vector<int> ProjectPorts(const std::wstring& cmdline, const std::wstring& packageJson, const std::wstring& env) {
+    std::vector<int> out;
+    std::wstring scripts;
+    for (const wchar_t* s : {L"dev", L"start", L"serve", L"develop"}) scripts += Script(packageJson, s) + L" ";
+    FlagPorts(L" " + cmdline + L" ", out);
+    FlagPorts(L" " + scripts + L" ", out);
+    // PORT=3000 в .env (строка целиком)
+    std::wstring e = L"\n" + env;
+    for (size_t at = e.find(L"\nPORT"); at != std::wstring::npos; at = e.find(L"\nPORT", at + 1)) {
+        size_t p = at + 5;
+        while (p < e.size() && (e[p] == L' ' || e[p] == L'=')) ++p;
+        int n = 0, d = 0;
+        while (p < e.size() && iswdigit(e[p]) && d < 6) n = n * 10 + (e[p++] - L'0'), ++d;
+        if (n >= 80 && n < 65536 && std::find(out.begin(), out.end(), n) == out.end()) out.push_back(n);
+    }
+    DefaultPorts(cmdline + L" " + scripts, out);
     return out;
 }
 
