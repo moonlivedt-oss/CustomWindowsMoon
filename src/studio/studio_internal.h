@@ -16,6 +16,7 @@
 #include "net/net.h"
 #include "net/speed.h"
 #include "net/wifi.h"
+#include "desk/cardlog.h"
 #include "tools/healthscore.h"
 #include "tools/tools.h"
 #include "core/config.h"
@@ -261,17 +262,19 @@ enum Id {
     ID_FLOW_FILES,        // «И обычные файлы»
     ID_APP_NEW,           // «Программы»: поле своей программы
     ID_APP_NEW_BTN,
-    ID_APP_PRESET = 11800,   // +i: заготовка кольца программы
-    ID_APP = 12000,          // +кольцо*100 + поле (studio_apps.cpp)
-    ID_AID = 16000,          // +поле: «Помощники» (studio_aids.cpp)
-    ID_SET_NEW = 16490,      // «Программы»: новый рабочий набор
-    ID_SET = 16500,          // +набор*100 + поле (studio_apps.cpp)
-    ID_TOOLS_FIND = 18590,   // «Диски»: поиск папки по таблице MFT
-    ID_TOOLS_FOUND = 18600,  // +i*2: «Посчитать» и «Открыть» у найденной папки
-    ID_TOOLS_BIG = 18700,    // +i*2: «Показать» и «В Корзину» у большого файла
-    ID_STATE_IMP = 19300,    // +i: «Сделать» у дела из «Важного»
-    ID_STATE_PART = 19400,   // +i: часть программы в строке здоровья (наведение - подсказка)
-    ID_TOOLS_EXT = 19200,    // +i: «Открыть в браузере» у расширения
+    ID_APP_PRESET = 11800,    // +i: заготовка кольца программы
+    ID_APP = 12000,           // +кольцо*100 + поле (studio_apps.cpp)
+    ID_AID = 16000,           // +поле: «Помощники» (studio_aids.cpp)
+    ID_SET_NEW = 16490,       // «Программы»: новый рабочий набор
+    ID_SET = 16500,           // +набор*100 + поле (studio_apps.cpp)
+    ID_TOOLS_FIND = 18590,    // «Диски»: поиск папки по таблице MFT
+    ID_TOOLS_FOUND = 18600,   // +i*2: «Посчитать» и «Открыть» у найденной папки
+    ID_TOOLS_BIG = 18700,     // +i*2: «Показать» и «В Корзину» у большого файла
+    ID_STATE_IMP = 19300,     // +i: «Сделать» у дела из «Важного»
+    ID_STATE_PART = 19400,    // +i: часть программы в строке здоровья (наведение - подсказка)
+    ID_STATE_MISSED = 19500,  // +i*3: пропущенная карточка - главная кнопка, вторая, «Убрать» (Л10)
+    ID_STATE_MUTED = 19650,   // +i: «вернуть» заглушённый вид карточек (Л11)
+    ID_TOOLS_EXT = 19200,     // +i: «Открыть в браузере» у расширения
     ID_NET_TOP =
         18900,  // «Сеть»: «Замерить» (+0), «Отрезать» у программы (+1+i), «Вернуть» (+20+i), +50 - данные Windows
     ID_TOOLS_PRIV = 19100,   // +i: переключатель приватности; +60 - «Вернуть всё как было»
@@ -561,10 +564,11 @@ private:
     void AutoPage(const RectF& r);     // «Автоматика»: переключатели и журнал
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
     void ToolsPage(const RectF& r);
-    void ToolsPathTab(struct ToolsKit& tk);  // studio_tools_path.cpp
-    void ToolsDiskTab(struct ToolsKit& tk);  // studio_tools_disks.cpp
-    tools::AppHealthIn AppHealthNow();       // снимок для строки здоровья программы (Л27)
-    void ToolsDemo();                        // PATH и «Диски» на выдуманных данных (RADIAL_DEMO, эталоны снимков)
+    void ToolsPathTab(struct ToolsKit& tk);        // studio_tools_path.cpp
+    void ToolsDiskTab(struct ToolsKit& tk);        // studio_tools_disks.cpp
+    tools::AppHealthIn AppHealthNow();             // снимок для строки здоровья программы (Л27)
+    float MissedCards(float x, float y, float w);  // пропущенные карточки (Л10/Л11); высота, 0 - нечего показать
+    void ToolsDemo();                              // PATH и «Диски» на выдуманных данных (RADIAL_DEMO, эталоны снимков)
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
     void ToolsScan(const std::wstring& dir, bool setup = false);  // setup - сперва настроить задачу с правами
     void NetCheck();
@@ -682,7 +686,10 @@ private:
     std::vector<tools::Tweak> toolsPriv_;   // вкладка «Приватность»
     tools::HealthOut stateHealth_;          // «Состояние»: оценка 0-100 и за что снято
     std::vector<tools::AppPart> stateApp_;  // здоровье самой программы (Л27)
-    POINT stateCur_{};                      // курсор на прошлом замере: двигался ли, пока перехват молчал
+    std::vector<cardlog::Missed> missed_;   // пропущенные карточки (Л10) и заглушённые виды (Л11)
+    std::set<std::wstring> muted_;
+    unsigned missedGen_ = 0;
+    POINT stateCur_{};  // курсор на прошлом замере: двигался ли, пока перехват молчал
     ULONGLONG stateCurAt_ = 0;
     std::wstring ruleDraft_;  // «Помощники», «Если - то»: правило, что ещё набирают
     std::vector<tools::Listener> toolsPorts_;

@@ -389,6 +389,7 @@ void DigestTick() {
         if (g_openStudio) g_openStudio(11, L"");  // «Автоматика»: журнал целиком
     };
     g_card.onNo = nullptr;
+    g_card.kind = L"-";  // сам дайджест не глушится и в пропущенные не идёт
     g_card.Show(BoostCard::OFFER, L"За день: " + Plural((int)items.size(), L"событие", L"события", L"событий"), sub,
                 Theme(), 30000, Toast::G_INFO);
 }

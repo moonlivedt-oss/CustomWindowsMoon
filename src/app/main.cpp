@@ -18,6 +18,7 @@
 #include "app/netui.h"
 #include "app/palette.h"
 #include "app/worksets.h"
+#include "desk/cardlog.h"
 #include "desk/cliphist.h"
 #include "desk/layout.h"
 #include "app/autos.h"
@@ -88,6 +89,7 @@ std::wstring g_pickFor;  // чей профиль выбора: exe игры, р
 ULONGLONG g_avHintAt = 0;
 BoostCard g_dropCard;           // «Перенесено в ... - Вернуть»
 BoostCard g_edgeCard;           // что мешает кольцам у края (CursorWrap)
+BoostCard g_askCard;            // «больше не показывать?» для вида карточек, трижды закрытого без действия (Л11)
 BoostCard g_mcCard, g_mcCard2;  // Minecraft: падение / AlwaysPreTouch и подкачка
 McGame g_mcGame;
 std::function<void()> g_afterBoost;       // запуск сборки после «Применить» в карточке выбора
@@ -705,6 +707,7 @@ void ShutdownAll() {
     g_mcCard.Destroy();
     g_mcCard2.Destroy();
     g_edgeCard.Destroy();
+    g_askCard.Destroy();
     g_dropCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
@@ -1064,6 +1067,21 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_gbCard.Create(inst);
     g_mcCard.Create(inst);
     g_mcCard2.Create(inst);
+    g_askCard.Create(inst);
+    // Л11: вид карточек трижды подряд закрыт без действия - один раз спросить; заглушённое - в вечерний дайджест
+    cardlog::SetDigest([](const std::wstring& title, const std::wstring& text) { return autos::Digest(title, text); });
+    cardlog::SetAsk([](const std::wstring& kind) {
+        if (fx::Game()) return;  // в игре не спрашиваем: третий раз ещё будет
+        g_askCard.kind = L"-";
+        g_askCard.yesLabel = L"Не показывать";
+        g_askCard.noLabel = L"Оставить";
+        g_askCard.onYes = [kind] { cardlog::Mute(kind, true); };
+        g_askCard.onNo = nullptr;
+        g_askCard.Show(BoostCard::OFFER, L"«" + kind + L"» - больше не показывать?",
+                       L"Трижды подряд закрыта без действия. Такие карточки будут ждать в студии (Состояние - "
+                       L"пропущенные) и в вечернем дайджесте; вернуть можно там же.",
+                       CurrentTheme(g_cfg), 20000);
+    });
     gboost::Start(g_wnd);
     g_game.recognize = [](DWORD pid, const std::wstring& path) { return mc::GameName(pid, path); };
     corners::SetMinecraft(ShowMcRing);
