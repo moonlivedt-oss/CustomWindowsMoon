@@ -169,6 +169,34 @@ void TestWalk() {
     CHECK(!tools::LinkDir(FILE_ATTRIBUTE_REPARSE_POINT));
 }
 
+// Кэш Unreal в FindJunk: весь размер и «не открывалось 30 дней» одним обходом - как OldBytes по отдельности.
+void TestJunkDdc() {
+    TempDir t;
+    const wchar_t* vars[] = {L"LOCALAPPDATA", L"TEMP", L"USERPROFILE"};
+    std::wstring was[3];
+    for (int i = 0; i < 3; ++i) {
+        wchar_t b[MAX_PATH] = {};
+        GetEnvironmentVariableW(vars[i], b, MAX_PATH);
+        was[i] = b;
+        SetEnvironmentVariableW(vars[i], t.path.c_str());  // настоящие кэши и TEMP не обходим
+    }
+    std::wstring ddc = t.path + L"\\UnrealEngine";
+    CreateDirectoryW(ddc.c_str(), nullptr);
+    CreateDirectoryW((ddc += L"\\Common").c_str(), nullptr);
+    CreateDirectoryW((ddc += L"\\DerivedDataCache").c_str(), nullptr);
+    MakeFile(ddc, L"old.udd", 300, 40 * 24 * kHour);
+    MakeFile(ddc, L"new.udd", 200, kHour);
+    ULONGLONG old = 1;
+    std::vector<tools::Junk> j = tools::FindJunk(true, &old, 30);
+    for (int i = 0; i < 3; ++i) SetEnvironmentVariableW(vars[i], was[i].c_str());
+    const tools::Junk* u = nullptr;
+    for (const tools::Junk& x : j)
+        if (_wcsicmp(x.path.c_str(), ddc.c_str()) == 0) u = &x;
+    CHECK(u && u->bytes == 500 && u->slow);
+    CHECK(old == 300);
+    CHECK(old == tools::OldBytes(ddc, 30));
+}
+
 void TestLiveSize() {
     TempDir t;
     MakeFile(t.path, L"a.bin", 4000, 0);
@@ -653,6 +681,7 @@ int wmain() {
     TestLooseMatch();
     TestStoreSize();
     TestLastPercent();
+    TestJunkDdc();
     TestJournal();
     TestStartFind();
     TestCrashReports();

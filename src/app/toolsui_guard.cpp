@@ -3,6 +3,8 @@
 // снимки, приоритеты, запрет сна и очередь для основного потока (карточки и журнал показывает Tick).
 #include "app/toolsui_internal.h"
 
+#include "core/perf.h"
+#include "core/procsnap.h"
 #include "tools/guard.h"
 
 namespace toolsui {
@@ -88,13 +90,14 @@ DWORD WINAPI GuardLoop(void*) {
     int cores = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
     bool awakeOn = false;
     do {
+        PERF_CPU("cpu.guard");
         AcquireSRWLockShared(&g_guardLock);
         GuardCfg c = g_gcfg;
         ReleaseSRWLockShared(&g_guardLock);
         std::vector<guard::Proc> procs;
-        for (const tools::ProcInfo& p : tools::Processes()) {
+        for (procsnap::Info& p : procsnap::Session()) {
             guard::Proc q;
-            q.pid = p.pid, q.parent = p.parent, q.name = p.name, q.created = p.created, q.cpu = p.cpu;
+            q.pid = p.pid, q.parent = p.parent, q.name = std::move(p.name), q.created = p.created, q.cpu = p.cpu;
             procs.push_back(std::move(q));
         }
         ULONGLONG now = GetTickCount64();

@@ -7,6 +7,7 @@
 
 #include "core/config.h"
 #include "core/edgecheck.h"
+#include "core/procsnap.h"
 #include "desk/dropundo.h"
 #include "app/rules.h"
 #include "app/settingsio.h"
@@ -179,6 +180,25 @@ void TestHealthScore() {
     CHECK(tools::HealthScore(in).score == 0);  // не ниже нуля
 }
 
+// Процессы сеанса одним вызовом: себя видим с родителем, временем создания и процессором; чужих сеансов и System нет.
+void TestProcSession() {
+    std::vector<procsnap::Info> list = procsnap::Session();
+    CHECK(!list.empty());
+    const procsnap::Info* self = nullptr;
+    for (const procsnap::Info& p : list) {
+        CHECK(p.pid > 4);
+        if (p.pid == GetCurrentProcessId()) self = &p;
+    }
+    CHECK(self != nullptr);
+    if (!self) return;
+    CHECK(_wcsicmp(self->name.c_str(), L"radial_tests.exe") == 0);
+    CHECK(self->parent != 0);
+    FILETIME c, e, k, u;
+    GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u);
+    CHECK(self->created == (((ULONGLONG)c.dwHighDateTime << 32) | c.dwLowDateTime));
+    CHECK(self->priv > 0);
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
@@ -189,4 +209,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestRules();
     TestSettingsPack();
     TestHealthScore();
+    TestProcSession();
 }

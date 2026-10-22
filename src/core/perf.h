@@ -28,8 +28,31 @@ private:
     LARGE_INTEGER t0_{};
 };
 
+// Время процессора этого потока (не настенное): для фоновых проходов, которые больше ждут диск, чем считают.
+// Точность - такт планировщика (~16 мс), годится для долгих участков и для среднего по многим проходам.
+class CpuScope {
+public:
+    explicit CpuScope(const char* name) : name_(Enabled() ? name : nullptr) {
+        if (name_) t0_ = Now();
+    }
+    ~CpuScope() {
+        if (name_) Record(name_, (Now() - t0_) / 10000.0);
+    }
+
+private:
+    static ULONGLONG Now() {
+        FILETIME c, e, k, u;
+        if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
+        return (((ULONGLONG)k.dwHighDateTime << 32) | k.dwLowDateTime) +
+               (((ULONGLONG)u.dwHighDateTime << 32) | u.dwLowDateTime);
+    }
+    const char* name_;
+    ULONGLONG t0_ = 0;
+};
+
 }  // namespace perf
 
 #define PERF_CAT2(a, b) a##b
 #define PERF_CAT(a, b) PERF_CAT2(a, b)
 #define PERF_SCOPE(name) perf::Scope PERF_CAT(perfScope_, __LINE__)(name)
+#define PERF_CPU(name) perf::CpuScope PERF_CAT(perfCpu_, __LINE__)(name)

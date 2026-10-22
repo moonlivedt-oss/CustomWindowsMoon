@@ -106,7 +106,7 @@ BoostPick g_pick;        // выбор по программам: закрыть
 BoostCard g_gbCard;      // новости Boost во время игры и работы: видеокарта, шейдеры, сборки, итог
 std::wstring g_pickFor;  // чей профиль выбора: exe игры, редактора или «вручную»
 ULONGLONG g_avHintAt = 0;
-BoostCard g_dropCard;            // «Перенесено в ... - Вернуть»
+BoostCard g_dropCard;           // «Перенесено в ... - Вернуть»
 BoostCard g_edgeCard;           // что мешает кольцам у края (CursorWrap)
 BoostCard g_mcCard, g_mcCard2;  // Minecraft: падение / AlwaysPreTouch и подкачка
 struct McGame {
@@ -129,9 +129,9 @@ Config g_cfg;
 std::wstring g_cfgPath;
 FILETIME g_cfgTime{};
 bool g_armed = true;
-bool g_restored = false;  // «Вернуть всё как было»: рамки окон на паузе до следующего перечитывания настроек
+bool g_restored = false;       // «Вернуть всё как было»: рамки окон на паузе до следующего перечитывания настроек
 std::wstring g_themeOverride;  // тема на время правила «если - то» (пусто - своя из radial.cfg)
-bool g_altTab = false;    // за это нажатие Alt был Tab: идёт переключение окон, кольцо у края не открываем
+bool g_altTab = false;         // за это нажатие Alt был Tab: идёт переключение окон, кольцо у края не открываем
 
 FILETIME FileTime(const std::wstring& p) {
     WIN32_FILE_ATTRIBUTE_DATA d{};
@@ -217,6 +217,7 @@ void ShowAvHint();
 void UpdateTrayTip();
 
 void PollWork() {
+    PERF_SCOPE("poll");
     bool alt = GetAsyncKeyState(VK_MENU) & 0x8000;
     ULONGLONG nowMs = GetTickCount64();
     if (nowMs - g_guardAt >= 1000) {
@@ -1387,6 +1388,8 @@ void ShutdownAll() {
     static bool done = false;
     if (done) return;
     done = true;
+    // выход или конец сеанса - не авария: что бы ни случилось дальше, новую копию не поднимать
+    crash::SetRestart(false);
     WTSUnRegisterSessionNotification(g_wnd);
     if (g_displayNotify) UnregisterPowerSettingNotification(g_displayNotify);
     if (g_acdcNotify) UnregisterPowerSettingNotification(g_acdcNotify);
@@ -1649,12 +1652,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     if (int code = 0; devcli::Run(code)) return code;
     bool wantEditor = devcli::HasFlag(L"--editor");
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\MoonRadialMenu");
-    // перезапуск после падения: старая копия ещё умирает и держит мьютекс - он освободится (брошенным), когда её не станет
-    if (GetLastError() == ERROR_ALREADY_EXISTS && devcli::HasFlag(L"--after-crash") && mutex) {
+    // ответ запоминаем сразу: HasFlag разбирает командную строку и затирает GetLastError - так вторая копия
+    // считала, что первой нет, и запускалась рядом (два кольца, два перехвата мыши)
+    bool running = GetLastError() == ERROR_ALREADY_EXISTS;
+    // перезапуск после падения: старая копия ещё умирает и держит мьютекс - он освободится, когда её не станет
+    if (running && mutex && devcli::HasFlag(L"--after-crash")) {
         DWORD w = WaitForSingleObject(mutex, 15000);
-        if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) SetLastError(0);
+        if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) running = false;
     }
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (running) {
         // уже запущено: попросить работающую копию открыть редактор
         if (HWND w = FindWindowW(kClass, nullptr); w && wantEditor) {
             AllowSetForegroundWindow(ASFW_ANY);
@@ -1835,8 +1841,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     }
 
     perf::Flush();
-    Gdiplus::GdiplusShutdown(gdipToken);
     OleUninitialize();
     ReleaseMutex(mutex);
+    // Всё своё уже убрано (ShutdownAll). Дальше C++ разрушал бы глобальные объекты - кольцо, кэши значков, карточки с
+    // картинками GDI+ - уже после GdiplusShutdown и рядом с ещё живыми фоновыми потоками: выход падал в gdiplus.dll,
+    // а перезапуск после падения поднимал новую копию. Память и дескрипторы всё равно вернёт система.
+    (void)gdipToken;
+    TerminateProcess(GetCurrentProcess(), 0);
     return 0;
 }

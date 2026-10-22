@@ -164,7 +164,8 @@ struct Junk {
     bool admin = false;
     bool slow = false;  // пересоздаётся дорого (шейдеры): в «Всё сразу» не входит
 };
-std::vector<Junk> FindJunk(bool sizes = true);  // sizes=false - только список, быстро (для кольца)
+// sizes=false - только список, быстро (для кольца); ddcOld - заодно старое в кэше Unreal, как OldBytes(DdcDir(), ddcDays)
+std::vector<Junk> FindJunk(bool sizes = true, ULONGLONG* ddcOld = nullptr, int ddcDays = 30);
 ULONGLONG DirBytes(const std::wstring& root, int* files = nullptr, std::atomic<bool>* cancel = nullptr,
                    std::atomic<long>* progress = nullptr);
 // Сколько освободит удаление папки: как DirBytes, но без файлов «только в облаке» (для «можно освободить»).
