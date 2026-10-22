@@ -9,6 +9,8 @@
 #include "app/autos.h"
 #include "app/autostart.h"
 #include "app/toolsui.h"
+#include "app/weekreport.h"
+#include "core/bg.h"
 #include "core/files.h"
 #include "core/fx.h"
 #include "core/text.h"
@@ -718,8 +720,31 @@ void Studio::StatePage(const RectF& r) {
         Card(wc);
         ui.Text(L"Новое за неделю", RectF(wc.X + ui.S(18), wc.Y + ui.S(14), wc.Width, ui.S(24)), c.text, 14, true);
         ui.Text(week.days ? L"сравнение со снимком " + Plural(week.days, L"день", L"дня", L"дней") + L" назад" : L"",
-                RectF(wc.X + ui.S(200), wc.Y + ui.S(16), wc.Width - ui.S(218), ui.S(20)), c.muted, 11, false,
+                RectF(wc.X + ui.S(200), wc.Y + ui.S(16), wc.Width - ui.S(430), ui.S(20)), c.muted, 11, false,
                 ui::Right);
+        // отчёт за неделю картинкой (П12): место, сеть, что поставилось, падения - с разницей к прошлому отчёту
+        bool making = reportJob_ && !*reportJob_;
+        if (ui.Button(ID_STATE_REPORT, RectF(wc.GetRight() - ui.S(218), wc.Y + ui.S(10), ui.S(200), ui.S(32)),
+                      making ? L"Собираю" : L"Отчёт картинкой", Kind::Secondary, L"", making) &&
+            !making && !Demo()) {
+            auto done = std::make_shared<std::atomic<bool>>(false);
+            reportJob_ = done;
+            UiColors colors = ui.C();
+            HWND w = wnd;
+            if (!bg::Run([done, colors, w] {
+                    std::wstring png = weekreport::Make(colors);
+                    if (!png.empty())  // показать в Проводнике: там же прошлые недели для сравнения
+                        ShellExecuteW(nullptr, nullptr, L"explorer.exe", (L"/select,\"" + png + L"\"").c_str(), nullptr,
+                                      SW_SHOWNORMAL);
+                    *done = true;
+                    InvalidateRect(w, nullptr, FALSE);
+                }))
+                *done = true;
+        }
+        ui.Tip(ID_STATE_REPORT,
+               L"Место, рост, что поставилось, сеть и скорость, падения за 7 дней - одной PNG в "
+               L"%APPDATA%\\MoonDesk\\reports, с разницей к прошлому отчёту");
+        if (making) RepaintIn(250);
         RectF in2(wc.X + ui.S(18), wc.Y + ui.S(52), wc.Width - ui.S(36), wc.Height - ui.S(66));
         if (kinds.size() > 1) {
             std::vector<std::wstring> labels{L"Все"};

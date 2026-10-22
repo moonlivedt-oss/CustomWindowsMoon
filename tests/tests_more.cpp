@@ -19,6 +19,8 @@
 #include "app/settingsio.h"
 #include "tools/healthscore.h"
 #include "tools/important.h"
+#include "core/cfgdiff.h"
+#include "app/weekreport.h"
 
 namespace {
 
@@ -383,6 +385,57 @@ void TestScanCache() {
     CHECK(!tools::ParseScanCache(L"junk\tбез времени\t\t1\t0\t0\t0", b));
 }
 
+// П11: radial.cfg по смыслу - настройки, секторы, пункты по подписи, порядок
+void TestCfgDiff() {
+    std::wstring a =
+        L"# комментарий\n[settings]\ntheme = crimson\nsounds = 1\n[@left]\n[Код]\npath = D:\\Код\n"
+        L"item = web | D:\\web | icons/web.png\nitem = java | D:\\java\n[Учёба]\npath = D:\\У\n"
+        L"[@right]\n[Музыка]\npath = D:\\M\n";
+    std::wstring b =
+        L"[settings]\ntheme = sunset\nsounds = 1\nvolume = 35\n[@left]\n[Учёба]\npath = D:\\У\n"
+        L"[Код]\npath = D:\\Код\nitem = web | D:\\web2 | icons/web.png\nitem = C++ | D:\\cpp\n"
+        L"[@right]\n[Minecraft]\npath = C:\\Prism\n";
+    std::vector<cfgdiff::Change> d = cfgdiff::Diff(a, b);
+    auto has = [&](cfgdiff::Change::Kind k, const std::wstring& where, const std::wstring& what) {
+        for (const cfgdiff::Change& c : d)
+            if (c.kind == k && c.where == where && c.what.find(what) != std::wstring::npos) return true;
+        return false;
+    };
+    CHECK(has(cfgdiff::Change::CHANGED, L"Настройки", L"theme: crimson -> sunset"));
+    CHECK(has(cfgdiff::Change::ADDED, L"Настройки", L"volume: 35"));
+    CHECK(has(cfgdiff::Change::CHANGED, L"Левый край", L"порядок секторов"));
+    CHECK(has(cfgdiff::Change::CHANGED, L"Левый край / Код", L"пункт «web»"));
+    CHECK(has(cfgdiff::Change::ADDED, L"Левый край / Код", L"пункт «C++»"));
+    CHECK(has(cfgdiff::Change::REMOVED, L"Левый край / Код", L"пункт «java»"));
+    CHECK(has(cfgdiff::Change::ADDED, L"Правый край", L"сектор «Minecraft»"));
+    CHECK(has(cfgdiff::Change::REMOVED, L"Правый край", L"сектор «Музыка»"));
+    CHECK(d.size() == 8);
+    CHECK(cfgdiff::Summary(d) == L"+3, -2, изменено 3");
+    CHECK(cfgdiff::Diff(a, a).empty() && cfgdiff::Summary({}).empty());
+}
+
+// П12: числа отчёта туда и обратно, разница к прошлой неделе - без шума
+void TestWeekReport() {
+    const ULONGLONG GB = 1024ull * 1024 * 1024;
+    weekreport::Data a;
+    a.when = 1792604800, a.to = L"23.10", a.drops = 3, a.tunnelDown = 46, a.directDown = 105, a.batteryWear = 11;
+    a.disks = {{L"C:\\", 140 * GB, 475 * GB}, {L"D:\\", 211 * GB, 476 * GB}};
+    weekreport::Data b;
+    CHECK(weekreport::ParseNumbers(weekreport::NumbersRow(a), b));
+    CHECK(b.when == a.when && b.to == L"23.10" && b.drops == 3 && b.tunnelDown == 46 && b.batteryWear == 11);
+    CHECK(b.disks.size() == 2 && b.disks[1].free == 211 * GB && b.disks[0].root == L"C:\\");
+    weekreport::Data prev = a;
+    prev.when -= 7 * 24 * 3600, prev.drops = 1, prev.tunnelDown = 38, prev.directDown = 100, prev.batteryWear = 10;
+    prev.disks[0].free = 152 * GB, prev.disks[1].free = 211 * GB + GB / 2;  // D: - меньше гигабайта, шум
+    std::vector<std::wstring> d = weekreport::Deltas(a, prev);
+    CHECK(d.size() == 4);
+    CHECK(d[0].find(L"C: свободно -12") == 0);
+    CHECK(d[1] == L"обрывов интернета 3 (было 1)");
+    CHECK(d[2].find(L"через туннель быстрее на 21%") == 0);  // напрямую +5% - шум, не пишется
+    CHECK(d[3] == L"износ батареи 11% (было 10%)");
+    CHECK(weekreport::Deltas(a, weekreport::Data()).empty());  // сравнивать не с чем
+}
+
 void TestImportant() {
     tools::ImportantIn in;
     CHECK(tools::ImportantTodos(in).empty());
@@ -433,4 +486,6 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestImportant();
     TestWifiBand();
     TestScanCache();
+    TestCfgDiff();
+    TestWeekReport();
 }

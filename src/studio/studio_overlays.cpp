@@ -156,16 +156,71 @@ void Studio::JournalOverlay(float w, float h) {
         std::wstring d = list[i].size() >= 23
                              ? list[i].substr(7, 10) + L"  " + list[i].substr(18, 2) + L":" + list[i].substr(21, 2)
                              : list[i];
+        // строка - выбор: слева от журнала панель «что изменилось с этой копии»
+        bool sel = diffSel_ == list[i];
+        if (Intersect(ir, bv).Height > 1 &&
+            ui.Click(ID_BACKUP + 20 + i, RectF(ir.X, ir.Y, ir.Width - ui.S(116), ir.Height)))
+            diffSel_ = sel ? L"" : list[i];
+        if (sel || ui.Hot(ID_BACKUP + 20 + i)) ui.Fill(ir, WithAlpha(c.cardHi, sel ? 255 : 160), ui.S(6));
         ui.Text(d, RectF(ir.X + ui.S(8), ir.Y, ir.Width, ir.Height), c.text, 12);
+        std::wstring sum = cfgdiff::Summary(BackupDiff(list[i]));
+        ui.Text(sum.empty() ? L"как сейчас" : sum, RectF(ir.X + ui.S(150), ir.Y, ir.Width - ui.S(270), ir.Height),
+                c.faint, 11, false, ui::Right);
         RectF btn(ir.X + ir.Width - ui.S(110), ir.Y + ui.S(3), ui.S(104), ir.Height - ui.S(6));
         if (Intersect(btn, bv).Height > btn.Height - 1 && ui.Button(ID_BACKUP + i, btn, L"Вернуть")) {
             std::wstring f = list[i];
             ov_ = OV_NONE;
+            diffSel_.clear();
             Restore(f);
             break;
         }
     }
     ui.G().Restore(st);
+    if (!diffSel_.empty() && std::find(list.begin(), list.end(), diffSel_) == list.end()) diffSel_.clear();
+    if (!diffSel_.empty()) DiffPanel(RectF(p.X - ui.S(492), p.Y, ui.S(476), p.Height));
+}
+
+// Что изменилось с выбранной копии до нынешнего radial.cfg: «+» появилось потом, «-» было в копии и убрано,
+// «~» изменено. «Вернуть» отменит ровно это.
+void Studio::DiffPanel(const RectF& p) {
+    const UiColors& c = ui.C();
+    ui.Fill(p, c.card, ui.S(14));
+    ui.Stroke(p, c.border, ui.S(14));
+    ui.Hover(ID_OV_BG + 2, p);
+    const std::wstring& f = diffSel_;
+    std::wstring d =
+        f.size() >= 23 ? f.substr(15, 2) + L"." + f.substr(12, 2) + L" " + f.substr(18, 2) + L":" + f.substr(21, 2) : f;
+    ui.Text(L"С копии " + d + L" до сейчас", RectF(p.X + ui.S(16), p.Y + ui.S(10), p.Width, ui.S(28)), c.text, 14,
+            true);
+    const std::vector<cfgdiff::Change>& ch = BackupDiff(f);
+    RectF view(p.X + ui.S(8), p.Y + ui.S(44), p.Width - ui.S(16), p.Height - ui.S(44) - ui.S(58));
+    float lh = ui.S(40);
+    float off = ui.Scroll(ID_BACKUP + 50, view, ch.size() * lh);
+    GraphicsState st = ui.G().Save();
+    ui.G().SetClip(view);
+    if (ch.empty()) ui.Text(L"Ничем: копия такая же, как сейчас.", Inset(view, ui.S(8), 0), c.faint, 12);
+    for (size_t i = 0; i < ch.size(); ++i) {
+        const cfgdiff::Change& x = ch[i];
+        float y = view.Y + i * lh - off;
+        Color mark = x.kind == cfgdiff::Change::ADDED ? c.gold : x.kind == cfgdiff::Change::REMOVED ? c.warn : c.accent;
+        ui.Text(x.kind == cfgdiff::Change::ADDED     ? L"+"
+                : x.kind == cfgdiff::Change::REMOVED ? L"-"
+                                                     : L"~",
+                RectF(view.X + ui.S(8), y, ui.S(16), ui.S(20)), mark, 13, true);
+        ui.Text(x.what, RectF(view.X + ui.S(28), y, view.Width - ui.S(32), ui.S(20)), c.text, 11.5f);
+        ui.Text(x.where, RectF(view.X + ui.S(28), y + ui.S(18), view.Width - ui.S(32), ui.S(18)), c.faint, 10);
+    }
+    ui.G().Restore(st);
+    RectF by(p.X + ui.S(16), p.Y + p.Height - ui.S(48), p.Width - ui.S(32), ui.S(36));
+    ui.Text(L"«+» появилось после копии, «-» было в ней", RectF(by.X, by.Y, by.Width - ui.S(190), by.Height), c.faint,
+            10.5f);
+    if (!ch.empty() && ui.Button(ID_BACKUP + 51, RectF(by.GetRight() - ui.S(180), by.Y, ui.S(180), by.Height),
+                                 L"Вернуть эту копию", Kind::Primary)) {
+        std::wstring file = f;
+        ov_ = OV_NONE;
+        diffSel_.clear();
+        Restore(file);
+    }
 }
 
 void Studio::LibraryOverlay(float w, float h) {

@@ -639,6 +639,13 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         }
     } else
         GoPage((Page)page);
+    // RADIAL_JOURNAL=n - снять с открытым журналом и отличиями n-й резервной копии (с 1; 0 - без отличий)
+    if (const wchar_t* jr = _wgetenv(L"RADIAL_JOURNAL")) {
+        ov_ = OV_JOURNAL;
+        std::vector<std::wstring> list = Backups();
+        int n = _wtoi(jr);
+        if (n >= 1 && n <= (int)list.size()) diffSel_ = list[n - 1];
+    }
     // RADIAL_SCROLL=пиксели - снять страницу прокрученной (карточки ниже края окна)
     const wchar_t* scrollTo = _wgetenv(L"RADIAL_SCROLL");
     // кадр в HDC, как в окне: появление страницы смешивает карточки средствами GDI

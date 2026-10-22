@@ -172,13 +172,54 @@ void Studio::Backup() {
     SYSTEMTIME t;
     GetLocalTime(&t);
     wchar_t name[64];
-    swprintf(name, 64, L"radial-%04d-%02d-%02d_%02d-%02d-%02d.cfg", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    swprintf(name, 64, L"radial-%04d-%02d-%02d_%02d-%02d-%02d.cfg", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
+             t.wSecond);
     CopyFileW(cfgPath.c_str(), (dir + L"\\" + name).c_str(), FALSE);
     auto all = Backups();
     for (size_t i = 10; i < all.size(); ++i) DeleteFileW((dir + L"\\" + all[i]).c_str());
 }
 
+namespace {
+
+std::wstring ReadUtf8(const std::wstring& path) {
+    HANDLE f =
+        CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return L"";
+    std::string raw(1024 * 1024, '\0');
+    DWORD got = 0;
+    ReadFile(f, raw.data(), (DWORD)raw.size(), &got, nullptr);
+    CloseHandle(f);
+    raw.resize(got);
+    int n = MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), nullptr, 0);
+    std::wstring s(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), s.data(), n);
+    return s;
+}
+
+}  // namespace
+
+// Чем копия отличается от нынешнего radial.cfg: что с неё добавлено, убрано, изменено (cfgdiff). Нынешний файл
+// перечитывается не чаще раза в 2 с - журнал рисуется каждый кадр.
+const std::vector<cfgdiff::Change>& Studio::BackupDiff(const std::wstring& file) {
+    ULONGLONG now = GetTickCount64();
+    if (!diffAt_ || now - diffAt_ > 2000) {
+        diffAt_ = now;
+        std::wstring cur = ReadUtf8(cfgPath);
+        if (cur != diffCfg_) {
+            diffCfg_ = cur;
+            diffCache_.clear();
+        }
+    }
+    auto it = diffCache_.find(file);
+    if (it == diffCache_.end())
+        it = diffCache_.emplace(file, cfgdiff::Diff(ReadUtf8(ExeDir() + L"\\backups\\" + file), diffCfg_)).first;
+    return it->second;
+}
+
 void Studio::Restore(const std::wstring& file) {
+    // нынешнее - сначала в копию, даже если последняя была только что: откат тоже можно откатить
+    lastBackup_ = 0;
+    Backup();
     Config c;
     if (!LoadConfig(ExeDir() + L"\\backups\\" + file, c)) {
         Log(L"Не удалось прочитать " + file);
@@ -224,14 +265,18 @@ void Studio::Recheck() {
         auto& ring = Ring(r);
         for (int i = 0; i < (int)ring.size(); ++i) {
             const Item& it = ring[i];
-            if (!check(it.path)) problems_.push_back({r, i, -1, it.path, 0});
-            else if (it.path.empty() && !it.HasRing()) problems_.push_back({r, i, -1, it.path, 1});
+            if (!check(it.path))
+                problems_.push_back({r, i, -1, it.path, 0});
+            else if (it.path.empty() && !it.HasRing())
+                problems_.push_back({r, i, -1, it.path, 1});
             else if (it.expand && !it.path.empty() && !it.dir && it.path.rfind(L"shell:", 0) != 0)
                 problems_.push_back({r, i, -1, it.path, 2});
             for (int j = 0; j < (int)it.children.size(); ++j) {
                 const Item& ch = it.children[j];
-                if (!check(ch.path)) problems_.push_back({r, i, j, ch.path, 0});
-                else if (ch.path.empty()) problems_.push_back({r, i, j, ch.path, 1});
+                if (!check(ch.path))
+                    problems_.push_back({r, i, j, ch.path, 0});
+                else if (ch.path.empty())
+                    problems_.push_back({r, i, j, ch.path, 1});
             }
         }
     }

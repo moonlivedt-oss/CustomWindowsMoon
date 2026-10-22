@@ -2,6 +2,7 @@
 #include "app/devcli_internal.h"
 #include "app/autostart.h"
 #include "app/toolsui.h"
+#include "app/weekreport.h"
 
 #include <atomic>
 #include <windows.h>
@@ -227,6 +228,19 @@ bool Run(int& exitCode) {
         }
         WriteOut(L"crash_out.txt", out.empty() ? L"падений нет\r\n" : out);
         exitCode = 0;
+    } else if (Has(args, L"--week-report")) {  // --week-report out.png [demo]: недельный отчёт картинкой (П12)
+        Gdip gdip;
+        size_t i = std::find(args.begin(), args.end(), L"--week-report") - args.begin();
+        std::wstring out = i + 1 < args.size() ? args[i + 1] : ExeDir() + L"\\week_report.png";
+        bool demo = i + 2 < args.size() && args[i + 2] == L"demo";
+        static Config cfg = LoadOwnConfig();
+        if (demo) {
+            weekreport::Data prev = weekreport::DemoData(true);
+            exitCode = weekreport::Render(weekreport::DemoData(), &prev, UiPalette(cfg), out) ? 0 : 1;
+        } else {
+            toolsui::PrimeForSnapshot(&cfg);  // рост и неделя - как у работающей программы
+            exitCode = weekreport::Render(weekreport::Collect(), nullptr, UiPalette(cfg), out) ? 0 : 1;
+        }
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
     } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку
