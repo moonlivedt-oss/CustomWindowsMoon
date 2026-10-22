@@ -3,6 +3,7 @@
 #include <map>
 
 #include "core/perf.h"
+#include "tools/important.h"
 
 namespace toolsui {
 
@@ -227,7 +228,7 @@ bool OnBattery() {
     return GetSystemPowerStatus(&ps) && ps.ACLineStatus == 0;
 }
 
-bool HeavyWait(const std::wstring& what) { return OnBattery() && UnixNow() - HeavyLast(what) < 24 * 3600; }
+bool HeavyWait(const std::wstring& what) { return tools::HeavyDefer(OnBattery(), UnixNow(), HeavyLast(what)); }
 
 void HeavyDone(const std::wstring& what) {
     LONGLONG now = UnixNow();
