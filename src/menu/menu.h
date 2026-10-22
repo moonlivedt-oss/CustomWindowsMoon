@@ -55,6 +55,8 @@ public:
     // Замер кадра без показа (--ring-bench): кольцо левого края, курсор водится по первому и второму кольцу
     // ms миллисекунд, окно остаётся скрытым. Возвращает число кадров; время по частям - в profile.log.
     int Bench(const Config* cfg, UINT dpi, int ms);
+    // кольцо-действие в картинку без мыши (проверка): курсор на секторе root, ms кадров анимации
+    void SnapNet(const Config* cfg, std::vector<Item> items, UINT dpi, int root, int ms, const std::wstring& path);
     int BenchDiff() const { return benchDiff_; }  // пикселей, где кадр из кэша колец не совпал (-1 - кэш не включился)
     void ResetIcons() {
         icons_.Clear();
@@ -171,6 +173,9 @@ private:
     void DrawIcon(Gdiplus::Graphics& g, Gdiplus::Bitmap* icon, const Item& it, double x, double y, double sz, double hl,
                   double appear, bool hot);
     void DrawLabel(Gdiplus::Graphics& g, const Ring& r, double a0, double a1, const Item& it, double hl, double appear);
+    void SaveFrame(const std::wstring& path);  // нынешний кадр в PNG
+    void DrawBadge(Gdiplus::Graphics& g, const std::wstring& text, double x, double y, Gdiplus::Color fill,
+                   double appear);
     double FitWidth(const Ring& r, double a0, double a1, double rad, double halfH, double& x, double& y) const;
     struct LabelFit {
         std::wstring text;  // строки через \n, уже сокращённые

@@ -81,6 +81,7 @@ void Toast::Open(int holdMs, bool onCursor) {
     open_ = true;
     hold_ = left_ = holdMs > 0 ? holdMs : 0;
     dirty_ = true;
+    fx::Wake();  // въезд идёт от тактов опроса
 }
 
 void Toast::Dismiss() {

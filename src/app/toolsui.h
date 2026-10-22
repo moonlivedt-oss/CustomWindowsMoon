@@ -75,6 +75,8 @@ bool CleanBusy();
 // lockers - кто не дал удалить занятое: «clangd, msedgewebview2» (пусто - всё удалилось или было свежим).
 ULONGLONG CleanList(const std::vector<tools::Junk>& list, const tools::Log& log, std::wstring* lockers = nullptr);
 void PrimeForSnapshot(const Config* cfg);  // для --studio-snap: посчитать сразу и дождаться
+// для --tools-ring-snap: посчитать, собрать кольцо утилит и снять его с курсором на секторе root
+void SnapRing(RadialMenu& menu, const Config* cfg, UINT dpi, int root, const std::wstring& path);
 void TrimDdc();                            // старое из кэша Unreal
 void CleanProjectList(const std::vector<tools::ProjectJunk>& list);
 bool Busy();

@@ -192,6 +192,27 @@ void RadialMenu::DrawIcon(Graphics& g, Bitmap* icon, const Item& it, double x, d
     g.Restore(st);
 }
 
+// Счётчик у значка: капля цвета группы с белым текстом, центр - в (x, y).
+void RadialMenu::DrawBadge(Graphics& g, const std::wstring& text, double x, double y, Color fill, double appear) {
+    if (appear <= 0.05) return;
+    Font font(Family(), (REAL)(10.5 * geo_.k), FontStyleBold, UnitPixel);
+    RectF tb;
+    g.MeasureString(text.c_str(), -1, &font, PointF(0, 0), StringFormat::GenericTypographic(), &tb);
+    REAL h = (REAL)(16 * geo_.k), w = std::max(h, tb.Width + (REAL)(9 * geo_.k));
+    RectF r((REAL)(x - w / 2), (REAL)(y - h / 2), w, h);
+    GraphicsPath pill;
+    pill.AddArc(r.X, r.Y, h, h, 90, 180);
+    pill.AddArc(r.X + w - h, r.Y, h, h, 270, 180);
+    pill.CloseFigure();
+    SolidBrush back(WithAlpha(fill, (BYTE)(240 * appear)));
+    g.FillPath(&back, &pill);
+    Pen edge(Color((BYTE)(110 * appear), 255, 255, 255), (REAL)(1.0 * geo_.k));
+    g.DrawPath(&edge, &pill);
+    SolidBrush ink(Color((BYTE)(255 * appear), 255, 255, 255));
+    g.DrawString(text.c_str(), -1, &font, PointF(r.X + (w - tb.Width) / 2, r.Y + (h - tb.Height) / 2),
+                 StringFormat::GenericTypographic(), &ink);
+}
+
 float RadialMenu::TextWidth(const std::wstring& s) {
     std::wstring key = s + L"|" + std::to_wstring((int)(LabelPx() * 10));
     auto it = textW_.find(key);

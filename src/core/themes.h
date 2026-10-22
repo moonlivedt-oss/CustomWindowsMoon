@@ -29,6 +29,8 @@ struct UiColors {
 
 const std::vector<ThemeInfo>& Themes();
 ThemeInfo CurrentTheme(const Config& c);  // с подставленными цветами обоев и своей палитры
+// оттенок по времени суток (day_tint); hour - местное время дробью, 0..24
+ThemeInfo DayTint(ThemeInfo t, const Config& c, double hour);
 RingColors RingPalette(const Config& c);
 UiColors UiPalette(const Config& c);
 

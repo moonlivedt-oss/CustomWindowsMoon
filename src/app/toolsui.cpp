@@ -230,6 +230,7 @@ void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
     s.leftovers = sys ? tools::AppLeftovers() : prev.leftovers;
     s.devices = sys ? tools::DeviceProblems() : prev.devices;
     s.updates = sys ? tools::WindowsUpdates() : prev.updates;
+    s.week = sys ? tools::WeekRecordAndCompare() : prev.week;
     CoUninitialize();
     if (bg::Quitting()) return;
     AcquireSRWLockExclusive(&g_scanLock);
@@ -1415,6 +1416,14 @@ void PrimeForSnapshot(const Config* cfg) {
     if (!g_cfg) g_cfg = cfg;
     RefreshScan(true);
     for (int i = 0; i < 1200 && g_scanRunning; ++i) Sleep(100);
+}
+
+void SnapRing(RadialMenu& menu, const Config* cfg, UINT dpi, int root, const std::wstring& path) {
+    PrimeForSnapshot(cfg);
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    PrimeSecurityForSnapshot();
+    std::wstring status;
+    menu.SnapNet(cfg, RingItems(status), dpi, root, 1500, path);
 }
 
 bool Busy() { return g_busy; }

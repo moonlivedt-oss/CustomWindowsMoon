@@ -13,6 +13,7 @@
 #include "desk/boostcard.h"
 #include "menu/menu.h"
 #include "net/net.h"
+#include "net/speed.h"
 #include "net/watch.h"
 #include "tools/tools.h"
 
@@ -196,6 +197,13 @@ std::vector<Item> RingItems() {
                      Act(L"Яндекс", L"net-ping.png", L"ping:ya.ru", L"ya.ru"),
                      Act(L"GitHub", L"net-ping.png", L"ping:github.com", L"github.com")};
     ring.push_back(ping);
+    // скорость (И26): последний замер и сравнение «через туннель / напрямую» по истории
+    std::vector<net::Speed> hist = net::SpeedHistory();
+    std::wstring compare = net::SpeedCompare(hist);
+    ring.push_back(Act(L"Скорость", L"net-globe.png", L"speed",
+                       (hist.empty() ? std::wstring(L"Загрузка, отдача и задержка через speed.cloudflare.com (~20 с)")
+                                     : L"Последний замер: " + net::SpeedText(hist.back())) +
+                           (compare.empty() ? L". Замеры с туннелем и без копятся для сравнения" : L". " + compare)));
     ring.push_back(Act(L"Проверить сеть", L"net-check.png", L"check",
                        L"Полная проверка в студии: прокси, туннели, остатки VPN, история"));
     return ring;
@@ -407,6 +415,18 @@ void Run(const std::wstring& key) {
                     Theme());
         return;
     }
+    if (key == L"speed")
+        return RunJob(L"Скорость", [](const net::Log& log, std::wstring& res) {
+            net::Speed s = net::MeasureSpeed(log);
+            if (s.down <= 0) {
+                res = L"Не получилось скачать с speed.cloudflare.com - интернет есть?";
+                return false;
+            }
+            net::SaveSpeed(s);
+            std::wstring compare = net::SpeedCompare(net::SpeedHistory());
+            res = net::SpeedText(s) + L"." + (compare.empty() ? L"" : L" " + compare + L".");
+            return true;
+        });
     if (key.rfind(L"ping:", 0) == 0) {
         std::wstring host = key.substr(5);
         return RunJob(L"Пинг " + host, [host](const net::Log&, std::wstring& res) {

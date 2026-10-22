@@ -8,6 +8,9 @@
 #include "core/config.h"
 #include "core/edgecheck.h"
 #include "core/procsnap.h"
+#include "core/themes.h"
+#include "net/speed.h"
+#include "tools/weekdiff.h"
 #include "desk/dropundo.h"
 #include "app/rules.h"
 #include "app/settingsio.h"
@@ -199,6 +202,65 @@ void TestProcSession() {
     CHECK(self->priv > 0);
 }
 
+// Цвета по времени суток: днём как тема (чуть ярче), ночью теплее и темнее, вечер - между ними.
+void TestDayTint() {
+    Config c;
+    c.theme = L"wallpaper";  // кромка не смешивается с обоями: проверяем только время
+    c.nightFrom = 23, c.nightTo = 7;
+    ThemeInfo base = Themes()[0];
+    ThemeInfo noon = DayTint(base, c, 13), eve = DayTint(base, c, 21), deep = DayTint(base, c, 2);
+    auto warmth = [](COLORREF x) { return (int)GetRValue(x) - (int)GetBValue(x); };
+    CHECK(warmth(deep.glow) > warmth(eve.glow) && warmth(eve.glow) > warmth(noon.glow));
+    CHECK(GetRValue(deep.bg) + GetGValue(deep.bg) + GetBValue(deep.bg) <
+          GetRValue(base.bg) + GetGValue(base.bg) + GetBValue(base.bg) + 1);
+    CHECK(noon.bg == base.bg);
+    c.night = false;  // ночной режим выключен - ночь не наступает, но вечер теплеет
+    CHECK(DayTint(base, c, 2).bg == base.bg);
+}
+
+// История скорости: строка туда и обратно (табуляция в имени не ломает), сравнение - медианы по виду.
+void TestSpeedLog() {
+    net::Speed s;
+    s.when = 133000000000000000ull;
+    s.down = 87.5, s.up = 21.25, s.pingMs = 45, s.tunnel = true, s.via = L"happ-tun\t, Финляндия";
+    net::Speed back;
+    CHECK(net::ParseSpeedRow(net::SpeedRow(s), back));
+    CHECK(back.when == s.when && back.down == 87.5 && back.up == 21.25 && back.pingMs == 45 && back.tunnel);
+    CHECK(back.via == L"happ-tun , Финляндия");
+    CHECK(!net::ParseSpeedRow(L"мусор", back));
+    std::vector<net::Speed> h;
+    CHECK(net::SpeedCompare(h).empty());
+    for (double d : {80.0, 100.0, 90.0}) {
+        net::Speed x;
+        x.when = 1, x.down = d, x.up = 20, x.tunnel = true;
+        h.push_back(x);
+    }
+    CHECK(net::SpeedCompare(h).empty());  // напрямую ещё не мерили - сравнивать не с чем
+    net::Speed d;
+    d.when = 1, d.down = 140, d.up = 35;
+    h.push_back(d);
+    std::wstring c = net::SpeedCompare(h);
+    CHECK(c.find(L"↓ 90.0") != std::wstring::npos && c.find(L"↓ 140") != std::wstring::npos);
+}
+
+// Неделя: новое, убранное и обновлённое (та же программа с другой версией); строки снимка туда и обратно.
+void TestWeekDiff() {
+    std::vector<tools::WeekEntry> old = {
+        {L"app", L"Git", L"Git 2.44"}, {L"svc", L"OldSvc", L"Старая служба"}, {L"start", L"Run|Discord", L"Discord"}};
+    std::vector<tools::WeekEntry> now = {
+        {L"app", L"Git", L"Git 2.45"}, {L"start", L"Run|Discord", L"Discord"}, {L"drv", L"newdrv", L"Новый драйвер"}};
+    std::vector<tools::WeekChange> d = tools::WeekDiff(old, now);
+    CHECK(d.size() == 3);
+    if (d.size() == 3) {
+        CHECK(d[0].what == tools::WeekChange::ADDED && d[0].entry.key == L"newdrv");
+        CHECK(d[1].what == tools::WeekChange::REMOVED && d[1].entry.key == L"OldSvc");
+        CHECK(d[2].what == tools::WeekChange::UPDATED && d[2].was == L"Git 2.44");
+    }
+    std::vector<tools::WeekEntry> back = tools::ParseWeekRows(tools::WeekRows(now));
+    CHECK(back.size() == 3 && back[2].label == L"Новый драйвер");
+    CHECK(tools::WeekDiff(now, back).empty());
+}
+
 }  // namespace
 
 void TestMore(void (*check)(bool, const char*, int)) {
@@ -210,4 +272,7 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestSettingsPack();
     TestHealthScore();
     TestProcSession();
+    TestDayTint();
+    TestSpeedLog();
+    TestWeekDiff();
 }

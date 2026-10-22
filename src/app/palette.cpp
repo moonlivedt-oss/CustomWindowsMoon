@@ -126,7 +126,10 @@ void Show() {
             extra.push_back(std::move(it));
         }
     std::wstring status;
-    Leaves(toolsui::RingItems(status), L"t|", L"Утилиты", extra);
+    std::vector<Item> tools = toolsui::RingItems(status);
+    // «Важное» - копии пунктов из групп: в палитре они были бы вторыми строками тех же действий
+    if (!tools.empty() && tools[0].name == L"Важное") tools.erase(tools.begin());
+    Leaves(tools, L"t|", L"Утилиты", extra);
     Leaves(netui::RingItems(), L"n|", L"Сеть", extra);
     for (auto& [page, name] : EditorPages()) {
         Item it;

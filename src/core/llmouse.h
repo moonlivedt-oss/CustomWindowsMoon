@@ -7,7 +7,7 @@
 // Обработчики вызываются в потоке перехвата: только быстрые проверки, сама работа уходит сообщением окну.
 namespace llmouse {
 
-enum Slot { DESK_CLICK, WINDOW_FX, CORNERS, kSlots };           // в таком порядке и вызываются
+enum Slot { DESK_CLICK, WINDOW_FX, CORNERS, EDGE, kSlots };     // в таком порядке и вызываются; EDGE - будит опрос
 using Handler = bool (*)(WPARAM msg, const MSLLHOOKSTRUCT& m);  // true - событие съедено
 
 void Set(Slot s, Handler h);  // обработчик слота: один раз, до Need
