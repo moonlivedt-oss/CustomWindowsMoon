@@ -41,4 +41,65 @@ HealthOut HealthScore(const HealthIn& in) {
     return out;
 }
 
+std::vector<AppPart> AppHealth(const AppHealthIn& in) {
+    std::vector<AppPart> v;
+    auto add = [&](const wchar_t* name, AppPart::State s, const std::wstring& why, int fix = 0) {
+        v.push_back({name, s, why, fix});
+    };
+    if (in.gameMode)
+        add(L"перехват мыши", AppPart::OFF, L"снят на время игры");
+    else if (!in.mouseWanted)
+        add(L"перехват мыши", AppPart::OFF, L"не нужен: углы с колесом, двойной клик и Alt + колесо выключены");
+    else if (!in.mouseHooked)
+        add(L"перехват мыши", AppPart::BAD, L"не стоит - углы и двойной клик не работают", 1);
+    else if (in.mouseSilent)
+        add(L"перехват мыши", AppPart::BAD, L"Windows сняла его молча (программа долго не отвечала)", 1);
+    else
+        add(L"перехват мыши", AppPart::OK, L"стоит");
+
+    if (in.autostartOn)
+        add(L"автозапуск", AppPart::OK, L"включён");
+    else if (in.autostartUserOff)
+        add(L"автозапуск", AppPart::BAD, L"выключен в Диспетчере задач", 2);
+    else if (in.autostartWanted == 1)
+        add(L"автозапуск", AppPart::BAD, L"пропал, хотя был включён", 2);
+    else
+        add(L"автозапуск", AppPart::OFF, L"выключен");
+
+    if (in.toolsExe)
+        add(L"RadialTools", AppPart::OK, L"на месте");
+    else
+        add(L"RadialTools", AppPart::BAD, L"пропал - очистка и закрытие программ не работают до пересборки");
+
+    if (in.adminBlocked)
+        add(L"задачи с правами", AppPart::BAD, L"задачу не пускает антивирус - каждое действие спрашивает разрешение",
+            3);
+    else if (in.adminReady)
+        add(L"задачи с правами", AppPart::OK, L"помощник на месте");
+    else if (in.adminExists)
+        add(L"задачи с правами", AppPart::BAD, L"помощник устарел - обновится при первом действии с правами", 3);
+    else
+        add(L"задачи с правами", AppPart::OFF, L"не созданы - спросит разрешение, когда понадобятся");
+
+    unsigned long long late = in.watchPeriodMs * 3 + 30000;
+    if (!in.watchAgeMs)
+        add(L"слежка", in.uptimeMs > late ? AppPart::BAD : AppPart::OK,
+            in.uptimeMs > late ? L"не прошла ни разу" : L"запускается");
+    else if (in.watchAgeMs > late)
+        add(L"слежка", AppPart::BAD, L"молчит " + std::to_wstring(in.watchAgeMs / 60000) + L" мин");
+    else
+        add(L"слежка", AppPart::OK, L"работает");
+    return v;
+}
+
+std::wstring AppHealthLine(const std::vector<AppPart>& parts) {
+    std::wstring bad, ok;
+    for (const AppPart& p : parts) {
+        if (p.state == AppPart::BAD) bad += (bad.empty() ? L"" : L", ") + p.name + L" (" + p.why + L")";
+        if (p.state == AppPart::OK) ok += (ok.empty() ? L"" : L", ") + p.name;
+    }
+    if (!bad.empty()) return L"Отвалилось: " + bad;
+    return ok.empty() ? L"Всё выключено нарочно" : L"Всё работает: " + ok;
+}
+
 }  // namespace tools

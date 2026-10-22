@@ -67,6 +67,8 @@ struct Watched {
     tools::CommitInfo commit;
 };
 Watched Watch();
+// Сколько слежка молчит, мс (0 - ещё не прошла ни разу); periodMs - как часто она должна проходить сейчас
+ULONGLONG WatchAge(ULONGLONG& periodMs);
 std::vector<tools::ToolVersion> Versions();                  // пусто - ещё не проверялось
 void SetVersions(const std::vector<tools::ToolVersion>& v);  // проверили из студии - кольцу тоже
 void Refresh();                                              // пересчитать сейчас

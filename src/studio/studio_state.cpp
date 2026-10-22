@@ -11,8 +11,10 @@
 #include "app/toolsui.h"
 #include "app/weekreport.h"
 #include "core/bg.h"
+#include "core/elevate.h"
 #include "core/files.h"
 #include "core/fx.h"
+#include "core/llmouse.h"
 #include "core/text.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -26,6 +28,28 @@ using ui::Kind;
 namespace studio {
 
 namespace {
+
+// Задача с правами для строки здоровья (Л27): schtasks долгий, в кадре его звать нельзя - раз в минуту в фоне.
+// Поток пишет в файловые атомики, а не в студию: она может закрыться раньше.
+std::atomic<int> g_adminState{-1};  // -1 - ещё не знаем; биты: 1 - есть, 2 - готова, 4 - не пускает антивирус
+std::atomic<ULONGLONG> g_adminAt{0};
+std::atomic<bool> g_adminBusy{false};
+const ULONGLONG g_startTick = GetTickCount64();  // когда программа запустилась: слежке нужно время на первый проход
+
+void AdminStateSoon() {
+    ULONGLONG now = GetTickCount64(), at = g_adminAt;
+    if ((at && now - at < 60000) || g_adminBusy.exchange(true)) return;
+    g_adminAt = now;
+    if (!bg::Run(
+            [] {
+                int v = (elevate::TaskExists(elevate::TASK_NET) ? 1 : 0) |
+                        (elevate::TaskReady(elevate::TASK_NET) ? 2 : 0) | (elevate::Blocked(elevate::TASK_NET) ? 4 : 0);
+                g_adminState = v;
+                g_adminBusy = false;
+            },
+            THREAD_PRIORITY_BELOW_NORMAL))
+        g_adminBusy = false;
+}
 
 // Новое за неделю для снимков (RADIAL_DEMO): по нескольку записей каждого вида
 tools::WeekReport DemoWeek() {
@@ -117,6 +141,41 @@ void Studio::GoState(const std::wstring& focus) {
 
 // ---------------- «Состояние» ----------------
 
+// Снимок для строки здоровья программы (Л27); для снимков (RADIAL_DEMO) - всё в порядке, задача не создана
+tools::AppHealthIn Studio::AppHealthNow() {
+    tools::AppHealthIn ah;
+    ULONGLONG now = GetTickCount64();
+    if (Demo()) {
+        ah.mouseWanted = ah.mouseHooked = ah.autostartOn = true;
+        ah.watchAgeMs = 20000;
+        return ah;
+    }
+    ah.gameMode = fx::Game();
+    ah.mouseWanted = llmouse::Wanted();
+    ah.mouseHooked = llmouse::Hooked();
+    POINT cur{};
+    GetCursorPos(&cur);
+    // курсор сдвинулся с прошлого замера, а перехват с тех пор не получил ни одного события
+    ah.mouseSilent = ah.mouseHooked && stateCurAt_ && (cur.x != stateCur_.x || cur.y != stateCur_.y) &&
+                     llmouse::LastEvent() < stateCurAt_;
+    stateCur_ = cur;
+    stateCurAt_ = now;
+    ah.autostartWanted = AutostartWanted();
+    ah.autostartOn = homeAuto_;
+    ah.autostartUserOff = !homeAuto_ && AutostartDisabledByUser();
+    ah.toolsExe = GetFileAttributesW((ExeDir() + L"\\RadialTools.exe").c_str()) != INVALID_FILE_ATTRIBUTES;
+    AdminStateSoon();
+    int a = g_adminState;
+    if (a >= 0) {
+        ah.adminExists = a & 1;
+        ah.adminReady = a & 2;
+        ah.adminBlocked = a & 4;
+    }
+    ah.watchAgeMs = toolsui::WatchAge(ah.watchPeriodMs);
+    ah.uptimeMs = now - g_startTick;
+    return ah;
+}
+
 void Studio::StatePage(const RectF& r) {
     const UiColors& c = ui.C();
     Graphics& g = ui.G();
@@ -155,6 +214,7 @@ void Studio::StatePage(const RectF& r) {
         if (bat.present && bat.designed) hi.batteryWear = (int)(100 - bat.full * 100 / bat.designed);
         hi.reboot = !tools::PendingReboot().empty();
         stateHealth_ = tools::HealthScore(hi);
+        stateApp_ = tools::AppHealth(AppHealthNow());
     }
     if (!statePhysAt_) {
         statePhysAt_ = now;
@@ -218,6 +278,56 @@ void Studio::StatePage(const RectF& r) {
                    stateHealth_.minus[i].why;
         if (why.empty()) why = L"Место, память, диски, защита и батарея - без замечаний.";
         ui.Text(why, RectF(tx, y + ui.S(42), tw, h - ui.S(46)), c.muted, 11.5f);
+        y += h + gap;
+    }
+
+    // ---- здоровье самой программы (Л27): работает ли то, на чём держится остальное ----
+    if (!stateApp_.empty()) {
+        float h = ui.S(84);
+        RectF cr(x, y, w, h);
+        Card(cr);
+        const tools::AppPart* broken = nullptr;
+        for (const tools::AppPart& p : stateApp_)
+            if (p.state == tools::AppPart::BAD && p.fix && !broken) broken = &p;
+        float bw = broken ? ui.S(132) : 0;
+        std::wstring line = tools::AppHealthLine(stateApp_);
+        bool bad = line.rfind(L"Отвалилось", 0) == 0;
+        ui.Text(L"Программа", RectF(x + ui.S(20), y + ui.S(12), ui.S(200), ui.S(20)), c.muted, 12);
+        ui.Text(Ellip(line, 150), RectF(x + ui.S(20), y + ui.S(32), w - ui.S(40) - bw, ui.S(20)), bad ? c.warn : c.text,
+                12, true);
+        float px = x + ui.S(20), py = y + ui.S(56);
+        for (size_t i = 0; i < stateApp_.size(); ++i) {
+            const tools::AppPart& p = stateApp_[i];
+            float tw = ui.Measure(p.name, 11) + ui.S(22);
+            RectF chip(px, py, tw, ui.S(20));
+            ui.Click(ID_STATE_PART + (int)i, chip);
+            // в порядке - светлая точка, поломка - тревожная, выключено нарочно - пустой кружок
+            RectF dr(px + ui.S(2), py + ui.S(6), ui.S(8), ui.S(8));
+            if (p.state == tools::AppPart::OFF)
+                ui.Stroke(dr, c.faint, ui.S(4));
+            else
+                ui.Fill(dr, p.state == tools::AppPart::BAD ? c.warn : WithAlpha(c.text, 170), ui.S(4));
+            ui.Text(p.name, RectF(px + ui.S(16), py, tw, ui.S(20)),
+                    p.state == tools::AppPart::OFF   ? c.faint
+                    : p.state == tools::AppPart::BAD ? c.warn
+                                                     : c.muted,
+                    11);
+            ui.Tip(ID_STATE_PART + (int)i, p.name + L": " + p.why);
+            px += tw + ui.S(12);
+        }
+        if (broken && ui.Button(ID_STATE_APPFIX, RectF(cr.GetRight() - ui.S(20) - bw, y + ui.S(22), bw, ui.S(36)),
+                                L"Починить", Kind::Primary)) {
+            if (broken->fix == 1) llmouse::Rehook();
+            if (broken->fix == 2) SetAutostart(true);
+            if (broken->fix == 3)
+                bg::Run([] {
+                    elevate::Setup(elevate::TASK_NET);
+                    g_adminAt = 0;
+                });
+            stateCurAt_ = 0;  // свежий замер курсора: перехват только что встал заново
+            stateAt_ = 0;
+            RepaintIn(1500);
+        }
         y += h + gap;
     }
 
