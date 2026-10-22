@@ -658,8 +658,13 @@ void WarnEdgeConflict() {
 void ReportCrashes() {
     std::vector<crash::Report> rs = crash::Unreported(crash::Dir(), true);
     if (rs.empty()) return;
+    // где именно - по карте символов той сборки (cmake/symbols.cmake), если она есть
+    auto where = [](const crash::Report& r) {
+        std::wstring fn = crash::Decode(r.what);
+        return r.what.empty() ? std::wstring() : r.what + (fn.empty() ? L"" : L", функция " + fn);
+    };
     for (const crash::Report& r : rs)
-        autos::Note(L"Программа падала " + r.when + (r.what.empty() ? L"" : L": " + r.what) + L". Дамп: " + r.dump);
+        autos::Note(L"Программа падала " + r.when + (r.what.empty() ? L"" : L": " + where(r)) + L". Дамп: " + r.dump);
     const crash::Report& last = rs.back();
     std::wstring dump = last.dump;
     g_boostCard.yesLabel = L"Папка";
@@ -672,7 +677,7 @@ void ReportCrashes() {
     g_boostCard.Show(BoostCard::OFFER,
                      rs.size() == 1 ? L"Программа падала " + last.when
                                     : L"Программа падала " + std::to_wstring(rs.size()) + L" раза",
-                     (last.what.empty() ? L"" : last.what + L". ") + L"Дамп: " + dump + L" (хранятся последние " +
+                     (last.what.empty() ? L"" : where(last) + L". ") + L"Дамп: " + dump + L" (хранятся последние " +
                          std::to_wstring(crash::kKeep) + L").",
                      CurrentTheme(g_cfg), 30000, Toast::G_WARN);
 }

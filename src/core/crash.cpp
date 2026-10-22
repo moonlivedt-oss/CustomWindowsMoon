@@ -63,8 +63,15 @@ void Describe(EXCEPTION_POINTERS* ep, wchar_t* out, size_t n) {
         GetModuleFileNameW(mod, path, MAX_PATH);
     const wchar_t* leaf = wcsrchr(path, L'\\');
     leaf = leaf ? leaf + 1 : path;
-    swprintf(out, n, L"%08lX (%ls) в %ls+0x%llx", (unsigned long)code, CodeName(code), leaf,
-             (unsigned long long)((ULONG_PTR)addr - (ULONG_PTR)mod));
+    // метка сборки (TimeDateStamp заголовка PE) - по ней --crash-decode найдёт карту символов той самой сборки
+    DWORD stamp = 0;
+    if (mod) {
+        auto* dos = (const IMAGE_DOS_HEADER*)mod;
+        if (dos->e_magic == IMAGE_DOS_SIGNATURE)
+            stamp = ((const IMAGE_NT_HEADERS*)((const BYTE*)mod + dos->e_lfanew))->FileHeader.TimeDateStamp;
+    }
+    swprintf(out, n, L"%08lX (%ls) в %ls+0x%llx, сборка %08lX", (unsigned long)code, CodeName(code), leaf,
+             (unsigned long long)((ULONG_PTR)addr - (ULONG_PTR)mod), (unsigned long)stamp);
 }
 
 wchar_t g_restartExe[MAX_PATH] = {};
@@ -197,6 +204,20 @@ void Prune(const std::wstring& dir, int keep) {
     }
 }
 
+std::vector<Report> All(const std::wstring& dir) {
+    std::vector<Report> out;
+    for (const std::wstring& name : Dumps(dir)) {
+        Report r;
+        r.dump = dir + L"\\" + name;
+        if (name.size() >= 21)
+            r.when =
+                name.substr(12, 2) + L"." + name.substr(10, 2) + L" " + name.substr(15, 2) + L":" + name.substr(17, 2);
+        r.what = Widen8(ReadSmall(dir + L"\\" + Stem(name) + L".txt"));
+        out.push_back(r);
+    }
+    return out;
+}
+
 std::vector<Report> Unreported(const std::wstring& dir, bool mark) {
     std::vector<Report> out;
     std::wstring markFile = dir + L"\\reported";
@@ -227,6 +248,77 @@ std::vector<Report> Unreported(const std::wstring& dir, bool mark) {
         }
     }
     return out;
+}
+
+// --- разбор адреса по карте символов (Н10) ---
+
+bool ParseWhere(const std::wstring& what, std::wstring& module, ULONGLONG& offset, DWORD& stamp) {
+    size_t plus = what.find(L"+0x");
+    if (plus == std::wstring::npos) return false;
+    size_t a = what.find_last_of(L" \\/", plus);
+    module = what.substr(a == std::wstring::npos ? 0 : a + 1, plus - (a == std::wstring::npos ? 0 : a + 1));
+    offset = wcstoull(what.c_str() + plus + 3, nullptr, 16);
+    stamp = 0;
+    size_t b = what.find(L"сборка ");
+    if (b != std::wstring::npos) stamp = wcstoul(what.c_str() + b + 7, nullptr, 16);
+    return !module.empty() && offset != 0;
+}
+
+std::wstring Symbolize(const std::string& map, ULONGLONG addr) {
+    // строки nm --numeric-sort: «0000000140001000 T имя»; берём ближайший код (T/t) не выше адреса
+    ULONGLONG best = 0;
+    std::string name;
+    size_t pos = 0;
+    while (pos < map.size()) {
+        size_t e = map.find('\n', pos);
+        if (e == std::string::npos) e = map.size();
+        const char* line = map.c_str() + pos;
+        char* end = nullptr;
+        ULONGLONG at = strtoull(line, &end, 16);
+        if (end && end != line && end + 3 <= map.c_str() + e && (end[1] == 'T' || end[1] == 't') && end[2] == ' ') {
+            if (at > addr) break;
+            best = at;
+            name.assign(end + 3, (size_t)(map.c_str() + e - (end + 3)));
+            if (!name.empty() && name.back() == '\r') name.pop_back();
+        }
+        pos = e + 1;
+    }
+    if (name.empty()) return L"";
+    wchar_t tail[32];
+    swprintf(tail, 32, L"+0x%llx", (unsigned long long)(addr - best));
+    return Widen8(name) + tail;
+}
+
+std::wstring MapsDir() {
+    wchar_t p[MAX_PATH];
+    ExpandEnvironmentStringsW(L"%APPDATA%\\MoonDesk\\integrity\\maps", p, MAX_PATH);
+    return p;
+}
+
+std::wstring Decode(const std::wstring& what, const std::wstring& mapsDir) {
+    std::wstring module;
+    ULONGLONG offset = 0;
+    DWORD stamp = 0;
+    if (!ParseWhere(what, module, offset, stamp)) return L"";
+    std::wstring stem = module.size() > 4 && !_wcsicmp(module.c_str() + module.size() - 4, L".exe")
+                            ? module.substr(0, module.size() - 4)
+                            : module;
+    wchar_t hex[16];
+    swprintf(hex, 16, L"%08lX", (unsigned long)stamp);
+    std::wstring dir = mapsDir.empty() ? MapsDir() : mapsDir;
+    std::wstring map = dir + L"\\" + stem + L"-" + hex + L".map";
+    if (!stamp || GetFileAttributesW(map.c_str()) == INVALID_FILE_ATTRIBUTES) return L"";  // своей карты нет
+    HANDLE f = CreateFileW(map.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return L"";
+    LARGE_INTEGER size{};
+    GetFileSizeEx(f, &size);
+    std::string text((size_t)std::min<LONGLONG>(size.QuadPart, 64ll << 20), '\0');
+    DWORD got = 0;
+    ReadFile(f, text.data(), (DWORD)text.size(), &got, nullptr);
+    CloseHandle(f);
+    text.resize(got);
+    // 64-битный exe MinGW грузится по 0x140000000 (без ASLR в карте); смещение - от начала модуля
+    return Symbolize(text, 0x140000000ull + offset);
 }
 
 }  // namespace crash

@@ -625,6 +625,31 @@ void TestCrashReports() {
         FindClose(h);
     }
     CHECK(dmp == crash::kKeep && txt == crash::kKeep);  // .txt уходят вместе со своими дампами
+    CHECK(crash::All(t.path).size() == (size_t)crash::kKeep);
+
+    // Н10: строка падения -> модуль, смещение, метка сборки; карта nm -> функция
+    std::wstring module;
+    ULONGLONG off = 0;
+    DWORD stamp = 0;
+    CHECK(crash::ParseWhere(L"18.10 14:05  C0000005 (обращение к памяти) в RadialMenu.exe+0x1a2b3, сборка 68F9A3C6",
+                            module, off, stamp));
+    CHECK(module == L"RadialMenu.exe" && off == 0x1a2b3 && stamp == 0x68F9A3C6);
+    CHECK(crash::ParseWhere(L"в RadialMenu.exe+0x10", module, off, stamp) && stamp == 0);  // старая строка
+    CHECK(!crash::ParseWhere(L"E0000A11", module, off, stamp));
+    std::string map =
+        "0000000140001000 T WinMain\r\n0000000140001200 t Helper(int)\r\n0000000140003000 D g_data\r\n"
+        "0000000140004000 T Last\n";
+    CHECK(crash::Symbolize(map, 0x140001234) == L"Helper(int)+0x34");
+    CHECK(crash::Symbolize(map, 0x140003500) == L"Helper(int)+0x2300");  // данные - не функция
+    CHECK(crash::Symbolize(map, 0x140000500).empty());
+    // карта сборки в папке: Decode находит её по метке, чужой метки - нет
+    HANDLE f = CreateFileW((t.path + L"\\RadialMenu-68F9A3C6.map").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
+                           nullptr);
+    DWORD put = 0;
+    WriteFile(f, map.data(), (DWORD)map.size(), &put, nullptr);
+    CloseHandle(f);
+    CHECK(crash::Decode(L"в RadialMenu.exe+0x1210, сборка 68F9A3C6", t.path) == L"Helper(int)+0x10");
+    CHECK(crash::Decode(L"в RadialMenu.exe+0x1210, сборка 11111111", t.path).empty());
 }
 
 // ---- П3: рост своей памяти и дескрипторов за сутки ----

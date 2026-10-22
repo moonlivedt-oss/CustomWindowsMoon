@@ -19,6 +19,7 @@
 #include "core/bg.h"
 #include "tools/mft_detail.h"
 #include "core/config.h"
+#include "core/crash.h"
 #include "core/elevate.h"
 #include "core/filedlg.h"
 #include "core/files.h"
@@ -1061,6 +1062,22 @@ bool Run(int& exitCode) {
     } else if (Has(args, L"--crash-test")) {  // нарочно упасть: проверить, что дамп и строка ложатся в crash
         *(volatile int*)nullptr = 0;
         exitCode = 1;
+    } else if (Has(args, L"--crash-decode")) {  // --crash-decode [строка]: адрес падения -> функция, в crash_out.txt
+        size_t i = std::find(args.begin(), args.end(), L"--crash-decode") - args.begin();
+        std::vector<std::wstring> lines;
+        if (i + 1 < args.size()) {
+            lines.push_back(args[i + 1]);
+        } else {  // без строки - все падения из папки crash
+            for (const crash::Report& r : crash::All(crash::Dir()))
+                if (!r.what.empty()) lines.push_back(r.when + L"  " + r.what);
+        }
+        std::wstring out;
+        for (const std::wstring& l : lines) {
+            std::wstring fn = crash::Decode(l);
+            out += l + L"\r\n    -> " + (fn.empty() ? L"нет карты символов этой сборки" : fn) + L"\r\n";
+        }
+        WriteOut(L"crash_out.txt", out.empty() ? L"падений нет\r\n" : out);
+        exitCode = 0;
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
     } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку

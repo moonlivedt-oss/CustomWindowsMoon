@@ -22,7 +22,8 @@ target_compile_options(RadialMenu PRIVATE ${RADIAL_WERROR})
 
 option(RADIAL_STRIP "убрать символы из exe (OFF - для разбора падений по адресу)" ON)
 if(MINGW)
-  target_link_options(RadialMenu PRIVATE -municode -static $<$<BOOL:${RADIAL_STRIP}>:-s>)
+  # символы убирает cmake/symbols.cmake после сборки, успев записать карту для разбора падений
+  target_link_options(RadialMenu PRIVATE -municode -static)
 endif()
 
 # exe кладём в корень проекта рядом с radial.cfg и icons/;
@@ -58,6 +59,10 @@ if(MINGW)
 endif()
 add_test(NAME radial_tests COMMAND radial_tests)
 
+# карта символов для разбора падений, потом символы прочь из exe (cmake/symbols.cmake)
+add_custom_command(TARGET RadialMenu POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:RadialMenu> -DNM=${CMAKE_NM} -DSTRIP_TOOL=${CMAKE_STRIP}
+          -DSTRIP=${RADIAL_STRIP} -P ${CMAKE_SOURCE_DIR}/cmake/symbols.cmake)
 # подпись своим сертификатом, если он настроен (cmake/sign.cmake), потом выкладка с проверкой (не пустой, начинается
 # с MZ) и заменой одним переименованием (cmake/deploy.cmake), потом отметка целостности: SHA-256 выложенного exe -
 # «Защита» заметит, если файл потом изменится (cmake/integrity.cmake)
