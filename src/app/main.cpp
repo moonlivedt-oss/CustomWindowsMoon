@@ -393,6 +393,7 @@ void OnDevMode(bool on) {
     UpdateTrayTip();
     autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
     toolsui::OnModes(g_game.On(), on);
+    netui::Dev(on);
     gboost::SetDev(on && g_cfg.devWatch, g_dev.Reason());
     std::vector<std::wstring> chips;
     if (on) {

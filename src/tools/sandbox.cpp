@@ -124,7 +124,8 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
         kit = base + L"\\kit";
         SHCreateDirectoryExW(nullptr, kit.c_str(), nullptr);
         ClearDir(kit);
-        bool ok = CopyFileW((ExeDir() + L"\\sandbox\\check.ps1").c_str(), (kit + L"\\check.ps1").c_str(), FALSE) != FALSE;
+        bool ok =
+            CopyFileW((ExeDir() + L"\\sandbox\\check.ps1").c_str(), (kit + L"\\check.ps1").c_str(), FALSE) != FALSE;
         for (const wchar_t* tool : {L"Procmon64.exe", L"procexp64.exe", L"tcpview64.exe", L"Autoruns64.exe"}) {
             std::wstring found = FindTool(checkTools, tool, 0);
             bool need = !_wcsicmp(tool, L"Procmon64.exe") || !_wcsicmp(tool, L"procexp64.exe");
@@ -135,19 +136,19 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
             CopyFileW(found.c_str(), (kit + L"\\" + tool).c_str(), FALSE);
         }
         if (!ok) {
-            err = L"Для проверки нужны check.ps1 рядом с RadialMenu и Process Monitor с Process Explorer в папке защиты";
+            err =
+                L"Для проверки нужны check.ps1 рядом с RadialMenu и Process Monitor с Process Explorer в папке защиты";
             return L"";
         }
     }
     const std::wstring inside = L"C:\\Users\\WDAGUtilityAccount\\Desktop\\Check";  // латиницей: cmd в песочнице
     // запуск сам: exe и msi стартуют, остальное открывается программой по умолчанию; рядом - окно папки
     const std::wstring tools = L"C:\\Users\\WDAGUtilityAccount\\Desktop\\Tools";
-    std::wstring cmd = !kit.empty()
-                           ? L"powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;" + tools +
-                                 L"\\check.ps1&quot; -Target &quot;" + inside + L"\\" + Xml(name) + L"&quot; -Tools &quot;" +
-                                 tools + L"&quot;" + (network ? L" -Network" : L"")
-                           : L"cmd.exe /c start \"\" explorer.exe \"" + inside + L"\" &amp; start \"\" \"" + inside + L"\\" +
-                       Xml(name) + L"\"";
+    std::wstring cmd = !kit.empty() ? L"powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;" + tools +
+                                          L"\\check.ps1&quot; -Target &quot;" + inside + L"\\" + Xml(name) +
+                                          L"&quot; -Tools &quot;" + tools + L"&quot;" + (network ? L" -Network" : L"")
+                                    : L"cmd.exe /c start \"\" explorer.exe \"" + inside + L"\" &amp; start \"\" \"" +
+                                          inside + L"\\" + Xml(name) + L"\"";
     std::wstring wsb =
         L"<Configuration>\r\n"
         L"  <Networking>" +
@@ -168,9 +169,10 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
         L"</SandboxFolder>\r\n"
         L"      <ReadOnly>true</ReadOnly>\r\n"
         L"    </MappedFolder>\r\n" +
-        (kit.empty() ? std::wstring()
-                     : L"    <MappedFolder>\r\n      <HostFolder>" + Xml(kit) + L"</HostFolder>\r\n      <SandboxFolder>" +
-                           tools + L"</SandboxFolder>\r\n      <ReadOnly>true</ReadOnly>\r\n    </MappedFolder>\r\n") +
+        (kit.empty()
+             ? std::wstring()
+             : L"    <MappedFolder>\r\n      <HostFolder>" + Xml(kit) + L"</HostFolder>\r\n      <SandboxFolder>" +
+                   tools + L"</SandboxFolder>\r\n      <ReadOnly>true</ReadOnly>\r\n    </MappedFolder>\r\n") +
         L"  </MappedFolders>\r\n"
         L"  <LogonCommand>\r\n"
         L"    <Command>" +
@@ -189,6 +191,84 @@ std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring&
     WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr);
     CloseHandle(f);
     return path;
+}
+
+std::wstring SafeUrl(const std::wstring& raw) {
+    size_t a = raw.find_first_not_of(L" \t\r\n"), b = raw.find_last_not_of(L" \t\r\n");
+    if (a == std::wstring::npos) return L"";
+    std::wstring u = raw.substr(a, b - a + 1);
+    if (u.size() > 2048) return L"";
+    std::wstring low = Lower(u);
+    if (low.rfind(L"http://", 0) != 0 && low.rfind(L"https://", 0) != 0) return L"";
+    if (u.size() <= low.find(L"//") + 2) return L"";  // одна схема без адреса
+    // в командную строку песочницы адрес идёт в кавычках: кавычки, пробелы и управляющие символы - нельзя
+    for (wchar_t c : u)
+        if (c <= 0x20 || c == L'"' || c == L'<' || c == L'>' || c == L'`' || c == 0x7F) return L"";
+    return u;
+}
+
+std::wstring SandboxUrlConfig(const std::wstring& raw, std::wstring& err) {
+    std::wstring url = SafeUrl(raw);
+    if (url.empty()) {
+        err = L"Это не похоже на адрес сайта (нужен http:// или https://, без пробелов и кавычек)";
+        return L"";
+    }
+    wchar_t la[MAX_PATH] = {};
+    ExpandEnvironmentStringsW(L"%LOCALAPPDATA%\\MoonDesk\\sandbox", la, MAX_PATH);
+    std::wstring base = la;
+    SHCreateDirectoryExW(nullptr, base.c_str(), nullptr);
+    // ни одной папки с этого компьютера; буфер не пробрасываем - вредная страница не дотянется до своего
+    std::wstring wsb =
+        L"<Configuration>\r\n"
+        L"  <Networking>Default</Networking>\r\n"
+        L"  <vGPU>Disable</vGPU>\r\n"
+        L"  <ClipboardRedirection>Disable</ClipboardRedirection>\r\n"
+        L"  <PrinterRedirection>Disable</PrinterRedirection>\r\n"
+        L"  <LogonCommand>\r\n"
+        L"    <Command>explorer.exe &quot;" +
+        Xml(url) +
+        L"&quot;</Command>\r\n"
+        L"  </LogonCommand>\r\n"
+        L"</Configuration>\r\n";
+    std::wstring path = base + L"\\url.wsb";
+    std::string bytes = "\xEF\xBB\xBF" + Narrow(wsb);
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) {
+        err = L"Не записался файл настроек песочницы";
+        return L"";
+    }
+    DWORD put = 0;
+    WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr);
+    CloseHandle(f);
+    return path;
+}
+
+bool OpenUrlInSandbox(const std::wstring& url, std::wstring& err) {
+    if (!SandboxAvailable()) {
+        err = L"Песочница Windows не включена";
+        return false;
+    }
+    std::wstring path = SandboxUrlConfig(url, err);
+    if (path.empty()) return false;
+    std::wstring exe = System32(L"WindowsSandbox.exe"), args = L"\"" + path + L"\"";
+    if ((INT_PTR)ShellExecuteW(nullptr, L"open", exe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL) <= 32) {
+        err = L"Песочница не запустилась";
+        return false;
+    }
+    return true;
+}
+
+std::wstring ClipboardUrl() {
+    std::wstring out;
+    if (!OpenClipboard(nullptr)) return out;
+    if (HANDLE t = GetClipboardData(CF_UNICODETEXT))
+        if (auto* s = (const wchar_t*)GlobalLock(t)) {
+            std::wstring v = s;
+            GlobalUnlock(t);
+            out = SafeUrl(v);
+        }
+    CloseClipboard();
+    return out;
 }
 
 bool RunInSandbox(const std::wstring& file, bool network, std::wstring& err, const std::wstring& checkTools) {

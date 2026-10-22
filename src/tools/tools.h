@@ -440,10 +440,32 @@ struct Suspect {
     int score = 0;         // сумма признаков
     std::wstring why;      // признаки через «; »
 };
+// Права расширений браузеров (И35, extrights.cpp - разбор manifest.json под тестами).
+enum ExtRight {
+    EXT_ALL_SITES = 1,
+    EXT_CLIPBOARD = 2,
+    EXT_NATIVE = 4,
+    EXT_PROXY = 8,
+    EXT_DEBUGGER = 16,
+    EXT_COOKIES = 32,
+    EXT_HISTORY = 64,
+    EXT_MANAGEMENT = 128,
+    EXT_REQUESTS = 256
+};
+int ExtRightsOf(const std::string& manifest);  // биты ExtRight
+std::wstring ExtRightsText(int rights);       // «читает и меняет все сайты, читает буфер обмена»
+int ExtRisk(int rights);                      // 0 - ничего особого; от 4 - доступ к входам и паролям
+struct BrowserExt {
+    std::wstring browser, profile, id, name, dir;
+    int rights = 0;
+    bool store = true;  // обновляется из магазина браузера
+};
+
 struct SecurityScan {
     std::vector<Suspect> procs, autos, hijacks;  // по убыванию счёта
     std::vector<Suspect> tasks;                  // задачи планировщика (where - путь задачи)
     std::vector<Suspect> exts;                   // расширения Chrome/Edge не из магазина (path - папка)
+    std::vector<BrowserExt> extList;             // все расширения с правами, опасные сначала
     std::vector<Suspect> nets;                   // hosts и DNS
     int tasksChecked = 0, extsChecked = 0;
     std::vector<StartItem> starts;    // вся автозагрузка на момент проверки
@@ -574,6 +596,12 @@ void OpenSandboxFeature();  // окно «Компоненты Windows», где
 bool RunInSandbox(const std::wstring& file, bool network, std::wstring& err, const std::wstring& checkTools = L"");
 std::wstring SandboxConfig(const std::wstring& file, bool network, std::wstring& err,
                            const std::wstring& checkTools = L"");  // только собрать .wsb
+// Ссылка в песочнице (И38): адрес открывается браузером внутри одноразовой Windows, сеть - есть, папок с этого
+// компьютера - нет. SafeUrl - только http(s) без пробелов, кавычек и управляющих символов (пусто - не годится).
+std::wstring SafeUrl(const std::wstring& raw);
+std::wstring SandboxUrlConfig(const std::wstring& url, std::wstring& err);  // только собрать .wsb
+bool OpenUrlInSandbox(const std::wstring& url, std::wstring& err);
+std::wstring ClipboardUrl();  // адрес из буфера (текст, одна строка), прошедший SafeUrl
 // системный PATH: как записано и после подстановки системных переменных
 std::vector<std::pair<std::wstring, std::wstring>> SystemPathEntries();
 std::wstring FileSha256(const std::wstring& path);  // в common.cpp: VirusTotal по хэшу, сверка дубликатов

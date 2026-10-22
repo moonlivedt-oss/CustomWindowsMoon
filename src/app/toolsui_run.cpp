@@ -8,6 +8,7 @@ void Run(const std::wstring& key) {
         size_t i = (size_t)_wtoi(key.c_str() + prefix);
         return i < size ? i : (size_t)-1;
     };
+    if (key == L"state") return autos::OpenState();
     if (key.rfind(L"studio:", 0) == 0) {
         if (g_openStudio) g_openStudio(_wtoi(key.c_str() + 7), L"");
         return;
@@ -835,6 +836,25 @@ void Run(const std::wstring& key) {
                       SW_SHOWNORMAL);
         return;
     }
+    if (key == L"sec-url") {
+        std::wstring url = tools::ClipboardUrl();
+        if (url.empty()) {
+            g_card.Show(BoostCard::DONE, L"Песочница: какой адрес?",
+                        L"Скопируйте ссылку (Ctrl+C), начинающуюся с http:// или https://, и выберите пункт снова.",
+                        Theme(), 12000, Toast::G_INFO);
+            return;
+        }
+        if (!tools::SandboxAvailable()) return OpenInSandbox(L"");  // там же карточка «как включить»
+        std::wstring err;
+        if (tools::OpenUrlInSandbox(url, err))
+            g_card.Show(BoostCard::DONE, L"Ссылка открывается в песочнице",
+                        L"Секунд 10-20. Внутри - чистая Windows с браузером, ваших файлов и входов на сайты там нет. " +
+                            Short(url, 80),
+                        Theme(), 15000, Toast::G_OK);
+        else
+            g_card.Show(BoostCard::DONE, L"Песочница: не вышло", err, Theme(), 0, Toast::G_WARN);
+        return;
+    }
     if (key == L"sec-sandbox") {
         std::wstring file = tools::ClipboardPath();
         DWORD a = file.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(file.c_str());
@@ -880,6 +900,32 @@ void Run(const std::wstring& key) {
                     OpenVirusTotal(exe);
             },
             30000, Toast::G_WARN);
+        return;
+    }
+    if (key.rfind(L"sec-ext:", 0) == 0) {  // страница расширения в его браузере: удалить или выключить - там
+        size_t i = idx(8, g_exts.size());
+        if (i == (size_t)-1) return;
+        const tools::BrowserExt& e = g_exts[i];
+        struct B {
+            const wchar_t *name, *exe, *scheme;
+        } kB[] = {{L"Chrome", L"chrome.exe", L"chrome"},
+                  {L"Edge", L"msedge.exe", L"edge"},
+                  {L"Brave", L"brave.exe", L"brave"},
+                  {L"Яндекс", L"browser.exe", L"browser"}};
+        for (const B& b : kB) {
+            if (e.browser != b.name) continue;
+            wchar_t exe[MAX_PATH] = {};
+            DWORD size = sizeof(exe);
+            std::wstring key2 = std::wstring(L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\") + b.exe;
+            if (RegGetValueW(HKEY_CURRENT_USER, key2.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, exe, &size) !=
+                ERROR_SUCCESS) {
+                size = sizeof(exe);
+                RegGetValueW(HKEY_LOCAL_MACHINE, key2.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, exe, &size);
+            }
+            std::wstring url = std::wstring(b.scheme) + L"://extensions/?id=" + e.id;
+            if (e.profile.size()) url = L"--profile-directory=\"" + e.profile + L"\" " + url;
+            if (exe[0]) ShellExecuteW(nullptr, L"open", exe, url.c_str(), nullptr, SW_SHOWNORMAL);
+        }
         return;
     }
     if (key.rfind(L"sec-find:", 0) == 0) {

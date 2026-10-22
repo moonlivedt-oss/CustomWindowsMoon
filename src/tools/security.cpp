@@ -710,7 +710,7 @@ std::wstring ExtName(const std::wstring& dir, const std::string& manifest) {
     return name;
 }
 
-void CheckExtensions(std::vector<Suspect>& out, int& checked) {
+void CheckExtensions(std::vector<Suspect>& out, int& checked, std::vector<BrowserExt>* list) {
     struct Browser {
         const wchar_t *name, *dir, *store;
     };
@@ -752,13 +752,21 @@ void CheckExtensions(std::vector<Suspect>& out, int& checked) {
                 s.path = dir;
                 s.where = std::wstring(b.name) + (profile == L"Default" ? L"" : L", " + profile);
                 std::wstring upd = Lower(JsonStr(man, "update_url"));
+                bool store = !upd.empty() && (upd.find(b.store) != std::wstring::npos ||
+                                              upd.find(L"google.com") != std::wstring::npos ||
+                                              upd.find(L"microsoft.com") != std::wstring::npos);
                 if (upd.empty())
                     Flag(s, 3, L"поставлено не из магазина (нет адреса обновлений)");
                 else if (upd.find(b.store) == std::wstring::npos && upd.find(L"google.com") == std::wstring::npos &&
                          upd.find(L"microsoft.com") == std::wstring::npos)
                     Flag(s, 4, L"обновляется не из магазина: " + upd);
-                if (s.score && man.find("<all_urls>") != std::string::npos) Flag(s, 1, L"читает и меняет все сайты");
+                int rights = ExtRightsOf(man);
+                if (s.score && (rights & EXT_ALL_SITES)) Flag(s, 1, L"читает и меняет все сайты");
+                // не из магазина и с доступом к входам (буфер, куки, отладчик, связь с программами) - заметнее
+                if (s.score && ExtRisk(rights) >= 4) Flag(s, 1, ExtRightsText(rights & ~EXT_ALL_SITES));
                 if (s.score >= kSuspectScore) out.push_back(s);
+                if (list)
+                    list->push_back({b.name, profile == L"Default" ? L"" : profile, id, s.name, dir, rights, store});
             }
         }
     }
@@ -1053,7 +1061,9 @@ SecurityScan ScanSecurity() {
     std::stable_sort(r.procs.begin(), r.procs.end(), byScore);
     std::stable_sort(r.autos.begin(), r.autos.end(), byScore);
     CheckTasks(r.tasks, r.tasksChecked, ownDir);
-    CheckExtensions(r.exts, r.extsChecked);
+    CheckExtensions(r.exts, r.extsChecked, &r.extList);
+    std::stable_sort(r.extList.begin(), r.extList.end(),
+                     [](const BrowserExt& a, const BrowserExt& b) { return ExtRisk(a.rights) > ExtRisk(b.rights); });
     CheckNetwork(r.nets);
     std::stable_sort(r.hijacks.begin(), r.hijacks.end(), byScore);
     std::stable_sort(r.tasks.begin(), r.tasks.end(), byScore);

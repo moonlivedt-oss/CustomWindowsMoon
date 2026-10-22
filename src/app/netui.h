@@ -27,6 +27,7 @@ void Run(const std::wstring& key);  // действие по ключу: smart, 
 void OnEvent(LPARAM lp);
 void OnJob(LPARAM lp);
 void Game(bool on, const std::vector<DWORD>& pids, const std::wstring& name);
+void Dev(bool on);  // режим разработки (Unreal): тихий замер скорости не мешает сборке
 void Wake();  // после сна и разблокировки: проверить сразу, но обрыв какое-то время не считать
 void Tick();
 void Shutdown();

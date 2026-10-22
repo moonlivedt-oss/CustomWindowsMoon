@@ -65,7 +65,10 @@ ThemeInfo CurrentTheme(const Config& c) {
         t.glow = c.customAccent2;
         t.gold = c.customGold;
     }
-    if (c.dayTint) {
+    // снимки (эталоны студии, кольцо утилит) снимаются с RADIAL_DEMO: им цвета по часам не нужны - иначе вечерний
+    // снимок не совпал бы с дневным эталоном
+    static const bool snap = getenv("RADIAL_DEMO") != nullptr;
+    if (c.dayTint && !snap) {
         SYSTEMTIME st;
         GetLocalTime(&st);
         t = DayTint(t, c, st.wHour + st.wMinute / 60.0);

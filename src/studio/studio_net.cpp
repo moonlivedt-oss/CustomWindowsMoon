@@ -275,11 +275,12 @@ void Studio::NetPage(const RectF& r) {
     });
 
     // --- сторож ---
-    card(L"Сторож", 4.6f, [&](const RectF& b) {
+    card(L"Сторож", 5.6f, [&](const RectF& b) {
         toggle(row(b, 0, L"Следить за интернетом"), ID_NET_WATCH, cfg.netWatch);
         toggle(row(b, 1, L"Сообщать о смене выходного узла"), ID_NET_EXIT, cfg.netExit);
         toggle(row(b, 2, L"Проверять сеть при запуске игры"), ID_NET_GAME, cfg.netGame);
-        RectF ir = row(b, 3, L"Проверять раз в");
+        toggle(row(b, 3, L"Замерять скорость раз в сутки"), ID_NET_SPEED_AUTO, cfg.speedAuto);
+        RectF ir = row(b, 4, L"Проверять раз в");
         int sel = cfg.netInterval <= 10 ? 0 : cfg.netInterval <= 20 ? 1 : 2;
         if (ui.Segmented(ID_NET_INTERVAL, RectF(ir.X + ir.Width * 0.45f, ir.Y + ui.S(3), ir.Width * 0.55f, ui.S(38)),
                          {L"10 с", L"20 с", L"60 с"}, sel)) {
@@ -287,8 +288,9 @@ void Studio::NetPage(const RectF& r) {
             cfg.netInterval = sel == 0 ? 10 : sel == 1 ? 20 : 60;
             Save();
         }
-        note(b, 4,
+        note(b, 5,
              L"Пропал интернет - справа снизу карточка с причиной и кнопкой починки, сама сеть не сбрасывается. "
+             L"Скорость меряется, пока компьютер простаивает, - так копится сравнение «через туннель / напрямую». "
              L"Кольцо со всеми действиями - на углу (Стол - Углы, действие «Кольцо сети»).",
              c.muted);
     });

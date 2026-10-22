@@ -29,6 +29,7 @@ void OnPower();                     // сменился источник пит�
 void OnModes(bool game, bool dev);  // включился или выключился игровой режим или режим разработки
 void OnJob(WPARAM wp, LPARAM lp);
 void Shutdown();
+void OpenState();  // студия на «Состоянии» (из «Всё спокойно» в кольце утилит)
 
 // для студии
 using Entry = tools::JournalEntry;            // «16.10 14:05», что сделано
