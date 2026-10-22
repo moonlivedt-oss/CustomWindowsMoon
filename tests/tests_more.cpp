@@ -364,6 +364,25 @@ void TestWifiBand() {
     CHECK(net::WifiBandGuess(0).empty());
 }
 
+// О5: итог обхода на диске - туда и обратно, табуляция в именах не ломает строку
+void TestScanCache() {
+    tools::ScanCache c;
+    c.when = 1792700000, c.ddcOld = 123;
+    tools::Junk j;
+    j.name = L"Кэш\tnpm", j.path = L"C:\\npm", j.bytes = 7, j.fresh = 2, j.slow = true;
+    c.junk.push_back(j);
+    tools::ProjectJunk p;
+    p.project = L"D:\\proj", p.name = L"proj", p.path = L"D:\\proj\\node_modules", p.kind = L"node_modules";
+    p.bytes = 99, p.idleDays = 40;
+    c.projects.push_back(p);
+    tools::ScanCache b;
+    CHECK(tools::ParseScanCache(tools::ScanCacheRows(c), b));
+    CHECK(b.when == c.when && b.ddcOld == 123 && b.junk.size() == 1 && b.projects.size() == 1);
+    CHECK(b.junk[0].name == L"Кэш npm" && b.junk[0].bytes == 7 && b.junk[0].fresh == 2 && b.junk[0].slow);
+    CHECK(b.projects[0].path == p.path && b.projects[0].idleDays == 40 && b.projects[0].bytes == 99);
+    CHECK(!tools::ParseScanCache(L"junk\tбез времени\t\t1\t0\t0\t0", b));
+}
+
 void TestImportant() {
     tools::ImportantIn in;
     CHECK(tools::ImportantTodos(in).empty());
@@ -413,4 +432,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestSafeUrl();
     TestImportant();
     TestWifiBand();
+    TestScanCache();
 }

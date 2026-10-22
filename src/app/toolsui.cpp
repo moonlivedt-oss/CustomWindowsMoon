@@ -189,6 +189,11 @@ std::wstring Sys32(const wchar_t* name) {
 // сутки. full - всё сразу (кнопка «Обновить»).
 constexpr ULONGLONG kProjEvery = 3 * 3600 * 1000ull, kSysEvery = 24 * 3600 * 1000ull;
 std::atomic<ULONGLONG> g_projAt{0}, g_sysAt{0};
+// Обход кэшей и проектов взят с диска (О5): насколько он был старше g_projAt (после загрузки ПК счётчик тиков меньше
+// возраста файла - такой разницы в g_projAt не записать). Сбрасывается настоящим обходом.
+std::atomic<ULONGLONG> g_projExtra{0};
+
+bool ProjDue(ULONGLONG now) { return !g_projAt || now - g_projAt + g_projExtra > kProjEvery; }
 // Старт мягче (Н9): тяжёлое после входа - не разом, а по очереди. Подсчёт места (кэши, проекты) - через 90 с,
 // «Защита» - через 4 мин, суточный проход (снимок недели с подписями, устройства, обновления) - через 7 мин,
 // недельные проверки (здоровье дисков, версии) - через 10 мин.
@@ -281,10 +286,10 @@ void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
         tools::RecordSizes(names, bytes);
         tools::RecordFree();  // прогноз места (И10)
     }
-    s.growth = proj ? tools::WeekGrowth(7) : prev.growth;
+    s.growth = proj || prev.growth.empty() ? tools::WeekGrowth(7) : prev.growth;  // пусто - обход был с диска
     CoInitializeEx(nullptr,
                    COINIT_MULTITHREADED);  // история обновлений - через COM
-    s.git = proj ? tools::GitRepos(roots) : prev.git;
+    s.git = proj || prev.git.empty() ? tools::GitRepos(roots) : prev.git;
     {
         PERF_CPU(sys ? "cpu.scan.sys" : "cpu.scan.light");  // суточная часть отдельно: её старт разнесён (Н9)
         s.vhd = sys ? tools::VirtualDisks() : prev.vhd;
@@ -302,15 +307,36 @@ void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
     g_scan = std::move(s);
     ++g_scanGen;
     g_scanAt = GetTickCount64();
-    if (proj) g_projAt = g_scanAt.load();
+    if (proj) g_projAt = g_scanAt.load(), g_projExtra = 0;
     if (sys) g_sysAt = g_scanAt.load();
+    tools::ScanCache cache;
+    if (proj) cache = {UnixNow(), g_scan.junk, g_scan.projects, g_scan.ddcOld};
     ReleaseSRWLockExclusive(&g_scanLock);
+    if (proj) tools::SaveScanCache(cache);  // перезапуск в ближайшие 3 часа обойдётся без нового обхода
+}
+
+// Старт (О5): обход кэшей и проектов моложе 3 часов - с диска, следующий - в свой срок от того обхода.
+void LoadScanFromDisk() {
+    tools::ScanCache c;
+    if (!tools::LoadScanCache(c)) return;
+    LONGLONG age = UnixNow() - c.when;
+    if (age < 0 || (ULONGLONG)age * 1000 >= kProjEvery) return;
+    ULONGLONG ageMs = (ULONGLONG)age * 1000, now = GetTickCount64();
+    AcquireSRWLockExclusive(&g_scanLock);
+    g_scan.junk = std::move(c.junk);
+    g_scan.projects = std::move(c.projects);
+    g_scan.ddcOld = c.ddcOld;
+    ++g_scanGen;
+    ++g_junkGen;
+    ReleaseSRWLockExclusive(&g_scanLock);
+    g_projAt = now > ageMs ? now - ageMs : 1;
+    g_projExtra = now > ageMs ? 0 : ageMs - now;
 }
 
 void RefreshScan(bool full) {
     if (!g_cfg || g_scanRunning.exchange(true)) return;  // студия в режиме снимка: утилиты не запущены
     ULONGLONG now = GetTickCount64();
-    bool proj = full || ((!g_projAt || now - g_projAt > kProjEvery) && !HeavyWait(L"scan"));
+    bool proj = full || (ProjDue(now) && !HeavyWait(L"scan"));
     bool sys = full || ((!g_sysAt || now - g_sysAt > kSysEvery) && now - g_started > kSysDelay && !HeavyWait(L"sys"));
     std::vector<std::wstring> roots = g_roots.empty() ? ProjectRoots(*g_cfg) : g_roots;
     bool started = bg::Run(
@@ -524,6 +550,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
     g_diskCheck = GetTickCount64() - 9 * 60 * 1000;  // первая проверка места - через минуту после старта
     g_started = GetTickCount64();
     g_weeklyCheck = g_started;
+    LoadScanFromDisk();
     // остановили по «Стоп», а задание доработало в фоне - итог карточкой (из фонового потока - в поток окна)
     net::SetLeftDone([](net::Job j, bool ok, const std::wstring& last) {
         auto* m = new LeftMsg{j, ok, last};
@@ -794,7 +821,7 @@ void Tick() {
     // бы и процессор, и диск. От батареи тяжёлые части ждут зарядки (HeavyWait), лёгкие идут как обычно
     if (!g_game && !g_dev && now - g_started > kScanDelay && !g_scanRunning) {
         bool due = !g_scanAt || now - g_scanAt > 30 * 60 * 1000;
-        bool projDue = (!g_projAt || now - g_projAt > kProjEvery) && !HeavyWait(L"scan");
+        bool projDue = ProjDue(now) && !HeavyWait(L"scan");
         bool sysDue = (!g_sysAt || now - g_sysAt > kSysEvery) && now - g_started > kSysDelay && !HeavyWait(L"sys");
         if (due || projDue || sysDue) RefreshScan();
     }
@@ -874,6 +901,7 @@ void JunkCleaned(const std::vector<std::pair<std::wstring, ULONGLONG>>& freed) {
     ++g_junkGen;
     ++g_scanGen;
     ReleaseSRWLockExclusive(&g_scanLock);
+    tools::DropScanCache();
 }
 
 void SystemClean() { SysClean(); }
