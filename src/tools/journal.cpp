@@ -26,8 +26,9 @@ std::string ReadAll(const std::wstring& file) {
 
 }  // namespace
 
-void JournalAdd(const std::wstring& dir, const std::wstring& when, const std::wstring& text, ULONGLONG limit) {
-    std::string u = Narrow(when + L"\t" + text + L"\n");
+void JournalAdd(const std::wstring& dir, const std::wstring& when, const std::wstring& text, ULONGLONG limit,
+                const std::wstring& undo) {
+    std::string u = Narrow(when + L"\t" + text + (undo.empty() ? L"" : L"\t" + undo) + L"\n");
     AcquireSRWLockExclusive(&g_lock);
     std::wstring file = JournalFile(dir, false);
     HANDLE f = CreateFileW(file.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
@@ -60,10 +61,38 @@ std::vector<JournalEntry> JournalRead(const std::wstring& dir, size_t max) {
             end = start == std::wstring::npos ? 0 : start;
             size_t tab = line.find(L'\t');
             if (tab == std::wstring::npos) continue;
-            out.push_back({line.substr(0, tab), line.substr(tab + 1)});
+            size_t tab2 = line.find(L'\t', tab + 1);
+            if (tab2 == std::wstring::npos)
+                out.push_back({line.substr(0, tab), line.substr(tab + 1), L""});
+            else
+                out.push_back({line.substr(0, tab), line.substr(tab + 1, tab2 - tab - 1), line.substr(tab2 + 1)});
         }
     }
     return out;
+}
+
+std::wstring UndoPack(const std::wstring& kind, const std::vector<std::wstring>& args) {
+    std::wstring s = kind;
+    for (const std::wstring& a : args) {
+        if (a.find_first_of(L"|\t\n\r") != std::wstring::npos) continue;  // такой путь не упаковать - пропускаем
+        s += L"|" + a;
+    }
+    return s;
+}
+
+bool UndoParse(const std::wstring& s, Undo& u) {
+    u = {};
+    size_t bar = s.find(L'|');
+    if (s.empty() || bar == 0 || bar == std::wstring::npos) return false;
+    u.kind = s.substr(0, bar);
+    while (bar != std::wstring::npos) {
+        size_t next = s.find(L'|', bar + 1);
+        std::wstring a = s.substr(bar + 1, next == std::wstring::npos ? std::wstring::npos : next - bar - 1);
+        while (!a.empty() && a.back() == L'\r') a.pop_back();
+        if (!a.empty()) u.args.push_back(a);
+        bar = next;
+    }
+    return !u.args.empty();
 }
 
 }  // namespace tools

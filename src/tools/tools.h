@@ -382,6 +382,8 @@ struct AppClose {
 // силой
 AppClose CloseApp(const HeavyApp& app, int waitMs, const Log& log);
 ULONGLONG RecycleBinBytes(ULONGLONG* items = nullptr);
+// Вернуть файлы из Корзины на прежнее место (как «Восстановить»); сколько вернулось (Л3). Ничего не удаляет.
+int RestoreRecycled(const std::vector<std::wstring>& paths);
 bool EmptyRecycleBin();
 struct MemoryState {
     ULONGLONG total = 0, avail = 0;
