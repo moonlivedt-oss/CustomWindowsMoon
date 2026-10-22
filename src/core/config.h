@@ -171,6 +171,7 @@ struct Config {
         L"ShaderCompileWorker.exe|git.exe|cargo.exe|npm.cmd|node.exe|RunUAT.bat|"
         L"UnrealEditor-Cmd.exe|dotnet.exe";
     int longMin = 3;  // от скольких минут работы команда считается долгой
+    bool appVolume = true;  // Л36: помнить громкость каждой программы и возвращать при новом запуске
     std::vector<Item> left, right;
     std::vector<AppRing> apps;  // кольца программ
     std::vector<WorkSet> sets;  // рабочие наборы

@@ -280,6 +280,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.longApps = val;
             else if (key == L"long_min")
                 cfg.longMin = std::clamp(_wtoi(val.c_str()), 1, 120);
+            else if (key == L"app_volume")
+                cfg.appVolume = ParseBool(val);
             else if (key == L"scale")
                 cfg.scale = std::clamp(_wtof(val.c_str()), 0.5, 3.0);
             else if (key == L"accent") {
@@ -574,6 +576,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"long_watch = " << (c.longWatch ? 1 : 0) << L"\n";
     o << L"long_apps = " << c.longApps << L"\n";
     o << L"long_min = " << c.longMin << L"\n";
+    o << L"# громкость по программам: уровень из микшера помнится по exe и возвращается при новом запуске\n";
+    o << L"app_volume = " << (c.appVolume ? 1 : 0) << L"\n";
 
     auto ring = [&](const wchar_t* tag, const std::vector<Item>& v) {
         o << L"\n" << tag << L"\n";
