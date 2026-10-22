@@ -396,7 +396,8 @@ build.cmd snaps
 src/
   app/      main.cpp - трей, опрос Alt + край экрана; autostart - запуск с Windows; netui, toolsui - сеть и утилиты в программе (toolsui.cpp - фоновые подсчёты,
             слежка, чистка; toolsui_ring.cpp - сборка кольца; toolsui_run.cpp - действия пунктов; общее - toolsui_internal.h);
-            devcli - служебные режимы запуска (--ocr, --dlg, --lock-apply, --purge и другие)
+            devcli - служебные режимы запуска (--ocr, --dlg, --lock-apply, --purge и другие; по темам: devcli_net - сеть,
+            devcli_tools - утилиты, «Защита», слежка, MFT, devcli_snaps - снимки, фильмы, эталоны; общее - devcli_internal.h)
   core/     crash - дамп падения и отчёт при следующем запуске; bg - разовые фоновые задачи (bg::Run, ожидание при выходе; все разовые потоки программы идут через него, свои CreateThread - только у долгих циклов со своим событием остановки); config - radial.cfg; themes - 12 тем; text, files - строки и пути; mem - память в простое;
             project - значок и тип папки-проекта, строки карточки;
             launch - VS Code, терминал, фокус; perf - замеры; fx - скорость анимаций и игровой режим;

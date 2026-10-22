@@ -230,7 +230,9 @@ Autoruns и System Informer, BleachBit, Ditto (история буфера), Eve
   выдуманные) и tools-ring (`toolsui::DemoRingItems`, `--tools-ring-snap файл сектор demo`); записаны и просмотрены, старые 6 совпали.
 
 ### Код
-- [ ] **Н12. devcli.cpp (1250 строк)** - разнести по темам (сеть, утилиты, снимки и замеры), как toolsui.
+- [x] **Н12. devcli.cpp (1250 строк)** - разнести по темам (сеть, утилиты, снимки и замеры), как toolsui.
+  Сделано: devcli.cpp (разбор командной строки и мелкие режимы, ~420 строк) + devcli_net, devcli_tools, devcli_snaps,
+  общее - devcli_internal.h. Проверено: --watch-selftest, --scene-film, --crash-decode, build.cmd snaps.
 - [ ] **Н13. clang-tidy по всему src** (build.cmd lint) - чисто ли после трёх заходов; исправить найденное.
 
 ## Ревью 2026-10-22: замеры и надёжность
