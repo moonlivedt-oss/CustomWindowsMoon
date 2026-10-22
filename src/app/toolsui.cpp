@@ -1,5 +1,7 @@
 #include "app/toolsui_internal.h"
 
+#include "core/perf.h"
+
 namespace toolsui {
 
 HWND g_app = nullptr;
@@ -184,8 +186,14 @@ void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
     AcquireSRWLockShared(&g_scanLock);
     Scan prev = g_scan;  // что в этот раз не пересчитываем - берём из прошлого
     ReleaseSRWLockShared(&g_scanLock);
-    s.junk = tools::FindJunk(true);
-    s.ddcOld = tools::OldBytes(tools::DdcDir(), kDdcDays);
+    // кэши (TEMP, npm, pip, Unreal) - миллионы файлов и десятки секунд процессора: вместе с проектами, раз в 3 часа
+    // (и по кнопке); между ними - прошлый ответ, а после чистки его поправляет JunkCleaned
+    if (proj) {
+        s.junk = tools::FindJunk(true, &s.ddcOld, kDdcDays);
+    } else {
+        s.junk = prev.junk;
+        s.ddcOld = prev.ddcOld;
+    }
     s.projects = proj ? tools::FindProjectJunk(roots) : prev.projects;
     s.conflicts = tools::PathConflicts();
     if (proj) {
@@ -244,7 +252,11 @@ void RefreshScan(bool full) {
     std::vector<std::wstring> roots = g_roots.empty() ? ProjectRoots(*g_cfg) : g_roots;
     bool started = bg::Run(
         [roots, proj, sys] {
-            ScanPass(roots, proj, sys);
+            SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);  // и диск - в последнюю очередь
+            {
+                PERF_CPU("cpu.scan");
+                ScanPass(roots, proj, sys);
+            }
             g_scanRunning = false;
         },
         THREAD_PRIORITY_LOWEST);  // фоновый обход диска не мешает работе
@@ -257,8 +269,13 @@ void RefreshSecurity() {
     if (!g_app || g_secRunning.exchange(true)) return;
     bool started = bg::Run(
         [] {
+            SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);  // чтение файлов для подписей - тоже
             CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-            tools::SecurityScan s = tools::ScanSecurity();
+            tools::SecurityScan s;
+            {
+                PERF_CPU("cpu.security");
+                s = tools::ScanSecurity();
+            }
             CoUninitialize();
             AcquireSRWLockExclusive(&g_secLock);
             g_sec = std::move(s);
@@ -510,6 +527,7 @@ DWORD WINAPI WatchLoop(void*) {
             selfAt = now + 3600 * 1000;
         }
         if (now >= nextFull) {
+            PERF_CPU("cpu.watch");
             std::vector<tools::ProcInfo> ps = tools::Processes();
             ULONGLONG in = 0, out = 0;
             tools::NetCounters(in, out);
@@ -1266,10 +1284,11 @@ void Tick() {
     ULONGLONG now = GetTickCount64();
     if (now - g_proactiveAt > 5000) TryProactive();  // отложенное, пока была другая карточка
     LiveAlert(now);
-    // фоновый подсчёт: первый раз через минуту после старта, дальше раз в полчаса
-    if (now - g_started > 60000 && (!g_scanAt || now - g_scanAt > 30 * 60 * 1000)) RefreshScan();
-    // «Защита»: первый раз через 3 минуты после старта (подписи считаются долго), дальше раз в полчаса
-    if (now - g_started > 3 * 60 * 1000 && (!g_secAt || now - g_secAt > 30 * 60 * 1000)) RefreshSecurity();
+    // фоновый подсчёт: первый раз через минуту после старта, дальше раз в полчаса; в игре и при открытом Unreal
+    // (шейдеры, сборка) обход диска ждёт - он отнимал бы и процессор, и диск
+    if (!g_game && !g_dev && now - g_started > 60000 && (!g_scanAt || now - g_scanAt > 30 * 60 * 1000)) RefreshScan();
+    // «Защита»: первый раз через 3 минуты после старта (подписи считаются долго), дальше раз в полчаса; не в игре
+    if (!g_game && now - g_started > 3 * 60 * 1000 && (!g_secAt || now - g_secAt > 30 * 60 * 1000)) RefreshSecurity();
     // недельные проверки: через 3 минуты после старта, потом раз в 6 часов смотрим, не пора ли
     if (now - g_weeklyCheck > (g_weeklyCheck == g_started ? 3 * 60 * 1000 : 6 * 3600 * 1000)) {
         g_weeklyCheck = now;

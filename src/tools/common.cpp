@@ -404,7 +404,7 @@ bool TempRemovable(const WalkFile& f, ULONGLONG now) {
     return !FileInUse(f.Path());
 }
 
-std::vector<Junk> FindJunk(bool sizes) {
+std::vector<Junk> FindJunk(bool sizes, ULONGLONG* ddcOld, int ddcDays) {
     // slow - пересоздаётся дорого (шейдеры собираются заново, первые запуски игр и редактора тормозят):
     // в «Всё сразу» не входит, только по отдельности
     struct Entry {
@@ -429,6 +429,8 @@ std::vector<Junk> FindJunk(bool sizes) {
         {L"Кэш Unreal Engine", L"%LOCALAPPDATA%\\UnrealEngine\\Common\\DerivedDataCache", true},
     };
     std::vector<Junk> out;
+    std::wstring temp = TempDir(), ddc = DdcDir();
+    if (ddcOld) *ddcOld = 0;
     for (const Entry& e : list) {
         Junk j;
         j.name = e.name;
@@ -439,10 +441,19 @@ std::vector<Junk> FindJunk(bool sizes) {
             out.push_back(j);
             continue;
         }
-        if (_wcsicmp(j.path.c_str(), TempDir().c_str()) == 0)
+        if (_wcsicmp(j.path.c_str(), temp.c_str()) == 0) {
             TempBytes(j);
-        else
+        } else if (ddcOld && _wcsicmp(j.path.c_str(), ddc.c_str()) == 0) {
+            // кэш Unreal - десятки ГБ: и весь размер, и старое (OldBytes) - одним обходом, а не двумя подряд
+            ULONGLONG cutoff = NowStamp() - (ULONGLONG)ddcDays * kDay;
+            WalkFiles(j.path, [&](const WalkFile& f) {
+                if (CloudOnly(f.attrs)) return;
+                j.bytes += f.size;
+                if (std::max(f.access, f.write) < cutoff) *ddcOld += f.size;
+            });
+        } else {
             j.bytes = FreeableBytes(j.path);
+        }
         if (j.bytes || j.fresh) out.push_back(j);
     }
     std::sort(out.begin(), out.end(), [](const Junk& a, const Junk& b) { return a.bytes > b.bytes; });
