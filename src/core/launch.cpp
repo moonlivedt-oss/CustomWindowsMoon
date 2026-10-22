@@ -22,6 +22,11 @@ std::wstring FindVsCode(const Config* c) {
     return L"code";
 }
 
+void OpenCodeAt(const Config* c, const std::wstring& at) {
+    if (at.empty()) return;
+    ShellExecuteW(nullptr, nullptr, FindVsCode(c).c_str(), (L"-g \"" + at + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+}
+
 void OpenTerminal(const Config* c, std::wstring dir) {
     if (!dir.empty() && dir.back() == L'\\') dir += L".";
     std::wstring t = Lower(c->terminal);

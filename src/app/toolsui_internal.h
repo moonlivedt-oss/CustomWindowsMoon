@@ -34,6 +34,7 @@ constexpr int kDdcDays = 30, kIdleDays = 60;
 constexpr UINT kWatchTag = 0x5F;   // wParam у WM_TOOLS_JOB: новый снимок слежки
 constexpr UINT kWeeklyTag = 0x57;  // wParam у WM_TOOLS_JOB: итог недельной проверки
 constexpr UINT kLeftTag = 0x5B;    // wParam у WM_TOOLS_JOB: задание, брошенное по «Стоп», доработало (LeftMsg)
+constexpr UINT kBuildTag = 0x5A;   // wParam у WM_TOOLS_JOB: повторная сборка CMake нашла ошибку (BuildMsg, Л31)
 constexpr UINT kSelfTag = 0x5C;    // wParam у WM_TOOLS_JOB: часовой снимок своей памяти (SelfMsg)
 constexpr UINT kDiskTag = 0x5D;    // wParam у WM_TOOLS_JOB: карточка «Мало места» собрана
 
@@ -132,6 +133,11 @@ extern ULONGLONG g_devEnded;
 extern std::set<std::wstring> g_leakWarned;
 extern ULONGLONG g_commitWarned, g_proactiveAt;
 // сообщения фоновых потоков основному (WM_TOOLS_JOB, lParam): разбирает OnJob
+struct BuildMsg {  // kBuildTag: итог повторной сборки CMake
+    int code;
+    std::wstring dir, plain, hint, go;
+};
+void BuildFound(const BuildMsg& m);
 struct SelfMsg {  // kSelfTag: часовой снимок своей памяти
     std::wstring line, leak;
 };

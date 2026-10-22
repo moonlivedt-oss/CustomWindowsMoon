@@ -712,6 +712,11 @@ void OnJob(WPARAM wp, LPARAM lp) {
                     Theme(), 20000, m->ok ? Toast::G_OK : Toast::G_FAIL);
         return;
     }
+    if (wp == kBuildTag) {
+        std::unique_ptr<BuildMsg> m((BuildMsg*)lp);
+        BuildFound(*m);
+        return;
+    }
     if (wp == kSelfTag) {
         std::unique_ptr<SelfMsg> m((SelfMsg*)lp);
         autos::Note(m->line);  // журнал пишет поток окна: так строки не перемешаются с остальной автоматикой

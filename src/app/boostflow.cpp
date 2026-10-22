@@ -10,6 +10,7 @@
 #include "app/toolsui.h"
 #include "core/bg.h"
 #include "core/files.h"
+#include "core/launch.h"
 #include "core/fx.h"
 #include "core/text.h"
 #include "core/themes.h"
@@ -398,9 +399,20 @@ void OnBoostNote(const gboost::Note& n) {
             if (!g_cfg.devWatch) return;
             if (n.b > 0)
                 g_gbCard.Show(BoostCard::DONE, L"Сборка готова за " + MinSec(n.a), n.sub, t, 7000, Toast::G_OK);
-            else
+            else if (!n.go.empty()) {  // Л31: место ошибки известно - открыть его в VS Code
+                std::wstring go = n.go;
+                g_gbCard.yesLabel = L"Открыть в VS Code";
+                g_gbCard.noLabel = L"Позже";
+                g_gbCard.onYes = [go] {
+                    g_gbCard.yesLabel.clear(), g_gbCard.noLabel.clear();
+                    OpenCodeAt(&g_cfg, go);
+                };
+                g_gbCard.onNo = nullptr;
+                g_gbCard.Show(BoostCard::OFFER, L"Сборка не удалась", n.text, t, 30000, Toast::G_FAIL);
+            } else {
                 g_gbCard.Show(BoostCard::DONE, L"Сборка не удалась",
                               n.text.empty() ? L"Подробности - в окне вывода." : n.text, t, 20000, Toast::G_FAIL);
+            }
             return;
         case gboost::EV_PURGED:
             return;  // тихо: итог игры скажет, сколько раз

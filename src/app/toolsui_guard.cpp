@@ -3,8 +3,10 @@
 // снимки, приоритеты, запрет сна и очередь для основного потока (карточки и журнал показывает Tick).
 #include "app/toolsui_internal.h"
 
+#include "core/launch.h"
 #include "core/perf.h"
 #include "core/procsnap.h"
+#include "tools/builderr.h"
 #include "tools/guard.h"
 
 namespace toolsui {
@@ -26,7 +28,12 @@ struct LongDone {
     DWORD code;
     bool haveCode;
 };
-std::vector<LongDone> g_longDone;             // под g_guardLock: долгие команды закончились
+std::vector<LongDone> g_longDone;  // под g_guardLock: долгие команды закончились
+struct BuildFail {                 // Л31: cmake --build закончился с ошибкой
+    std::wstring exe, dir;         // cmake.exe и папка сборки (полный путь)
+    ULONGLONG ms;
+};
+std::vector<BuildFail> g_buildFails;          // под g_guardLock
 std::wstring g_awake;                         // под g_guardLock: что держит без сна
 std::vector<guard::Balancer::Act> g_lowered;  // под g_guardLock: кто сейчас понижен
 std::atomic<bool> g_restoreAll{false};
@@ -81,11 +88,17 @@ DWORD WINAPI GuardLoop(void*) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     guard::Balancer bal;
     guard::LongWatch lw;
-    std::set<DWORD> lowered;          // кому приоритет понизили мы (возвращаем только им)
+    std::set<DWORD> lowered;           // кому приоритет понизили мы (возвращаем только им)
     std::map<DWORD, ULONGLONG> ruled;  // кому правило уже применено (pid -> время создания: номер мог смениться)
     std::wstring rulesText;
     std::vector<guard::ProcRule> rules;
     std::map<DWORD, HANDLE> handles;  // долгие команды: держим, чтобы узнать код выхода
+    struct BuildRun {
+        HANDLE h = nullptr;  // nullptr - это не «cmake --build», больше не смотрим
+        std::wstring exe, dir;
+        ULONGLONG t0 = 0;
+    };
+    std::map<DWORD, BuildRun> builds;  // Л31: cmake --build - держим, чтобы узнать код выхода
     DWORD self = GetCurrentProcessId();
     int cores = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
     bool awakeOn = false;
@@ -207,6 +220,48 @@ DWORD WINAPI GuardLoop(void*) {
             g_longDone.push_back({d.name, d.ms, code, have});
             ReleaseSRWLockExclusive(&g_guardLock);
         }
+        // ---- сборка CMake (Л31): упала - в очередь карточки; свои повторные сборки (родитель - мы) не в счёт ----
+        for (const guard::Proc& p : procs) {
+            if (builds.count(p.pid) || p.parent == self || !guard::Match(p.name, L"cmake.exe")) continue;
+            BuildRun& b = builds[p.pid];
+            HANDLE h = OpenProcess(
+                SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE,
+                p.pid);
+            if (!h) continue;
+            std::vector<std::wstring> t = tools::CmdTokens(tools::ProcCommandLine(h));
+            auto at = std::find(t.begin(), t.end(), L"--build");
+            wchar_t img[MAX_PATH * 2];
+            DWORD n = MAX_PATH * 2;
+            if (at == t.end() || at + 1 == t.end() || !QueryFullProcessImageNameW(h, 0, img, &n)) {
+                CloseHandle(h);
+                continue;
+            }
+            std::wstring dir = *(at + 1);
+            if (!(dir.size() > 2 && dir[1] == L':')) dir = tools::ProcCurrentDir(h) + L"\\" + dir;
+            wchar_t full[MAX_PATH * 2];
+            DWORD fn = GetFullPathNameW(dir.c_str(), MAX_PATH * 2, full, nullptr);
+            b = {h, img, fn && fn < MAX_PATH * 2 ? full : dir, now};
+        }
+        for (auto it = builds.begin(); it != builds.end();) {
+            BuildRun& b = it->second;
+            bool alive =
+                std::any_of(procs.begin(), procs.end(), [&](const guard::Proc& p) { return p.pid == it->first; });
+            DWORD code = 0;
+            if (b.h && WaitForSingleObject(b.h, 0) == WAIT_OBJECT_0 && GetExitCodeProcess(b.h, &code)) {
+                if (code != 0 && !g_game) {
+                    AcquireSRWLockExclusive(&g_guardLock);
+                    g_buildFails.push_back({b.exe, b.dir, now - b.t0});
+                    ReleaseSRWLockExclusive(&g_guardLock);
+                }
+                CloseHandle(b.h);
+                b.h = nullptr;
+            }
+            if (!alive && !b.h)
+                it = builds.erase(it);
+            else
+                ++it;
+        }
+
         for (auto it = handles.begin(); it != handles.end();) {  // закончившиеся закрываем
             DWORD code = 0;
             if (GetExitCodeProcess(it->second, &code) && code != STILL_ACTIVE &&
@@ -226,6 +281,8 @@ DWORD WINAPI GuardLoop(void*) {
     for (DWORD pid : lowered) SetPrio(pid, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS);
     SetThreadExecutionState(ES_CONTINUOUS);
     for (auto& [pid, h] : handles) CloseHandle(h);
+    for (auto& [pid, b] : builds)
+        if (b.h) CloseHandle(b.h);
     return 0;
 }
 
@@ -249,6 +306,60 @@ void GuardStop() {
     g_guardThread = nullptr;
 }
 
+// Л31: cmake --build упал. Вывода у нас нет (он в чужом окне) - по согласию собираем упавшее ещё раз в фоне (ninja
+// повторит только то, что не собралось), первую ошибку - понятным языком, с переходом в VS Code.
+void BuildFailed(const std::wstring& exe, const std::wstring& dir) {
+    std::wstring leaf = Leaf(dir);
+    std::wstring proj = Leaf(dir.substr(0, dir.find_last_of(L'\\')));  // папка проекта над папкой сборки
+    autos::Note(L"Сборка CMake упала: " + dir);
+    if (g_busy) return;
+    Ask(
+        L"Сборка не удалась: " + proj,
+        L"cmake --build " + leaf + L" закончился с ошибкой. Найти первую ошибку? Упавшее соберётся ещё раз в фоне.",
+        L"Найти ошибку", L"Не надо",
+        [exe, dir] {
+            g_card.Show(BoostCard::WORKING, L"Ищу ошибку", L"cmake --build " + dir, Theme());
+            bg::Run(
+                [exe, dir] {
+                    std::wstring out;
+                    int code = tools::RunCapture(L"\"" + exe + L"\" --build \"" + dir + L"\"", out, 10 * 60 * 1000);
+                    auto* m = new BuildMsg{code, dir, L"", L"", L""};
+                    builderr::Error e;
+                    if (code != 0 && builderr::First(out, e)) {
+                        m->plain = builderr::Plain(e);
+                        m->hint = builderr::Hint(e);
+                        m->go = builderr::GotoArg(e, dir);
+                    }
+                    if (!PostMessageW(g_app, WM_TOOLS_JOB, kBuildTag, (LPARAM)m)) delete m;
+                },
+                THREAD_PRIORITY_BELOW_NORMAL);
+        },
+        nullptr, 40000, Toast::G_FAIL);
+}
+
+void BuildFound(const BuildMsg& m) {
+    if (m.code == 0) {
+        g_card.Show(BoostCard::DONE, L"Сборка прошла", L"Со второго раза ошибки нет: " + m.dir, Theme(), 8000,
+                    Toast::G_OK);
+        return;
+    }
+    if (m.plain.empty()) {
+        g_card.Show(BoostCard::DONE, L"Ошибку не разобрал",
+                    L"Сборка падает, но строки с ошибкой в выводе нет. Код " + std::to_wstring(m.code) + L".", Theme(),
+                    12000, Toast::G_FAIL);
+        return;
+    }
+    std::wstring sub = m.plain + (m.hint.empty() ? L"" : L"\n" + m.hint);
+    if (m.go.empty()) {
+        g_card.Show(BoostCard::DONE, L"Ошибка сборки", sub, Theme(), 25000, Toast::G_FAIL);
+        return;
+    }
+    std::wstring go = m.go;
+    Ask(
+        L"Ошибка сборки", sub, L"Открыть в VS Code", L"Позже", [go] { OpenCodeAt(g_cfg, go); }, nullptr, 40000,
+        Toast::G_FAIL);
+}
+
 // из Tick (основной поток): снимок настроек для потока, журнал и карточки из очереди
 void GuardTick() {
     ULONGLONG now = GetTickCount64();
@@ -266,9 +377,12 @@ void GuardTick() {
     AcquireSRWLockExclusive(&g_guardLock);
     std::vector<std::wstring> notes = std::move(g_guardNotes);
     std::vector<LongDone> done = std::move(g_longDone);
+    std::vector<BuildFail> fails = std::move(g_buildFails);
     g_guardNotes.clear();
     g_longDone.clear();
+    g_buildFails.clear();
     ReleaseSRWLockExclusive(&g_guardLock);
+    for (const BuildFail& f : fails) BuildFailed(f.exe, f.dir);
     for (const std::wstring& n : notes) autos::Note(n);
     for (const LongDone& d : done) {
         bool fail = d.haveCode && d.code != 0;

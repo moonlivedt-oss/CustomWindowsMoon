@@ -20,6 +20,7 @@
 #include "tools/healthscore.h"
 #include "tools/important.h"
 #include "tools/journal.h"
+#include "tools/builderr.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
 #include "desk/cardlog.h"
@@ -557,6 +558,52 @@ void TestJournalUndo() {
     RemoveDirectoryW(d.c_str());
 }
 
+// Сломанная сборка (Л31): первая настоящая ошибка у MSVC/UBT, GCC/Clang, линкера и CMake, подсказки, место для VS Code
+void TestBuildErr() {
+    builderr::Error e;
+    std::wstring ubt =
+        L"Building MyGameEditor...\r\n"
+        L"[1/3] Compile [x64] Player.cpp\r\n"
+        L"D:\\Games\\My\\Source\\My\\Player.cpp(42,17): error C2065: 'Hp': undeclared identifier\r\n"
+        L"D:\\Games\\My\\Source\\My\\Player.cpp(50): error C2143: syntax error: missing ';' before '}'\r\n"
+        L"Result: Failed (OtherCompilationError)\r\n";
+    CHECK(builderr::First(ubt, e) && e.line == 42 && e.col == 17 && e.code == L"C2065" &&
+          e.file == L"D:\\Games\\My\\Source\\My\\Player.cpp" && e.text == L"'Hp': undeclared identifier");
+    CHECK(builderr::Plain(e) == L"Player.cpp, строка 42: C2065 'Hp': undeclared identifier");
+    CHECK(builderr::Hint(e).find(L"не объявлено") != std::wstring::npos);
+    CHECK(builderr::GotoArg(e, L"") == L"D:\\Games\\My\\Source\\My\\Player.cpp:42:17");
+    std::wstring gcc =
+        L"[3/10] Building CXX object CMakeFiles/app.dir/src/main.cpp.obj\r\n"
+        L"FAILED: CMakeFiles/app.dir/src/main.cpp.obj\r\n"
+        L"D:/Proj/src/main.cpp: In function 'int main()':\r\n"
+        L"D:/Proj/src/main.cpp:12:5: error: 'foo' was not declared in this scope\r\n"
+        L"ninja: build stopped: subcommand failed.\r\n";
+    CHECK(builderr::First(gcc, e) && e.file == L"D:/Proj/src/main.cpp" && e.line == 12 && e.col == 5 &&
+          e.code.empty() && e.text == L"'foo' was not declared in this scope");
+    CHECK(builderr::GotoArg(e, L"") == L"D:\\Proj\\src\\main.cpp:12:5");
+    std::wstring rel = L"../src/a.cpp:7: fatal error: b.h: No such file or directory\n";
+    CHECK(builderr::First(rel, e) && e.file == L"../src/a.cpp" && e.line == 7 && e.col == 0);
+    CHECK(builderr::GotoArg(e, L"D:\\Proj\\build") == L"D:\\Proj\\src\\a.cpp:7");
+    CHECK(builderr::Hint(e).find(L"заголовок") != std::wstring::npos);
+    std::wstring lnk =
+        L"Module.My.cpp.obj : error LNK2019: unresolved external symbol \"void Foo()\"\r\n"
+        L"D:\\Games\\My\\Binaries\\Win64\\UnrealEditor-My.dll : fatal error LNK1120: 1 unresolved externals\r\n";
+    CHECK(builderr::First(lnk, e) && e.code == L"LNK2019" && e.file.empty() && e.line == 0);
+    CHECK(builderr::Hint(e).find(L"Build.cs") != std::wstring::npos && builderr::GotoArg(e, L"").empty());
+    std::wstring ld =
+        L"collect2.exe: error: ld returned 1 exit status\nmain.cpp:(.text+0x1e): undefined reference to `bar()'\n";
+    CHECK(builderr::First(ld, e) && e.text == L"undefined reference to `bar()'");  // итоговая строка не в счёт
+    std::wstring cm =
+        L"-- Configuring incomplete\nCMake Error at CMakeLists.txt:12 (add_executable):\n  Cannot find source file:\n";
+    CHECK(builderr::First(cm, e) && e.file == L"CMakeLists.txt" && e.line == 12 &&
+          e.text == L"Cannot find source file:");
+    std::wstring live =
+        L"Unable to build while Live Coding is active. Exit the editor and game, or press Ctrl+Alt+F11\n"
+        L"ERROR: Unable to build while Live Coding is active.\n";
+    CHECK(builderr::First(live, e) && builderr::Hint(e).find(L"Live Coding") != std::wstring::npos);
+    CHECK(!builderr::First(L"Result: Succeeded\nTotal execution time: 3.1 seconds\n", e));
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -580,4 +627,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestAppHealth();
     TestCardLog();
     TestJournalUndo();
+    TestBuildErr();
 }

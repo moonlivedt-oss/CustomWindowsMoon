@@ -40,6 +40,7 @@
 #include "net/wifi.h"
 #include "gfx/qr.h"
 #include "studio/studio.h"
+#include "tools/builderr.h"
 #include "tools/tools.h"
 
 namespace devcli {
@@ -346,8 +347,21 @@ bool Run(int& exitCode) {
             o += f.path + L"\t" + tools::Bytes(f.bytes) + L"\t" + std::to_wstring(f.files) + L"\r\n";
         WriteOut(L"find_out.txt", o);
         exitCode = any ? 0 : 1;
-    } else if (Value(args, L"--undelete",
-                     v)) {  // --undelete <путь>: вернуть из Корзины (Л3) -> код = сколько вернулось
+    } else if (Has(args, L"--build-err")) {  // --build-err <cmake.exe> <папка сборки>: как «Найти ошибку» (Л31)
+        size_t i = std::find(args.begin(), args.end(), L"--build-err") - args.begin();
+        if (i + 2 < args.size()) {
+            std::wstring out;
+            int code = tools::RunCapture(L"\"" + args[i + 1] + L"\" --build \"" + args[i + 2] + L"\"", out, 600000);
+            builderr::Error e;
+            std::wstring o = L"код " + std::to_wstring(code) + L"\r\n";
+            if (builderr::First(out, e))
+                o += builderr::Plain(e) + L"\r\n" + builderr::Hint(e) + L"\r\n" + builderr::GotoArg(e, args[i + 2]);
+            WriteOut(L"build_out.txt", o);
+            exitCode = code;
+        } else {
+            exitCode = 2;
+        }
+    } else if (Value(args, L"--undelete", v)) {  // вернуть из Корзины (Л3); код - сколько вернулось
         exitCode = tools::RestoreRecycled({v});
     } else if (Value(args, L"--mft-test", v)) {  // --mft-test <папка>, из консоли администратора -> mft_out.txt
         exitCode = MftTest(v);

@@ -349,6 +349,11 @@ struct Listener {
     std::wstring command;  // командная строка, коротко
     int conns = 0;         // TCP-соединений на этом порту сейчас (для живой сцены: ток по кабелю)
 };
+// Чужой процесс того же пользователя (Л31): командная строка, текущая папка (из PEB, 64 бита), разбор строки на
+// слова по правилам кавычек. Ручке нужны PROCESS_QUERY_LIMITED_INFORMATION и PROCESS_VM_READ.
+std::wstring ProcCommandLine(HANDLE h);
+std::wstring ProcCurrentDir(HANDLE h);
+std::vector<std::wstring> CmdTokens(const std::wstring& cmd);
 std::vector<Listener> Listeners();                 // кто слушает порты
 void ListenerProjects(std::vector<Listener>& ls);  // заполнить project и command
                                                    // (только для dev-портов)

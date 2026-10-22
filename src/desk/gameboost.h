@@ -30,6 +30,7 @@ struct Note {
     Event ev;
     double a = 0, b = 0;
     std::wstring text, sub;
+    std::wstring go;  // EV_BUILD_DONE с ошибкой: «файл:строка:столбец» для VS Code (code -g); пусто - места нет
 };
 
 // ---------------- процессы ----------------
