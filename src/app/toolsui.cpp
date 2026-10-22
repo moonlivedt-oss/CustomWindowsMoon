@@ -188,6 +188,55 @@ std::wstring Sys32(const wchar_t* name) {
 // сутки. full - всё сразу (кнопка «Обновить»).
 constexpr ULONGLONG kProjEvery = 3 * 3600 * 1000ull, kSysEvery = 24 * 3600 * 1000ull;
 std::atomic<ULONGLONG> g_projAt{0}, g_sysAt{0};
+// Старт мягче (Н9): тяжёлое после входа - не разом, а по очереди. Подсчёт места (кэши, проекты) - через 90 с,
+// «Защита» - через 4 мин, суточный проход (снимок недели с подписями, устройства, обновления) - через 7 мин,
+// недельные проверки (здоровье дисков, версии) - через 10 мин.
+constexpr ULONGLONG kScanDelay = 90 * 1000, kSecDelay = 4 * 60 * 1000, kSysDelay = 7 * 60 * 1000,
+                    kWeeklyDelay = 10 * 60 * 1000;
+
+// Тяжёлое - не от батареи (Н8): обход кэшей, суточный проход, «Защита» и недельные проверки ждут зарядки, но не
+// дольше суток с прошлого раза (время прошлого раза - в weekly.ini, секция heavy, переживает перезапуск).
+namespace {
+SRWLOCK g_heavyLock = SRWLOCK_INIT;
+std::map<std::wstring, LONGLONG> g_heavy;  // что -> когда было, секунды unix; читается из файла один раз
+
+LONGLONG UnixNow() {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    return (LONGLONG)((((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 10000000ull - 11644473600ull);
+}
+
+LONGLONG HeavyLast(const std::wstring& what) {
+    AcquireSRWLockExclusive(&g_heavyLock);
+    auto it = g_heavy.find(what);
+    if (it == g_heavy.end()) {
+        wchar_t v[32] = {};
+        GetPrivateProfileStringW(L"heavy", what.c_str(), L"0", v, 32, (tools::DataDir() + L"\\weekly.ini").c_str());
+        it = g_heavy.emplace(what, _wtoi64(v)).first;
+    }
+    LONGLONG t = it->second;
+    ReleaseSRWLockExclusive(&g_heavyLock);
+    return t;
+}
+}  // namespace
+
+bool OnBattery() {
+    static const bool fake = getenv("RADIAL_ON_BATTERY") != nullptr;  // проверка без выдёргивания зарядки
+    if (fake) return true;
+    SYSTEM_POWER_STATUS ps;
+    return GetSystemPowerStatus(&ps) && ps.ACLineStatus == 0;
+}
+
+bool HeavyWait(const std::wstring& what) { return OnBattery() && UnixNow() - HeavyLast(what) < 24 * 3600; }
+
+void HeavyDone(const std::wstring& what) {
+    LONGLONG now = UnixNow();
+    AcquireSRWLockExclusive(&g_heavyLock);
+    g_heavy[what] = now;
+    WritePrivateProfileStringW(L"heavy", what.c_str(), std::to_wstring(now).c_str(),
+                               (tools::DataDir() + L"\\weekly.ini").c_str());
+    ReleaseSRWLockExclusive(&g_heavyLock);
+}
 
 void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
     Scan s;
@@ -235,11 +284,14 @@ void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
     CoInitializeEx(nullptr,
                    COINIT_MULTITHREADED);  // история обновлений - через COM
     s.git = proj ? tools::GitRepos(roots) : prev.git;
-    s.vhd = sys ? tools::VirtualDisks() : prev.vhd;
-    s.leftovers = sys ? tools::AppLeftovers() : prev.leftovers;
-    s.devices = sys ? tools::DeviceProblems() : prev.devices;
-    s.updates = sys ? tools::WindowsUpdates() : prev.updates;
-    s.week = sys ? tools::WeekRecordAndCompare() : prev.week;
+    {
+        PERF_CPU(sys ? "cpu.scan.sys" : "cpu.scan.light");  // суточная часть отдельно: её старт разнесён (Н9)
+        s.vhd = sys ? tools::VirtualDisks() : prev.vhd;
+        s.leftovers = sys ? tools::AppLeftovers() : prev.leftovers;
+        s.devices = sys ? tools::DeviceProblems() : prev.devices;
+        s.updates = sys ? tools::WindowsUpdates() : prev.updates;
+        s.week = sys ? tools::WeekRecordAndCompare() : prev.week;
+    }
     CoUninitialize();
     if (bg::Quitting()) return;
     AcquireSRWLockExclusive(&g_scanLock);
@@ -257,8 +309,8 @@ void ScanPass(const std::vector<std::wstring>& roots, bool proj, bool sys) {
 void RefreshScan(bool full) {
     if (!g_cfg || g_scanRunning.exchange(true)) return;  // студия в режиме снимка: утилиты не запущены
     ULONGLONG now = GetTickCount64();
-    bool proj = full || !g_projAt || now - g_projAt > kProjEvery;
-    bool sys = full || !g_sysAt || now - g_sysAt > kSysEvery;
+    bool proj = full || ((!g_projAt || now - g_projAt > kProjEvery) && !HeavyWait(L"scan"));
+    bool sys = full || ((!g_sysAt || now - g_sysAt > kSysEvery) && now - g_started > kSysDelay && !HeavyWait(L"sys"));
     std::vector<std::wstring> roots = g_roots.empty() ? ProjectRoots(*g_cfg) : g_roots;
     bool started = bg::Run(
         [roots, proj, sys] {
@@ -267,6 +319,8 @@ void RefreshScan(bool full) {
                 PERF_CPU("cpu.scan");
                 ScanPass(roots, proj, sys);
             }
+            if (proj && !bg::Quitting()) HeavyDone(L"scan");
+            if (sys && !bg::Quitting()) HeavyDone(L"sys");
             g_scanRunning = false;
         },
         THREAD_PRIORITY_LOWEST);  // фоновый обход диска не мешает работе
@@ -291,6 +345,7 @@ void RefreshSecurity() {
             g_sec = std::move(s);
             g_secAt = GetTickCount64();
             ReleaseSRWLockExclusive(&g_secLock);
+            HeavyDone(L"sec");
             g_secRunning = false;
             PostMessageW(g_app, WM_TOOLS_JOB, kSecTag, 0);
         },
@@ -733,13 +788,20 @@ void Tick() {
     if (now - g_proactiveAt > 5000) TryProactive();  // отложенное, пока была другая карточка
     LiveAlert(now);
     WeekNews();
-    // фоновый подсчёт: первый раз через минуту после старта, дальше раз в полчаса; в игре и при открытом Unreal
-    // (шейдеры, сборка) обход диска ждёт - он отнимал бы и процессор, и диск
-    if (!g_game && !g_dev && now - g_started > 60000 && (!g_scanAt || now - g_scanAt > 30 * 60 * 1000)) RefreshScan();
-    // «Защита»: первый раз через 3 минуты после старта (подписи считаются долго), дальше раз в полчаса; не в игре
-    if (!g_game && now - g_started > 3 * 60 * 1000 && (!g_secAt || now - g_secAt > 30 * 60 * 1000)) RefreshSecurity();
-    // недельные проверки: через 3 минуты после старта, потом раз в 6 часов смотрим, не пора ли
-    if (now - g_weeklyCheck > (g_weeklyCheck == g_started ? 3 * 60 * 1000 : 6 * 3600 * 1000)) {
+    // фоновый подсчёт: первый раз через 90 с после старта, дальше раз в полчаса (кэши и проекты - раз в 3 часа,
+    // суточная часть - своим сроком); в игре и при открытом Unreal (шейдеры, сборка) обход диска ждёт - он отнимал
+    // бы и процессор, и диск. От батареи тяжёлые части ждут зарядки (HeavyWait), лёгкие идут как обычно
+    if (!g_game && !g_dev && now - g_started > kScanDelay && !g_scanRunning) {
+        bool due = !g_scanAt || now - g_scanAt > 30 * 60 * 1000;
+        bool projDue = (!g_projAt || now - g_projAt > kProjEvery) && !HeavyWait(L"scan");
+        bool sysDue = (!g_sysAt || now - g_sysAt > kSysEvery) && now - g_started > kSysDelay && !HeavyWait(L"sys");
+        if (due || projDue || sysDue) RefreshScan();
+    }
+    // «Защита»: первый раз через 4 минуты после старта (подписи считаются долго), дальше раз в полчаса; не в игре
+    if (!g_game && now - g_started > kSecDelay && (!g_secAt || now - g_secAt > 30 * 60 * 1000) && !HeavyWait(L"sec"))
+        RefreshSecurity();
+    // недельные проверки: через 10 минут после старта, потом раз в 6 часов смотрим, не пора ли; от батареи - ждут
+    if (now - g_weeklyCheck > (g_weeklyCheck == g_started ? kWeeklyDelay : 6 * 3600 * 1000) && !HeavyWait(L"weekly")) {
         g_weeklyCheck = now;
         Weekly();
     }

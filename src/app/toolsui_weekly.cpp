@@ -48,6 +48,7 @@ void Weekly() {
     bool started = bg::Run(
         [wanted] {
             const Want* want = &wanted;
+            PERF_CPU("cpu.weekly");
             CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             auto* m = new WeeklyMsg;
             int today = Today();
@@ -77,6 +78,7 @@ void Weekly() {
                 if (!m->versions.empty()) SetDay(L"versions", today);
             }
             CoUninitialize();
+            HeavyDone(L"weekly");
             if (!PostMessageW(g_app, WM_TOOLS_JOB, kWeeklyTag, (LPARAM)m)) delete m;
             g_weeklyRunning = false;
         },
