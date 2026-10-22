@@ -19,6 +19,7 @@
 #include "app/settingsio.h"
 #include "tools/healthscore.h"
 #include "tools/important.h"
+#include "tools/journal.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
 #include "desk/cardlog.h"
@@ -534,6 +535,28 @@ void TestCardLog() {
     CHECK(cardlog::ParseMutes(L"a\r\n\nb\r\n") == (std::set<std::wstring>{L"a", L"b"}));
 }
 
+// Отмена записи журнала (Л3): упаковка туда и обратно, путь с «|» не упаковывается, третий столбец читается
+void TestJournalUndo() {
+    std::wstring u = tools::UndoPack(L"recycle", {L"C:\\Dl\\a.exe", L"C:\\Dl\\bad|name.zip", L"C:\\Dl\\b (1).zip"});
+    CHECK(u == L"recycle|C:\\Dl\\a.exe|C:\\Dl\\b (1).zip");
+    tools::Undo p;
+    CHECK(tools::UndoParse(u, p) && p.kind == L"recycle" && p.args.size() == 2 && p.args[1] == L"C:\\Dl\\b (1).zip");
+    CHECK(tools::UndoParse(L"power|1\r", p) && p.kind == L"power" && p.args[0] == L"1");
+    CHECK(!tools::UndoParse(L"", p) && !tools::UndoParse(L"cfg", p) && !tools::UndoParse(L"|x", p));
+    wchar_t dir[MAX_PATH];
+    GetTempPathW(MAX_PATH, dir);
+    std::wstring d = std::wstring(dir) + L"radial_undo_test";
+    CreateDirectoryW(d.c_str(), nullptr);
+    DeleteFileW((d + L"\\journal.tsv").c_str());
+    DeleteFileW((d + L"\\journal.old.tsv").c_str());
+    tools::JournalAdd(d, L"23.10 10:00", L"без отмены");
+    tools::JournalAdd(d, L"23.10 10:01", L"Питание: экономия", 64 * 1024, L"power|1");
+    std::vector<tools::JournalEntry> e = tools::JournalRead(d, 10);
+    CHECK(e.size() == 2 && e[0].text == L"Питание: экономия" && e[0].undo == L"power|1" && e[1].undo.empty());
+    DeleteFileW((d + L"\\journal.tsv").c_str());
+    RemoveDirectoryW(d.c_str());
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -556,4 +579,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestWeekReport();
     TestAppHealth();
     TestCardLog();
+    TestJournalUndo();
 }

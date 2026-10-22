@@ -346,6 +346,9 @@ bool Run(int& exitCode) {
             o += f.path + L"\t" + tools::Bytes(f.bytes) + L"\t" + std::to_wstring(f.files) + L"\r\n";
         WriteOut(L"find_out.txt", o);
         exitCode = any ? 0 : 1;
+    } else if (Value(args, L"--undelete",
+                     v)) {  // --undelete <путь>: вернуть из Корзины (Л3) -> код = сколько вернулось
+        exitCode = tools::RestoreRecycled({v});
     } else if (Value(args, L"--mft-test", v)) {  // --mft-test <папка>, из консоли администратора -> mft_out.txt
         exitCode = MftTest(v);
     } else if (Has(args, L"--clean")) {  // очистить кэши и временные файлы, итог в clean_out.txt

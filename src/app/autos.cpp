@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <set>
 
 #include "app/autostart.h"
 #include "core/bg.h"
@@ -37,6 +38,7 @@ std::vector<tools::DownloadJunk> g_downloads;
 unsigned g_downloadsGen = 0;    // растёт под g_lock при каждой правке g_downloads (DownloadsIfChanged)
 SRWLOCK g_lock = SRWLOCK_INIT;  // список Загрузок пишется из потоков
 std::wstring g_power, g_repair;
+bool g_powerHeld = false;  // режим питания вернули отменой (Л3): сами не трогаем до смены источника питания
 
 ThemeInfo Theme() { return CurrentTheme(*g_cfg); }
 
@@ -60,12 +62,13 @@ void Put(const wchar_t* key, const std::wstring& v) {
 
 // сообщения из рабочих потоков
 struct Msg {
-    enum Kind { CLEAN_LOG, CLEAN_DONE, DOWNLOADS, RECYCLED, REPORT } kind;
+    enum Kind { CLEAN_LOG, CLEAN_DONE, DOWNLOADS, RECYCLED, REPORT, UNDONE } kind;
     std::wstring text;
     ULONGLONG bytes = 0;
     int count = 0;
-    bool silent = false;   // по расписанию: итог карточкой, но без «работаю»
-    std::wstring lockers;  // чистка: кто не дал удалить занятое
+    bool silent = false;                                             // по расписанию: итог карточкой, но без «работаю»
+    std::wstring lockers;                                            // чистка: кто не дал удалить занятое
+    std::function<void(bool, const std::wstring&)>* undo = nullptr;  // UNDONE: итог отмены (Л3)
 };
 
 void Post(Msg* m) {
@@ -144,7 +147,8 @@ void DailyBackup() {
         if (n.size() >= 23 && iswdigit(n[7]) && ++kept > 10) DeleteFileW((dir + L"\\" + n).c_str());
     std::wstring sum = newest.empty() ? L"первая копия" : cfgdiff::Summary(d);
     Put(L"backup_what", sum);
-    Note(L"Копия radial.cfg за сутки: " + sum);
+    // отмена - вернуть настройки, какими они были в прошлой копии
+    Note(L"Копия radial.cfg за сутки: " + sum, newest.empty() ? L"" : tools::UndoPack(L"cfg", {dir + L"\\" + newest}));
 }
 
 // ---------------- тихая чистка ----------------
@@ -225,7 +229,10 @@ void Recycle(std::vector<std::wstring> paths) {
                 bytes += ((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow;
         }
         int moved = tools::RecycleDownloads(list, nullptr);
-        Post(new Msg{Msg::RECYCLED, L"", moved ? bytes : 0, moved});
+        std::vector<std::wstring> gone;  // что на деле ушло в Корзину - его и вернёт отмена
+        for (const std::wstring& f : list)
+            if (GetFileAttributesW(f.c_str()) == INVALID_FILE_ATTRIBUTES) gone.push_back(f);
+        Post(new Msg{Msg::RECYCLED, gone.empty() ? L"" : tools::UndoPack(L"recycle", gone), moved ? bytes : 0, moved});
     });
 }
 
@@ -243,9 +250,15 @@ void ApplyPower(const wchar_t* why) {
                                                                                    : g_dev ? L", Unreal"
                                                                                            : L"");
     g_power = std::wstring(tools::PowerModeName(want)) + L" (" + reason + L")";
-    if (tools::GetPowerMode() == want) return;
+    if (g_powerHeld) {
+        g_power = L"как вернули вручную - до смены питания";
+        return;
+    }
+    tools::PowerMode was = tools::GetPowerMode();
+    if (was == want) return;
     if (tools::SetPowerMode(want))
-        Note(L"Питание: " + std::wstring(tools::PowerModeName(want)) + L" - " + reason + (why ? why : L""));
+        Note(L"Питание: " + std::wstring(tools::PowerModeName(want)) + L" - " + reason + (why ? why : L""),
+             was == tools::POWER_UNKNOWN ? L"" : tools::UndoPack(L"power", {std::to_wstring((int)was)}));
 }
 
 // ---------------- самовосстановление ----------------
@@ -394,12 +407,97 @@ void DigestTick() {
                 Theme(), 30000, Toast::G_INFO);
 }
 
-void Note(const std::wstring& text) {
+void Note(const std::wstring& text, const std::wstring& undo) {
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t when[32];
     swprintf(when, 32, L"%02d.%02d %02d:%02d", st.wDay, st.wMonth, st.wHour, st.wMinute);
-    tools::JournalAdd(tools::DataDir(), when, text);  // больше 64 КБ - уходит в journal.old.tsv (tools/journal.cpp)
+    // больше 64 КБ - уходит в journal.old.tsv (tools/journal.cpp)
+    tools::JournalAdd(tools::DataDir(), when, text, 64 * 1024, undo);
+}
+
+// ---------------- отмена записи (Л3) ----------------
+
+std::wstring UndoneFile() { return tools::DataDir() + L"\\undone.tsv"; }
+
+// отменённое - в памяти (студия спрашивает на каждой строке журнала), файл читается один раз
+std::set<std::wstring> g_undone;
+bool g_undoneRead = false;
+
+bool Undone(const std::wstring& undo) {
+    if (undo.empty()) return false;
+    if (!g_undoneRead) {
+        g_undoneRead = true;
+        std::wstring all = ReadUtf8(UndoneFile());
+        size_t at = 0;
+        while (at < all.size()) {
+            size_t end = all.find(L'\n', at);
+            if (end == std::wstring::npos) end = all.size();
+            std::wstring line = all.substr(at, end - at);
+            if (!line.empty() && line.back() == L'\r') line.pop_back();
+            if (!line.empty()) g_undone.insert(line);
+            at = end + 1;
+        }
+    }
+    return g_undone.count(undo) > 0;
+}
+
+void UndoEntry(const Entry& e) {
+    tools::Undo u;
+    if (!tools::UndoParse(e.undo, u) || Undone(e.undo)) return;
+    auto done = [undo = e.undo, text = e.text](bool ok, const std::wstring& what) {
+        if (ok) {
+            g_undone.insert(undo);
+            std::string line = Narrow(undo + L"\n");
+            HANDLE f =
+                CreateFileW(UndoneFile().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
+            if (f != INVALID_HANDLE_VALUE) {
+                DWORD put = 0;
+                WriteFile(f, line.data(), (DWORD)line.size(), &put, nullptr);
+                CloseHandle(f);
+            }
+            Note(L"Отменено: " + text + L" - " + what);
+        }
+        g_card.Show(BoostCard::DONE, ok ? L"Отменено" : L"Не получилось отменить", what, Theme(), 6000);
+    };
+    if (u.kind == L"power") {
+        auto mode = (tools::PowerMode)_wtoi(u.args[0].c_str());
+        bool ok = tools::SetPowerMode(mode);
+        if (ok) g_powerHeld = true;
+        done(ok, ok ? L"режим питания снова «" + std::wstring(tools::PowerModeName(mode)) +
+                          L"», сам не переключу до смены питания"
+                    : L"Windows не дала сменить режим питания");
+    } else if (u.kind == L"cfg") {
+        // нынешние настройки - сперва в копию (её тоже можно вернуть из «Журнала» студии), потом прежние на место
+        std::wstring prev = u.args[0], dir = ExeDir() + L"\\backups";
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        wchar_t name[80];
+        swprintf(name, 80, L"\\radial-before-undo-%04d-%02d-%02d_%02d-%02d-%02d.cfg", t.wYear, t.wMonth, t.wDay,
+                 t.wHour, t.wMinute, t.wSecond);
+        CreateDirectoryW(dir.c_str(), nullptr);
+        bool ok = GetFileAttributesW(prev.c_str()) != INVALID_FILE_ATTRIBUTES &&
+                  CopyFileW(g_cfgPath.c_str(), (dir + name).c_str(), FALSE) &&
+                  CopyFileW(prev.c_str(), g_cfgPath.c_str(), FALSE);
+        if (ok && g_reload) g_reload();
+        done(ok, ok ? L"настройки - как в копии " + prev.substr(prev.find_last_of(L'\\') + 1) +
+                          L"; нынешние сохранены в " + std::wstring(name + 1)
+                    : L"прежней копии уже нет");
+    } else if (u.kind == L"recycle") {
+        g_card.Show(BoostCard::WORKING, L"Возвращаю из Корзины", std::to_wstring(u.args.size()) + L" файлов", Theme());
+        auto* box = new std::function<void(bool, const std::wstring&)>(done);
+        if (!bg::Run([paths = u.args, box] {
+                int n = tools::RestoreRecycled(paths);
+                auto* m =
+                    new Msg{Msg::UNDONE,
+                            n ? L"вернул в Загрузки " + std::to_wstring(n) + L" из " + std::to_wstring(paths.size())
+                              : L"в Корзине их уже нет",
+                            0, n};
+                m->undo = box;
+                Post(m);
+            }))
+            delete box;
+    }
 }
 
 std::vector<Entry> Journal(size_t max) { return tools::JournalRead(tools::DataDir(), max); }
@@ -462,6 +560,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const std::wstring& cfgPa
 }
 
 void OnPower() {
+    g_powerHeld = false;             // сменился источник питания - снова решаем сами
     if (g_cfg) ApplyPower(nullptr);  // уведомление может прийти раньше Init
 }
 
@@ -607,8 +706,14 @@ void OnJob(WPARAM, LPARAM lp) {
             g_card.Show(BoostCard::OFFER, L"Отчёт за неделю", text, Theme(), 20000, Toast::G_OK);
             return;
         }
+        case Msg::UNDONE:
+            if (m->undo) {
+                (*m->undo)(m->count > 0, m->text);
+                delete m->undo;
+            }
+            return;
         case Msg::RECYCLED:
-            Note(L"Загрузки: в Корзину " + std::to_wstring(m->count) + L" файлов, " + tools::Bytes(m->bytes));
+            Note(L"Загрузки: в Корзину " + std::to_wstring(m->count) + L" файлов, " + tools::Bytes(m->bytes), m->text);
             AcquireSRWLockExclusive(&g_lock);
             g_downloads.clear();
             ++g_downloadsGen;

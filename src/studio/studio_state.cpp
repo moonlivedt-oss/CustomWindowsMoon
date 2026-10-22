@@ -1069,7 +1069,19 @@ void Studio::AutoPage(const RectF& r) {
             float yy = b.Y + i * lh;
             if (i % 2 == 0) ui.Fill(RectF(b.X - ui.S(8), yy, b.Width + ui.S(16), lh), WithAlpha(c.cardHi, 90), ui.S(6));
             ui.Text(journal[i].when, RectF(b.X, yy, ui.S(96), lh), c.faint, 11.5f);
-            ui.Text(journal[i].text, RectF(b.X + ui.S(100), yy, b.Width - ui.S(100), lh), c.text, 12);
+            // Л3: у записи, которую можно отменить, - своя кнопка; отменённая помечается
+            float uw = 0;
+            if (!journal[i].undo.empty()) {
+                uw = ui.S(104);
+                RectF ub(b.GetRight() - uw, yy + (lh - ui.S(26)) / 2, uw, ui.S(26));
+                if (autos::Undone(journal[i].undo)) {
+                    ui.Text(L"отменено", ub, c.faint, 11, false, ui::Right);
+                } else if (ui.Button(ID_AUTO_UNDO + (int)i, ub, L"Отменить", Kind::Ghost)) {
+                    autos::Entry e = journal[i];
+                    Defer([e] { autos::UndoEntry(e); });
+                }
+            }
+            ui.Text(journal[i].text, RectF(b.X + ui.S(100), yy, b.Width - ui.S(100) - uw, lh), c.text, 12);
         }
     });
     pageContentH_ = cols.Height();
