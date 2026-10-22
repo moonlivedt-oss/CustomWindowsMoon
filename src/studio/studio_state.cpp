@@ -915,6 +915,34 @@ void Studio::AutoPage(const RectF& r) {
                   L"Антивирус не обхожу.",
                   c.faint);
     });
+    cols.Card(L"Отчёт за неделю", 3.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Сам раз в неделю, вечером");
+        toggle(rr, ID_AUTO_REPORT, cfg.autoReport);
+        rr = cols.Row(b, 1, L"Последний: " + autos::ReportStatus(), 0.6f);
+        if (ui.Button(ID_AUTO_REPORT_NOW, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
+                      L"Папка", Kind::Secondary)) {
+            wchar_t p[MAX_PATH];
+            ExpandEnvironmentStringsW(L"%APPDATA%\\MoonDesk\\reports", p, MAX_PATH);
+            CreateDirectoryW(p, nullptr);
+            std::wstring dir = p;
+            Defer([dir] { ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
+        }
+        cols.Note(b, 2.0f,
+                  L"Место, что выросло, что поставилось, сеть и скорость, падения - одной PNG с разницей к прошлой "
+                  L"неделе. Приходит в вечерний дайджест; в игре и при открытом Unreal ждёт. Вручную - «Отчёт "
+                  L"картинкой» на «Состоянии».",
+                  c.faint);
+    });
+    cols.Card(L"Копия настроек", 2.6f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Раз в сутки, если radial.cfg поменялся");
+        toggle(rr, ID_AUTO_BACKUP, cfg.autoBackup);
+        cols.Row(b, 1, autos::BackupStatus(), 0.95f);
+        cols.Note(
+            b, 2.0f,
+            L"Студия и так делает копию при правках; эта ловит правки руками и импорт. Копии и чем они отличаются "
+            L"от нынешних настроек - в «Журнале» внизу студии.",
+            c.faint);
+    });
     std::vector<autos::Entry> journal = autos::Journal(40);
     float rows = std::max(1.0f, journal.size() * 0.62f);
     cols.Wide(L"Журнал автоматики", rows, [&](const RectF& b) {

@@ -144,6 +144,8 @@ struct Config {
     int downloadsDays = 14;  // установщики и архивы старше стольких дней - кандидаты в корзину
     bool autoPower = true;
     bool autoRepair = true;
+    bool autoReport = true;  // раз в неделю сам собрать отчёт картинкой (app/weekreport), итог - в дайджест
+    bool autoBackup = true;  // раз в сутки копия radial.cfg в backups, если он поменялся (правка не из студии)
     bool toolsDiskWarn = true;  // карточка, когда на диске мало места (меньше 10% и меньше 20 ГБ)
     int lockPattern = 1;        // узор стекла при переходе: 0 - нет, 1 - соты, 2 - осколки
     std::wstring avatarSource;  // своя картинка в середине аватара, пусто - эмблема-полумесяц

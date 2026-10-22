@@ -147,6 +147,23 @@ void TestRules() {
         f.procs = {L"explorer.exe"};
         CHECK(!rules::Holds(r[0], f));
     }
+    // простой, сеть по имени, «не»
+    auto more = rules::Parse(
+        {L"idle>15 & !net:Bubuka* -> power:eco", L"net:Office+Work -> mute", L"!! ac -> mute", L"idle>0 -> mute"},
+        &bad);
+    CHECK(more.size() == 2);
+    if (more.size() == 2) {
+        rules::Facts g;
+        g.idleMin = 20;
+        g.networks = {L"Bubuka_5G 2"};
+        CHECK(!rules::Holds(more[0], g));  // дома - нет
+        g.networks = {L"Cafe"};
+        CHECK(rules::Holds(more[0], g));
+        g.idleMin = 3;
+        CHECK(!rules::Holds(more[0], g));
+        g.networks = {L"Cafe", L"Work"};
+        CHECK(rules::Holds(more[1], g));
+    }
     auto low = rules::Parse({L"battery<30 -> power:eco"});
     rules::Facts g;
     g.ac = false;

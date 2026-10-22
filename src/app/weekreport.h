@@ -42,6 +42,7 @@ Data Collect();  // из фоновых подсчётов, журнала се�
 Data DemoData(bool previous = false);
 bool Render(const Data& now, const Data* prev, const UiColors& c, const std::wstring& png);
 // Собрать, сравнить с прошлым отчётом, записать PNG и числа; путь к картинке (пусто - не получилось)
-std::wstring Make(const UiColors& c);
+// deltas - сюда же разница к прошлому отчёту (для дайджеста)
+std::wstring Make(const UiColors& c, std::vector<std::wstring>* deltas = nullptr);
 
 }  // namespace weekreport
