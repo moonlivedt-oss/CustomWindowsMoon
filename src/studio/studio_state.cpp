@@ -219,6 +219,37 @@ void Studio::StatePage(const RectF& r) {
         y += h + gap;
     }
 
+    // ---- важное сейчас (О4): те же дела, что в первом секторе кольца утилит, с кнопкой ----
+    if (!stateImpAt_ || now - stateImpAt_ > 10000) {
+        stateImpAt_ = now;
+        stateImp_ = toolsui::ImportantItems(Demo());
+    }
+    if (!stateImp_.empty()) {
+        float rh = ui.S(46), h = ui.S(52) + stateImp_.size() * rh + ui.S(10);
+        RectF cr(x, y, w, h);
+        Card(cr);
+        ui.Text(L"Стоит сделать сейчас", RectF(x + ui.S(18), y + ui.S(14), w, ui.S(24)), c.text, 14, true);
+        float ry = y + ui.S(50);
+        for (size_t i = 0; i < stateImp_.size(); ++i, ry += rh) {
+            const Item& it = stateImp_[i];
+            ui.Icon(it.iconFull, RectF(x + ui.S(18), ry + ui.S(4), ui.S(34), ui.S(34)));
+            std::wstring why = it.note, rest;
+            size_t dot = why.find(L". ");
+            if (dot != std::wstring::npos) rest = why.substr(dot + 2), why = why.substr(0, dot);
+            float tx = x + ui.S(64), tw = w - ui.S(64) - ui.S(170);
+            ui.Text(it.name.find(why) != std::wstring::npos ? it.name : it.name + L"  -  " + why,
+                    RectF(tx, ry + ui.S(2), tw, ui.S(22)), c.text, 12, true);
+            ui.Text(Ellip(rest, 140), RectF(tx, ry + ui.S(23), tw, ui.S(20)), c.muted, 10.5f);
+            if (ui.Button(ID_STATE_IMP + (int)i, RectF(x + w - ui.S(158), ry + ui.S(6), ui.S(140), ui.S(32)),
+                          L"Сделать", Kind::Secondary) &&
+                !Demo()) {
+                std::wstring key = it.path;
+                Defer([key] { toolsui::Run(key); });
+            }
+        }
+        y += h + gap;
+    }
+
     // ---- шкалы: диски, память, питание ----
     {
         float h = ui.S(132);

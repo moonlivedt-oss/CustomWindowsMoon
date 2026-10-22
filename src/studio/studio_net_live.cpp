@@ -37,7 +37,8 @@ std::vector<net::Speed> DemoSpeeds() {
         net::Speed s;
         s.when = When(8 + d, 9);
         s.down = 38 + (d * 7) % 15, s.up = 24 + (d * 3) % 8, s.pingMs = 190 + d, s.tunnel = true;
-        s.via = L"happ-xray, Финляндия";
+        const wchar_t* exitsDemo[] = {L"happ-xray, Финляндия", L"happ-xray, Швеция", L"happ-xray, Нидерланды"};
+        s.via = exitsDemo[d % 3];
         h.push_back(s);
         if (d % 3 == 1) {
             s.when = When(8 + d, 11);
@@ -110,8 +111,9 @@ void Studio::SpeedCard(CardColumns& cols) {
     const std::vector<net::Speed>& hist = speedHist_;
     std::vector<net::SpeedDay> days = net::SpeedDays(hist, 14);
     net::SpeedMedian mt = net::SpeedMedianOf(hist, true), md = net::SpeedMedianOf(hist, false);
+    std::vector<net::SpeedExit> exits = net::SpeedByExit(hist);  // выходы туннеля по скорости (О3)
 
-    cols.Wide(L"Скорость", 5.0f, [&](const RectF& b) {
+    cols.Wide(L"Скорость", exits.empty() ? 5.0f : 5.6f, [&](const RectF& b) {
         // --- медианы: через туннель и напрямую ---
         float lx = b.X;
         auto legend = [&](Color col, const std::wstring& name, const net::SpeedMedian& m) {
@@ -281,6 +283,16 @@ void Studio::SpeedCard(CardColumns& cols) {
                              Num(last->up) + (last->pingMs >= 0 ? L", " + std::to_wstring(last->pingMs) + L" мс" : L"")
                        : L"ещё не мерили";
             ui.Text(t, steps, c.muted, 10, false, ui::Center);
+        }
+        // выходы туннеля: какая страна быстрее (у Happ выход меняется сам)
+        if (!exits.empty()) {
+            std::wstring t = L"По выходам: ";
+            for (size_t i = 0; i < exits.size() && i < 5; ++i)
+                t += (i ? L", " : L"") + exits[i].country + L" ↓ " + Num(exits[i].down) + L" (" +
+                     std::to_wstring(exits[i].n) + L")";
+            std::wstring advice = net::SpeedExitAdvice(exits);
+            ui.Text(t + (advice.empty() ? L"" : L". " + advice), RectF(b.X, b.Y + ui.S(254), b.Width, ui.S(22)),
+                    c.muted, 11);
         }
     });
 }

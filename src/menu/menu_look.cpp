@@ -200,7 +200,8 @@ void RadialMenu::DrawBadge(Graphics& g, const std::wstring& text, double x, doub
     RectF tb;
     g.MeasureString(text.c_str(), -1, &font, PointF(0, 0), StringFormat::GenericTypographic(), &tb);
     REAL h = (REAL)(16 * geo_.k), w = std::max(h, tb.Width + (REAL)(9 * geo_.k));
-    RectF r((REAL)(x - w / 2), (REAL)(y - h / 2), w, h);
+    // правый край - как у круглого счётчика: широкий («12 ГБ») растёт влево, на значок, а не на подпись рядом
+    RectF r((REAL)(x + h / 2 - w), (REAL)(y - h / 2), w, h);
     GraphicsPath pill;
     pill.AddArc(r.X, r.Y, h, h, 90, 180);
     pill.AddArc(r.X + w - h, r.Y, h, h, 270, 180);

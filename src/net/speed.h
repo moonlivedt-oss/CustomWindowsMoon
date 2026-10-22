@@ -52,5 +52,15 @@ struct SpeedDay {
     int pingMs = -1, n = 0;
 };
 std::vector<SpeedDay> SpeedDays(const std::vector<Speed>& history, size_t days = 14);
+// Выходы туннеля (О3): страна из via («happ-xray, Швеция» - после последней запятой), медианы последних 20 замеров
+// каждой; быстрые первыми. Без страны и не через туннель - не в счёт
+struct SpeedExit {
+    std::wstring country;
+    double down = 0, up = 0;
+    int pingMs = -1, n = 0;
+};
+std::vector<SpeedExit> SpeedByExit(const std::vector<Speed>& history);
+// «Быстрее всего через Швецию: ↓ 61 против ↓ 45 у Нидерландов»; пусто - сравнивать не с чем (меньше двух стран)
+std::wstring SpeedExitAdvice(const std::vector<SpeedExit>& exits);
 
 }  // namespace net

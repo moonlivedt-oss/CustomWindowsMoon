@@ -1146,6 +1146,11 @@ std::vector<Item> DemoRingItems() {
     Item imp = Act(L"Важное", Have(L"tools-important.png", L"tools-alarm.png"), L"", L"");
     imp.children = {act(L"Epic Games Updater", L"tools-service.png"), act(L"Обновления: ошибок 1", L"tools-update.png"),
                     act(L"Можно освободить 12 ГБ", L"tools-clean.png"), act(L"RadialMenu +5", L"tools-git.png")};
+    const wchar_t* why[] = {L"Опасное. Файл службы может изменить обычный пользователь",
+                            L"Обновления не ставятся. Последняя попытка - с ошибкой 0x80073712",
+                            L"Можно освободить 12 ГБ. Кэши npm, pip и TEMP старше суток",
+                            L"Давно не отправлено. 5 коммитов не в GitHub"};
+    for (size_t i = 0; i < imp.children.size(); ++i) imp.children[i].note = why[i];
     imp.badge = L"4";
     ring.push_back(imp);
     ring.push_back(group(L"Место", Have(L"grp-space.png", L"tools-disk.png"),
@@ -1177,6 +1182,13 @@ std::vector<Item> DemoRingItems() {
                           act(L"Отчёт", L"tools-report.png")},
                          L"1"));
     return ring;
+}
+
+std::vector<Item> ImportantItems(bool demo) {
+    std::wstring status;
+    std::vector<Item> ring = demo ? DemoRingItems() : RingItems(status);
+    if (ring.empty() || ring[0].calm || ring[0].children.empty()) return {};
+    return ring[0].children;
 }
 
 void ShowRing(RadialMenu& menu) {
