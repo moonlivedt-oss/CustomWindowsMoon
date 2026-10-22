@@ -25,6 +25,7 @@
 #include "tools/drain.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
+#include "desk/appvol.h"
 #include "desk/cardlog.h"
 
 namespace {
@@ -665,6 +666,27 @@ void TestDrain() {
     CHECK(!tools::DrainSummary(in, o));  // ушло 2%
 }
 
+// Громкость по программам (Л36): новый сеанс получает запомненное, перемену уровня у знакомого - запомнить
+void TestAppVolume() {
+    std::map<DWORD, float> last;
+    std::map<std::wstring, float> saved{{L"discord", 0.3f}};
+    // первый проход после старта: только смотрим
+    appvol::Plan p = appvol::PlanVolumes({{10, L"discord", 1.0f}, {11, L"game", 0.8f}}, last, saved, true);
+    CHECK(p.set.empty() && p.save.empty() && last.size() == 2);
+    // вы сделали игру тише - запомнить; Discord как был - ничего
+    p = appvol::PlanVolumes({{10, L"discord", 1.0f}, {11, L"game", 0.5f}}, last, saved, false);
+    CHECK(p.set.empty() && p.save.size() == 1 && p.save[L"game"] == 0.5f);
+    // Discord перезапустился (новый pid) - вернуть 0.3; игра закрылась - забыта в last; системные звуки (pid 0) мимо
+    p = appvol::PlanVolumes({{20, L"discord", 1.0f}, {0, L"", 1.0f}}, last, saved, false);
+    CHECK(p.set.size() == 1 && p.set[0].first == 20 && p.set[0].second == 0.3f && last.size() == 1 && last[20] == 0.3f);
+    // следующий проход видит уже 0.3 - не «поменяли вы»
+    p = appvol::PlanVolumes({{20, L"discord", 0.3f}}, last, saved, false);
+    CHECK(p.set.empty() && p.save.empty());
+    std::map<std::wstring, float> m{{L"discord", 0.3f}, {L"nfs14", 0.85f}};
+    std::map<std::wstring, float> back = appvol::ParseSaved(appvol::SavedText(m));
+    CHECK(back.size() == 2 && std::fabs(back[L"nfs14"] - 0.85f) < 0.001f);
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -692,4 +714,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestDevServers();
     TestProjectPorts();
     TestDrain();
+    TestAppVolume();
 }

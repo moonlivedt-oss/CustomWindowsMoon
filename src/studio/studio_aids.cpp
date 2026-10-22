@@ -3,10 +3,12 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cmath>
 
 #include "app/palette.h"
 #include "app/toolsui.h"
 #include "core/files.h"
+#include "desk/appvol.h"
 #include "desk/cliphist.h"
 #include "core/text.h"
 #include "desk/gamepad.h"
@@ -254,6 +256,23 @@ void Studio::AidsPage(const RectF& r) {
                   L"или «упало» с кодом выхода, если вы в это время в другом окне (в терминале, откуда запускали, - "
                   L"молчу). Вложенные команды (ninja под cmake) не дублируются; сборки и шейдеры Unreal в режиме "
                   L"разработки сообщает он сам.",
+                  c.faint);
+    });
+    cols.Card(L"Громкость по программам", 3.6f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Помнить уровень каждой программы");
+        toggle(rr, ID_AID + 51, cfg.appVolume);
+        std::wstring list;
+        int shown = 0;
+        for (const auto& [exe, v] : appvol::Saved()) {
+            if (shown++ == 6) break;
+            list += (list.empty() ? L"" : L", ") + exe + L" " + std::to_wstring((int)std::lround(v * 100)) + L"%";
+        }
+        cols.Row(b, 1, list.empty() ? L"Пока ничего: поменяйте громкость программы в микшере" : L"Помню: " + list,
+                 0.95f);
+        cols.Note(b, 2.0f,
+                  L"Поставили в микшере Windows Discord тише, а игру громче - уровень запоминается по имени программы "
+                  L"и возвращается при её следующем запуске. Windows помнит это не для всех: браузеры и многие игры "
+                  L"начинают со 100%. Проверка раз в 4 с, без прав.",
                   c.faint);
     });
     pageContentH_ = cols.Height();

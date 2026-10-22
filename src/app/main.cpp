@@ -18,6 +18,7 @@
 #include "app/netui.h"
 #include "app/palette.h"
 #include "app/worksets.h"
+#include "desk/appvol.h"
 #include "desk/cardlog.h"
 #include "desk/cliphist.h"
 #include "desk/layout.h"
@@ -136,6 +137,7 @@ void Reload() {
     g_winfx.Apply(g_cfg);
     g_snip.Apply(g_cfg);
     g_deskClick.SetEnabled(g_cfg.deskDouble);
+    appvol::SetEnabled(g_cfg.appVolume);
     cursor::Apply(g_cfg);
     g_menu.ResetIcons();
     if (g_wnd) {
@@ -713,6 +715,7 @@ void ShutdownAll() {
     netui::Shutdown();
     toolsui::Shutdown();
     cliphist::Stop();
+    appvol::Stop();
     autos::Shutdown();
     boost::GameTweaks(boost::Load(BoostDir()), false);
     g_frame.Destroy();
@@ -1123,6 +1126,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     palette::Apply();
     gamepad::Start(g_wnd, g_cfg.gamepad);
     cliphist::Start(inst, &g_cfg);
+    appvol::Start(g_cfg.appVolume);  // Л36: громкость по программам
     corners::SetClip([] { cliphist::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {
         for (Item& it : cliphist::Items(L"b|")) {

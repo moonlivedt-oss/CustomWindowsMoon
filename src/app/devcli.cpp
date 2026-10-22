@@ -23,6 +23,7 @@
 #include "core/files.h"
 #include "core/text.h"
 #include "core/themes.h"
+#include "desk/appvol.h"
 #include "desk/boost.h"
 #include "desk/gamemode.h"
 #include "desk/lockscreen.h"
@@ -391,6 +392,14 @@ bool Run(int& exitCode) {
             WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
             CloseHandle(f);
         }
+        exitCode = 0;
+    } else if (Has(args, L"--appvol-diag")) {  // Л36: звуковые сеансы и запомненные уровни -> appvol_out.txt
+        std::wstring o;
+        for (const appvol::SessionNow& s : appvol::Current())
+            o += s.exe + L" pid " + std::to_wstring(s.pid) + L" " + std::to_wstring((int)(s.level * 100 + 0.5f)) +
+                 L"%\r\n";
+        o += L"запомнено:\r\n" + appvol::SavedText(appvol::Saved());
+        WriteOut(L"appvol_out.txt", o);
         exitCode = 0;
     } else if (Has(args, L"--devserv-diag")) {  // Л19: серверы разработки без порогов (час, 100 МБ) -> devserv_out.txt
         std::vector<tools::ProcInfo> ps = tools::Processes();
