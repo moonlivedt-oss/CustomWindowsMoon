@@ -392,6 +392,20 @@ bool Run(int& exitCode) {
             CloseHandle(f);
         }
         exitCode = 0;
+    } else if (Has(args, L"--devserv-diag")) {  // Л19: серверы разработки без порогов (час, 100 МБ) -> devserv_out.txt
+        std::vector<tools::ProcInfo> ps = tools::Processes();
+        std::map<std::wstring, ULONGLONG> seen;
+        toolsui::FindForgotten(ps, seen, 0, 0);  // первая встреча - «видны сейчас»
+        std::wstring o;
+        for (const tools::Forgotten& f : toolsui::FindForgotten(ps, seen, 0, 0)) {
+            o += f.project + L"\t" + tools::Bytes(f.bytes) + L"\r\n";
+            for (const tools::DevServer& s : f.servers)
+                o += L"  " + s.process + L" pid " + std::to_wstring(s.pid) + L" :" + std::to_wstring(s.port) + L"\r\n";
+        }
+        o += L"(проекты, видные в заголовках окон, не попадают; всего проектов с серверами: " +
+             std::to_wstring(seen.size()) + L")\r\n";
+        WriteOut(L"devserv_out.txt", o);
+        exitCode = 0;
     } else if (Has(args, L"--recent-diag")) {  // недавние файлы и папки -> recent_out.txt
         std::wstring s;
         ULONGLONG t0 = GetTickCount64();

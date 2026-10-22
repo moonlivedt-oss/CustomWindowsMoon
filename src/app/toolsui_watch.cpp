@@ -3,8 +3,10 @@
 #include "app/toolsui_internal.h"
 
 #include <map>
+#include <set>
 
 #include "core/perf.h"
+#include "tools/devserv.h"
 
 namespace toolsui {
 
@@ -32,8 +34,45 @@ ULONGLONG g_devEnded = 0;  // когда закрылся Unreal: через 2 �
 std::set<std::wstring> g_leakWarned;
 ULONGLONG g_commitWarned = 0, g_proactiveAt = 0;
 
-std::vector<tools::Suspect> g_netAlerts;  // новое в hosts, DNS, прокси - ждёт карточки
-std::set<std::wstring> g_netKnown;        // что уже видели (ключ находки)
+std::vector<tools::Suspect> g_netAlerts;    // новое в hosts, DNS, прокси - ждёт карточки
+std::vector<tools::Forgotten> g_forgotten;  // забытые серверы разработки (Л19) - ждут вопроса; под g_watchLock
+std::set<std::wstring> g_devKeep;           // проекты, чьи серверы велели оставить (до перезапуска программы)
+
+BOOL CALLBACK TitleProc(HWND w, LPARAM lp) {
+    if (!IsWindowVisible(w) || GetWindow(w, GW_OWNER)) return TRUE;
+    wchar_t t[512];
+    int n = GetWindowTextW(w, t, 512);
+    if (n > 0) ((std::vector<std::wstring>*)lp)->push_back(std::wstring(t, n));
+    return TRUE;
+}
+
+// Л19: серверы разработки (слушают порт, процесс вроде node/python) и заголовки окон - решение в tools/devserv
+std::vector<tools::Forgotten> FindForgotten(const std::vector<tools::ProcInfo>& ps,
+                                            std::map<std::wstring, ULONGLONG>& lastSeen, ULONGLONG idleMs,
+                                            ULONGLONG minBytes) {
+    bool any = false;
+    for (const tools::ProcInfo& p : ps) any = any || tools::DevServerName(p.name);
+    if (!any) {
+        lastSeen.clear();
+        return {};
+    }
+    std::vector<tools::Listener> ls = tools::Listeners();
+    for (auto it = ls.begin(); it != ls.end();)
+        it = tools::DevServerName(it->process) ? (it->dev = true, std::next(it)) : ls.erase(it);
+    tools::ListenerProjects(ls);  // проект ищется только у dev - а сервер может слушать любой порт
+    std::vector<tools::DevServer> servers;
+    for (const tools::Listener& l : ls) {
+        if (l.project.empty()) continue;
+        tools::DevServer s{l.pid, l.process, l.project, l.port, 0};
+        for (const tools::ProcInfo& p : ps)  // своя память и дочерних (vite, воркеры)
+            if (p.pid == l.pid || p.parent == l.pid) s.bytes += p.mem;
+        servers.push_back(s);
+    }
+    std::vector<std::wstring> titles;
+    EnumWindows(TitleProc, (LPARAM)&titles);
+    return tools::ForgottenServers(servers, titles, lastSeen, GetTickCount64(), idleMs, minBytes);
+}
+std::set<std::wstring> g_netKnown;  // что уже видели (ключ находки)
 
 std::wstring NetKey(const tools::Suspect& s) { return s.name + L"|" + s.path; }
 
@@ -102,7 +141,8 @@ DWORD WINAPI WatchLoop(void*) {
     if (hosts != INVALID_HANDLE_VALUE) waits.push_back(hosts);
 
     ULONGLONG lastIn = 0, lastOut = 0, lastAt = 0, nextFull = 0, quickAt = 0, gpuAt = 0, selfAt = 0;
-    std::vector<tools::SelfSample> self;  // раз в час, за последние сутки с запасом
+    std::map<std::wstring, ULONGLONG> devSeen;  // Л19: когда проект последний раз был виден в окнах
+    std::vector<tools::SelfSample> self;        // раз в час, за последние сутки с запасом
     int n = 0;
     for (;;) {
         ULONGLONG now = GetTickCount64();
@@ -124,6 +164,10 @@ DWORD WINAPI WatchLoop(void*) {
             std::vector<tools::SysItem> freshSys;
             if (n % 5 == 0) fresh = tools::NewStartupItems();
             if (n % 5 == 2) freshSys = tools::NewSysItems();  // службы и задачи - раз в 5 минут, не в тот же проход
+            std::vector<tools::Forgotten> forgot;
+            bool devPass = n % 5 == 4 && !g_game;
+            if (devPass)
+                forgot = FindForgotten(ps, devSeen, 3600 * 1000, 100ull << 20);  // забытые серверы - раз в 5 минут
             std::vector<std::wstring> wake;
             bool wakeNew = n % 30 == 0;
             if (wakeNew) wake = tools::WakeDevices();
@@ -140,6 +184,7 @@ DWORD WINAPI WatchLoop(void*) {
             g_newStarts.insert(g_newStarts.end(), fresh.begin(), fresh.end());
             g_newSys.insert(g_newSys.end(), freshSys.begin(), freshSys.end());
             if (wakeNew) g_wakeCache = std::move(wake);
+            if (devPass) g_forgotten = std::move(forgot);
             ReleaseSRWLockExclusive(&g_watchLock);
             lastIn = in, lastOut = out, lastAt = now;
             PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
@@ -336,6 +381,7 @@ void TryProactive() {
     std::vector<tools::ProcHistory::Leak> leaks = g_leaks;
     tools::CommitInfo c = g_commit;
     std::vector<tools::ProcInfo> procs = g_dev || !g_devEnded ? std::vector<tools::ProcInfo>{} : g_procs;
+    std::vector<tools::Forgotten> forgot = g_forgotten;
     bool haveNet = !g_netAlerts.empty();
     tools::Suspect netFind = haveNet ? g_netAlerts.front() : tools::Suspect{};
     if (haveNet) g_netAlerts.erase(g_netAlerts.begin());
@@ -361,6 +407,31 @@ void TryProactive() {
     }
     if (haveSys) {
         AskSysItem(sys);
+        return;
+    }
+    for (const tools::Forgotten& f : forgot) {  // Л19: тихо, по одному проекту, оставленные - не спрашивать снова
+        if (!g_devKeep.insert(Lower(f.project)).second) continue;
+        std::wstring what;
+        for (const tools::DevServer& s : f.servers)
+            if (what.find(NoExe(s.process) + L" ") == std::wstring::npos || s.port)
+                what +=
+                    (what.empty() ? L"" : L", ") + NoExe(s.process) + (s.port ? L" :" + std::to_wstring(s.port) : L"");
+        std::vector<tools::DevServer> servers = f.servers;
+        std::wstring proj = Leaf(f.project);
+        Ask(
+            L"Забытый сервер: " + proj,
+            what + L" ещё работает, а проекта не видно в окнах " + std::to_wstring(f.minutes) + L" мин. Занимает " +
+                tools::Bytes(f.bytes) + L".",
+            L"Завершить", L"Оставить",
+            [servers, proj] {
+                bg::Run([servers, proj] {
+                    int killed = 0;
+                    for (const tools::DevServer& s : servers) killed += tools::KillPid(s.pid, s.process);
+                    autos::Note(L"Забытый сервер " + proj + L": завершено " + std::to_wstring(killed) + L" из " +
+                                std::to_wstring(servers.size()));
+                });
+            },
+            nullptr, 30000, Toast::G_INFO);
         return;
     }
     for (const tools::ProcHistory::Leak& l : leaks) {

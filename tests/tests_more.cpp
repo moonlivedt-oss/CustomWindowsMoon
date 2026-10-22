@@ -21,6 +21,7 @@
 #include "tools/important.h"
 #include "tools/journal.h"
 #include "tools/builderr.h"
+#include "tools/devserv.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
 #include "desk/cardlog.h"
@@ -604,6 +605,26 @@ void TestBuildErr() {
     CHECK(!builderr::First(L"Result: Succeeded\nTotal execution time: 3.1 seconds\n", e));
 }
 
+// Забытые серверы (Л19): проект виден в заголовке - не забыт; не виден час и ест память - забыт, один на проект
+void TestDevServers() {
+    CHECK(tools::DevServerName(L"node.exe") && tools::DevServerName(L"Python3.11.exe") &&
+          !tools::DevServerName(L"Code.exe"));
+    CHECK(tools::ProjectInTitle(L"D:\\Web\\shop", L"App.tsx - shop - Visual Studio Code"));
+    CHECK(!tools::ProjectInTitle(L"D:\\Web\\shop", L"workshop - Visual Studio Code"));  // целым словом
+    CHECK(tools::ProjectInTitle(L"D:\\Web\\my-site\\", L"PowerShell D:\\Web\\my-site"));
+    std::vector<tools::DevServer> s = {{10, L"node.exe", L"D:\\Web\\shop", 5173, 300ull << 20},
+                                       {10, L"node.exe", L"D:\\Web\\shop", 24678, 300ull << 20},  // тот же процесс
+                                       {11, L"python.exe", L"D:\\Py\\bot", 8000, 30ull << 20}};
+    std::map<std::wstring, ULONGLONG> seen;
+    ULONGLONG h = 3600 * 1000;
+    CHECK(tools::ForgottenServers(s, {L"shop - Visual Studio Code"}, seen, 1000).empty());  // первая встреча
+    CHECK(tools::ForgottenServers(s, {}, seen, 1000 + h - 60000).empty());                  // ещё не час
+    std::vector<tools::Forgotten> f = tools::ForgottenServers(s, {}, seen, 1000 + h + 60000);
+    CHECK(f.size() == 1 && f[0].project == L"D:\\Web\\shop" && f[0].servers.size() == 2 &&
+          f[0].bytes == (300ull << 20) && f[0].minutes == 61);  // бот ест мало - не в счёт, память процесса - один раз
+    CHECK(tools::ForgottenServers(s, {L"Terminal - shop"}, seen, 1000 + 2 * h).empty());  // проект снова открыт
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -628,4 +649,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestCardLog();
     TestJournalUndo();
     TestBuildErr();
+    TestDevServers();
 }

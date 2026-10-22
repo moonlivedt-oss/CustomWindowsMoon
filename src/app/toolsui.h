@@ -2,6 +2,7 @@
 // Утилиты в основной программе: кольцо «Утилиты» (действие угла tools), действия в фоне с ходом в карточке,
 // предупреждение, когда на диске мало места.
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@ struct Config;
 struct Item;
 class BoostCard;
 class RadialMenu;
+#include "tools/devserv.h"
 #include "tools/tools.h"
 #include "tools/weekdiff.h"
 
@@ -69,6 +71,10 @@ struct Watched {
 Watched Watch();
 // Сколько слежка молчит, мс (0 - ещё не прошла ни разу); periodMs - как часто она должна проходить сейчас
 ULONGLONG WatchAge(ULONGLONG& periodMs);
+// Забытые серверы разработки (Л19): снимок портов, проектов и заголовков окон, решение - tools/devserv
+std::vector<tools::Forgotten> FindForgotten(const std::vector<tools::ProcInfo>& ps,
+                                            std::map<std::wstring, ULONGLONG>& lastSeen, ULONGLONG idleMs,
+                                            ULONGLONG minBytes);
 std::vector<tools::ToolVersion> Versions();                  // пусто - ещё не проверялось
 void SetVersions(const std::vector<tools::ToolVersion>& v);  // проверили из студии - кольцу тоже
 void Refresh();                                              // пересчитать сейчас
