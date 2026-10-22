@@ -25,6 +25,7 @@
 #include "tools/drain.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
+#include "app/resume.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
 
@@ -687,6 +688,35 @@ void TestAppVolume() {
     CHECK(back.size() == 2 && std::fabs(back[L"nfs14"] - 0.85f) < 0.001f);
 }
 
+// «Продолжить, где остановился» (Л4): снимок туда и обратно, папки VS Code, чего нет сейчас, текст карточки
+void TestResume() {
+    CHECK(resume::FromFileUri(L"file:///d%3A/Desktop/C%2B%2B") == L"D:\\Desktop\\C++");
+    CHECK(resume::FromFileUri(L"file:///c%3A/Users/%D0%9C%D0%BE%D1%8F") == L"C:\\Users\\Моя");  // UTF-8 в URI
+    CHECK(resume::FromFileUri(L"vscode-remote://wsl/x").empty());
+    std::wstring json =
+        L"{\"backupWorkspaces\": {\"workspaces\": [], \"folders\": [{\"folderUri\": \"file:///d%3A/Web/shop\"}], "
+        L"\"emptyWindows\": []}, \"profileAssociations\": {\"workspaces\": {\"file:///d%3A/Web/shop\": "
+        L"\"__default__profile__\", \"file:///d%3A/Games/MyGame\": \"__default__profile__\", \"file:///c%3A/a/tools\": "
+        L"\"__default__profile__\", \"file:///d%3A/b/tools\": \"__default__profile__\"}}}";
+    std::vector<std::wstring> f = resume::CodeFolders(
+        json, {L"main.cpp - MyGame - Visual Studio Code", L"x.py - tools - Visual Studio Code", L"Telegram"});
+    CHECK(f.size() == 2 && f[0] == L"D:\\Web\\shop" &&
+          f[1] == L"D:\\Games\\MyGame");  // «tools» - две папки, не угадываем
+    resume::Snapshot s;
+    s.when = 1792700000;
+    s.things = {{resume::Thing::CODE, L"D:\\Web\\shop", L"shop"},
+                {resume::Thing::FOLDER, L"C:\\Users\\Me\\Downloads", L"Downloads"},
+                {resume::Thing::UNREAL, L"D:\\Games\\MyGame\\MyGame.uproject", L"MyGame"},
+                {resume::Thing::APP, L"C:\\Program Files\\Blender\\blender.exe", L"blender"}};
+    resume::Snapshot back;
+    CHECK(resume::Parse(resume::Save(s), back) && back.when == s.when && back.things.size() == 4 &&
+          back.things[2].kind == resume::Thing::UNREAL && back.things[3].label == L"blender");
+    std::vector<resume::Thing> miss = resume::Missing(s, {{resume::Thing::CODE, L"d:\\web\\SHOP", L"shop"}});
+    CHECK(miss.size() == 3 && miss[0].kind == resume::Thing::FOLDER);
+    CHECK(resume::Describe(miss) == L"Unreal: MyGame; папки: Downloads; программы: blender");
+    CHECK(resume::Describe(s.things, 30).size() == 30);
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -715,4 +745,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestProjectPorts();
     TestDrain();
     TestAppVolume();
+    TestResume();
 }
