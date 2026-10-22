@@ -1126,6 +1126,59 @@ std::vector<Item> RingItems(std::wstring& status) {
     return ring;
 }
 
+// Кольцо утилит на выдуманных данных - эталон снимка (build.cmd snaps): те же группы, значки и счётчики, что у
+// настоящего, длинные подписи для проверки раскладки, но ничего не читается с этого компьютера.
+std::vector<Item> DemoRingItems() {
+    auto act = [](const wchar_t* name, const wchar_t* icon, const wchar_t* key = L"x") {
+        return Act(name, icon, key, L"");
+    };
+    auto group = [&](const wchar_t* name, const wchar_t* icon, std::vector<Item> kids, const wchar_t* badge) {
+        Item g = Act(name, icon, L"", L"");
+        g.children = std::move(kids);
+        g.children.push_back(act(L"В студии", Have(L"tools-studio.png", L"tools-box.png")));
+        if (*badge)
+            g.badge = badge;
+        else
+            g.calm = true;
+        return g;
+    };
+    std::vector<Item> ring;
+    Item imp = Act(L"Важное", Have(L"tools-important.png", L"tools-alarm.png"), L"", L"");
+    imp.children = {act(L"Epic Games Updater", L"tools-service.png"), act(L"Обновления: ошибок 1", L"tools-update.png"),
+                    act(L"Можно освободить 12 ГБ", L"tools-clean.png"), act(L"RadialMenu +5", L"tools-git.png")};
+    imp.badge = L"4";
+    ring.push_back(imp);
+    ring.push_back(group(L"Место", Have(L"grp-space.png", L"tools-disk.png"),
+                         {act(L"Диски", L"tools-disk.png"), act(L"Очистка 12 ГБ", L"tools-clean.png"),
+                          act(L"Проекты", L"tools-box.png")},
+                         L"12 ГБ"));
+    ring.push_back(group(L"Память", Have(L"grp-memory.png", L"tools-mem.png"),
+                         {act(L"Процессы", L"tools-procs.png"), act(L"Фон", L"tools-box.png"),
+                          act(L"Автозагрузка", L"tools-startup.png")},
+                         L""));
+    ring.push_back(
+        group(L"Разработка", Have(L"grp-dev.png", L"tools-git.png"),
+              {act(L"Git", L"tools-git.png"), act(L"PATH", L"tools-path.png"), act(L"Порты", L"tools-ports.png"),
+               act(L"Терминал", L"tools-terminal.png"), act(L"Кто держит", L"tools-lock.png")},
+              L"2"));
+    ring.push_back(group(L"Защита", L"tools-bug.png",
+                         {act(L"Заново", L"tools-shield.png"), act(L"Списком", L"tools-shield.png"),
+                          act(L"Расширения 5", Have(L"tools-extension.png", L"tools-shield.png")),
+                          act(L"Ссылка в песочнице", Have(L"tools-sandbox-link.png", L"tools-sandbox.png")),
+                          act(L"VSCodeCssAutoheal", L"tools-shield.png"), act(L"MoonLiveDz", L"tools-certs.png"),
+                          act(L"Epic Games Updater", L"tools-service.png")},
+                         L"!1"));
+    ring.push_back(group(L"Починка", L"rec-kit.png",
+                         {act(L"Починить Windows", L"tools-repair.png"), act(L"Центр обновления", L"tools-update.png"),
+                          act(L"Офлайн-проверка", L"tools-shield.png")},
+                         L""));
+    ring.push_back(group(L"Система", L"tools-report.png",
+                         {act(L"Устройства", L"tools-devices.png"), act(L"Износ батареи", L"tools-battery.png"),
+                          act(L"Отчёт", L"tools-report.png")},
+                         L"1"));
+    return ring;
+}
+
 void ShowRing(RadialMenu& menu) {
     std::wstring status;
     std::vector<Item> ring = RingItems(status);

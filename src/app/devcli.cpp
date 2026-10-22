@@ -705,16 +705,20 @@ struct SnapCase {
     int page, tab;
     const wchar_t* name;
 };
-const SnapCase kSnapCases[] = {{2, 0, L"behavior"}, {13, 0, L"aids"}, {1, 0, L"themes"},
-                               {9, 0, L"keys"},     {3, 0, L"desk"},  {7, 7, L"privacy"}};
+// page -1 - кольцо утилит на выдуманных данных (--tools-ring-snap ... demo), tab - раскрытая группа
+const SnapCase kSnapCases[] = {{2, 0, L"behavior"},   {13, 0, L"aids"},       {1, 0, L"themes"},
+                               {9, 0, L"keys"},       {3, 0, L"desk"},        {7, 7, L"privacy"},
+                               {7, 0, L"tools-path"}, {7, 1, L"tools-disks"}, {-1, 4, L"tools-ring"}};
 
 const CLSID kPngEncoder = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
 
 bool SnapRun(const SnapCase& c, const std::wstring& out) {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --studio-snap " + std::to_wstring(c.page) + L" " +
-                       std::to_wstring(c.tab) + L" \"" + out + L"\" 2500";
+    std::wstring cmd = c.page < 0 ? L"\"" + std::wstring(exe) + L"\" --tools-ring-snap \"" + out + L"\" " +
+                                        std::to_wstring(c.tab) + L" demo"
+                                  : L"\"" + std::wstring(exe) + L"\" --studio-snap " + std::to_wstring(c.page) + L" " +
+                                        std::to_wstring(c.tab) + L" \"" + out + L"\" 2500";
     SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
@@ -1100,11 +1104,13 @@ bool Run(int& exitCode) {
             toolsui::PrimeSecurityForSnapshot();
         }
         exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
-    } else if (Has(args, L"--tools-ring-snap")) {  // --tools-ring-snap файл.png [сектор]: кольцо утилит в картинку
+    } else if (Has(args,
+                   L"--tools-ring-snap")) {  // --tools-ring-snap файл.png [сектор] [demo]: кольцо утилит в картинку
         size_t i = std::find(args.begin(), args.end(), L"--tools-ring-snap") - args.begin();
         std::wstring out = i + 1 < args.size() ? args[i + 1] : ExeDir() + L"\\tools_ring.png";
         int root = i + 2 < args.size() ? _wtoi(args[i + 2].c_str()) : 0;
-        SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");  // цвета темы - без поправки на время суток
+        bool demo = i + 3 < args.size() && args[i + 3] == L"demo";  // выдуманные пункты - эталон снимка
+        SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");              // цвета темы - без поправки на время суток
         _putenv("RADIAL_DEMO=1");
         OleInitialize(nullptr);
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -1114,7 +1120,7 @@ bool Run(int& exitCode) {
         if (menu.Create(GetModuleHandleW(nullptr))) {
             UINT dpi = GetDpiForSystem();
             while (!menu.Prewarm(&cfg, dpi, 1000)) {}
-            toolsui::SnapRing(menu, &cfg, dpi, root, out);
+            toolsui::SnapRing(menu, &cfg, dpi, root, out, demo);
         }
         TerminateProcess(GetCurrentProcess(), 0);  // как --ring-bench: разбирать окна и кэши GDI+ незачем
     } else if (Has(args, L"--modefx-film")) {      // --modefx-film game|dev on|off out.png: кадры анимации режима
