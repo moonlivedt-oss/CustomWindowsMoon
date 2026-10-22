@@ -26,6 +26,9 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below,
 void ShowRing(RadialMenu& menu);
 std::vector<Item> RingItems(std::wstring& status);  // пункты кольца без показа (для командной палитры)
 void Run(const std::wstring& key);
+// «Важное» (О4): дела из первого сектора кольца - имя, причина (note), ключ действия (path) для Run; пусто - всё
+// спокойно. demo - выдуманные, для снимков
+std::vector<Item> ImportantItems(bool demo = false);
 void OnJob(WPARAM wp, LPARAM lp);
 void Tick();  // карточка и раз в 10 минут - проверка места на дисках
 void Shutdown();

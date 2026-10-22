@@ -263,6 +263,7 @@ enum Id {
     ID_TOOLS_FIND = 18590,   // «Диски»: поиск папки по таблице MFT
     ID_TOOLS_FOUND = 18600,  // +i*2: «Посчитать» и «Открыть» у найденной папки
     ID_TOOLS_BIG = 18700,    // +i*2: «Показать» и «В Корзину» у большого файла
+    ID_STATE_IMP = 19300,    // +i: «Сделать» у дела из «Важного»
     ID_TOOLS_EXT = 19200,    // +i: «Открыть в браузере» у расширения
     ID_NET_TOP =
         18900,  // «Сеть»: «Замерить» (+0), «Отрезать» у программы (+1+i), «Вернуть» (+20+i), +50 - данные Windows
@@ -766,8 +767,10 @@ private:
     toolsui::SecurityView secView_;  // вкладка «Защита»
     int secKind_ = 0;                // фильтр: 0 - все, дальше - виды, что есть в находках
     int extKind_ = 0;                // расширения браузеров: 0 - все, 1 - опасные
-    int weekKind_ = 0;               // «Состояние», новое за неделю: 0 - все, дальше - виды, что есть
-    ULONGLONG liveAt_ = 0;           // данные колбы и батареи - не чаще раза в 3 с
+    std::vector<Item> stateImp_;     // «Важное» на «Состоянии» (О4), раз в 10 с
+    ULONGLONG stateImpAt_ = 0;
+    int weekKind_ = 0;      // «Состояние», новое за неделю: 0 - все, дальше - виды, что есть
+    ULONGLONG liveAt_ = 0;  // данные колбы и батареи - не чаще раза в 3 с
     tools::MemoryState liveMem_;
     std::vector<tools::HeavyApp> liveApps_;
     tools::BatteryInfo liveBat_;

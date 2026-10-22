@@ -272,6 +272,26 @@ void TestSpeedLog() {
     CHECK(days.front().day == 7 && days.front().down == 8 && days.front().n == 2);
     CHECK(days.back().day == 20 && days.back().tunnel && days[13].day == 20 && !days[13].tunnel);
     CHECK(days[13].down == 300);
+
+    // О3: выходы туннеля - страна после последней запятой, быстрые первыми, без страны и напрямую не в счёт
+    std::vector<net::Speed> e;
+    auto add = [&](double down, const wchar_t* via, bool tunnel = true) {
+        net::Speed x;
+        x.when = 1, x.down = down, x.up = 10, x.tunnel = tunnel, x.via = via;
+        e.push_back(x);
+    };
+    add(40, L"happ-xray, Нидерланды");
+    add(60, L"happ-xray, Швеция");
+    add(62, L"happ-xray, Швеция");
+    add(500, L"Wi-Fi", false);
+    add(90, L"happ-xray");
+    std::vector<net::SpeedExit> ex = net::SpeedByExit(e);
+    CHECK(ex.size() == 2 && ex[0].country == L"Швеция" && ex[0].down == 61 && ex[0].n == 2);
+    CHECK(ex[1].country == L"Нидерланды");
+    CHECK(net::SpeedExitAdvice(ex).find(L"«Швеция»") != std::wstring::npos);
+    ex[1].down = 58;
+    CHECK(net::SpeedExitAdvice(ex).find(L"почти равны") != std::wstring::npos);
+    CHECK(net::SpeedExitAdvice({ex[0]}).empty());
 }
 
 // Неделя: новое, убранное и обновлённое (та же программа с другой версией); строки снимка туда и обратно.

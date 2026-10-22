@@ -209,11 +209,12 @@ std::vector<Item> RingItems() {
     ring.push_back(wifi);
     // скорость (И26): последний замер и сравнение «через туннель / напрямую» по истории
     std::vector<net::Speed> hist = net::SpeedHistory();
-    std::wstring compare = net::SpeedCompare(hist);
+    std::wstring compare = net::SpeedCompare(hist), exitAdvice = net::SpeedExitAdvice(net::SpeedByExit(hist));
     ring.push_back(Act(L"Скорость", L"net-globe.png", L"speed",
                        (hist.empty() ? std::wstring(L"Загрузка, отдача и задержка через speed.cloudflare.com (~20 с)")
                                      : L"Последний замер: " + net::SpeedText(hist.back())) +
-                           (compare.empty() ? L". Замеры с туннелем и без копятся для сравнения" : L". " + compare)));
+                           (compare.empty() ? L". Замеры с туннелем и без копятся для сравнения" : L". " + compare) +
+                           (exitAdvice.empty() ? L"" : L". " + exitAdvice)));
     ring.push_back(Act(L"Проверить сеть", L"net-check.png", L"check",
                        L"Полная проверка в студии: прокси, туннели, остатки VPN, история"));
     return ring;

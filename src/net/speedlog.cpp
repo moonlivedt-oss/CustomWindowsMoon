@@ -167,4 +167,37 @@ std::vector<SpeedDay> SpeedDays(const std::vector<Speed>& history, size_t days) 
     return out;
 }
 
+std::vector<SpeedExit> SpeedByExit(const std::vector<Speed>& history) {
+    std::map<std::wstring, std::vector<const Speed*>> by;
+    for (auto it = history.rbegin(); it != history.rend(); ++it) {
+        if (!it->tunnel || it->down <= 0) continue;
+        size_t comma = it->via.rfind(L',');
+        if (comma == std::wstring::npos) continue;
+        size_t a = it->via.find_first_not_of(L' ', comma + 1);
+        if (a == std::wstring::npos) continue;
+        std::vector<const Speed*>& v = by[it->via.substr(a)];
+        if (v.size() < 20) v.push_back(&*it);
+    }
+    std::vector<SpeedExit> out;
+    for (const auto& [country, v] : by) {
+        std::vector<double> d, u, p;
+        for (const Speed* s : v) {
+            d.push_back(s->down);
+            if (s->up > 0) u.push_back(s->up);
+            if (s->pingMs >= 0) p.push_back(s->pingMs);
+        }
+        out.push_back({country, Median(d), Median(u), p.empty() ? -1 : (int)Median(p), (int)v.size()});
+    }
+    std::stable_sort(out.begin(), out.end(), [](const SpeedExit& a, const SpeedExit& b) { return a.down > b.down; });
+    return out;
+}
+
+std::wstring SpeedExitAdvice(const std::vector<SpeedExit>& exits) {
+    if (exits.size() < 2) return L"";
+    const SpeedExit &best = exits.front(), &next = exits[1];
+    if (best.down < next.down * 1.15) return L"Выходы туннеля по скорости почти равны";  // разница в шуме замеров
+    return L"Быстрее всего через «" + best.country + L"»: ↓ " + Mbps(best.down) + L" против ↓ " + Mbps(next.down) +
+           L" у «" + next.country + L"»";
+}
+
 }  // namespace net
