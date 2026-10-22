@@ -1,7 +1,13 @@
+// winsock2 раньше windows.h (через wifi.h): иначе IP Helper (скорость связи) не видит свои типы
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
 #include "net/wifi.h"
 
 #include <objidl.h>
 #include <gdiplus.h>
+#include <iphlpapi.h>
+#include <netioapi.h>
 #include <wlanapi.h>
 #include <netlistmgr.h>
 
@@ -77,6 +83,14 @@ bool ChannelsOverlap(int a, int b) {
     return a24 ? std::abs(a - b) < 5 : a == b;
 }
 
+std::wstring WifiBandGuess(int mbps) {
+    // 2,4 ГГц на 20/40 МГц даёт до ~300 Мбит/с (Wi-Fi 4 и 6 - 287-574 только на 40 МГц, у домашних роутеров редко);
+    // выше 400 - каналы 80 МГц и шире, они бывают только в 5 и 6 ГГц
+    if (mbps >= 400) return L"скорее 5 или 6 ГГц";
+    if (mbps > 0 && mbps <= 150) return L"скорее 2,4 ГГц";
+    return L"";
+}
+
 WifiInfo Wifi(bool scan) {
     WifiInfo r;
     Wlan w;
@@ -87,6 +101,16 @@ WifiInfo Wifi(bool scan) {
         const WLAN_INTERFACE_INFO& itf = list->InterfaceInfo[i];
         if (itf.isState != wlan_interface_state_connected) continue;
         r.adapter = itf.strInterfaceDescription;
+        // скорость связи - из IP Helper: она есть и без местоположения
+        NET_LUID luid{};
+        if (ConvertInterfaceGuidToLuid(&itf.InterfaceGuid, &luid) == NO_ERROR) {
+            MIB_IF_ROW2 row{};
+            row.InterfaceLuid = luid;
+            if (GetIfEntry2(&row) == NO_ERROR) {
+                r.linkRx = (int)(row.ReceiveLinkSpeed / 1000000);
+                r.linkTx = (int)(row.TransmitLinkSpeed / 1000000);
+            }
+        }
         DWORD size = 0;
         WLAN_CONNECTION_ATTRIBUTES* conn = nullptr;
         DWORD err = WlanQueryInterface(w.h, &itf.InterfaceGuid, wlan_intf_opcode_current_connection, nullptr, &size,

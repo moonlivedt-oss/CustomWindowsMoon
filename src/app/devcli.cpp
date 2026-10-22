@@ -409,6 +409,9 @@ bool Run(int& exitCode) {
             s += L"  " + n.ssid + L" канал " + std::to_wstring(n.channel) + L" " + std::to_wstring(n.rssi) + L" дБм" +
                  (net::ChannelsOverlap(n.channel, w.now.channel) ? L" (мешает)" : L"") + nl;
         s += w.advice + nl;
+        if (w.linkRx)
+            s += L"связь с роутером " + std::to_wstring(w.linkRx) + L" / " + std::to_wstring(w.linkTx) + L" Мбит/с, " +
+                 net::WifiBandGuess(w.linkRx) + nl;
         if (w.ok) {
             bool open = w.now.open;
             std::wstring pass = net::WifiPassword(w.now.ssid, &open);

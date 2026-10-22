@@ -52,7 +52,7 @@ add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.c
   src/tools/mft_parse.cpp src/tools/journal.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/tools/selfwatch.cpp)
 target_include_directories(radial_tests PRIVATE src)
 target_compile_definitions(radial_tests PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
-target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 uuid bcrypt gdiplus wlanapi)
+target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 uuid bcrypt gdiplus wlanapi iphlpapi)
 target_compile_options(radial_tests PRIVATE ${RADIAL_WERROR})
 if(MINGW)
   target_link_options(radial_tests PRIVATE -municode -static)
