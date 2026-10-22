@@ -26,6 +26,7 @@
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
 #include "app/resume.h"
+#include "app/afterwork.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
 
@@ -717,6 +718,27 @@ void TestResume() {
     CHECK(resume::Describe(s.things, 30).size() == 30);
 }
 
+// Сон после работы (Л6): что считается работой и отсчёт - ждём тишины, потом минута, работа снова пошла - с начала
+void TestAfterWork() {
+    std::vector<afterwork::ProcNow> ps = {{L"explorer.exe", 0.01}, {L"blender.exe", 0.05}};
+    CHECK(afterwork::BusyReason(ps, L"ninja.exe|UnrealBuildTool.exe", 0, false).empty());
+    ps[1].cpu = 0.6;  // рендер
+    CHECK(afterwork::BusyReason(ps, L"ninja.exe", 0, false) == L"рендер Blender");
+    ps.push_back({L"UnrealBuildTool.exe", 0.3});
+    CHECK(afterwork::BusyReason({{L"UnrealBuildTool.exe", 0}}, L"ninja.exe|UnrealBuildTool.exe", 0, false) ==
+          L"UnrealBuildTool.exe");
+    CHECK(afterwork::BusyReason({}, L"", 2, false) == L"загрузка в браузере");
+    CHECK(afterwork::BusyReason({}, L"", 0, true) == L"загрузка Steam");
+    afterwork::Countdown c;
+    CHECK(c.Feed(true, 0) == afterwork::Countdown::WAIT);
+    CHECK(c.Feed(false, 1000) == afterwork::Countdown::WAIT);     // затихло - ждём 2 минуты
+    CHECK(c.Feed(false, 121000) == afterwork::Countdown::COUNT);  // отсчёт пошёл
+    CHECK(c.SecondsLeft(121000) == 60);
+    CHECK(c.Feed(true, 150000) == afterwork::Countdown::WAIT);  // работа снова - с начала
+    CHECK(c.Feed(false, 151000) == afterwork::Countdown::WAIT && c.Feed(false, 271000) == afterwork::Countdown::COUNT);
+    CHECK(c.Feed(false, 331000) == afterwork::Countdown::ACT);
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -746,4 +768,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestDrain();
     TestAppVolume();
     TestResume();
+    TestAfterWork();
 }

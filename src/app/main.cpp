@@ -16,6 +16,7 @@
 #include "app/autostart.h"
 #include "app/devcli.h"
 #include "app/netui.h"
+#include "app/afterwork.h"
 #include "app/palette.h"
 #include "app/resume.h"
 #include "app/worksets.h"
@@ -246,6 +247,7 @@ void PollWork() {
         });
     autos::Tick();
     resume::Tick();
+    afterwork::Tick();
     if (!alt) {
         g_armed = true;
         g_altTab = false;
@@ -571,6 +573,13 @@ void TrayMenu() {
     if (g_dev.On() && !g_dev.Manual()) dev += L": " + g_dev.Reason();
     AppendMenuW(m, MF_STRING | (g_dev.On() ? MF_CHECKED : 0), CMD_DEV, dev.c_str());
     AppendMenuW(m, MF_STRING, CMD_BOOST, L"Освободить память...");
+    // Л6: сон после работы - галочка у взведённого, в подписи - чего ждём
+    afterwork::Mode aw = afterwork::Armed();
+    std::wstring awWhy = aw == afterwork::OFF ? L"" : L" (" + afterwork::Status() + L")";
+    AppendMenuW(m, MF_STRING | (aw == afterwork::SLEEP ? MF_CHECKED : 0), CMD_AFTER_SLEEP,
+                (L"Усыпить, когда всё закончится" + (aw == afterwork::SLEEP ? awWhy : L"")).c_str());
+    AppendMenuW(m, MF_STRING | (aw == afterwork::SHUTDOWN ? MF_CHECKED : 0), CMD_AFTER_OFF,
+                (L"Выключить, когда всё закончится" + (aw == afterwork::SHUTDOWN ? awWhy : L"")).c_str());
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | (AutostartOn() ? MF_CHECKED : 0), CMD_AUTOSTART, L"Запускать вместе с Windows");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
@@ -713,6 +722,7 @@ void ShutdownAll() {
     g_edgeCard.Destroy();
     g_askCard.Destroy();
     resume::Shutdown();
+    afterwork::Shutdown();
     g_dropCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
@@ -815,6 +825,12 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     break;
                 case CMD_BOOST:
                     OfferBoost(true);
+                    break;
+                case CMD_AFTER_SLEEP:
+                    afterwork::Arm(afterwork::Armed() == afterwork::SLEEP ? afterwork::OFF : afterwork::SLEEP);
+                    break;
+                case CMD_AFTER_OFF:
+                    afterwork::Arm(afterwork::Armed() == afterwork::SHUTDOWN ? afterwork::OFF : afterwork::SHUTDOWN);
                     break;
                 case CMD_GAME:
                     g_game.SetManual(!g_game.On(), g_cfg);  // выключили посреди игры - до её выхода
@@ -1139,6 +1155,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     cliphist::Start(inst, &g_cfg);
     appvol::Start(g_cfg.appVolume);     // Л36: громкость по программам
     resume::Init(inst, g_wnd, &g_cfg);  // Л4: продолжить, где остановился
+    afterwork::Init(inst, &g_cfg);      // Л6: сон после работы
     corners::SetClip([] { cliphist::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {
         for (Item& it : cliphist::Items(L"b|")) {
