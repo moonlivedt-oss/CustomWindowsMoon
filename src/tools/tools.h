@@ -214,6 +214,19 @@ struct ProjectJunk {
     int idleDays = 0;  // сколько дней в проекте ничего не менялось
 };
 std::vector<ProjectJunk> FindProjectJunk(const std::vector<std::wstring>& roots, std::atomic<bool>* cancel = nullptr);
+// Итог обхода на диске (О5, scancache.cpp): %APPDATA%\MoonDesk\tools\scan-cache.tsv. Перезапуск в пределах срока
+// берёт его, а не обходит кэши и проекты заново (главная цена старта - этот обход, 4-6 с процессора).
+struct ScanCache {
+    LONGLONG when = 0;  // секунды unix
+    std::vector<Junk> junk;
+    std::vector<ProjectJunk> projects;
+    ULONGLONG ddcOld = 0;
+};
+std::wstring ScanCacheRows(const ScanCache& c);
+bool ParseScanCache(const std::wstring& text, ScanCache& c);  // false - пусто или без времени
+void SaveScanCache(const ScanCache& c);
+bool LoadScanCache(ScanCache& c);
+void DropScanCache();  // после чистки размеры на диске уже неверны - следующий старт обойдёт заново
 bool IsProjectJunk(const std::wstring& path,
                    std::wstring* kind = nullptr);  // проверка признаков перед удалением
 
