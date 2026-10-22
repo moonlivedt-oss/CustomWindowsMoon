@@ -4,6 +4,7 @@
 
 #include <winhttp.h>
 
+#include <algorithm>
 #include <chrono>
 #include <vector>
 
@@ -26,7 +27,7 @@ HINTERNET Session() {
 }
 
 // Скачать bytes байт, не дольше capSec: Мбит/с с первого байта (без установки соединения); 0 - не вышло.
-double Download(HINTERNET c, ULONGLONG bytes, double capSec, std::atomic<bool>* cancel) {
+double Download(HINTERNET c, ULONGLONG bytes, double capSec, std::atomic<bool>* cancel, SpeedLive* live) {
     std::wstring path = L"/__down?bytes=" + std::to_wstring(bytes);
     HINTERNET r = WinHttpOpenRequest(c, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                      WINHTTP_FLAG_SECURE);
@@ -41,6 +42,10 @@ double Download(HINTERNET c, ULONGLONG bytes, double capSec, std::atomic<bool>* 
         while (WinHttpReadData(r, buf.data(), (DWORD)buf.size(), &n) && n) {
             got += n;
             t = Clock::now();
+            if (live && Seconds(t0, t) > 0.2) {
+                live->mbps = got * 8 / Seconds(t0, t) / 1e6;
+                live->part = std::max(Seconds(t0, t) / capSec, (double)got / bytes);
+            }
             if (Seconds(t0, t) > capSec || (cancel && *cancel)) break;
         }
         double sec = Seconds(t0, t);
@@ -51,7 +56,7 @@ double Download(HINTERNET c, ULONGLONG bytes, double capSec, std::atomic<bool>* 
 }
 
 // Отдать bytes байт, не дольше capSec: время от начала отправки до ответа сервера.
-double Upload(HINTERNET c, DWORD bytes, double capSec, std::atomic<bool>* cancel) {
+double Upload(HINTERNET c, DWORD bytes, double capSec, std::atomic<bool>* cancel, SpeedLive* live) {
     HINTERNET r = WinHttpOpenRequest(c, L"POST", L"/__up", nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                      WINHTTP_FLAG_SECURE);
     if (!r) return 0;
@@ -65,7 +70,12 @@ double Upload(HINTERNET c, DWORD bytes, double capSec, std::atomic<bool>* cancel
         DWORD put = 0, want = std::min<DWORD>((DWORD)chunk.size(), bytes - sent);
         ok = WinHttpWriteData(r, chunk.data(), want, &put) && put;
         sent += put;
-        if (Seconds(t0, Clock::now()) > capSec || (cancel && *cancel)) break;
+        double sec = Seconds(t0, Clock::now());
+        if (live && sec > 0.2) {
+            live->mbps = sent * 8.0 / sec / 1e6;
+            live->part = std::max(sec / capSec, (double)sent / bytes);
+        }
+        if (sec > capSec || (cancel && *cancel)) break;
     }
     // всё отдали - ждём ответ (до него данные могли ещё лежать в буферах); оборвали по времени - считаем отданное
     if (ok && sent == bytes) ok = WinHttpReceiveResponse(r, nullptr);
@@ -77,7 +87,13 @@ double Upload(HINTERNET c, DWORD bytes, double capSec, std::atomic<bool>* cancel
 
 }  // namespace
 
-Speed MeasureSpeed(const Log& log, std::atomic<bool>* cancel) {
+Speed MeasureSpeed(const Log& log, std::atomic<bool>* cancel, SpeedLive* live) {
+    auto phase = [live](int p) {
+        if (!live) return;
+        live->phase = p;
+        live->mbps = 0;
+        live->part = 0;
+    };
     Speed s;
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
@@ -85,6 +101,7 @@ Speed MeasureSpeed(const Log& log, std::atomic<bool>* cancel) {
     std::wstring adapter;
     s.tunnel = RouteTo(L"1.1.1.1", &adapter);
     log(L"Задержка...");
+    phase(1);
     s.pingMs = HttpRtt(5000);
     Exit e = ExitNode(5000);
     s.via = adapter;
@@ -93,16 +110,19 @@ Speed MeasureSpeed(const Log& log, std::atomic<bool>* cancel) {
     if (!ses) return s;
     if (HINTERNET c = WinHttpConnect(ses, L"speed.cloudflare.com", INTERNET_DEFAULT_HTTPS_PORT, 0)) {
         log(L"Загрузка...");
+        phase(2);
         // разгон: 10 МБ; быстрая сеть успела за секунду - второй заход крупнее, он и в счёт
-        s.down = Download(c, 10'000'000, 6, cancel);
-        if (s.down > 80 && !(cancel && *cancel)) s.down = std::max(s.down, Download(c, 100'000'000, 8, cancel));
+        s.down = Download(c, 10'000'000, 6, cancel, live);
+        if (s.down > 80 && !(cancel && *cancel)) s.down = std::max(s.down, Download(c, 100'000'000, 8, cancel, live));
         if (!(cancel && *cancel)) {
             log(L"Отдача...");
-            s.up = Upload(c, s.down > 50 ? 25'000'000 : 5'000'000, 8, cancel);
+            phase(3);
+            s.up = Upload(c, s.down > 50 ? 25'000'000 : 5'000'000, 8, cancel, live);
         }
         WinHttpCloseHandle(c);
     }
     WinHttpCloseHandle(ses);
+    if (live) live->phase = 4;
     return s;
 }
 

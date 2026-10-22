@@ -3,6 +3,30 @@
 
 namespace toolsui {
 
+// Страница расширения в его браузере (chrome://extensions/?id=...): удалить или выключить - там
+void OpenExtension(const tools::BrowserExt& e) {
+    struct B {
+        const wchar_t *name, *exe, *scheme;
+    } kB[] = {{L"Chrome", L"chrome.exe", L"chrome"},
+              {L"Edge", L"msedge.exe", L"edge"},
+              {L"Brave", L"brave.exe", L"brave"},
+              {L"Яндекс", L"browser.exe", L"browser"}};
+    for (const B& b : kB) {
+        if (e.browser != b.name) continue;
+        wchar_t exe[MAX_PATH] = {};
+        DWORD size = sizeof(exe);
+        std::wstring key2 = std::wstring(L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\") + b.exe;
+        if (RegGetValueW(HKEY_CURRENT_USER, key2.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, exe, &size) !=
+            ERROR_SUCCESS) {
+            size = sizeof(exe);
+            RegGetValueW(HKEY_LOCAL_MACHINE, key2.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, exe, &size);
+        }
+        std::wstring url = std::wstring(b.scheme) + L"://extensions/?id=" + e.id;
+        if (e.profile.size()) url = L"--profile-directory=\"" + e.profile + L"\" " + url;
+        if (exe[0]) ShellExecuteW(nullptr, L"open", exe, url.c_str(), nullptr, SW_SHOWNORMAL);
+    }
+}
+
 void Run(const std::wstring& key) {
     auto idx = [&](size_t prefix, size_t size) {
         size_t i = (size_t)_wtoi(key.c_str() + prefix);
@@ -905,27 +929,7 @@ void Run(const std::wstring& key) {
     if (key.rfind(L"sec-ext:", 0) == 0) {  // страница расширения в его браузере: удалить или выключить - там
         size_t i = idx(8, g_exts.size());
         if (i == (size_t)-1) return;
-        const tools::BrowserExt& e = g_exts[i];
-        struct B {
-            const wchar_t *name, *exe, *scheme;
-        } kB[] = {{L"Chrome", L"chrome.exe", L"chrome"},
-                  {L"Edge", L"msedge.exe", L"edge"},
-                  {L"Brave", L"brave.exe", L"brave"},
-                  {L"Яндекс", L"browser.exe", L"browser"}};
-        for (const B& b : kB) {
-            if (e.browser != b.name) continue;
-            wchar_t exe[MAX_PATH] = {};
-            DWORD size = sizeof(exe);
-            std::wstring key2 = std::wstring(L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\") + b.exe;
-            if (RegGetValueW(HKEY_CURRENT_USER, key2.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, exe, &size) !=
-                ERROR_SUCCESS) {
-                size = sizeof(exe);
-                RegGetValueW(HKEY_LOCAL_MACHINE, key2.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, exe, &size);
-            }
-            std::wstring url = std::wstring(b.scheme) + L"://extensions/?id=" + e.id;
-            if (e.profile.size()) url = L"--profile-directory=\"" + e.profile + L"\" " + url;
-            if (exe[0]) ShellExecuteW(nullptr, L"open", exe, url.c_str(), nullptr, SW_SHOWNORMAL);
-        }
+        OpenExtension(g_exts[i]);
         return;
     }
     if (key.rfind(L"sec-find:", 0) == 0) {

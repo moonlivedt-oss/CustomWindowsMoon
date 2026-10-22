@@ -25,6 +25,28 @@ namespace studio {
 
 namespace {
 
+// Новое за неделю для снимков (RADIAL_DEMO): по нескольку записей каждого вида
+tools::WeekReport DemoWeek() {
+    tools::WeekReport w;
+    w.days = 7;
+    auto add = [&](tools::WeekChange::What what, const wchar_t* kind, const wchar_t* label) {
+        tools::WeekChange ch;
+        ch.what = what;
+        ch.entry = {kind, label, label};
+        w.changes.push_back(ch);
+    };
+    add(tools::WeekChange::ADDED, L"app", L"Blender 4.5");
+    add(tools::WeekChange::ADDED, L"start", L"Discord");
+    add(tools::WeekChange::ADDED, L"task", L"GoogleUpdaterTaskUser");
+    add(tools::WeekChange::ADDED, L"svc", L"Epic Online Services");
+    add(tools::WeekChange::REMOVED, L"app", L"CCleaner");
+    add(tools::WeekChange::REMOVED, L"drv", L"vboxsup");
+    add(tools::WeekChange::UPDATED, L"app", L"Git 2.51.0");
+    add(tools::WeekChange::UPDATED, L"app", L"Visual Studio Code 1.105");
+    add(tools::WeekChange::UPDATED, L"app", L"NVIDIA App 11.0.5");
+    return w;
+}
+
 // Идёт чистка: по полосе бегут косые штрихи, а с неё вверх улетают и тают крупинки мусора.
 void CleanDust(ui::Ui& ui, const RectF& bar, Color a, Color b) {
     Graphics& g = ui.G();
@@ -123,7 +145,8 @@ void Studio::StatePage(const RectF& r) {
             hi.disks.push_back(d);
         }
         hi.memLoad = stateMem_.loadPercent;
-        for (const tools::Physical& p : statePhys_) (p.health >= 2 ? hi.smartBad : p.health == 1 ? hi.smartWarn : hi.odd) += p.health > 0;
+        for (const tools::Physical& p : statePhys_)
+            (p.health >= 2 ? hi.smartBad : p.health == 1 ? hi.smartWarn : hi.odd) += p.health > 0;
         toolsui::SecurityView sv = toolsui::SecurityFinds();
         for (const tools::Suspect& f : sv.finds) (f.score >= 6 ? hi.danger : hi.odd) += f.score >= 3;
         tools::BatteryInfo bat = tools::Battery();
@@ -183,7 +206,9 @@ void Studio::StatePage(const RectF& r) {
         g.DrawArc(&p, cx - d / 2, cy - d / 2, d, d, -90, 360 * std::max(0.01f, score / 100.0f) * (float)EaseOut(a));
         ui.Text(std::to_wstring(score), RectF(cx - d / 2, cy - ui.S(13), d, ui.S(26)), c.text, 17, true, ui::Center);
         float tx = cx + d / 2 + ui.S(18), tw = cr.GetRight() - tx - ui.S(18);
-        ui.Text(score >= 85 ? L"Компьютер в порядке" : score >= 60 ? L"Есть что поправить" : L"Нужно внимание",
+        ui.Text(score >= 85   ? L"Компьютер в порядке"
+                : score >= 60 ? L"Есть что поправить"
+                              : L"Нужно внимание",
                 RectF(tx, y + ui.S(16), tw, ui.S(24)), c.text, 14, true);
         std::wstring why;
         for (size_t i = 0; i < stateHealth_.minus.size() && i < 3; ++i)
@@ -643,6 +668,79 @@ void Studio::StatePage(const RectF& r) {
         y = std::max(gc.GetBottom(), sc.GetBottom()) + gap;
     }
 
+    // ---- новое за неделю (Н3): что поставилось, пропало и обновилось - по снимкам раз в сутки ----
+    {
+        tools::WeekReport week = s.week;
+        if (Demo() && week.changes.empty()) week = DemoWeek();
+        std::vector<std::wstring> kinds;
+        for (const tools::WeekChange& ch : week.changes)
+            if (std::find(kinds.begin(), kinds.end(), ch.entry.kind) == kinds.end()) kinds.push_back(ch.entry.kind);
+        if (weekKind_ > (int)kinds.size()) weekKind_ = 0;
+        std::vector<const tools::WeekChange*> cols3[3];
+        for (const tools::WeekChange& ch : week.changes)
+            if (!weekKind_ || ch.entry.kind == kinds[weekKind_ - 1]) cols3[ch.what].push_back(&ch);
+        const size_t kMax = 8;
+        size_t rows = 0;
+        for (auto& v : cols3) rows = std::max(rows, std::min(v.size(), kMax) + (v.size() > kMax));
+        float lineH = ui.S(26), top = ui.S(kinds.size() > 1 ? 100 : 56);
+        RectF wc(x, y, w, top + std::max<float>(1, (float)rows) * lineH + ui.S(64));
+        Card(wc);
+        ui.Text(L"Новое за неделю", RectF(wc.X + ui.S(18), wc.Y + ui.S(14), wc.Width, ui.S(24)), c.text, 14, true);
+        ui.Text(week.days ? L"сравнение со снимком " + Plural(week.days, L"день", L"дня", L"дней") + L" назад" : L"",
+                RectF(wc.X + ui.S(200), wc.Y + ui.S(16), wc.Width - ui.S(218), ui.S(20)), c.muted, 11, false,
+                ui::Right);
+        RectF in2(wc.X + ui.S(18), wc.Y + ui.S(52), wc.Width - ui.S(36), wc.Height - ui.S(66));
+        if (kinds.size() > 1) {
+            std::vector<std::wstring> labels{L"Все"};
+            for (const std::wstring& k : kinds) labels.push_back(tools::WeekKindName(k));
+            int sel = weekKind_;
+            if (ui.Segmented(ID_STATE_WEEK,
+                             RectF(in2.X, in2.Y, std::min(in2.Width, ui.S(120) * labels.size()), ui.S(34)), labels,
+                             sel))
+                weekKind_ = sel;
+            in2.Y += ui.S(46);
+        }
+        if (!week.days) {
+            ui.Text(
+                L"Снимок того, что стоит и запускается, пишется раз в сутки: через неделю здесь будет видно, какие "
+                L"программы, службы, драйверы и задачи появились, пропали или обновились.",
+                RectF(in2.X, in2.Y, in2.Width, ui.S(60)), c.muted, 12, false, ui::Left, true);
+        } else if (week.changes.empty()) {
+            ui.Text(
+                L"За неделю ничего не поставилось и не пропало: программы, автозапуск, службы, драйверы и задачи "
+                L"те же.",
+                RectF(in2.X, in2.Y, in2.Width, ui.S(60)), c.muted, 12, false, ui::Left, true);
+        } else {
+            float a = appear(true);
+            const wchar_t* heads[3] = {L"Появилось", L"Убрано", L"Обновлено"};
+            Color dots[3] = {c.gold, c.muted, c.accent};
+            float colW = in2.Width / 3;
+            for (int k = 0; k < 3; ++k) {
+                float cx = in2.X + k * colW, cy = in2.Y;
+                ui.Text(heads[k] + (cols3[k].empty() ? L"" : L"  " + std::to_wstring(cols3[k].size())),
+                        RectF(cx, cy, colW - ui.S(12), ui.S(24)), c.text, 12.5f, true);
+                cy += ui.S(30);
+                if (cols3[k].empty()) ui.Text(L"-", RectF(cx, cy, colW, lineH), c.faint, 11.5f);
+                for (size_t i = 0; i < cols3[k].size() && i < kMax; ++i) {
+                    const tools::WeekChange& ch = *cols3[k][i];
+                    float ry = cy + i * lineH + (1 - (float)EaseOut(a)) * ui.S(10);
+                    ui.Fill(RectF(cx, ry + ui.S(8), ui.S(7), ui.S(7)), dots[k], ui.S(4));
+                    std::wstring kind = tools::WeekKindName(ch.entry.kind);
+                    float kw = weekKind_ ? 0 : ui.Measure(kind, 10.5f) + ui.S(8);
+                    std::wstring label = ch.entry.label;
+                    ui.Text(label, RectF(cx + ui.S(14), ry, colW - ui.S(26) - kw, lineH), c.text, 11.5f);
+                    if (kw > 0)
+                        ui.Text(kind, RectF(cx + colW - ui.S(12) - kw, ry + ui.S(1), kw, lineH), c.faint, 10.5f, false,
+                                ui::Right);
+                }
+                if (cols3[k].size() > kMax)
+                    ui.Text(L"и ещё " + std::to_wstring(cols3[k].size() - kMax),
+                            RectF(cx + ui.S(14), cy + kMax * lineH, colW, lineH), c.faint, 11);
+            }
+        }
+        y = wc.GetBottom() + gap;
+    }
+
     pageContentH_ = y + off - view.Y;
     g.Restore(gs);
     // переход из карточки «Загрузки - Показать»: прокрутить к нужной карточке один раз
@@ -742,7 +840,8 @@ void Studio::AutoPage(const RectF& r) {
             Save();
         }
         int waiting = autos::DigestCount();
-        cols.Row(b, 2, waiting ? L"Ждёт вечера: " + std::to_wstring(waiting) : std::wstring(L"Пока ничего не ждёт"), 0.95f);
+        cols.Row(b, 2, waiting ? L"Ждёт вечера: " + std::to_wstring(waiting) : std::wstring(L"Пока ничего не ждёт"),
+                 0.95f);
         cols.Note(b, 3.0f,
                   L"Итоги тихой чистки и самовосстановления не всплывают по одному, а приходят вечером списком. "
                   L"Вопросы и тревоги (новый автозапуск, мало места, обрыв сети) - сразу, как раньше.",

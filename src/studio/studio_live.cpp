@@ -19,12 +19,12 @@ using namespace Gdiplus;
 
 namespace studio {
 
-namespace {
-
 bool Demo() {
     static bool d = getenv("RADIAL_DEMO") != nullptr;
     return d;
 }
+
+namespace {
 
 double DemoT() {
     static ULONGLONG t0 = GetTickCount64();

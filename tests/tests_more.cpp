@@ -244,6 +244,33 @@ void TestSpeedLog() {
     h.push_back(d);
     std::wstring c = net::SpeedCompare(h);
     CHECK(c.find(L"↓ 90.0") != std::wstring::npos && c.find(L"↓ 140") != std::wstring::npos);
+    net::SpeedMedian m = net::SpeedMedianOf(h, true);
+    CHECK(m.n == 3 && m.down == 90 && m.up == 20);
+    CHECK(net::SpeedMedianOf(h, false).down == 140);
+    // по дням: полдень UTC - в любом поясе России тот же день; в одном дне туннель и напрямую - две записи
+    auto at = [](int day, int hour) {
+        SYSTEMTIME st{2026, 10, 0, (WORD)day, (WORD)hour, 0, 0, 0};
+        FILETIME ft;
+        SystemTimeToFileTime(&st, &ft);
+        return ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    };
+    std::vector<net::Speed> w;
+    for (int day = 1; day <= 20; ++day) {
+        net::Speed x;
+        x.when = at(day, 9), x.down = day, x.up = 1, x.tunnel = true;
+        w.push_back(x);
+        x.when = at(day, 10), x.down = day + 2;
+        w.push_back(x);  // медиана двух - среднее
+        if (day == 20) {
+            x.tunnel = false, x.down = 300;
+            w.push_back(x);
+        }
+    }
+    std::vector<net::SpeedDay> days = net::SpeedDays(w, 14);
+    CHECK(days.size() == 15);  // 14 дней, в последнем - две записи
+    CHECK(days.front().day == 7 && days.front().down == 8 && days.front().n == 2);
+    CHECK(days.back().day == 20 && days.back().tunnel && days[13].day == 20 && !days[13].tunnel);
+    CHECK(days[13].down == 300);
 }
 
 // Неделя: новое, убранное и обновлённое (та же программа с другой версией); строки снимка туда и обратно.

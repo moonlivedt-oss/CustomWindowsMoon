@@ -150,6 +150,10 @@ void Studio::NetPage(const RectF& r) {
             note(b, 3.2f + routeGrow, L"Всё в порядке, чинить нечего.", c.muted);
     });
 
+    // --- скорость и Wi-Fi: живые карточки (studio_net_live.cpp) ---
+    SpeedCard(cols);
+    WifiCard(cols);
+
     // --- что нашла проверка ---
     if (netReport_) {
         card(L"Проверка", 1.0f, [&](const RectF& b) {
