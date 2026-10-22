@@ -26,11 +26,13 @@ namespace {
 struct SnapCase {
     int page, tab;
     const wchar_t* name;
+    int scroll = 0;  // RADIAL_SCROLL: снять не верх страницы, а ниже
 };
 // page -1 - кольцо утилит на выдуманных данных (--tools-ring-snap ... demo), tab - раскрытая группа
 const SnapCase kSnapCases[] = {{2, 0, L"behavior"},   {13, 0, L"aids"},       {1, 0, L"themes"},
                                {9, 0, L"keys"},       {3, 0, L"desk"},        {7, 7, L"privacy"},
-                               {7, 0, L"tools-path"}, {7, 1, L"tools-disks"}, {-1, 4, L"tools-ring"}};
+                               {7, 0, L"tools-path"}, {7, 1, L"tools-disks"}, {-1, 4, L"tools-ring"},
+                               {6, 0, L"net", 420}};  // «Сеть»: скорость и Wi-Fi (проверка сети на снимке не идёт)
 
 const CLSID kPngEncoder = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
 
@@ -42,6 +44,7 @@ bool SnapRun(const SnapCase& c, const std::wstring& out) {
                                   : L"\"" + std::wstring(exe) + L"\" --studio-snap " + std::to_wstring(c.page) + L" " +
                                         std::to_wstring(c.tab) + L" \"" + out + L"\" 2500";
     SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");
+    SetEnvironmentVariableW(L"RADIAL_SCROLL", c.scroll ? std::to_wstring(c.scroll).c_str() : nullptr);
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
     std::vector<wchar_t> line(cmd.begin(), cmd.end());

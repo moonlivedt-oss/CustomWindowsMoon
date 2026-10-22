@@ -102,7 +102,7 @@ void Studio::NetPage(const RectF& r) {
     auto note = [&](const RectF& b, float n, const std::wstring& s, Color col) { cols.Note(b, n, s, col); };
 
     // первая проверка - сама при открытии раздела
-    if (!netReport_ && !netJob_) NetCheck();
+    if (!netReport_ && !netJob_ && !Demo()) NetCheck();  // снимок (RADIAL_DEMO) - без настоящей проверки
     bool busy = netJob_ && !netJob_->done;
     if (netJob_) {
         AcquireSRWLockShared(&netJob_->lock);
