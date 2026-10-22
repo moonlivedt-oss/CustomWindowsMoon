@@ -263,6 +263,12 @@ void SecurityAction(const tools::Suspect& s);
 void TurnOffStart(const tools::StartItem& it);  // выключить запись, если она всё та же (сверка со свежим списком)
 void GuardStart();                              // сторожа процессов (toolsui_guard.cpp): поток раз в 5 с
 void GuardStop();
+// Наблюдатель запусков разработки (toolsui_devrun.cpp, Л18 и Л31): упавший cmake --build и сервер, которому не дали
+// порт. Раз в секунду, пока впереди VS Code или терминал, иначе раз в 5 с. DevrunTick - карточки из основного потока.
+void DevrunStart();
+void DevrunStop();
+void DevrunTick();
+void BuildFailed(const std::wstring& exe, const std::wstring& dir);  // toolsui_guard.cpp: карточка «Найти ошибку»
 void GuardTick();  // из Tick: настройки для потока, журнал и карточки из очереди
 Item SecurityItem();
 Item RecoveryItem();

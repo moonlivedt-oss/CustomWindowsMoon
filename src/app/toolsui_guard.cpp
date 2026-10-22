@@ -28,12 +28,7 @@ struct LongDone {
     DWORD code;
     bool haveCode;
 };
-std::vector<LongDone> g_longDone;  // под g_guardLock: долгие команды закончились
-struct BuildFail {                 // Л31: cmake --build закончился с ошибкой
-    std::wstring exe, dir;         // cmake.exe и папка сборки (полный путь)
-    ULONGLONG ms;
-};
-std::vector<BuildFail> g_buildFails;          // под g_guardLock
+std::vector<LongDone> g_longDone;             // под g_guardLock: долгие команды закончились
 std::wstring g_awake;                         // под g_guardLock: что держит без сна
 std::vector<guard::Balancer::Act> g_lowered;  // под g_guardLock: кто сейчас понижен
 std::atomic<bool> g_restoreAll{false};
@@ -93,12 +88,6 @@ DWORD WINAPI GuardLoop(void*) {
     std::wstring rulesText;
     std::vector<guard::ProcRule> rules;
     std::map<DWORD, HANDLE> handles;  // долгие команды: держим, чтобы узнать код выхода
-    struct BuildRun {
-        HANDLE h = nullptr;  // nullptr - это не «cmake --build», больше не смотрим
-        std::wstring exe, dir;
-        ULONGLONG t0 = 0;
-    };
-    std::map<DWORD, BuildRun> builds;  // Л31: cmake --build - держим, чтобы узнать код выхода
     DWORD self = GetCurrentProcessId();
     int cores = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
     bool awakeOn = false;
@@ -220,48 +209,6 @@ DWORD WINAPI GuardLoop(void*) {
             g_longDone.push_back({d.name, d.ms, code, have});
             ReleaseSRWLockExclusive(&g_guardLock);
         }
-        // ---- сборка CMake (Л31): упала - в очередь карточки; свои повторные сборки (родитель - мы) не в счёт ----
-        for (const guard::Proc& p : procs) {
-            if (builds.count(p.pid) || p.parent == self || !guard::Match(p.name, L"cmake.exe")) continue;
-            BuildRun& b = builds[p.pid];
-            HANDLE h = OpenProcess(
-                SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE,
-                p.pid);
-            if (!h) continue;
-            std::vector<std::wstring> t = tools::CmdTokens(tools::ProcCommandLine(h));
-            auto at = std::find(t.begin(), t.end(), L"--build");
-            wchar_t img[MAX_PATH * 2];
-            DWORD n = MAX_PATH * 2;
-            if (at == t.end() || at + 1 == t.end() || !QueryFullProcessImageNameW(h, 0, img, &n)) {
-                CloseHandle(h);
-                continue;
-            }
-            std::wstring dir = *(at + 1);
-            if (!(dir.size() > 2 && dir[1] == L':')) dir = tools::ProcCurrentDir(h) + L"\\" + dir;
-            wchar_t full[MAX_PATH * 2];
-            DWORD fn = GetFullPathNameW(dir.c_str(), MAX_PATH * 2, full, nullptr);
-            b = {h, img, fn && fn < MAX_PATH * 2 ? full : dir, now};
-        }
-        for (auto it = builds.begin(); it != builds.end();) {
-            BuildRun& b = it->second;
-            bool alive =
-                std::any_of(procs.begin(), procs.end(), [&](const guard::Proc& p) { return p.pid == it->first; });
-            DWORD code = 0;
-            if (b.h && WaitForSingleObject(b.h, 0) == WAIT_OBJECT_0 && GetExitCodeProcess(b.h, &code)) {
-                if (code != 0 && !g_game) {
-                    AcquireSRWLockExclusive(&g_guardLock);
-                    g_buildFails.push_back({b.exe, b.dir, now - b.t0});
-                    ReleaseSRWLockExclusive(&g_guardLock);
-                }
-                CloseHandle(b.h);
-                b.h = nullptr;
-            }
-            if (!alive && !b.h)
-                it = builds.erase(it);
-            else
-                ++it;
-        }
-
         for (auto it = handles.begin(); it != handles.end();) {  // закончившиеся закрываем
             DWORD code = 0;
             if (GetExitCodeProcess(it->second, &code) && code != STILL_ACTIVE &&
@@ -281,8 +228,6 @@ DWORD WINAPI GuardLoop(void*) {
     for (DWORD pid : lowered) SetPrio(pid, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS);
     SetThreadExecutionState(ES_CONTINUOUS);
     for (auto& [pid, h] : handles) CloseHandle(h);
-    for (auto& [pid, b] : builds)
-        if (b.h) CloseHandle(b.h);
     return 0;
 }
 
@@ -377,12 +322,10 @@ void GuardTick() {
     AcquireSRWLockExclusive(&g_guardLock);
     std::vector<std::wstring> notes = std::move(g_guardNotes);
     std::vector<LongDone> done = std::move(g_longDone);
-    std::vector<BuildFail> fails = std::move(g_buildFails);
     g_guardNotes.clear();
     g_longDone.clear();
-    g_buildFails.clear();
     ReleaseSRWLockExclusive(&g_guardLock);
-    for (const BuildFail& f : fails) BuildFailed(f.exe, f.dir);
+    DevrunTick();  // Л18, Л31: что заметил наблюдатель запусков разработки
     for (const std::wstring& n : notes) autos::Note(n);
     for (const LongDone& d : done) {
         bool fail = d.haveCode && d.code != 0;

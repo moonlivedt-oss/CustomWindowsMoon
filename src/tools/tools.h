@@ -353,6 +353,7 @@ struct Listener {
 // слова по правилам кавычек. Ручке нужны PROCESS_QUERY_LIMITED_INFORMATION и PROCESS_VM_READ.
 std::wstring ProcCommandLine(HANDLE h);
 std::wstring ProcCurrentDir(HANDLE h);
+std::wstring ProjectOfPath(const std::wstring& p);  // папка проекта над путём (package.json, .git...), пусто - нет
 std::vector<std::wstring> CmdTokens(const std::wstring& cmd);
 std::vector<Listener> Listeners();                 // кто слушает порты
 void ListenerProjects(std::vector<Listener>& ls);  // заполнить project и command

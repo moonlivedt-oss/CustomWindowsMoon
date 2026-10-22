@@ -625,6 +625,19 @@ void TestDevServers() {
     CHECK(tools::ForgottenServers(s, {L"Terminal - shop"}, seen, 1000 + 2 * h).empty());  // проект снова открыт
 }
 
+// Порт занят (Л18): на каком порту проект собирался слушать - явный флаг первым, потом скрипты, .env, обычные порты
+void TestProjectPorts() {
+    CHECK(tools::ProjectPorts(L"node server.js --port 4000", L"", L"") == std::vector<int>{4000});
+    CHECK(tools::ProjectPorts(L"python -m http.server 9001", L"", L"") == (std::vector<int>{9001, 8000}));
+    CHECK(tools::ProjectPorts(L"python manage.py runserver 0.0.0.0:8100", L"", L"") == (std::vector<int>{8100, 8000}));
+    std::wstring pkg = L"{\"name\":\"shop\",\"scripts\":{\"dev\":\"vite --host\",\"build\":\"vite build\"}}";
+    CHECK(tools::ProjectPorts(L"node node_modules\\vite\\bin\\vite.js", pkg, L"") == std::vector<int>{5173});
+    std::wstring pkg2 = L"{\"scripts\": {\"start\": \"next start -p 3100\"}}";
+    CHECK(tools::ProjectPorts(L"node server.js", pkg2, L"DEBUG=1\nPORT=3200\n") ==
+          (std::vector<int>{3100, 3200, 3000}));
+    CHECK(tools::ProjectPorts(L"node index.js", L"{\"scripts\":{\"test\":\"jest\"}}", L"").empty());  // не угадать
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -650,4 +663,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestJournalUndo();
     TestBuildErr();
     TestDevServers();
+    TestProjectPorts();
 }
