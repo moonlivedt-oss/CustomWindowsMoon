@@ -238,7 +238,10 @@ void Studio::ToolsDiskTab(ToolsKit& tk) {
                     RectF(b.X, y + found * tk.lineH, b.Width, tk.lineH), c.faint, 10.5f);
     });
     // системные гиганты (И11)
-    std::vector<tools::Giant> giants = toolsui::Giants();
+    std::vector<tools::Giant> giants =
+        Demo() ? std::vector<tools::Giant>{{L"hiber", L"Гибернация", L"C:\\hiberfil.sys",
+                                            L"Файл сна на диске: размер памяти", L"hiber-off", L"", 6ull << 30, true}}
+               : toolsui::Giants();
     bool hiber = false;
     for (const tools::Giant& g : giants) hiber |= g.key == L"hiber";
     if (toolsui::GiantsCounting() && giants.empty()) RepaintIn(500);
@@ -281,7 +284,7 @@ void Studio::ToolsDiskTab(ToolsKit& tk) {
             Defer([] { toolsui::GiantAct(L"hiber", true); });
     });
     // большие файлы томов (И9): список кладёт задача с правами при подсчёте по MFT
-    if (GetTickCount64() - toolsBigAt_ > 5000) {
+    if (!Demo() && GetTickCount64() - toolsBigAt_ > 5000) {
         toolsBigAt_ = GetTickCount64();
         toolsBig_ = tools::BigFiles(&toolsBigAge_);
     }

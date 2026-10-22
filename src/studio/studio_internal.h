@@ -555,6 +555,7 @@ private:
     void ToolsPage(const RectF& r);
     void ToolsPathTab(struct ToolsKit& tk);  // studio_tools_path.cpp
     void ToolsDiskTab(struct ToolsKit& tk);  // studio_tools_disks.cpp
+    void ToolsDemo();                        // PATH и «Диски» на выдуманных данных (RADIAL_DEMO, эталоны снимков)
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
     void ToolsScan(const std::wstring& dir, bool setup = false);  // setup - сперва настроить задачу с правами
     void NetCheck();

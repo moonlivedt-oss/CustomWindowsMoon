@@ -224,8 +224,10 @@ Autoruns и System Informer, BleachBit, Ditto (история буфера), Eve
   Сделано: `cmake/symbols.cmake` (карта по метке сборки PE в integrity\maps, потом strip), метка в строке падения,
   `crash::ParseWhere/Symbolize/Decode`, `--crash-decode`, функция в карточке и журнале. Проверено настоящим
   `--crash-test` (APPDATA подменён): `devcli::Run(int&)+0xf60`. Тест в `TestCrashReports`.
-- [ ] **Н11. Эталоны шире.** В build.cmd snaps добавить вкладки «Утилит» PATH и «Диски» (их только что разнесли по
+- [x] **Н11. Эталоны шире.** В build.cmd snaps добавить вкладки «Утилит» PATH и «Диски» (их только что разнесли по
   файлам) и снимок кольца утилит (--tools-ring-snap с выдуманными данными RADIAL_DEMO).
+  Сделано: эталоны tools-path, tools-disks (`Studio::ToolsDemo` - PATH, тома, диски, кэши, гиганты, большие файлы
+  выдуманные) и tools-ring (`toolsui::DemoRingItems`, `--tools-ring-snap файл сектор demo`); записаны и просмотрены, старые 6 совпали.
 
 ### Код
 - [ ] **Н12. devcli.cpp (1250 строк)** - разнести по темам (сеть, утилиты, снимки и замеры), как toolsui.

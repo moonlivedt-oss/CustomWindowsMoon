@@ -867,7 +867,11 @@ void PrimeForSnapshot(const Config* cfg) {
     for (int i = 0; i < 1200 && g_scanRunning; ++i) Sleep(100);
 }
 
-void SnapRing(RadialMenu& menu, const Config* cfg, UINT dpi, int root, const std::wstring& path) {
+void SnapRing(RadialMenu& menu, const Config* cfg, UINT dpi, int root, const std::wstring& path, bool demo) {
+    if (demo) {  // эталон: выдуманные пункты
+        menu.SnapNet(cfg, DemoRingItems(), dpi, root, 1500, path);
+        return;
+    }
     PrimeForSnapshot(cfg);
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     PrimeSecurityForSnapshot();

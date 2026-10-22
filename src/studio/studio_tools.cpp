@@ -24,6 +24,43 @@ using ui::Kind;
 
 namespace studio {
 
+void Studio::ToolsDemo() {
+    const ULONGLONG GB = 1024ull * 1024 * 1024;
+    toolsPath_ = {
+        {L"%SystemRoot%\\system32", L"C:\\Windows\\system32", true, false, false, L"cmd, powershell"},
+        {L"C:\\Program Files\\Git\\cmd", L"C:\\Program Files\\Git\\cmd", true, false, false, L"git"},
+        {L"C:\\nasm-3.01", L"C:\\nasm-3.01", true, true, false, L""},
+        {L"D:\\msys64\\ucrt64\\bin", L"D:\\msys64\\ucrt64\\bin", false, false, false, L"g++, cmake, ninja"},
+        {L"%LOCALAPPDATA%\\Programs\\Python\\Python310",
+         L"C:\\Users\\demo\\AppData\\Local\\Programs\\Python\\Python310", false, false, false, L"python, pip"},
+        {L"C:\\Program Files\\nodejs", L"C:\\Program Files\\nodejs", false, false, false, L"node, npm"},
+        {L"C:\\Program Files\\Git\\cmd", L"C:\\Program Files\\Git\\cmd", false, false, true, L""},
+        {L"%USERPROFILE%\\.dotnet\\tools", L"C:\\Users\\demo\\.dotnet\\tools", false, true, false, L""}};
+    toolsWhich_ = {{L"python",
+                    L"C:\\Users\\demo\\AppData\\Local\\Programs\\Python\\Python310\\python.exe",
+                    {L"C:\\Python314\\python.exe"}},
+                   {L"git", L"C:\\Program Files\\Git\\cmd\\git.exe", {}},
+                   {L"g++", L"D:\\msys64\\ucrt64\\bin\\g++.exe", {L"C:\\MinGW\\bin\\g++.exe"}},
+                   {L"node", L"C:\\Program Files\\nodejs\\node.exe", {}}};
+    toolsEnv_ = {{L"JAVA_HOME", L"C:\\Program Files\\Java\\jdk-21", false, false},
+                 {L"GOPATH", L"C:\\Users\\demo\\go", false, true},
+                 {L"ComSpec", L"C:\\Windows\\system32\\cmd.exe", true, false}};
+    toolsVols_ = {{L"C:\\", L"Система", L"NTFS", 475 * GB, 61 * GB, DRIVE_FIXED},
+                  {L"D:\\", L"Данные", L"NTFS", 953 * GB, 402 * GB, DRIVE_FIXED}};
+    toolsPhys_ = {{L"NVMe DEMO 512", true, 0, 512 * GB, -1, -1, -1},
+                  {L"NVMe DEMO 1TB", true, 0, 1000 * GB, -1, -1, -1}};
+    toolsJunk_ = {{L"Кэш npm", L"C:\\Users\\demo\\AppData\\Local\\npm-cache", 7 * GB, 0, false, false},
+                  {L"Кэш pip", L"C:\\Users\\demo\\AppData\\Local\\pip\\cache", 5 * GB, 0, false, false},
+                  {L"TEMP старше суток", L"C:\\Users\\demo\\AppData\\Local\\Temp", 4 * GB, GB / 2, false, false},
+                  {L"Шейдеры NVIDIA", L"C:\\Users\\demo\\AppData\\Local\\NVIDIA\\DXCache", 2 * GB, 0, false, true}};
+    toolsJunkAsked_ = true;
+    toolsBig_ = {{L"D:\\Video\\record-2026-10-01.mp4", L"", 14 * GB},
+                 {L"C:\\hiberfil.sys", L"система", 6 * GB},
+                 {L"D:\\Downloads\\UE_5.8.zip", L"", 5 * GB}};
+    toolsBigAge_ = 3 * 3600;
+    toolsBigAt_ = ~0ull / 2;  // не перечитывать настоящие
+}
+
 namespace {
 
 void ToolsThread(const std::shared_ptr<ToolsJob>& job) {
@@ -381,7 +418,9 @@ void Studio::ToolsPage(const RectF& r) {
     ULONGLONG every = toolsTab_ == 3 || (toolsTab_ == 6 && secView_.running) ? 3000 : 15000;
     if (!toolsAt_ || now - toolsAt_ > every) {
         toolsAt_ = now;
-        if (toolsTab_ == 0) {
+        if (Demo() && toolsTab_ <= 1) {  // эталоны снимков: не зависят от этого компьютера и от времени
+            ToolsDemo();
+        } else if (toolsTab_ == 0) {
             toolsPath_ = tools::ReadPath();
             toolsWhich_ = tools::WhichAll();
             toolsEnv_ = tools::ReadEnv();
