@@ -116,6 +116,12 @@ void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std
 
 std::wstring Short(std::wstring s, size_t n) { return s.size() > n ? s.substr(0, n - 1) + L"…" : s; }
 
+// Подпись находки в кольце: «Брандмауэр: javaw» -> «javaw» - вид и так виден по значку, а в карточке - целиком
+std::wstring RingName(const std::wstring& s) {
+    size_t c = s.find(L": ");
+    return c != std::wstring::npos && c <= 14 && c + 2 < s.size() ? s.substr(c + 2) : s;
+}
+
 // Очистка с живой сценой: места по одному, лента scene::Clean ведёт вихрь в карточке (и в студии, если открыта).
 void RunClean(const std::wstring& title, const std::vector<tools::Junk>& list) {
     if (!CleanClaim()) {

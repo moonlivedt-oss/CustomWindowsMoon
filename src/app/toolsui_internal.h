@@ -167,6 +167,7 @@ Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key,
 void RunJob(const std::wstring& title, std::function<bool(const tools::Log&, std::wstring&)> work, bool quiet = false,
             bool stoppable = false);
 std::wstring Short(std::wstring s, size_t n);
+std::wstring RingName(const std::wstring& s);  // подпись находки без «Вид: »
 void RunClean(const std::wstring& title, const std::vector<tools::Junk>& list);
 std::wstring NoExe(const std::wstring& s);
 std::wstring Leaf(const std::wstring& p);

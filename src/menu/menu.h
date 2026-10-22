@@ -183,7 +183,8 @@ private:
         float px = 0;  // размер шрифта, при котором влезло
     };
     LabelFit LayoutLabel(const Ring& r, double a0, double a1, const Item& it);
-    LabelFit LayoutLabelAt(const Ring& r, double a0, double a1, const Item& it);  // при текущем LabelPx
+    // при текущем LabelPx; hyphen - можно переносить внутри слова (если иначе - только обрезать)
+    LabelFit LayoutLabelAt(const Ring& r, double a0, double a1, const Item& it, bool hyphen = false);
     float TextWidth(const std::wstring& s);
     // размер подписей секторов: крупный, а если имя не влезает - чуть мельче (подбирает LayoutLabel)
     float LabelPx() const { return labelPx_ > 0 ? labelPx_ : geo_.font * 1.15f; }

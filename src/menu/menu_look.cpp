@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <vector>
 
 #include "core/files.h"
@@ -351,20 +352,40 @@ void RadialMenu::DrawLabel(Graphics& g, const Ring& r, double a0, double a1, con
     }
 }
 
+// Где разорвать слово переносом: самая длинная голова, что влезает (fits), не короче 3 букв и с хвостом не
+// короче 3; лучше - после гласной перед согласной («Расши-рения», «Бранд-мауэр»); 0 - нигде.
+static size_t HyphenCut(const std::wstring& w, const std::function<bool(const std::wstring&)>& fits) {
+    auto vowel = [](wchar_t c) { return wcschr(L"аеёиоуыэюяАЕЁИОУЫЭЮЯaeiouyAEIOUY", c) != nullptr; };
+    size_t best[3] = {0, 0, 0};  // гласная|согласная+гласная («По-чинка»), согласная|согласная+гласная, любая
+    for (size_t k = w.size() >= 6 ? w.size() - 3 : 0; k >= 3; --k) {
+        if (!IsCharAlphaW(w[k - 1]) || !IsCharAlphaW(w[k]) || wcschr(L"ьъйЬЪЙ", w[k]) || !fits(w.substr(0, k)))
+            continue;
+        bool cv = !vowel(w[k]) && k + 1 < w.size() && vowel(w[k + 1]);
+        int kind = cv && vowel(w[k - 1]) ? 0 : cv ? 1 : 2;
+        if (!best[kind]) best[kind] = k;
+    }
+    return best[0] ? best[0] : best[1] ? best[1] : best[2];
+}
+
 RadialMenu::LabelFit RadialMenu::LayoutLabel(const Ring& r, double a0, double a1, const Item& it) {
     PERF_SCOPE("menu.LayoutLabel");
     LabelFit out;
-    for (float scale : {1.15f, 1.04f, 0.95f}) {  // крупно, если влезает целиком; иначе мельче, но не обрезая
-        labelPx_ = geo_.font * scale;
-        out = LayoutLabelAt(r, a0, a1, it);
-        out.px = labelPx_;
-        if (out.text.find(L'…') == std::wstring::npos && !out.text.empty()) break;
+    // крупно, если влезает целиком; иначе мельче (до 0,8 - ещё читается), но не обрезая
+    // перенос внутри слова - только когда без него обрезается при любом размере
+    for (bool hyphen : {false, true}) {
+        for (float scale : {1.15f, 1.04f, 0.95f, 0.87f, 0.8f}) {
+            labelPx_ = geo_.font * scale;
+            out = LayoutLabelAt(r, a0, a1, it, hyphen);
+            out.px = labelPx_;
+            if (out.text.find(L'…') == std::wstring::npos && !out.text.empty()) break;
+        }
+        if (out.text.find(L'…') == std::wstring::npos) break;
     }
     labelPx_ = 0;
     return out;
 }
 
-RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double a1, const Item& it) {
+RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double a1, const Item& it, bool hyphen) {
     LabelFit out;
     double lh = LabelPx() * 1.22;
     // где подписи просторнее: на своём радиусе или чуть ближе к центру (у края у горизонтальных секторов тесно)
@@ -430,6 +451,14 @@ RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double 
                 first += parts[i];
             }
             first = Trim(first);
+            if (hyphen && first.empty() && i < parts.size()) {  // первое слово само не влезает: перенос внутри слова
+                std::wstring word = Trim(parts[i]);
+                size_t cut = HyphenCut(word, [&](const std::wstring& head) { return TextWidth(head + L"-") <= w2; });
+                if (cut) {
+                    first = word.substr(0, cut) + L"-";
+                    parts[i] = word.substr(cut);
+                }
+            }
             if (!first.empty() && i < parts.size()) {
                 std::wstring rest;
                 for (; i < parts.size(); ++i) rest += parts[i];
