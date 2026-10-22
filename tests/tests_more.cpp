@@ -18,6 +18,7 @@
 #include "app/rules.h"
 #include "app/settingsio.h"
 #include "tools/healthscore.h"
+#include "tools/important.h"
 
 namespace {
 
@@ -334,6 +335,31 @@ void TestSafeUrl() {
 
 }  // namespace
 
+// «Важное»: опасное раньше всего, порядок по важности, не больше 6, пустой снимок - пусто.
+void TestImportant() {
+    tools::ImportantIn in;
+    CHECK(tools::ImportantTodos(in).empty());
+    in.findScores = {3, 7, 9};  // «странно» в «Важное» не идёт
+    in.git = {{6, 0}, {0, 3}};  // второй репозиторий спокойный
+    in.freeable = 3ull << 30;
+    in.quickPlaces = 1;
+    std::vector<tools::ImportantTodo> t = tools::ImportantTodos(in);
+    CHECK(t.size() == 4);
+    CHECK(t[0].key == L"sec-find:1" && t[0].why == L"Опасное" && t[1].key == L"sec-find:2");
+    CHECK(t[2].key == L"clean:" && t[2].why.find(L"Можно освободить") == 0);
+    CHECK(t[3].key == L"git:0");
+    in.quickPlaces = 3;
+    in.freeable = 1ull << 30;  // меньше 2 ГБ - не дело
+    in.broken = in.reboot = in.updatesFailed = in.deviceErrors = in.driverNewer = in.balanceLowered = true;
+    in.lowDisks = {L"C:\\"};
+    t = tools::ImportantTodos(in);
+    CHECK(t.size() == 6);  // предел
+    CHECK(t[2].key == L"rec-unbreak" && t[3].key == L"sys-reboot" && t[4].key == L"scan:C:\\" && t[5].key == L"sys-wu");
+    CHECK(tools::ImportantTodos(in, 100).size() == 10);
+    in.freeable = 5ull << 30;
+    CHECK(tools::ImportantTodos(in, 100)[5].key == L"clean-all");
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -349,4 +375,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestQr();
     TestExtRights();
     TestSafeUrl();
+    TestImportant();
 }

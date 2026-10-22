@@ -1,5 +1,6 @@
 // Кольцо «Утилиты»: из последнего подсчёта и слежки - пункты дисков, очистки, процессов, «Защиты», системы.
 #include "app/toolsui_internal.h"
+#include "tools/important.h"
 
 namespace toolsui {
 
@@ -1065,22 +1066,31 @@ std::vector<Item> RingItems(std::wstring& status) {
     };
     int danger = 0;
     for (const tools::Suspect& f : g_finds) danger += f.score >= kDangerScore;
-    for (size_t i = 0; i < g_finds.size() && i < 12; ++i)
-        if (g_finds[i].score >= kDangerScore) take(find(G_GUARD, L"sec-find:" + std::to_wstring(i)), L"Опасное");
-    take(find(G_FIX, L"rec-unbreak"), L"Испорчено");
-    take(find(G_SYSTEM, L"sys-reboot"), L"Windows ждёт перезагрузки");
-    for (const tools::Volume& v : tools::VolumesCached())
-        if (v.type == DRIVE_FIXED && tools::DiskWarn(v)) take(find(G_SPACE, L"scan:" + v.root), L"Мало места");
     ULONGLONG freeable = sized ? quickTotal + scan.ddcOld + bin : 0;
-    if (freeable >= 2ull * 1024 * 1024 * 1024)
-        take(find(G_SPACE, quick > 1 ? L"clean-all" : L"clean:"), L"Можно освободить " + tools::Bytes(freeable));
-    if (!g_updates.failed.empty()) take(find(G_SYSTEM, L"sys-wu"), L"Обновления не ставятся");
-    if (!g_devs.empty()) take(find(G_SYSTEM, L"sys-dev"), L"Устройство с ошибкой");
-    if (scan.driver.ok && scan.driver.newer) take(find(G_SPACE, L"driver"), L"Вышел новый драйвер");
-    if (!low.empty()) take(find(G_MEMORY, L"balance-restore"), L"Приоритет придержан");
-    for (size_t i = 0; i < g_git.size() && i < 2; ++i)
-        if (g_git[i].ahead >= 5 || g_git[i].changed >= 20)
-            take(find(G_DEV, L"git:" + std::to_wstring(i)), L"Давно не отправлено");
+    // что важно и в каком порядке - чистая функция (tools/important, под тестами); здесь только пункты по ключам
+    tools::ImportantIn in;
+    for (const tools::Suspect& f : g_finds) in.findScores.push_back(f.score);
+    in.dangerScore = kDangerScore;
+    in.broken = !tools::FindBroken().empty();
+    in.reboot = !tools::PendingReboot().empty();
+    for (const tools::Volume& v : tools::VolumesCached())
+        if (v.type == DRIVE_FIXED && tools::DiskWarn(v)) in.lowDisks.push_back(v.root);
+    in.freeable = freeable;
+    in.quickPlaces = quick;
+    in.updatesFailed = !g_updates.failed.empty();
+    in.deviceErrors = !g_devs.empty();
+    in.driverNewer = scan.driver.ok && scan.driver.newer;
+    in.balanceLowered = !low.empty();
+    for (const tools::GitRepo& r : g_git) in.git.push_back({r.ahead, r.changed});
+    const int groupOf[] = {G_GUARD, G_FIX, G_SYSTEM, G_SPACE, G_SPACE, G_SYSTEM, G_SYSTEM, G_SPACE, G_MEMORY, G_DEV};
+    const wchar_t* prefixes[] = {L"sec-find:", L"rec-unbreak", L"sys-reboot", L"scan:",           L"clean",
+                                 L"sys-wu",    L"sys-dev",     L"driver",     L"balance-restore", L"git:"};
+    for (const tools::ImportantTodo& t : tools::ImportantTodos(in, SIZE_MAX)) {
+        int grp = G_SPACE;
+        for (size_t k = 0; k < sizeof(prefixes) / sizeof(prefixes[0]); ++k)
+            if (t.key.rfind(prefixes[k], 0) == 0) grp = groupOf[k];
+        take(find(grp, t.key), t.why);
+    }
     if (imp.children.empty()) {
         imp.iconFull = Act(L"", L"tools-ok.png", L"", L"").iconFull;
         imp.note = L"Всё спокойно: ни место, ни защита, ни Windows не требуют внимания. 2 клика - «Состояние» в студии";
