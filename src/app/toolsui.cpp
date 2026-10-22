@@ -781,6 +781,7 @@ bool SnapshotIfChanged(State& s, unsigned& gen) {
         s.growth = g_scan.growth;
         s.ddcOld = g_scan.ddcOld;
         s.driver = g_scan.driver;
+        s.week = g_scan.week;
         gen = g_scanGen;
     }
     s.at = g_scanAt;
@@ -911,6 +912,7 @@ SecurityView SecurityFinds() {
     v.finds = AllFinds(g_sec);
     v.processes = g_sec.processes;
     v.autoruns = g_sec.autoruns;
+    v.exts = g_sec.extList;
     ReleaseSRWLockShared(&g_secLock);
     v.running = g_secRunning;
     v.ignored = (int)Ignored().size();

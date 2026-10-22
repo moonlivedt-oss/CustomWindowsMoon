@@ -1,6 +1,8 @@
 // История замеров скорости и сравнение «через туннель / напрямую» - без сети, под тестами.
 #include <algorithm>
 #include <cwchar>
+#include <map>
+#include <tuple>
 #include <string>
 
 #include "net/speed.h"
@@ -107,23 +109,62 @@ std::wstring SpeedText(const Speed& s) {
     return t;
 }
 
-std::wstring SpeedCompare(const std::vector<Speed>& history) {
-    std::vector<double> td, tu, dd, du;
-    // последние 20 замеров каждого вида: старые сети и тарифы не в счёт
-    for (auto it = history.rbegin(); it != history.rend(); ++it) {
-        if (it->down <= 0) continue;
-        auto& d = it->tunnel ? td : dd;
-        auto& u = it->tunnel ? tu : du;
-        if (d.size() >= 20) continue;
+SpeedMedian SpeedMedianOf(const std::vector<Speed>& history, bool tunnel) {
+    // последние 20 замеров вида: старые сети и тарифы не в счёт
+    std::vector<double> d, u;
+    for (auto it = history.rbegin(); it != history.rend() && d.size() < 20; ++it) {
+        if (it->down <= 0 || it->tunnel != tunnel) continue;
         d.push_back(it->down);
         if (it->up > 0) u.push_back(it->up);
     }
-    if (td.empty() || dd.empty()) return L"";
-    auto part = [](const wchar_t* name, const std::vector<double>& d, const std::vector<double>& u) {
-        return std::wstring(name) + L" ↓ " + Mbps(Median(d)) + (u.empty() ? L"" : L" / ↑ " + Mbps(Median(u))) + L" (" +
-               std::to_wstring(d.size()) + L")";
+    return {Median(d), Median(u), (int)d.size()};
+}
+
+std::wstring SpeedCompare(const std::vector<Speed>& history) {
+    SpeedMedian t = SpeedMedianOf(history, true), d = SpeedMedianOf(history, false);
+    if (!t.n || !d.n) return L"";
+    auto part = [](const wchar_t* name, const SpeedMedian& m) {
+        return std::wstring(name) + L" ↓ " + Mbps(m.down) + (m.up > 0 ? L" / ↑ " + Mbps(m.up) : L"") + L" (" +
+               std::to_wstring(m.n) + L")";
     };
-    return part(L"Обычно через туннель", td, tu) + L", " + part(L"напрямую", dd, du);
+    return part(L"Обычно через туннель", t) + L", " + part(L"напрямую", d);
+}
+
+std::vector<SpeedDay> SpeedDays(const std::vector<Speed>& history, size_t days) {
+    struct Acc {
+        std::vector<double> d, u, p;
+    };
+    std::map<std::tuple<int, int, int, bool>, Acc> by;
+    for (const Speed& s : history) {
+        if (s.down <= 0) continue;
+        FILETIME ft{(DWORD)s.when, (DWORD)(s.when >> 32)}, loc;
+        SYSTEMTIME st;
+        if (!FileTimeToLocalFileTime(&ft, &loc) || !FileTimeToSystemTime(&loc, &st)) continue;
+        Acc& a = by[{st.wYear, st.wMonth, st.wDay, s.tunnel}];
+        a.d.push_back(s.down);
+        if (s.up > 0) a.u.push_back(s.up);
+        if (s.pingMs >= 0) a.p.push_back(s.pingMs);
+    }
+    std::vector<SpeedDay> out;
+    for (const auto& [k, a] : by) {
+        SpeedDay d;
+        std::tie(d.year, d.month, d.day, d.tunnel) = k;
+        d.down = Median(a.d);
+        d.up = Median(a.u);
+        d.pingMs = a.p.empty() ? -1 : (int)Median(a.p);
+        d.n = (int)a.d.size();
+        out.push_back(d);
+    }
+    // последние days дней (в дне может быть две записи - туннель и напрямую)
+    size_t seen = 0, from = out.size();
+    while (from > 0) {
+        bool newDay = from == out.size() || out[from - 1].year != out[from].year ||
+                      out[from - 1].month != out[from].month || out[from - 1].day != out[from].day;
+        if (newDay && ++seen > days) break;
+        --from;
+    }
+    out.erase(out.begin(), out.begin() + from);
+    return out;
 }
 
 }  // namespace net

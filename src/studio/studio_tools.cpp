@@ -706,6 +706,64 @@ void Studio::ToolsPage(const RectF& r) {
                 y += findH;
             }
         });
+        // расширения браузеров по правам (Н4): всё, что нашла «Защита», доступ к входам и паролям - сверху
+        std::vector<size_t> extShown;
+        int extRisky = 0;
+        for (const tools::BrowserExt& e : secView_.exts) extRisky += tools::ExtRisk(e.rights) >= 4;
+        for (size_t i = 0; i < secView_.exts.size() && extShown.size() < 40; ++i)
+            if (!extKind_ || tools::ExtRisk(secView_.exts[i].rights) >= 4) extShown.push_back(i);
+        std::wstring extIcon = ExeDir() + L"\\icons\\tools-extension.png";
+        if (GetFileAttributesW(extIcon.c_str()) == INVALID_FILE_ATTRIBUTES)
+            extIcon = ExeDir() + L"\\icons\\tools-shield.png";
+        wide(L"Расширения браузеров", (std::max<size_t>(extShown.size(), 1) * findH + ui.S(58)) / rowH,
+             [&](const RectF& b) {
+                 std::wstring head =
+                     !secView_.checked ? std::wstring(L"Появятся после проверки")
+                     : secView_.exts.empty()
+                         ? std::wstring(L"Расширений с особыми правами нет")
+                         : Plural((int)secView_.exts.size(), L"расширение", L"расширения", L"расширений") +
+                               L" с правами, к входам и паролям (буфер, куки, программы): " + std::to_wstring(extRisky);
+                 ui.Text(head, RectF(b.X, b.Y, b.Width - ui.S(250), ui.S(36)), c.muted, 11.5f);
+                 int sel = extKind_;
+                 if (ui.Segmented(ID_TOOLS_EXT_KIND, RectF(b.X + b.Width - ui.S(240), b.Y, ui.S(240), ui.S(34)),
+                                  {L"Все", L"Опасные"}, sel))
+                     extKind_ = sel;
+                 float y = b.Y + ui.S(48);
+                 if (extShown.empty())
+                     ui.Text(extKind_ ? L"Опасных нет: ни одно расширение не читает входы, буфер и куки сразу на всех "
+                                        L"сайтах."
+                                      : L"Chrome, Edge, Brave и Яндекс: расширения с доступом к сайтам и данным.",
+                             RectF(b.X, y, b.Width, lineH), c.muted, 11.5f);
+                 for (size_t n = 0; n < extShown.size(); ++n) {
+                     const tools::BrowserExt& e = secView_.exts[extShown[n]];
+                     RectF rr(b.X - ui.S(6), y, b.Width + ui.S(12), findH);
+                     bool hot = rowHot(rr);
+                     if (hot) ui.Fill(rr, WithAlpha(c.cardHi, 170), ui.S(6));
+                     int risk = tools::ExtRisk(e.rights);
+                     ui.Icon(extIcon, RectF(b.X + ui.S(2), y + ui.S(6), ui.S(32), ui.S(32)));
+                     if (risk >= 2)
+                         ui.Text(risk >= 4 ? L"опасно" : L"все сайты",
+                                 RectF(b.X + ui.S(40), y + ui.S(2), ui.S(74), ui.S(22)), risk >= 4 ? c.warn : c.gold,
+                                 11, true);
+                     float tx = b.X + ui.S(116), tw = b.Width - ui.S(116) - (hot ? ui.S(200) : 0);
+                     std::wstring name = Ellip(e.name, 60);
+                     float nw = std::min(tw, ui.Measure(name, 12, true) + ui.S(12));
+                     ui.Text(name, RectF(tx, y + ui.S(2), nw, ui.S(22)), c.text, 12, true);
+                     ui.Text(e.browser + (e.profile.empty() ? L"" : L", " + e.profile) +
+                                 (e.store ? L"" : L", не из магазина"),
+                             RectF(tx + nw, y + ui.S(3), std::max(0.0f, tw - nw), ui.S(22)), e.store ? c.faint : c.gold,
+                             10.5f);
+                     ui.Text(Ellip(tools::ExtRightsText(e.rights), 150), RectF(tx, y + ui.S(23), tw, ui.S(22)), c.muted,
+                             10.5f);
+                     if (hot && ui.Button(ID_TOOLS_EXT + (int)n,
+                                          RectF(b.X + b.Width - ui.S(192), y + ui.S(8), ui.S(192), ui.S(28)),
+                                          L"Открыть в браузере", Kind::Primary)) {
+                         tools::BrowserExt copy = e;
+                         Defer([copy] { toolsui::OpenExtension(copy); });
+                     }
+                     y += findH;
+                 }
+             });
         bool signReady = tools::CodeSigningReady();
         wide(L"Подпись своих exe", 1.5f, [&](const RectF& b) {
             ui.Text(signReady

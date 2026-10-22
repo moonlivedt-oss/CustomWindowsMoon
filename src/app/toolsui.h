@@ -12,6 +12,7 @@ struct Item;
 class BoostCard;
 class RadialMenu;
 #include "tools/tools.h"
+#include "tools/weekdiff.h"
 
 namespace toolsui {
 
@@ -46,8 +47,9 @@ struct State {
     std::vector<tools::Growth> growth;
     ULONGLONG ddcOld = 0;
     tools::Driver driver;
-    ULONGLONG at = 0;       // когда посчитано (GetTickCount64), 0 - ещё ни разу
-    bool scanning = false;  // считается прямо сейчас
+    tools::WeekReport week;  // что изменилось за неделю (И36), для «Состояния»
+    ULONGLONG at = 0;        // когда посчитано (GetTickCount64), 0 - ещё ни разу
+    bool scanning = false;   // считается прямо сейчас
 };
 State Snapshot();
 // То же для того, кто держит снимок у себя и спрашивает часто (страница «Состояние» - каждые 250 мс): вектора
@@ -77,7 +79,7 @@ ULONGLONG CleanList(const std::vector<tools::Junk>& list, const tools::Log& log,
 void PrimeForSnapshot(const Config* cfg);  // для --studio-snap: посчитать сразу и дождаться
 // для --tools-ring-snap: посчитать, собрать кольцо утилит и снять его с курсором на секторе root
 void SnapRing(RadialMenu& menu, const Config* cfg, UINT dpi, int root, const std::wstring& path);
-void TrimDdc();                            // старое из кэша Unreal
+void TrimDdc();  // старое из кэша Unreal
 void CleanProjectList(const std::vector<tools::ProjectJunk>& list);
 bool Busy();
 
@@ -86,12 +88,14 @@ struct SecurityView {
     std::vector<tools::Suspect> finds;
     bool checked = false, running = false;
     int processes = 0, autoruns = 0;
-    int ignored = 0;  // сколько отмечено «Это моё»
+    int ignored = 0;                      // сколько отмечено «Это моё»
+    std::vector<tools::BrowserExt> exts;  // все расширения браузеров с правами, опасные сначала (Н4)
 };
 SecurityView SecurityFinds();                    // не проверялось - запускает проверку в фоне
 void PrimeSecurityForSnapshot();                 // для --studio-snap 7 6: проверить сразу, в этом потоке
 void SecurityRescan();                           // проверить заново (итог - в SecurityFinds)
 void SecurityAct(const tools::Suspect& s);       // карточка «что с этим сделать», как из кольца
+void OpenExtension(const tools::BrowserExt& e);  // страница расширения в его браузере (там - удалить)
 void IgnoreFind(const tools::Suspect& s);        // «Это моё»: больше не показывать (ignored.tsv)
 void ClearIgnored();                             // показывать снова всё
 const wchar_t* FindKindName(tools::FindKind k);  // «процесс», «сертификат»...

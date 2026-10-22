@@ -14,6 +14,8 @@
 
 #include "desk/lockscreen.h"
 #include "net/net.h"
+#include "net/speed.h"
+#include "net/wifi.h"
 #include "tools/healthscore.h"
 #include "tools/tools.h"
 #include "core/config.h"
@@ -238,6 +240,14 @@ enum Id {
     ID_TOOLS_SEC_RESCAN,  // «Проверить заново»
     ID_TOOLS_SEC_UNHIDE,  // «Показать скрытые»
     ID_TOOLS_SIGN,        // «Настроить подпись»
+    ID_TOOLS_EXT_KIND,    // «Защита»: расширения браузеров - все или опасные
+    ID_NET_SPEED_RUN,     // «Сеть»: «Замерить» скорость
+    ID_NET_SPEED_CHART,   // столбики истории скорости (наведение)
+    ID_NET_WIFI_RUN,      // «Послушать эфир»
+    ID_NET_WIFI_QR,       // «QR для телефона»
+    ID_NET_WIFI_LOC,      // «Открыть Параметры» (местоположение)
+    ID_NET_WIFI_CHART,    // схема каналов (наведение)
+    ID_STATE_WEEK,        // «Состояние»: новое за неделю - вид
     ID_LANE_BIN,          // «Кольца»: корзина под дорожками
     ID_TAPE,              // лента правок
     ID_ICON_DOCK,         // сетка значков-дока (наведение)
@@ -253,7 +263,9 @@ enum Id {
     ID_TOOLS_FIND = 18590,   // «Диски»: поиск папки по таблице MFT
     ID_TOOLS_FOUND = 18600,  // +i*2: «Посчитать» и «Открыть» у найденной папки
     ID_TOOLS_BIG = 18700,    // +i*2: «Показать» и «В Корзину» у большого файла
-    ID_NET_TOP = 18900,      // «Сеть»: «Замерить» (+0), «Отрезать» у программы (+1+i), «Вернуть» (+20+i), +50 - данные Windows
+    ID_TOOLS_EXT = 19200,    // +i: «Открыть в браузере» у расширения
+    ID_NET_TOP =
+        18900,  // «Сеть»: «Замерить» (+0), «Отрезать» у программы (+1+i), «Вернуть» (+20+i), +50 - данные Windows
     ID_TOOLS_PRIV = 19100,   // +i: переключатель приватности; +60 - «Вернуть всё как было»
     ID_TOOLS_GIANT = 18800,  // +i: действие у системного гиганта; +40 - «Точно, с правами», +41 - вернуть гибернацию
     ID_BACKUP = 7000,        // +i
@@ -341,6 +353,8 @@ struct IconJob {
     HWND wnd = nullptr;
 };
 
+bool Demo();  // RADIAL_DEMO=1: выдуманные данные для снимков и фильмов без мыши (studio_live.cpp)
+
 // Работа раздела «Сеть» в своём потоке: журнал и отчёт под замком, страница только читает.
 struct NetJob {
     SRWLOCK lock = SRWLOCK_INIT;
@@ -351,6 +365,20 @@ struct NetJob {
     std::wstring title;
     std::function<bool(const net::Log&, NetJob&)> work;
     HWND wnd = nullptr;
+};
+
+// Замер скорости из студии (Н1): ход - в live, итог - в result после done.
+struct SpeedJob {
+    net::SpeedLive live;
+    std::atomic<bool> done{false};
+    net::Speed result;
+    bool seen = false;  // кадр уже перечитал историю после замера
+};
+// Эфир Wi-Fi (Н2): что слышно и к чему подключены; profile - имя сети без доступа к местоположению.
+struct WifiJob {
+    std::atomic<bool> done{false};
+    net::WifiInfo info;
+    std::wstring profile;
 };
 
 // Работа раздела «Утилиты» в своём потоке; что успело посчитаться - под замком.
@@ -530,6 +558,8 @@ private:
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
     void ToolsScan(const std::wstring& dir, bool setup = false);  // setup - сперва настроить задачу с правами
     void NetCheck();
+    void SpeedCard(class CardColumns& cols);  // studio_net_live.cpp: история скорости и живой замер (Н1)
+    void WifiCard(class CardColumns& cols);   // схема каналов Wi-Fi и QR (Н2)
     void NetRun(const std::wstring& title, std::function<bool(const net::Log&, NetJob&)> work);
     void CornerMenu(int corner, int kind);  // kind: 0 задержка, 1 двойной толчок, 2 колесо
     void SetCorner(int corner, int kind, const std::wstring& val);
@@ -624,6 +654,11 @@ private:
     std::vector<net::CutApp> netCut_;  // отрезанные программы (И16), из кэша netui
     ULONGLONG netProcsAt_ = 0, netHistAt_ = 0;
     std::vector<std::pair<std::wstring, std::wstring>> netHist_;
+    std::shared_ptr<SpeedJob> speedJob_;
+    std::vector<net::Speed> speedHist_;
+    ULONGLONG speedHistAt_ = 0, speedTickAt_ = 0;
+    float speedNeedle_ = 0;  // стрелка спидометра, догоняет замер
+    std::shared_ptr<WifiJob> wifiJob_;
     int toolsTab_ = 0;
     ULONGLONG toolsAt_ = 0;
     std::shared_ptr<ToolsJob> toolsJob_;
@@ -729,6 +764,8 @@ private:
     bool versionsBusy_ = false;
     toolsui::SecurityView secView_;  // вкладка «Защита»
     int secKind_ = 0;                // фильтр: 0 - все, дальше - виды, что есть в находках
+    int extKind_ = 0;                // расширения браузеров: 0 - все, 1 - опасные
+    int weekKind_ = 0;               // «Состояние», новое за неделю: 0 - все, дальше - виды, что есть
     ULONGLONG liveAt_ = 0;           // данные колбы и батареи - не чаще раза в 3 с
     tools::MemoryState liveMem_;
     std::vector<tools::HeavyApp> liveApps_;
