@@ -32,4 +32,33 @@ struct HealthOut {
 
 HealthOut HealthScore(const HealthIn& in);
 
+// Здоровье самой программы (Л27): работает ли то, на чём держится остальное. Снимок собирает студия, здесь -
+// только вывод, под тестами.
+struct AppHealthIn {
+    bool mouseWanted = false;  // перехват мыши кому-то нужен (углы, двойной клик, Alt + колесо)
+    bool mouseHooked = false;  // и стоит
+    bool mouseSilent = false;  // стоит, курсор двигался, а событий нет - Windows сняла его молча
+    bool gameMode = false;     // в игре перехват снят нарочно
+    int autostartWanted = -1;  // AutostartWanted: -1 - не задавали
+    bool autostartOn = false;
+    bool autostartUserOff = false;                                       // выключен в Диспетчере задач
+    bool toolsExe = true;                                                // RadialTools.exe рядом
+    bool adminExists = false, adminReady = false, adminBlocked = false;  // задача с правами «Сети»
+    unsigned long long watchAgeMs = 0;  // сколько слежка молчит; 0 - ещё не прошла ни разу
+    unsigned long long watchPeriodMs = 60000;
+    unsigned long long uptimeMs = 0;  // сколько живёт программа
+};
+
+struct AppPart {
+    enum State { OK, OFF, BAD };  // OFF - выключено нарочно или не нужно, не поломка
+    std::wstring name;
+    State state = OK;
+    std::wstring why;
+    int fix = 0;  // чем чинить: 0 - ничем, 1 - перехват заново, 2 - автозапуск, 3 - задача с правами
+};
+
+std::vector<AppPart> AppHealth(const AppHealthIn& in);
+// Одной строкой: «Всё работает: перехват мыши, автозапуск, ...» или «Отвалилось: слежка (молчит 7 мин)»
+std::wstring AppHealthLine(const std::vector<AppPart>& parts);
+
 }  // namespace tools

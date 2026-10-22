@@ -485,6 +485,37 @@ void TestImportant() {
     CHECK(!tools::HeavyDefer(true, now, now + 3600));
 }
 
+// Здоровье программы (Л27): поломки отдельно от выключенного нарочно, одной строкой - что отвалилось
+void TestAppHealth() {
+    tools::AppHealthIn in;
+    in.mouseWanted = in.mouseHooked = true;
+    in.autostartOn = true;
+    in.adminReady = true;
+    in.watchAgeMs = 30000;
+    in.uptimeMs = 3600000;
+    std::vector<tools::AppPart> v = tools::AppHealth(in);
+    bool allOk = v.size() == 5;
+    for (const tools::AppPart& p : v) allOk = allOk && p.state == tools::AppPart::OK;
+    CHECK(allOk);
+    CHECK(tools::AppHealthLine(v).rfind(L"Всё работает: перехват мыши", 0) == 0);
+    in.mouseSilent = true;
+    in.watchAgeMs = 7 * 60000;
+    v = tools::AppHealth(in);
+    CHECK(v[0].state == tools::AppPart::BAD && v[0].fix == 1);
+    CHECK(v[4].state == tools::AppPart::BAD && v[4].why == L"молчит 7 мин");
+    CHECK(tools::AppHealthLine(v).rfind(L"Отвалилось: перехват мыши", 0) == 0);
+    in = {};  // в игре перехват снят нарочно, автозапуск не хотели - не поломки
+    in.gameMode = true;
+    in.uptimeMs = 10000;
+    v = tools::AppHealth(in);
+    CHECK(v[0].state == tools::AppPart::OFF && v[1].state == tools::AppPart::OFF && v[4].state == tools::AppPart::OK);
+    in.autostartWanted = 1;
+    in.toolsExe = false;
+    in.uptimeMs = 3600000;  // за час слежка ни разу не прошла
+    v = tools::AppHealth(in);
+    CHECK(v[1].state == tools::AppPart::BAD && v[2].state == tools::AppPart::BAD && v[4].state == tools::AppPart::BAD);
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -505,4 +536,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestScanCache();
     TestCfgDiff();
     TestWeekReport();
+    TestAppHealth();
 }

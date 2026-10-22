@@ -253,6 +253,7 @@ enum Id {
     ID_NET_WIFI_CHART,    // схема каналов (наведение)
     ID_STATE_WEEK,        // «Состояние»: новое за неделю - вид
     ID_STATE_REPORT,      // «Отчёт картинкой»
+    ID_STATE_APPFIX,      // «Починить» у части программы, что отвалилась (Л27)
     ID_LANE_BIN,          // «Кольца»: корзина под дорожками
     ID_TAPE,              // лента правок
     ID_ICON_DOCK,         // сетка значков-дока (наведение)
@@ -269,6 +270,7 @@ enum Id {
     ID_TOOLS_FOUND = 18600,  // +i*2: «Посчитать» и «Открыть» у найденной папки
     ID_TOOLS_BIG = 18700,    // +i*2: «Показать» и «В Корзину» у большого файла
     ID_STATE_IMP = 19300,    // +i: «Сделать» у дела из «Важного»
+    ID_STATE_PART = 19400,   // +i: часть программы в строке здоровья (наведение - подсказка)
     ID_TOOLS_EXT = 19200,    // +i: «Открыть в браузере» у расширения
     ID_NET_TOP =
         18900,  // «Сеть»: «Замерить» (+0), «Отрезать» у программы (+1+i), «Вернуть» (+20+i), +50 - данные Windows
@@ -561,6 +563,7 @@ private:
     void ToolsPage(const RectF& r);
     void ToolsPathTab(struct ToolsKit& tk);  // studio_tools_path.cpp
     void ToolsDiskTab(struct ToolsKit& tk);  // studio_tools_disks.cpp
+    tools::AppHealthIn AppHealthNow();       // снимок для строки здоровья программы (Л27)
     void ToolsDemo();                        // PATH и «Диски» на выдуманных данных (RADIAL_DEMO, эталоны снимков)
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
     void ToolsScan(const std::wstring& dir, bool setup = false);  // setup - сперва настроить задачу с правами
@@ -676,9 +679,12 @@ private:
     std::vector<tools::Physical> toolsPhys_;
     std::vector<tools::Junk> toolsJunk_;
     std::vector<tools::StartItem> toolsStarts_;
-    std::vector<tools::Tweak> toolsPriv_;  // вкладка «Приватность»
-    tools::HealthOut stateHealth_;         // «Состояние»: оценка 0-100 и за что снято
-    std::wstring ruleDraft_;               // «Помощники», «Если - то»: правило, что ещё набирают
+    std::vector<tools::Tweak> toolsPriv_;   // вкладка «Приватность»
+    tools::HealthOut stateHealth_;          // «Состояние»: оценка 0-100 и за что снято
+    std::vector<tools::AppPart> stateApp_;  // здоровье самой программы (Л27)
+    POINT stateCur_{};                      // курсор на прошлом замере: двигался ли, пока перехват молчал
+    ULONGLONG stateCurAt_ = 0;
+    std::wstring ruleDraft_;  // «Помощники», «Если - то»: правило, что ещё набирают
     std::vector<tools::Listener> toolsPorts_;
     std::vector<tools::Locker> toolsLockers_;
     bool toolsLockChecked_ = false, toolsJunkAsked_ = false, toolsShowSys_ = false;

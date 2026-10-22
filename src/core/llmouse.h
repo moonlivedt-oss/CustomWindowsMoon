@@ -13,6 +13,12 @@ using Handler = bool (*)(WPARAM msg, const MSLLHOOKSTRUCT& m);  // true - соб
 void Set(Slot s, Handler h);  // обработчик слота: один раз, до Need
 void Need(Slot s, bool on);   // слоту нужны события; перехват стоит, пока он нужен хоть одному
 void Suspend(bool on);        // игровой режим: перехват снят целиком
+// Здоровье (Л27): нужен ли, стоит ли и когда пришло последнее событие (GetTickCount64). Windows снимает
+// перехват молча, если поток долго не отвечает, - тогда стоит, а событий нет; Rehook ставит его заново.
+bool Wanted();
+bool Hooked();
+ULONGLONG LastEvent();
+void Rehook();
 void Shutdown();
 
 }  // namespace llmouse

@@ -24,6 +24,7 @@ double g_netDown = 0, g_netUp = 0;  // байт/с за последнюю ми�
 HANDLE g_watchStop = nullptr, g_watchThread = nullptr;
 
 std::atomic<bool> g_game{false};
+std::atomic<ULONGLONG> g_watchBeat{0};  // когда слежка прошла последний раз (Л27)
 bool g_dev = false;
 GpuStats g_gpu;
 bool g_ddcAsk = false;     // Unreal закрыт: спросить про старый DDC, если он большой
@@ -143,6 +144,7 @@ DWORD WINAPI WatchLoop(void*) {
             lastIn = in, lastOut = out, lastAt = now;
             PostMessageW(g_app, WM_TOOLS_JOB, kWatchTag, 0);
             ++n;
+            g_watchBeat = GetTickCount64();
             nextFull = now + (g_game ? 300000 : 60000);  // в игре реже: и так ни о чём не спросим
             tools::RecordBattery();                      // износ по дням и сколько времени на зарядке
         }
@@ -187,6 +189,12 @@ DWORD WINAPI WatchLoop(void*) {
     if (hosts != INVALID_HANDLE_VALUE) FindCloseChangeNotification(hosts);
     CoUninitialize();
     return 0;
+}
+
+ULONGLONG WatchAge(ULONGLONG& periodMs) {
+    periodMs = g_game ? 300000 : 60000;
+    ULONGLONG b = g_watchBeat;
+    return b ? std::max<ULONGLONG>(1, GetTickCount64() - b) : 0;
 }
 
 Watched Watch() {
