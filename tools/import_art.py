@@ -124,6 +124,17 @@ SHEETS = {
         "tools-pagefile",
         "tools-alarm",
     ],
+    # набор 6: пункты, что пока берут запасной значок (Have(новый, запасной) в toolsui_ring.cpp)
+    "sheet-tools4.png": [
+        "tools-important",
+        "tools-week",
+        "tools-extension",
+        "tools-sandbox-link",
+        "tools-bigfiles",
+        "tools-balance",
+        "tools-giants",
+        "tools-forecast",
+    ],
     # кольцо «Сеть»
     "sheet-net.png": [
         "net-check",
@@ -153,6 +164,7 @@ GRIDS = {
     "sheet-recovery.png": (3, 2),
     "sheet-tools2.png": (4, 3),
     "sheet-tools3.png": (4, 3),
+    "sheet-tools4.png": (4, 2),
 }
 
 
