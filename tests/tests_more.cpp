@@ -21,6 +21,7 @@
 #include "tools/important.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
+#include "desk/cardlog.h"
 
 namespace {
 
@@ -516,6 +517,23 @@ void TestAppHealth() {
     CHECK(v[1].state == tools::AppPart::BAD && v[2].state == tools::AppPart::BAD && v[4].state == tools::AppPart::BAD);
 }
 
+// Память карточек (Л10/Л11): вид без чисел, третье закрытие подряд - вопрос один раз, действие обнуляет счёт
+void TestCardLog() {
+    CHECK(cardlog::KindOf(L"Освободить ~1.2 ГБ перед игрой?") == L"Освободить");
+    CHECK(cardlog::KindOf(L"Загрузки: 2,4 ГБ лишнего") == L"Загрузки");
+    CHECK(cardlog::KindOf(L"Пропал интернет - починить?") == L"Пропал интернет - починить?");
+    CHECK(cardlog::KindOf(L"7 дней без копии") == L"7 дней без копии");  // число в начале - вид весь заголовок
+    cardlog::Strikes st;
+    CHECK(!st.Closed(L"a", false) && !st.Closed(L"a", false));
+    CHECK(st.Closed(L"a", false));   // третье подряд
+    CHECK(!st.Closed(L"a", false));  // дальше не спрашиваем снова
+    CHECK(!st.Closed(L"b", false) && !st.Closed(L"b", false) && !st.Closed(L"b", true));
+    CHECK(!st.Closed(L"b", false) && !st.Closed(L"b", false) && st.Closed(L"b", false));  // после действия - с нуля
+    std::set<std::wstring> m{L"Загрузки", L"Выход сменился"};
+    CHECK(cardlog::ParseMutes(cardlog::MutesText(m)) == m);
+    CHECK(cardlog::ParseMutes(L"a\r\n\nb\r\n") == (std::set<std::wstring>{L"a", L"b"}));
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -537,4 +555,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestCfgDiff();
     TestWeekReport();
     TestAppHealth();
+    TestCardLog();
 }

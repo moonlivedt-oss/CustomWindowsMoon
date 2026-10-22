@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "desk/cardlog.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 
@@ -23,9 +24,53 @@ std::wstring Pretty(std::wstring s) {
 
 void BoostCard::Create(HINSTANCE inst) { CreateWnd(inst, L"MoonRadialBoost", L"Boost"); }
 
+void BoostCard::Unanswered() {
+    if (!asked_) return;
+    asked_ = false;
+    cardlog::Missed m;
+    m.kind = askKind_;
+    m.title = title_;
+    m.sub = sub_;
+    m.yes = askYes_;
+    m.no = askNo_;
+    m.onYes = askOnYes_;  // снимки с показа: к уходу карточки onYes могли уже переписать под следующий вопрос
+    m.onNo = askOnNo_;
+    cardlog::Record(std::move(m));
+    cardlog::Closed(askKind_, false);
+}
+
+void BoostCard::Closed() { Unanswered(); }
+
 void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs,
                      Glyph glyph) {
+    std::wstring k = kind.empty() ? cardlog::KindOf(title) : kind;
+    kind.clear();
+    // прежний вопрос сменился другим, так и не отвеченный (тот же вид - просто обновление)
+    if (Visible() && k != askKind_) Unanswered();
+    bool ask = (mode == OFFER || mode == RESTORE) && onYes && k != L"-";
+    if (ask && cardlog::Muted(k)) {  // заглушённый вид (Л11): не выезжает - в пропущенные и в дайджест
+        cardlog::Missed m;
+        m.kind = k;
+        m.title = title;
+        m.sub = Pretty(sub);
+        Mode was = mode_;  // подписи по умолчанию зависят от вида; открытая карточка остаётся как была
+        mode_ = mode;
+        m.yes = Label(true);
+        m.no = Label(false);
+        mode_ = was;
+        m.onYes = onYes;
+        m.onNo = onNo;
+        cardlog::Record(std::move(m));
+        cardlog::ToDigest(title, sub);
+        return;
+    }
+    asked_ = ask;
+    askKind_ = k;
     mode_ = mode;
+    if (ask) {
+        askYes_ = Label(true), askNo_ = Label(false);
+        askOnYes_ = onYes, askOnNo_ = onNo;
+    }
     if (mode != WORKING) onStop = nullptr, progress = -1;
     title_ = title;
     sub_ = Pretty(sub);
@@ -139,6 +184,15 @@ int BoostCard::HitContent(const PointF& p) const {
 }
 
 void BoostCard::Click(int id) {
+    if ((id == H_YES || (id == H_NO && !StopButton())) && asked_) {
+        // ответили: «да» или вторая кнопка со своим действием - это действие, «Не сейчас» без него - нет
+        if (id == H_YES || onNo) {
+            asked_ = false;
+            cardlog::Closed(askKind_, true);
+        } else {
+            Unanswered();
+        }
+    }
     if (id == H_YES) {
         // сначала уходит вопрос, потом действие: оно может сразу показать «Работаю...» в этой же карточке
         Hide();

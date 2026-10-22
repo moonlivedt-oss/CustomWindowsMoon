@@ -331,6 +331,9 @@ void Studio::StatePage(const RectF& r) {
         y += h + gap;
     }
 
+    // ---- пропущенные карточки (Л10) и заглушённые виды (Л11) ----
+    if (float mh = MissedCards(x, y, w)) y += mh + gap;
+
     // ---- важное сейчас (О4): те же дела, что в первом секторе кольца утилит, с кнопкой ----
     if (!stateImpAt_ || now - stateImpAt_ > 10000) {
         stateImpAt_ = now;
