@@ -23,6 +23,7 @@
 #include "ui/ui.h"
 #include "gfx/scene.h"
 #include "app/toolsui.h"
+#include "core/cfgdiff.h"
 
 namespace studio {
 
@@ -248,6 +249,7 @@ enum Id {
     ID_NET_WIFI_LOC,      // «Открыть Параметры» (местоположение)
     ID_NET_WIFI_CHART,    // схема каналов (наведение)
     ID_STATE_WEEK,        // «Состояние»: новое за неделю - вид
+    ID_STATE_REPORT,      // «Отчёт картинкой»
     ID_LANE_BIN,          // «Кольца»: корзина под дорожками
     ID_TAPE,              // лента правок
     ID_ICON_DOCK,         // сетка значков-дока (наведение)
@@ -720,6 +722,13 @@ private:
     int childDrag_ = -1, childDragShown_ = -1;
     std::wstring toast_;
     ULONGLONG toastUntil_ = 0, pageAt_ = 0, lastBackup_ = 0;
+    // резервные копии (П11): чем копия отличается от нынешнего radial.cfg; кэш сбрасывается, когда файл поменялся
+    std::wstring diffSel_;  // выбранная копия - панель отличий слева от журнала
+    std::map<std::wstring, std::vector<cfgdiff::Change>> diffCache_;
+    std::wstring diffCfg_;  // текст radial.cfg, с которым сравнивали
+    ULONGLONG diffAt_ = 0;
+    const std::vector<cfgdiff::Change>& BackupDiff(const std::wstring& file);
+    void DiffPanel(const RectF& p);
     // появление страницы: кадр рисуется в свой холст, карточки выезжают из него по очереди
     HDC revealDC_ = nullptr;
     HBITMAP revealBmp_ = nullptr;
@@ -764,10 +773,11 @@ private:
     std::shared_ptr<NetSampler> sampler_;
     std::vector<tools::ToolVersion> versions_;
     bool versionsBusy_ = false;
-    toolsui::SecurityView secView_;  // вкладка «Защита»
-    int secKind_ = 0;                // фильтр: 0 - все, дальше - виды, что есть в находках
-    int extKind_ = 0;                // расширения браузеров: 0 - все, 1 - опасные
-    std::vector<Item> stateImp_;     // «Важное» на «Состоянии» (О4), раз в 10 с
+    toolsui::SecurityView secView_;                 // вкладка «Защита»
+    int secKind_ = 0;                               // фильтр: 0 - все, дальше - виды, что есть в находках
+    int extKind_ = 0;                               // расширения браузеров: 0 - все, 1 - опасные
+    std::shared_ptr<std::atomic<bool>> reportJob_;  // недельный отчёт собирается (false) / готов (true)
+    std::vector<Item> stateImp_;                    // «Важное» на «Состоянии» (О4), раз в 10 с
     ULONGLONG stateImpAt_ = 0;
     int weekKind_ = 0;      // «Состояние», новое за неделю: 0 - все, дальше - виды, что есть
     ULONGLONG liveAt_ = 0;  // данные колбы и батареи - не чаще раза в 3 с
