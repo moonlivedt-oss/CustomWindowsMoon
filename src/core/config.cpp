@@ -226,6 +226,10 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.autoPower = ParseBool(val);
             else if (key == L"auto_repair")
                 cfg.autoRepair = ParseBool(val);
+            else if (key == L"auto_report")
+                cfg.autoReport = ParseBool(val);
+            else if (key == L"auto_backup")
+                cfg.autoBackup = ParseBool(val);
             else if (key == L"tools_disk_warn")
                 cfg.toolsDiskWarn = ParseBool(val);
             else if (key == L"net_interval")
@@ -530,6 +534,9 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"downloads_days = " << c.downloadsDays << L"\n";
     o << L"auto_power = " << (c.autoPower ? 1 : 0) << L"\n";
     o << L"auto_repair = " << (c.autoRepair ? 1 : 0) << L"\n";
+    o << L"# раз в неделю отчёт картинкой, раз в сутки копия radial.cfg, если он поменялся\n";
+    o << L"auto_report = " << (c.autoReport ? 1 : 0) << L"\n";
+    o << L"auto_backup = " << (c.autoBackup ? 1 : 0) << L"\n";
     o << L"# цвета по времени суток: утром свежее, вечером теплее, ночью тёплые и приглушённые; кромка - в цвет обоев\n";
     o << L"day_tint = " << (c.dayTint ? 1 : 0) << L"\n";
     o << L"# сотовое стекло в углах, кольце, свечении заряда и волне игрового режима\n";

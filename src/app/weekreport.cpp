@@ -268,7 +268,7 @@ bool Render(const Data& d, const Data* prev, const UiColors& c, const std::wstri
     return bmp.Save(png.c_str(), &kPng, nullptr) == Ok;
 }
 
-std::wstring Make(const UiColors& c) {
+std::wstring Make(const UiColors& c, std::vector<std::wstring>* deltas) {
     Data now = Collect(), prev;
     bool had = PreviousNumbers(now.when, prev);
     CreateDirectoryW(Dir().c_str(), nullptr);
@@ -277,6 +277,7 @@ std::wstring Make(const UiColors& c) {
     swprintf(name, 48, L"\\week-%04u-%02u-%02u.png", st.wYear, st.wMonth, st.wDay);
     std::wstring path = Dir() + name;
     if (!Render(now, had ? &prev : nullptr, c, path)) return L"";
+    if (deltas) *deltas = had ? Deltas(now, prev) : std::vector<std::wstring>();
     AppendNumbers(now);
     return path;
 }

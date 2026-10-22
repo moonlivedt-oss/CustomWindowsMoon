@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <tlhelp32.h>
+#include <netlistmgr.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -25,7 +26,35 @@ float g_volume = -1;
 bool g_themeSet = false;
 ULONGLONG g_at = 0;
 
-Facts Gather() {
+// Имена подключённых сетей (Network List Manager, без местоположения): раз в 30 с - список меняется редко
+std::vector<std::wstring> Networks() {
+    static std::vector<std::wstring> cached;
+    static ULONGLONG at = 0;
+    ULONGLONG now = GetTickCount64();
+    if (at && now - at < 30000) return cached;
+    at = now;
+    cached.clear();
+    INetworkListManager* nlm = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_NetworkListManager, nullptr, CLSCTX_ALL, IID_INetworkListManager, (void**)&nlm)))
+        return cached;
+    IEnumNetworks* list = nullptr;
+    if (SUCCEEDED(nlm->GetNetworks(NLM_ENUM_NETWORK_CONNECTED, &list)) && list) {
+        INetwork* n = nullptr;
+        while (list->Next(1, &n, nullptr) == S_OK && n) {
+            BSTR name = nullptr;
+            if (SUCCEEDED(n->GetName(&name)) && name) {
+                cached.push_back(name);
+                SysFreeString(name);
+            }
+            n->Release();
+        }
+        list->Release();
+    }
+    nlm->Release();
+    return cached;
+}
+
+Facts Gather(const std::vector<Rule>& list) {
     Facts f;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap != INVALID_HANDLE_VALUE) {
@@ -42,6 +71,15 @@ Facts Gather() {
     GetLocalTime(&t);
     f.minutes = t.wHour * 60 + t.wMinute;
     f.weekend = t.wDayOfWeek == 0 || t.wDayOfWeek == 6;
+    LASTINPUTINFO li{sizeof(li)};
+    if (GetLastInputInfo(&li)) f.idleMin = (int)((GetTickCount() - li.dwTime) / 60000);
+    // сети - только если о них спрашивает хоть одно правило (COM раз в 30 с незачем без нужды)
+    for (const Rule& r : list)
+        for (const std::wstring& w : r.when)
+            if (Lower(w).find(L"net:") != std::wstring::npos) {
+                f.networks = Networks();
+                return f;
+            }
     return f;
 }
 
@@ -67,7 +105,7 @@ void Tick(const Config& cfg, void (*onTheme)(const std::wstring&)) {
     std::vector<Rule> list = Parse(cfg.rules);
     const Rule* hit = nullptr;
     if (!list.empty()) {
-        Facts f = Gather();
+        Facts f = Gather(list);
         for (const Rule& r : list)
             if (Holds(r, f)) {
                 hit = &r;

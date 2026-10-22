@@ -4,7 +4,9 @@
 //  - разбор Загрузок раз в неделю: старые установщики, распакованные архивы, копии - карточка «в Корзину?»;
 //  - режим питания: от батареи - экономия, на зарядке - сбалансированный, в игре и Unreal - производительность;
 //  - самовосстановление: пропал автозапуск - вернуть, пропал radial.cfg - достать из копий, пропал RadialTools.exe -
-//    сказать.
+//    сказать;
+//  - отчёт за неделю картинкой (app/weekreport) - сам раз в неделю вечером, итог в дайджест;
+//  - копия radial.cfg раз в сутки, если он поменялся (в том числе правкой руками): её видно в журнале студии.
 // Каждое действие пишется в журнал (%APPDATA%\MoonDesk\tools\journal.tsv), его показывает студия.
 #include <functional>
 #include <string>
@@ -39,7 +41,7 @@ void Note(const std::wstring& text);          // записать в журна�
 // показывать самому не надо; выключен - false.
 bool Digest(const std::wstring& title, const std::wstring& text);
 int DigestCount();  // сколько ждёт вечера (для студии)
-void CleanNow();                              // тихая чистка прямо сейчас (ход и итог - в карточке)
+void CleanNow();    // тихая чистка прямо сейчас (ход и итог - в карточке)
 bool Cleaning();
 int LastCleanDays();                           // сколько дней назад была тихая чистка, -1 - не было
 ULONGLONG LastCleanFreed();                    // сколько она освободила
@@ -50,5 +52,7 @@ void ScanDownloads();  // разобрать заново (в фоне)
 void RecycleDownloads(const std::vector<std::wstring>& paths);
 std::wstring PowerStatus();  // «экономия, от батареи» - что сейчас и почему
 std::wstring RepairStatus();
+std::wstring ReportStatus();  // «был 3 дня назад» / «ещё не было»
+std::wstring BackupStatus();  // последняя ежедневная копия и что в ней поменялось
 
 }  // namespace autos

@@ -229,6 +229,9 @@ enum Id {
     ID_AUTO_CRASH_RESTART,
     ID_AUTO_DIGEST_HOUR,
     ID_AUTO_REPAIR,
+    ID_AUTO_REPORT,  // «Автоматика»: отчёт за неделю сам
+    ID_AUTO_REPORT_NOW,
+    ID_AUTO_BACKUP,  // копия radial.cfg раз в сутки
     ID_LIVE_ROUTE,   // живые сцены (studio_live.cpp): маршрут сети
     ID_LIVE_PORTS,   // кабели портов
     ID_LIVE_START,   // дорожка входа

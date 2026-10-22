@@ -35,6 +35,9 @@ int Minutes(const std::wstring& hhmm) {
 
 bool ValidWhen(const std::wstring& w) {
     std::wstring l = Lower(w);
+    if (!l.empty() && l[0] == L'!') return l.size() > 1 && l[1] != L'!' && ValidWhen(T(w.substr(1)));  // «не»
+    if (l.rfind(L"idle>", 0) == 0) return _wtoi(l.c_str() + 5) > 0;
+    if (l.rfind(L"net:", 0) == 0) return l.size() > 4;
     if (l == L"ac" || l == L"battery" || l == L"weekend") return true;
     if (l.rfind(L"battery<", 0) == 0) return _wtoi(l.c_str() + 8) > 0;
     if (l.rfind(L"app:", 0) == 0) return l.size() > 4;
@@ -83,10 +86,19 @@ std::vector<Rule> Parse(const std::vector<std::wstring>& lines, std::wstring* ba
 }
 
 bool Holds(const Rule& r, const Facts& f) {
-    for (const std::wstring& w : r.when) {
+    for (const std::wstring& when : r.when) {
+        bool neg = !when.empty() && when[0] == L'!';
+        std::wstring w = neg ? T(when.substr(1)) : when;
         std::wstring l = Lower(w);
         bool ok = false;
-        if (l == L"ac")
+        if (l.rfind(L"idle>", 0) == 0)
+            ok = f.idleMin >= _wtoi(l.c_str() + 5);
+        else if (l.rfind(L"net:", 0) == 0) {
+            std::wstring masks = w.substr(4);
+            std::replace(masks.begin(), masks.end(), L'+', L'|');
+            ok = std::any_of(f.networks.begin(), f.networks.end(),
+                             [&](const std::wstring& n) { return guard::Match(n, masks); });
+        } else if (l == L"ac")
             ok = f.ac;
         else if (l == L"battery")
             ok = !f.ac;
@@ -104,7 +116,7 @@ bool Holds(const Rule& r, const Facts& f) {
             int a = Minutes(l.substr(5, d - 5)), b = Minutes(l.substr(d + 1));
             ok = a <= b ? f.minutes >= a && f.minutes < b : f.minutes >= a || f.minutes < b;  // через полночь
         }
-        if (!ok) return false;
+        if (ok == neg) return false;
     }
     return true;
 }

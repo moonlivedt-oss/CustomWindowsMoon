@@ -12,6 +12,8 @@
 #include "core/themes.h"
 #include "tools/journal.h"
 #include "app/toolsui.h"
+#include "app/weekreport.h"
+#include "core/cfgdiff.h"
 #include "desk/boostcard.h"
 #include "desk/scenecard.h"
 #include "gfx/scene.h"
@@ -26,7 +28,9 @@ std::wstring g_cfgPath;
 std::function<void()> g_reload;
 std::function<void(int, const std::wstring&)> g_openStudio;
 BoostCard g_card;
-ULONGLONG g_started = 0, g_cleanCheck = 0, g_lowCheck = 0, g_repairCheck = 0, g_dlCheck = 0;
+ULONGLONG g_started = 0, g_cleanCheck = 0, g_lowCheck = 0, g_repairCheck = 0, g_dlCheck = 0, g_reportCheck = 0,
+          g_backupCheck = 0;
+std::atomic<bool> g_reporting{false};
 std::atomic<bool> g_dlScanning{false};
 bool g_game = false, g_dev = false, g_toolsWarned = false;
 std::vector<tools::DownloadJunk> g_downloads;
@@ -56,7 +60,7 @@ void Put(const wchar_t* key, const std::wstring& v) {
 
 // сообщения из рабочих потоков
 struct Msg {
-    enum Kind { CLEAN_LOG, CLEAN_DONE, DOWNLOADS, RECYCLED } kind;
+    enum Kind { CLEAN_LOG, CLEAN_DONE, DOWNLOADS, RECYCLED, REPORT } kind;
     std::wstring text;
     ULONGLONG bytes = 0;
     int count = 0;
@@ -66,6 +70,81 @@ struct Msg {
 
 void Post(Msg* m) {
     if (!PostMessageW(g_app, WM_AUTO_JOB, 0, (LPARAM)m)) delete m;
+}
+
+// ---------------- отчёт за неделю и копия radial.cfg ----------------
+
+std::wstring ReadUtf8(const std::wstring& path) {
+    HANDLE f =
+        CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return L"";
+    std::string raw(1024 * 1024, '\0');
+    DWORD got = 0;
+    ReadFile(f, raw.data(), (DWORD)raw.size(), &got, nullptr);
+    CloseHandle(f);
+    raw.resize(got);
+    int n = MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), nullptr, 0);
+    std::wstring s(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), s.data(), n);
+    return s;
+}
+
+// Отчёт за неделю: собрать в фоне (снимок того, что уже знают подсчёты), итог - сообщением в поток окна
+void MakeReport() {
+    if (g_reporting.exchange(true)) return;
+    UiColors colors = UiPalette(*g_cfg);
+    if (!bg::Run(
+            [colors] {
+                std::vector<std::wstring> deltas;
+                std::wstring png = weekreport::Make(colors, &deltas);
+                auto* m = new Msg{Msg::REPORT, png};
+                for (size_t i = 0; i < deltas.size() && i < 3; ++i) m->lockers += (i ? L"; " : L"") + deltas[i];
+                Post(m);
+                g_reporting = false;
+            },
+            THREAD_PRIORITY_LOWEST))
+        g_reporting = false;
+}
+
+// Копия radial.cfg раз в сутки - только если он отличается от самой свежей копии (правка руками, импорт, правила)
+void DailyBackup() {
+    std::wstring dir = ExeDir() + L"\\backups";
+    std::wstring newest;
+    WIN32_FIND_DATAW fd;
+    std::vector<std::wstring> all;
+    HANDLE h = FindFirstFileW((dir + L"\\radial-*.cfg").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do all.push_back(fd.cFileName);
+        while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    std::sort(all.rbegin(), all.rend());  // имена с датой: новые первыми
+    for (const std::wstring& n : all)
+        if (n.size() >= 23 && iswdigit(n[7])) {  // radial-ГГГГ-..., не «radial-before-...»
+            newest = n;
+            break;
+        }
+    std::wstring cur = ReadUtf8(g_cfgPath);
+    Put(L"backup_day", std::to_wstring(Today()));
+    if (cur.empty()) return;
+    std::vector<cfgdiff::Change> d = newest.empty() ? std::vector<cfgdiff::Change>{{}}  // копий нет - первая
+                                                    : cfgdiff::Diff(ReadUtf8(dir + L"\\" + newest), cur);
+    if (d.empty()) return;
+    CreateDirectoryW(dir.c_str(), nullptr);
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    wchar_t name[64];
+    swprintf(name, 64, L"radial-%04d-%02d-%02d_%02d-%02d-%02d.cfg", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
+             t.wSecond);
+    if (!CopyFileW(g_cfgPath.c_str(), (dir + L"\\" + name).c_str(), FALSE)) return;
+    // как у студии: 10 последних с датой в имени
+    all.insert(all.begin(), name);
+    int kept = 0;
+    for (const std::wstring& n : all)
+        if (n.size() >= 23 && iswdigit(n[7]) && ++kept > 10) DeleteFileW((dir + L"\\" + n).c_str());
+    std::wstring sum = newest.empty() ? L"первая копия" : cfgdiff::Summary(d);
+    Put(L"backup_what", sum);
+    Note(L"Копия radial.cfg за сутки: " + sum);
 }
 
 // ---------------- тихая чистка ----------------
@@ -403,7 +482,20 @@ void Tick() {
         g_repairCheck = now;
         Repair();
     }
+    // копия radial.cfg: раз в сутки, если поменялся (проверяем раз в час, первый раз через 2 минуты)
+    if (g_cfg->autoBackup && now - g_backupCheck > (g_backupCheck == g_started ? 2 * 60 * 1000ull : 3600 * 1000ull)) {
+        g_backupCheck = now;
+        if (_wtoi(Get(L"backup_day").c_str()) != Today()) DailyBackup();
+    }
     if (g_game) return;  // в игре ничего не чистим и не спрашиваем
+    // отчёт за неделю: раз в 7 дней, вечером (с часа дайджеста), проверяем раз в час
+    if (g_cfg->autoReport && now - g_reportCheck > (g_reportCheck == g_started ? 10 * 60 * 1000ull : 3600 * 1000ull)) {
+        g_reportCheck = now;
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        int last = _wtoi(Get(L"report_day").c_str());
+        if ((!last || Today() - last >= 7) && t.wHour >= g_cfg->digestHour && !g_dev) MakeReport();
+    }
     // тихая чистка по расписанию: раз в неделю (проверяем раз в час, первый раз через 3 минуты)
     if (g_cfg->autoClean && now - g_cleanCheck > (g_cleanCheck == g_started ? 3 * 60 * 1000ull : 3600 * 1000ull)) {
         g_cleanCheck = now;
@@ -488,6 +580,32 @@ void OnJob(WPARAM, LPARAM lp) {
                         kinds + L". В Корзину - вернуть можно оттуда.", Theme(), 30000, Toast::G_ASK);
             return;
         }
+        case Msg::REPORT: {
+            if (m->text.empty()) {
+                Note(L"Отчёт за неделю не собрался");
+                return;
+            }
+            Put(L"report_day", std::to_wstring(Today()));
+            Note(L"Отчёт за неделю: " + m->text);
+            std::wstring png = m->text,
+                         text = (m->lockers.empty() ? std::wstring(L"Место, сеть, что поставилось - одной картинкой")
+                                                    : L"К прошлой неделе: " + m->lockers) +
+                                L". Файл: " + png;
+            if (Digest(L"Отчёт за неделю", text)) return;
+            g_card.yesLabel = L"Открыть";
+            g_card.noLabel = L"Понятно";
+            g_card.onYes = [png] {
+                g_card.yesLabel.clear();
+                g_card.noLabel.clear();
+                ShellExecuteW(nullptr, L"open", png.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            };
+            g_card.onNo = [] {
+                g_card.yesLabel.clear();
+                g_card.noLabel.clear();
+            };
+            g_card.Show(BoostCard::OFFER, L"Отчёт за неделю", text, Theme(), 20000, Toast::G_OK);
+            return;
+        }
         case Msg::RECYCLED:
             Note(L"Загрузки: в Корзину " + std::to_wstring(m->count) + L" файлов, " + tools::Bytes(m->bytes));
             AcquireSRWLockExclusive(&g_lock);
@@ -502,6 +620,22 @@ void OnJob(WPARAM, LPARAM lp) {
             ScanDl(false);
             return;
     }
+}
+
+std::wstring ReportStatus() {
+    int last = _wtoi(Get(L"report_day").c_str());
+    if (!last) return L"ещё не было";
+    int d = Today() - last;
+    return d == 0 ? L"был сегодня" : d == 1 ? L"был вчера" : L"был " + Plural(d, L"день", L"дня", L"дней") + L" назад";
+}
+
+std::wstring BackupStatus() {
+    int last = _wtoi(Get(L"backup_day").c_str());
+    if (!last) return L"ещё не проверялось";
+    std::wstring what = Get(L"backup_what", L"");
+    return (Today() == last ? std::wstring(L"проверено сегодня")
+                            : L"проверено " + std::to_wstring(Today() - last) + L" дн. назад") +
+           (what.empty() ? L"" : L", последняя копия: " + what);
 }
 
 void Shutdown() { g_card.Destroy(); }
