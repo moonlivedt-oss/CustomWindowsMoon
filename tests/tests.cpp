@@ -254,7 +254,8 @@ struct FakeRec {
         memcpy(fn, &parent, 8);
         fn[0x40] = (BYTE)name.size();
         fn[0x41] = ns;  // 1 - Win32, 2 - DOS 8.3, 3 - оба сразу
-        memcpy(fn + 0x42, name.data(), name.size() * 2);
+        // имя в записи NTFS - длина в fn[0x40], без нуля в конце (как на диске)
+        memcpy(fn + 0x42, name.data(), name.size() * 2);  // NOLINT(bugprone-not-null-terminated-result)
     }
     void Data(DWORD size) {
         BYTE* a = Attr(md::kAttrData, 0x18, false);
