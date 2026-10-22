@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "app/afterwork.h"
 #include "app/palette.h"
 #include "app/toolsui.h"
 #include "core/files.h"
@@ -273,6 +274,32 @@ void Studio::AidsPage(const RectF& r) {
                   L"Поставили в микшере Windows Discord тише, а игру громче - уровень запоминается по имени программы "
                   L"и возвращается при её следующем запуске. Windows помнит это не для всех: браузеры и многие игры "
                   L"начинают со 100%. Проверка раз в 4 с, без прав.",
+                  c.faint);
+    });
+    cols.Card(L"Сон после работы", 3.6f, [&](const RectF& b) {
+        afterwork::Mode aw = afterwork::Armed();
+        RectF rr = cols.Row(b, 0,
+                            aw == afterwork::OFF     ? L"Сейчас не взведено"
+                            : aw == afterwork::SLEEP ? L"Усыплю: " + afterwork::Status()
+                                                     : L"Выключу: " + afterwork::Status());
+        if (aw != afterwork::OFF) {
+            RepaintIn(1000);  // статус живой: «жду: ...», «через 40 с»
+            if (ui.Button(ID_AID + 54, RectF(rr.GetRight() - ui.S(120), rr.Y + ui.S(6), ui.S(120), ui.S(32)),
+                          L"Отменить", Kind::Secondary))
+                afterwork::Arm(afterwork::OFF);
+        }
+        RectF br = cols.Row(b, 1, L"");
+        float bw = (br.Width - ui.S(10)) / 2;
+        if (ui.Button(ID_AID + 52, RectF(br.X, br.Y + ui.S(6), bw, ui.S(34)), L"Усыпить, когда закончится",
+                      aw == afterwork::SLEEP ? Kind::Primary : Kind::Secondary))
+            afterwork::Arm(afterwork::SLEEP);
+        if (ui.Button(ID_AID + 53, RectF(br.X + bw + ui.S(10), br.Y + ui.S(6), bw, ui.S(34)),
+                      L"Выключить, когда закончится", aw == afterwork::SHUTDOWN ? Kind::Primary : Kind::Secondary))
+            afterwork::Arm(afterwork::SHUTDOWN);
+        cols.Note(b, 2.0f,
+                  L"Ждёт, пока закончатся сборка (cmake, ninja, Unreal, шейдеры), упаковка и копирование, рендер "
+                  L"Blender, загрузка браузера или Steam, игра, и вы 2 минуты не трогаете компьютер; потом карточка "
+                  L"«через 60 с» с «Отмена». То же - в меню значка в трее.",
                   c.faint);
     });
     pageContentH_ = cols.Height();
