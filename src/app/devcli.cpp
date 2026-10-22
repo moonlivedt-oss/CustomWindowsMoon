@@ -40,6 +40,7 @@
 #include "gfx/scene.h"
 #include "menu/menu.h"
 #include "net/net.h"
+#include "net/speed.h"
 #include "studio/studio.h"
 #include "tools/tools.h"
 
@@ -199,6 +200,16 @@ int NetDiag() {
     s += nl + L"Задача с правами: " + std::wstring(net::AdminReady() ? L"есть" : L"нет") + nl;
     WriteOut(L"net_out.txt", s);
     return 0;
+}
+
+// Скорость (И26) без окна: замер в speed_out.txt; в историю не пишется
+int SpeedDiag() {
+    std::wstring s;
+    const std::wstring nl = L"\r\n";
+    net::Speed r = net::MeasureSpeed([&](const std::wstring& step) { s += step + nl; });
+    s += net::SpeedText(r) + nl + net::SpeedCompare(net::SpeedHistory()) + nl;
+    WriteOut(L"speed_out.txt", s);
+    return r.down > 0 ? 0 : 1;
 }
 
 // Утилиты без окна: отчёт в tools_out.txt
@@ -687,7 +698,7 @@ struct SnapCase {
     int page, tab;
     const wchar_t* name;
 };
-const SnapCase kSnapCases[] = {{2, 0, L"behavior"}, {13, 0, L"aids"},  {1, 0, L"themes"},
+const SnapCase kSnapCases[] = {{2, 0, L"behavior"}, {13, 0, L"aids"}, {1, 0, L"themes"},
                                {9, 0, L"keys"},     {3, 0, L"desk"},  {7, 7, L"privacy"}};
 
 const CLSID kPngEncoder = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
@@ -1066,6 +1077,21 @@ bool Run(int& exitCode) {
             toolsui::PrimeSecurityForSnapshot();
         }
         exitCode = EditorSnapshot(GetModuleHandleW(nullptr), ExeDir() + L"\\radial.cfg", page, tab, out, ms);
+    } else if (Has(args, L"--tools-ring-snap")) {  // --tools-ring-snap файл.png [сектор]: кольцо утилит в картинку
+        size_t i = std::find(args.begin(), args.end(), L"--tools-ring-snap") - args.begin();
+        std::wstring out = i + 1 < args.size() ? args[i + 1] : ExeDir() + L"\\tools_ring.png";
+        int root = i + 2 < args.size() ? _wtoi(args[i + 2].c_str()) : 0;
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Gdip gdip;
+        static Config cfg = LoadOwnConfig();
+        static RadialMenu menu;
+        if (menu.Create(GetModuleHandleW(nullptr))) {
+            UINT dpi = GetDpiForSystem();
+            while (!menu.Prewarm(&cfg, dpi, 1000)) {}
+            toolsui::SnapRing(menu, &cfg, dpi, root, out);
+        }
+        TerminateProcess(GetCurrentProcess(), 0);  // как --ring-bench: разбирать окна и кэши GDI+ незачем
     } else if (Has(args, L"--modefx-film")) {  // --modefx-film game|dev on|off out.png: кадры анимации режима
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--modefx-film") - args.begin();
@@ -1182,6 +1208,8 @@ bool Run(int& exitCode) {
         exitCode = SysDiag();
     } else if (Has(args, L"--watch-selftest")) {  // логика слежки на выдуманных данных -> selftest_out.txt
         exitCode = WatchSelftest();
+    } else if (Has(args, L"--speed-test")) {
+        exitCode = SpeedDiag();
     } else if (Has(args, L"--net-diag")) {
         exitCode = NetDiag();
     } else if (Has(args, L"--lock-apply")) {

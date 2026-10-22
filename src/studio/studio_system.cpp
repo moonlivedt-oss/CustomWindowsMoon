@@ -267,7 +267,7 @@ void Studio::SystemPage(const RectF& r) {
     });
 
     // ночь
-    card(L"Ночной режим", 2.0f, [&](const RectF& b) {
+    card(L"Ночной режим", 3.0f, [&](const RectF& b) {
         toggle(row(b, 0, L"Стекло темнее, звуки тише"), ID_SYS_NIGHT, cfg.night);
         RectF h = row(b, 1, L"Часы");
         auto stepper = [&](float rx, int idm, int idp, int& v) {
@@ -289,6 +289,7 @@ void Studio::SystemPage(const RectF& r) {
         stepper(rx, ID_SYS_NIGHT_FROM_M, ID_SYS_NIGHT_FROM_P, cfg.nightFrom);
         ui.Text(L"до", RectF(rx + ui.S(126), h.Y, ui.S(26), h.Height), c.muted, 12);
         stepper(rx + ui.S(152), ID_SYS_NIGHT_TO_M, ID_SYS_NIGHT_TO_P, cfg.nightTo);
+        toggle(row(b, 2, L"Цвета по времени суток"), ID_SYS_DAY_TINT, cfg.dayTint);
     });
 
     // стол и снимки

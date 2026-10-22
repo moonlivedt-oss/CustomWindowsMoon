@@ -497,6 +497,37 @@ Item SystemItem(const Scan& scan) {
                                     std::wstring(L"Ошибок в Диспетчере устройств нет") +
                                         (off ? L"; выключено вручную: " + std::to_wstring(off) : L"") +
                                         L". 2 клика - открыть"));
+    // что изменилось за неделю (И36): поставили, убрали, обновили - одним списком
+    if (scan.week.days > 0) {
+        const auto& ch = scan.week.changes;
+        int added = 0, removed = 0, updated = 0;
+        for (const tools::WeekChange& c : ch)
+            (c.what == tools::WeekChange::ADDED ? added : c.what == tools::WeekChange::REMOVED ? removed : updated)++;
+        std::wstring since = L"за " + Plural(scan.week.days, L"день", L"дня", L"дней");
+        Item week = Act(ch.empty() ? L"Неделя: тихо" : L"За неделю " + std::to_wstring(ch.size()),
+                        Have(L"tools-week.png", L"tools-update.png"), L"",
+                        ch.empty() ? L"Программы, автозапуск, службы, драйверы и задачи " + since + L" не менялись"
+                                   : L"Изменилось " + since + L": новых " + std::to_wstring(added) + L", убрано " +
+                                         std::to_wstring(removed) + L", обновлено " + std::to_wstring(updated) +
+                                         L". Щелчок - список");
+        for (size_t i = 0; i < ch.size() && i < 16; ++i) {
+            const tools::WeekChange& c = ch[i];
+            const wchar_t* sign = c.what == tools::WeekChange::ADDED     ? L"+ "
+                                  : c.what == tools::WeekChange::REMOVED ? L"- "
+                                                                         : L"~ ";
+            std::wstring kind = tools::WeekKindName(c.entry.kind);
+            std::wstring note = (c.what == tools::WeekChange::ADDED     ? L"Появилось: "
+                                 : c.what == tools::WeekChange::REMOVED ? L"Убрано: "
+                                                                        : L"Обновлено: ") +
+                                kind + L" «" + c.entry.label + L"»" +
+                                (c.was.empty() ? L"" : L", было «" + c.was + L"»");
+            week.children.push_back(Act(sign + Short(c.entry.label, 13), L"tools-box.png", L"", note));
+        }
+        if (ch.size() > 16)
+            week.children.push_back(Act(L"ещё " + std::to_wstring(ch.size() - 16), L"tools-box.png", L"",
+                                        L"Остальное - в отчёте о системе"));
+        item.children.push_back(std::move(week));
+    }
     item.children.push_back(Act(L"Видеокарта", L"tools-temp.png", L"sys-gpu",
                                 L"Температура, нагрузка и питание сейчас (nvidia-smi); в игре слежка меряет сама и "
                                 L"после игры скажет, если был перегрев"));
@@ -979,6 +1010,73 @@ std::vector<Item> RingItems(std::wstring& status) {
                 L"Размер точек восстановления и закрытых папок прошлой Windows видно только с правами"));
         groups.back().children.push_back(std::move(gi));
     }
+    // «Важное» первым сектором и счётчики на группах (вариант B из art/tools_rings_sketch.html): открыл кольцо - сразу
+    // видно, где есть дело; спокойные группы приглушены. Пункты «Важного» - копии пунктов из групп, с теми же ключами.
+    enum { G_SPACE, G_MEMORY, G_DEV, G_GUARD, G_FIX, G_SYSTEM };
+    auto find = [&](int grp, const std::wstring& prefix) -> const Item* {
+        std::vector<const Item*> stack{&groups[grp]};
+        while (!stack.empty()) {
+            const Item* it = stack.back();
+            stack.pop_back();
+            for (const Item& c : it->children) {
+                if (!c.path.empty() && c.path.rfind(prefix, 0) == 0) return &c;
+                if (!c.children.empty()) stack.push_back(&c);
+            }
+        }
+        return nullptr;
+    };
+    Item imp = Act(L"Важное", Have(L"tools-important.png", L"tools-alarm.png"), L"", L"");
+    auto take = [&](const Item* it, const std::wstring& why) {
+        if (!it || imp.children.size() >= 6) return;
+        Item c = *it;
+        c.children.clear();  // в «Важном» - само действие, без своего кольца
+        c.note = why + L". " + c.note;
+        imp.children.push_back(std::move(c));
+    };
+    int danger = 0;
+    for (const tools::Suspect& f : g_finds) danger += f.score >= kDangerScore;
+    for (size_t i = 0; i < g_finds.size() && i < 12; ++i)
+        if (g_finds[i].score >= kDangerScore) take(find(G_GUARD, L"sec-find:" + std::to_wstring(i)), L"Опасное");
+    take(find(G_FIX, L"rec-unbreak"), L"Испорчено");
+    take(find(G_SYSTEM, L"sys-reboot"), L"Windows ждёт перезагрузки");
+    for (const tools::Volume& v : tools::VolumesCached())
+        if (v.type == DRIVE_FIXED && tools::DiskWarn(v)) take(find(G_SPACE, L"scan:" + v.root), L"Мало места");
+    ULONGLONG freeable = sized ? quickTotal + scan.ddcOld + bin : 0;
+    if (freeable >= 2ull * 1024 * 1024 * 1024)
+        take(find(G_SPACE, quick > 1 ? L"clean-all" : L"clean:"), L"Можно освободить " + tools::Bytes(freeable));
+    if (!g_updates.failed.empty()) take(find(G_SYSTEM, L"sys-wu"), L"Обновления не ставятся");
+    if (!g_devs.empty()) take(find(G_SYSTEM, L"sys-dev"), L"Устройство с ошибкой");
+    if (scan.driver.ok && scan.driver.newer) take(find(G_SPACE, L"driver"), L"Вышел новый драйвер");
+    if (!low.empty()) take(find(G_MEMORY, L"balance-restore"), L"Приоритет придержан");
+    for (size_t i = 0; i < g_git.size() && i < 2; ++i)
+        if (g_git[i].ahead >= 5 || g_git[i].changed >= 20)
+            take(find(G_DEV, L"git:" + std::to_wstring(i)), L"Давно не отправлено");
+    if (imp.children.empty()) {
+        imp.iconFull = Act(L"", L"tools-ok.png", L"", L"").iconFull;
+        imp.note = L"Всё спокойно: ни место, ни защита, ни Windows не требуют внимания";
+        imp.calm = true;
+    } else {
+        imp.badge = std::to_wstring(imp.children.size());
+        imp.note = L"Стоит сделать сейчас: " + Plural((int)imp.children.size(), L"дело", L"дела", L"дел");
+    }
+    auto badge = [&](int grp, int n, const std::wstring& text = L"") {
+        if (n > 0)
+            groups[grp].badge = text.empty() ? std::to_wstring(n) : text;
+        else
+            groups[grp].calm = true;
+    };
+    int lowDisks = 0;
+    for (const tools::Volume& v : tools::VolumesCached()) lowDisks += v.type == DRIVE_FIXED && tools::DiskWarn(v);
+    if (lowDisks)
+        badge(G_SPACE, lowDisks, L"!");
+    else
+        badge(G_SPACE, freeable >= 2ull * 1024 * 1024 * 1024, tools::Bytes(freeable));
+    badge(G_MEMORY, (int)low.size() + (int)g_hogs.size());
+    badge(G_DEV, (int)g_git.size());
+    badge(G_GUARD, danger ? danger : (int)g_finds.size(), danger ? L"!" + std::to_wstring(danger) : L"");
+    badge(G_FIX, (int)tools::FindBroken().size());
+    badge(G_SYSTEM, (int)!tools::PendingReboot().empty() + (int)!g_updates.failed.empty() + (int)g_devs.size());
+    groups.insert(groups.begin(), std::move(imp));
     ring = std::move(groups);
     if (sized && quickTotal + scan.ddcOld + bin > 0)
         status += L"   |   можно освободить " + tools::Bytes(quickTotal + scan.ddcOld + bin);

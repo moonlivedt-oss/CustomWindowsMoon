@@ -12,6 +12,7 @@
 #include "core/files.h"
 #include "core/text.h"
 #include "tools/tools.h"
+#include "tools/weekdiff.h"
 
 namespace tools {
 
@@ -324,6 +325,15 @@ std::wstring SystemReport() {
     std::vector<Conflict> cf = PathConflicts();
     if (cf.empty()) line(L"  нет");
     for (const Conflict& c : cf) line(L"  " + c.cmd + L": " + c.winnerVer + L" затеняет " + c.loserVer);
+    line(L"");
+    WeekReport week = WeekRecordAndCompare();
+    line(L"Изменилось за " + std::to_wstring(week.days) + L" дн. (программы, автозапуск, службы, драйверы, задачи):");
+    if (!week.days) line(L"  сравнивать пока не с чем - снимки начаты сегодня");
+    for (const WeekChange& c : week.changes)
+        line(std::wstring(c.what == WeekChange::ADDED     ? L"  + "
+                          : c.what == WeekChange::REMOVED ? L"  - "
+                                                          : L"  ~ ") +
+             WeekKindName(c.entry.kind) + L": " + c.entry.label + (c.was.empty() ? L"" : L" (было " + c.was + L")"));
     return r;
 }
 

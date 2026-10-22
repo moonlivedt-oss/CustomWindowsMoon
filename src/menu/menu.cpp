@@ -304,21 +304,47 @@ int RadialMenu::Bench(const Config* cfg, UINT dpi, int ms) {
         for (size_t i = 0; i < total; ++i) diff += cached[i] != ((uint32_t*)bits_)[i];
         benchDiff_ = used ? diff : -1;
     }
-    {  // последний кадр - картинкой рядом с exe: глазами проверить, что кэш колец ничего не испортил
-        Bitmap frame(geo_.w, geo_.h, geo_.w * 4, PixelFormat32bppPARGB, (BYTE*)bits_);
-        UINT num = 0, size = 0;
-        GetImageEncodersSize(&num, &size);
-        std::vector<BYTE> buf(size);
-        auto* codecs = (ImageCodecInfo*)buf.data();
-        GetImageEncoders(num, size, codecs);
-        for (UINT i = 0; i < num; ++i)
-            if (!wcscmp(codecs[i].MimeType, L"image/png"))
-                frame.Save((ExeDir() + L"\\bench_ring.png").c_str(), &codecs[i].Clsid, nullptr);
-    }
+    SaveFrame(ExeDir() + L"\\bench_ring.png");  // глазами проверить, что кэш колец ничего не испортил
     Hide();
     fakeCursor_ = nullptr;
     cfg_ = cfg;
     return n;
+}
+
+void RadialMenu::SaveFrame(const std::wstring& path) {
+    Bitmap frame(geo_.w, geo_.h, geo_.w * 4, PixelFormat32bppPARGB, (BYTE*)bits_);
+    UINT num = 0, size = 0;
+    GetImageEncodersSize(&num, &size);
+    std::vector<BYTE> buf(size);
+    auto* codecs = (ImageCodecInfo*)buf.data();
+    GetImageEncoders(num, size, codecs);
+    for (UINT i = 0; i < num; ++i)
+        if (!wcscmp(codecs[i].MimeType, L"image/png")) frame.Save(path.c_str(), &codecs[i].Clsid, nullptr);
+}
+
+// Кольцо-действие (утилиты, сеть) в картинку без мыши: курсор стоит на секторе root, кадры идут ms.
+void RadialMenu::SnapNet(const Config* cfg, std::vector<Item> items, UINT dpi, int root, int ms,
+                         const std::wstring& path) {
+    Config quiet = *cfg;
+    quiet.sounds = false;
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    POINT mid{(mi.rcWork.left + mi.rcWork.right) / 2, (mi.rcWork.top + mi.rcWork.bottom) / 2};
+    ShowNet(&quiet, std::move(items), mid, mi.rcWork, dpi);
+    demo_ = true;
+    double step = 2 * Span() / std::max<size_t>(1, netRing_.size()), r = (geo_.r1 + geo_.r2) / 2;
+    double a = Rad(AbsAngle(-Span() + step * (root + 0.5)));  // середина сектора, как его раскладывает кадр
+    POINT fake{origin_.x + center_.x + (LONG)(std::cos(a) * r), origin_.y + center_.y + (LONG)(std::sin(a) * r)};
+    fakeCursor_ = &fake;
+    for (ULONGLONG t0 = GetTickCount64(); GetTickCount64() - t0 < (ULONGLONG)ms;) {
+        Tick();
+        Sleep(10);
+    }
+    Render();
+    SaveFrame(path);
+    Hide();
+    fakeCursor_ = nullptr;
+    cfg_ = cfg;
 }
 
 void RadialMenu::Start(bool live) {

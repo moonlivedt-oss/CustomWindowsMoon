@@ -24,6 +24,7 @@
 #include "app/autos.h"
 #include "tools/selfwatch.h"
 #include "tools/tools.h"
+#include "tools/weekdiff.h"
 
 namespace toolsui {
 
@@ -52,6 +53,7 @@ struct Scan {
     std::vector<tools::Leftover2> leftovers;
     std::vector<tools::DeviceProblem> devices;
     tools::UpdateInfo updates;
+    tools::WeekReport week;  // что изменилось за неделю (И36): снимок раз в сутки
 };
 
 struct JobMsg {

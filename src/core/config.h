@@ -19,6 +19,8 @@ struct Item {
     int special = 0;
     std::wstring note;   // пояснение для карточки (действия сети)
     HWND win = nullptr;  // для special 2: какое окно вызвать
+    std::wstring badge;  // счётчик у значка («3», «6,3 ГБ»): тут есть дело (кольцо утилит)
+    bool calm = false;   // в группе всё спокойно - сектор приглушён
     std::vector<Item> children;
 
     bool HasRing() const { return expand || !children.empty(); }
@@ -83,6 +85,7 @@ struct Config {
     bool snipCard = true;             // карточка после снимка области
     bool night = true;                // ночной режим: стекло темнее, звуки тише, свечение спокойнее
     int nightFrom = 23, nightTo = 7;  // часы ночного режима
+    bool dayTint = true;              // цвета по времени суток: утром свежее, вечером теплее, ночью тёплые и тише
     // курсор: пусто - системный, иначе цвет заливки #RRGGBB; размер в пикселях, 0 - как в системе
     std::wstring cursorColor;
     int cursorSize = 0;

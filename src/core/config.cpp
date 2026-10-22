@@ -228,6 +228,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.toolsDiskWarn = ParseBool(val);
             else if (key == L"net_interval")
                 cfg.netInterval = std::clamp(_wtoi(val.c_str()), 5, 600);
+            else if (key == L"day_tint")
+                cfg.dayTint = ParseBool(val);
             else if (key == L"hex_glass")
                 cfg.hexGlass = ParseBool(val);
             else if (key == L"boot_portal")
@@ -524,6 +526,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"downloads_days = " << c.downloadsDays << L"\n";
     o << L"auto_power = " << (c.autoPower ? 1 : 0) << L"\n";
     o << L"auto_repair = " << (c.autoRepair ? 1 : 0) << L"\n";
+    o << L"# цвета по времени суток: утром свежее, вечером теплее, ночью тёплые и приглушённые; кромка - в цвет обоев\n";
+    o << L"day_tint = " << (c.dayTint ? 1 : 0) << L"\n";
     o << L"# сотовое стекло в углах, кольце, свечении заряда и волне игрового режима\n";
     o << L"hex_glass = " << (c.hexGlass ? 1 : 0) << L"\n";
     o << L"# портал при входе после включения и после сна / выключения экрана из угла\n";

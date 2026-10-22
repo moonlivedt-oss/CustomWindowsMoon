@@ -321,12 +321,13 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         }
 
         double mid = Rad(AbsAngle((s.a0 + s.a1) / 2));
-        if (Bitmap* icon = ItemIcon(*s.it, s.ring.iconPx)) {
-            double sz = s.ring.iconPx * (0.7 + 0.3 * s.appear) * (1 + 0.1 * s.hl);
-            double ix = cx + std::cos(mid) * s.ring.rIcon - sz / 2, iy = cy + std::sin(mid) * s.ring.rIcon - sz / 2;
-            DrawIcon(g, icon, *s.it, ix, iy, sz, s.hl, s.appear, s.hot);
-        }
-        DrawLabel(g, s.ring, s.a0, s.a1, *s.it, s.hl, s.appear);
+        // спокойная группа приглушена, пока на неё не навели
+        double look = s.appear * (s.it->calm ? 0.55 + 0.45 * s.hl : 1.0);
+        double sz = s.ring.iconPx * (0.7 + 0.3 * s.appear) * (1 + 0.1 * s.hl);
+        double ix = cx + std::cos(mid) * s.ring.rIcon - sz / 2, iy = cy + std::sin(mid) * s.ring.rIcon - sz / 2;
+        if (Bitmap* icon = ItemIcon(*s.it, s.ring.iconPx)) DrawIcon(g, icon, *s.it, ix, iy, sz, s.hl, look, s.hot);
+        DrawLabel(g, s.ring, s.a0, s.a1, *s.it, s.hl, look);
+        if (!s.it->badge.empty()) DrawBadge(g, s.it->badge, ix + sz * 0.92, iy + sz * 0.08, pal.hotOut, s.appear);
     }
     blitOk_ = false;
     // кольцо, которое второй кадр подряд не меняется, запоминаем: дальше оно будет копироваться

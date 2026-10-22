@@ -1,5 +1,7 @@
 #include "core/themes.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 using namespace Gdiplus;
@@ -63,6 +65,37 @@ ThemeInfo CurrentTheme(const Config& c) {
         t.glow = c.customAccent2;
         t.gold = c.customGold;
     }
+    if (c.dayTint) {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        t = DayTint(t, c, st.wHour + st.wMinute / 60.0);
+    }
+    return t;
+}
+
+// Пресет «Красоты» по времени суток (И37): днём акцент ярче, вечером цвета теплеют, ночью (часы ночного режима)
+// тёплые и приглушённые. Кромка колец немного берёт цвет обоев, когда акцент не из них. Переходы - по минутам:
+// незаметно, видно только «к вечеру стало теплее».
+ThemeInfo DayTint(ThemeInfo t, const Config& c, double hour) {
+    auto ramp = [](double x, double a, double b) { return std::clamp((x - a) / (b - a), 0.0, 1.0); };
+    double h = std::fmod(hour + 24, 24);
+    double nightHours = std::fmod(c.nightTo - c.nightFrom + 24, 24);
+    bool night = c.night && nightHours > 0 && std::fmod(h - c.nightFrom + 24, 24) < nightHours;
+    // тепло: 0 днём; за 5 часов до ночи разгорается до 0,6; ночью 1; после ночи остывает за 3 часа
+    double untilNight = std::fmod(c.nightFrom - h + 24, 24), afterNight = std::fmod(h - c.nightTo + 24, 24);
+    double evening = 1 - ramp(untilNight, 0, 5), morning = 1 - ramp(afterNight, 0, 3);
+    double warm = night ? 1.0 : 0.6 * std::max(evening, morning);
+    double bright = night ? 0.0 : 1 - std::max(evening, morning);
+    auto mix = [](COLORREF a, Color b, double k) {
+        Color m = MixColor(ToColor(a), b, k);
+        return RGB(m.GetR(), m.GetG(), m.GetB());
+    };
+    const Color amber(255, 172, 96), white(255, 255, 255), black(0, 0, 0);
+    t.ac = mix(mix(t.ac, amber, 0.22 * warm), white, 0.08 * bright);
+    t.glow = mix(mix(t.glow, amber, 0.30 * warm), white, 0.10 * bright);
+    t.gold = mix(t.gold, amber, 0.35 * warm);
+    if (night) t.bg = mix(t.bg, black, 0.18);
+    if (c.theme != L"wallpaper" && c.accentAuto) t.gold = mix(t.gold, ToColor(c.accent), 0.25);
     return t;
 }
 

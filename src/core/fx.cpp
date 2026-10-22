@@ -8,6 +8,7 @@ namespace {
 double g_mult = 1.0;  // во сколько раз длиннее обычного
 bool g_game = false;
 bool g_active = false;
+void (*g_wake)() = nullptr;
 }  // namespace
 
 void SetMotion(int motion) { g_mult = motion == 0 ? 1.45 : motion == 2 ? 0.7 : 1.0; }
@@ -24,6 +25,13 @@ bool TakeActive() {
     bool a = g_active;
     g_active = false;
     return a;
+}
+
+void SetWaker(void (*wake)()) { g_wake = wake; }
+
+void Wake() {
+    g_active = true;
+    if (g_wake) g_wake();
 }
 
 }  // namespace fx
