@@ -27,6 +27,7 @@
 #include "app/weekreport.h"
 #include "app/resume.h"
 #include "app/afterwork.h"
+#include "app/gameprep.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
 
@@ -739,6 +740,28 @@ void TestAfterWork() {
     CHECK(c.Feed(false, 331000) == afterwork::Countdown::ACT);
 }
 
+// Подготовка к игре (Л21): мешает - строками, кнопка - самое полезное (обновления важнее Steam), нечему - молчим
+void TestGamePrep() {
+    gameprep::In in;
+    gameprep::Out o;
+    CHECK(!gameprep::Check(in, o));
+    in.downMbps = 5;  // мелочь
+    CHECK(!gameprep::Check(in, o));
+    in.battery = true;
+    in.percent = 41;
+    CHECK(gameprep::Check(in, o) && o.title == L"Игра от батареи" && o.action == gameprep::Out::NONE && o.yes.empty());
+    CHECK(o.text.find(L"(41%)") != std::wstring::npos);
+    in.steam = true;
+    in.partials = 2;  // Steam и браузер - одна строка про загрузку
+    CHECK(gameprep::Check(in, o) && o.title == L"Перед игрой" && o.action == gameprep::Out::OPEN_STEAM_DOWNLOADS);
+    CHECK(o.text.find(L"Браузер") == std::wstring::npos && o.text.find(L"\n") != std::wstring::npos);
+    in.updates = true;
+    CHECK(gameprep::Check(in, o) && o.action == gameprep::Out::OPEN_UPDATES && o.yes == L"Отложить обновления");
+    in = {};
+    in.downMbps = 45;
+    CHECK(gameprep::Check(in, o) && o.text.find(L"45 Мбит/с") != std::wstring::npos);
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -769,4 +792,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestAppVolume();
     TestResume();
     TestAfterWork();
+    TestGamePrep();
 }

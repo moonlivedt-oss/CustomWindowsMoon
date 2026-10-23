@@ -29,42 +29,6 @@ std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> g_prev;  // pid -> время �
 
 const wchar_t* Verb() { return g_mode == SHUTDOWN ? L"выключу" : L"усыплю"; }
 
-// свежий недокачанный файл в Загрузках (браузер или торрент пишет его прямо сейчас)
-int FreshPartials() {
-    std::wstring dir = tools::DownloadsDir();
-    if (dir.empty()) return 0;
-    int n = 0;
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    ULONGLONG now = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-    for (const wchar_t* mask : {L"*.crdownload", L"*.part", L"*.partial", L"*.download", L"*.!ut", L"*.opdownload"}) {
-        WIN32_FIND_DATAW fd;
-        HANDLE h = FindFirstFileW((dir + L"\\" + mask).c_str(), &fd);
-        if (h == INVALID_HANDLE_VALUE) continue;
-        do {
-            ULONGLONG wt = ((ULONGLONG)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime;
-            if (now - wt < 2ull * 60 * 10000000) ++n;  // писали за последние 2 минуты - качается
-        } while (FindNextFileW(h, &fd));
-        FindClose(h);
-    }
-    return n;
-}
-
-// Steam качает: в steamapps\downloading есть папки игр
-bool SteamDownloading() {
-    wchar_t p[MAX_PATH];
-    ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\Steam\\steamapps\\downloading\\*", p, MAX_PATH);
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(p, &fd);
-    if (h == INVALID_HANDLE_VALUE) return false;
-    bool any = false;
-    do {
-        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != L'.') any = true;
-    } while (!any && FindNextFileW(h, &fd));
-    FindClose(h);
-    return any;
-}
-
 std::wstring Masks() {
     // как «не спать, пока работает», но без steamwebhelper: он живёт, пока открыт Steam (загрузку видно по папке)
     std::wstring m = g_cfg ? g_cfg->noSleepApps : L"";
@@ -148,6 +112,42 @@ void ShowCount(int secs) {
 }
 
 }  // namespace
+
+// свежий недокачанный файл в Загрузках (браузер или торрент пишет его прямо сейчас)
+int FreshPartials() {
+    std::wstring dir = tools::DownloadsDir();
+    if (dir.empty()) return 0;
+    int n = 0;
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG now = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    for (const wchar_t* mask : {L"*.crdownload", L"*.part", L"*.partial", L"*.download", L"*.!ut", L"*.opdownload"}) {
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((dir + L"\\" + mask).c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) continue;
+        do {
+            ULONGLONG wt = ((ULONGLONG)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime;
+            if (now - wt < 2ull * 60 * 10000000) ++n;  // писали за последние 2 минуты - качается
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    return n;
+}
+
+// Steam качает: в steamapps\downloading есть папки игр
+bool SteamDownloading() {
+    wchar_t p[MAX_PATH];
+    ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\Steam\\steamapps\\downloading\\*", p, MAX_PATH);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(p, &fd);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    bool any = false;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != L'.') any = true;
+    } while (!any && FindNextFileW(h, &fd));
+    FindClose(h);
+    return any;
+}
 
 void Init(HINSTANCE inst, const Config* cfg) {
     g_cfg = cfg;
