@@ -254,8 +254,13 @@ void GuardStop() {
 // Л31: cmake --build упал. Вывода у нас нет (он в чужом окне) - по согласию собираем упавшее ещё раз в фоне (ninja
 // повторит только то, что не собралось), первую ошибку - понятным языком, с переходом в VS Code.
 void BuildFailed(const std::wstring& exe, const std::wstring& dir) {
-    std::wstring leaf = Leaf(dir);
-    std::wstring proj = Leaf(dir.substr(0, dir.find_last_of(L'\\')));  // папка проекта над папкой сборки
+    std::wstring d = dir;  // «build-check\» и «/» в пути - иначе имя проекта выходило именем папки сборки
+    for (wchar_t& c : d)
+        if (c == L'/') c = L'\\';
+    while (d.size() > 3 && d.back() == L'\\') d.pop_back();
+    std::wstring leaf = Leaf(d);
+    std::wstring proj = tools::ProjectOfPath(d.substr(0, d.find_last_of(L'\\')));  // проект над папкой сборки
+    proj = proj.empty() ? Leaf(d.substr(0, d.find_last_of(L'\\'))) : Leaf(proj);
     autos::Note(L"Сборка CMake упала: " + dir);
     if (g_busy) return;
     Ask(

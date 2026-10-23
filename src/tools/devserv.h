@@ -41,4 +41,20 @@ std::vector<Forgotten> ForgottenServers(const std::vector<DevServer>& servers, c
 // Первым - самое точное (явный флаг).
 std::vector<int> ProjectPorts(const std::wstring& cmdline, const std::wstring& packageJson, const std::wstring& env);
 
+// Проект одной кнопкой (Л20): чем запускать. Файлы проекта - их тексты или признак «есть».
+struct LaunchIn {
+    std::wstring packageJson, env;
+    bool pnpm = false, yarn = false, bun = false;  // замок менеджера пакетов рядом
+    bool django = false;                           // manage.py
+    bool cargo = false, go = false;
+    std::wstring uproject;  // имя .uproject, если есть
+};
+struct LaunchPlan {
+    std::wstring cmd;       // «npm run dev», «python manage.py runserver»; пусто - сервер не запускаем
+    int port = 0;           // куда открыть браузер (0 - не открывать)
+    std::wstring uproject;  // открыть в Unreal
+    bool Any() const { return !cmd.empty() || !uproject.empty(); }
+};
+LaunchPlan PlanLaunch(const LaunchIn& in);
+
 }  // namespace tools

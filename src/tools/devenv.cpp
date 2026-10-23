@@ -269,7 +269,7 @@ bool OpenEnvTerminal(const TermEnv& env) {
                              for (const std::wstring& w : env.what) s += (s.empty() ? L"" : L", ") + w;
                              return s;
                          }());
-    std::wstring inner = L"chcp 65001 >nul && " + env.setup + hello;
+    std::wstring inner = L"chcp 65001 >nul && " + env.setup + hello + (env.run.empty() ? L"" : L" && " + env.run);
     wchar_t wt[MAX_PATH];
     if (SearchPathW(nullptr, L"wt.exe", nullptr, MAX_PATH, wt, nullptr)) {
         // «;» в командной строке wt разделяет вкладки - в PATH его нужно экранировать

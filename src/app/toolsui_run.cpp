@@ -533,6 +533,11 @@ void Run(const std::wstring& key) {
             [l] { ShellExecuteW(nullptr, L"open", l.path.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
         return;
     }
+    if (key.rfind(L"launch:", 0) == 0) {  // Л20: проект одной кнопкой
+        size_t i = idx(7, g_launch.size());
+        if (i != (size_t)-1) LaunchProject(g_launch[i]);
+        return;
+    }
     if (key.rfind(L"git:", 0) == 0) {
         size_t i = idx(4, g_git.size());
         if (i == (size_t)-1) return;

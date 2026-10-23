@@ -164,4 +164,36 @@ std::vector<int> ProjectPorts(const std::wstring& cmdline, const std::wstring& p
     return out;
 }
 
+LaunchPlan PlanLaunch(const LaunchIn& in) {
+    LaunchPlan p;
+    p.uproject = in.uproject;
+    if (!in.packageJson.empty()) {
+        for (const wchar_t* s : {L"dev", L"start", L"serve", L"develop"}) {
+            if (Script(in.packageJson, s).empty()) continue;
+            std::wstring name = s;
+            if (in.pnpm)
+                p.cmd = L"pnpm " + name;
+            else if (in.yarn)
+                p.cmd = L"yarn " + name;
+            else if (in.bun)
+                p.cmd = L"bun run " + name;
+            else
+                p.cmd = name == L"start" ? L"npm start" : L"npm run " + name;
+            std::vector<int> ports = ProjectPorts(L"", in.packageJson, in.env);
+            if (!ports.empty()) p.port = ports[0];
+            return p;
+        }
+    }
+    if (in.django) {
+        p.cmd = L"python manage.py runserver";
+        std::vector<int> ports = ProjectPorts(p.cmd, L"", in.env);
+        p.port = ports.empty() ? 8000 : ports[0];
+    } else if (in.cargo) {
+        p.cmd = L"cargo run";
+    } else if (in.go) {
+        p.cmd = L"go run .";
+    }
+    return p;
+}
+
 }  // namespace tools

@@ -249,6 +249,13 @@ et\history.txt`).
 - **Порты с проектом.** У занятых портов разработки видно, из какого проекта процесс: по командной строке (путь к скрипту) или по текущей папке процесса поднимаемся до `package.json`, `Cargo.toml`, `pyproject.toml`, `.git`...
 - **Автозагрузка с весом.** В кольце - включённые программы, отсортированные по памяти, которую они сейчас держат (ярлыки и Squirrel-«Update.exe --processStart» разбираются). Два клика - выключить, с вопросом.
 - **Терминал с окружением.** Сектор «Терминал» открывает Windows Terminal в папке верхнего окна Проводника (или из буфера) и подключает окружение: `.venv`, MSYS2 ucrt64 для C/C++ (CMakeLists, .cpp), `node_modules\.bin`, Unreal (`Build\BatchFiles`, `UE_ENGINE`, `UPROJECT` - движок по `EngineAssociation`).
+- **Проект одной кнопкой** (Л20, `toolsui_launch.cpp`; кольцо утилит - Разработка - «Запустить», палитра
+  «Запустить: проект»). Проекты из колец (папка кольца или её прямые подпапки) с package.json, manage.py, Cargo.toml,
+  go.mod или .uproject. Два клика: VS Code с папкой, .uproject - в Unreal, терминал проекта (окружение и версии - как
+  у «Терминала») сразу с командой: скрипт dev/start/serve из package.json через нужный менеджер (pnpm, yarn, bun по
+  замку, иначе npm), `python manage.py runserver`, `cargo run`, `go run .`; когда порт проекта (`tools::ProjectPorts`)
+  заработает (до 90 с) - браузер на `http://localhost:порт/`. Сервер на этом порту уже работает - второй не
+  запускается, сразу браузер. План - `tools::PlanLaunch` (под тестами).
 - **Окружение проекта** (Л33, `tools/projver` - разбор под тестами). Проект просит версию: Node - `.nvmrc`,
   `.node-version`, `engines` в package.json («^20» - ветка 20, «>=18» - 18 и новее); Python - `.python-version`,
   `requires-python` в pyproject.toml (свой `.venv` - не трогаем); CMake - `cmake_minimum_required`. Первая в PATH не

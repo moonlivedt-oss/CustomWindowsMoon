@@ -773,6 +773,7 @@ struct TermEnv {
     std::wstring dir;
     std::vector<std::wstring> what;  // что подключено: «venv», «MSYS2 ucrt64»...
     std::wstring setup;              // команды cmd перед приглашением
+    std::wstring run;                // Л20: команда после приглашения (npm run dev); пусто - только терминал
 };
 TermEnv DetectEnv(const std::wstring& dir);
 bool OpenEnvTerminal(const TermEnv& env);
