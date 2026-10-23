@@ -8,6 +8,7 @@
 #include <cwctype>
 
 #include "core/text.h"
+#include "tools/projver.h"
 #include "tools/tools.h"
 
 namespace tools {
@@ -250,6 +251,12 @@ TermEnv DetectEnv(const std::wstring& dirIn) {
         }
     }
     if (IsFile(e.dir + L"\\Cargo.toml")) e.what.push_back(L"Rust");
+    // Л33: проект просит другую версию Node, Python или CMake, чем первая в PATH, а нужная стоит - она первой
+    for (const EnvPick& p : ProjectPicks(e.dir)) {
+        path = p.use.dir + L";" + (p.tool == L"Python" ? p.use.dir + L"\\Scripts;" : L"") + path;  // и pip
+        e.what.push_back(p.tool + L" " + VerText(p.use.v) + L" (" + p.need.from + L"; в PATH первой - " +
+                         VerText(p.first) + L")");
+    }
     if (!path.empty()) e.setup = L"set \"PATH=" + path + L"%PATH%\" && " + e.setup;
     return e;
 }
