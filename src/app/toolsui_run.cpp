@@ -533,6 +533,14 @@ void Run(const std::wstring& key) {
             [l] { ShellExecuteW(nullptr, L"open", l.path.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
         return;
     }
+    if (key.rfind(L"contest:", 0) == 0) {  // Л7: страница конкурса (только http/https)
+        size_t i = idx(8, g_contests.size());
+        if (i == (size_t)-1) return;
+        const std::wstring& url = g_contests[i].url;
+        if (url.rfind(L"https://", 0) == 0 || url.rfind(L"http://", 0) == 0)
+            ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return;
+    }
     if (key.rfind(L"launch:", 0) == 0) {  // Л20: проект одной кнопкой
         size_t i = idx(7, g_launch.size());
         if (i != (size_t)-1) LaunchProject(g_launch[i]);

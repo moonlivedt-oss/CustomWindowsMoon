@@ -47,6 +47,7 @@
 #include "studio/studio.h"
 #include "tools/builderr.h"
 #include "tools/projver.h"
+#include "tools/winget.h"
 #include "tools/tools.h"
 
 namespace devcli {
@@ -409,6 +410,13 @@ bool Run(int& exitCode) {
         for (const std::wstring& w : e.what) o += w + L"; ";
         WriteOut(L"projver_out.txt", o + L"\r\n" + e.setup);
         exitCode = 0;
+    } else if (Has(args, L"--winget-diag")) {  // Л12: что обновить через winget -> winget_out.txt
+        std::vector<tools::Upgrade> ups;
+        bool ok = tools::WingetUpgrades(ups);
+        std::wstring o = ok ? L"" : L"winget не ответил\r\n";
+        for (const tools::Upgrade& u : ups) o += u.name + L"\t" + u.id + L"\t" + u.have + L" -> " + u.avail + L"\r\n";
+        WriteOut(L"winget_out.txt", o);
+        exitCode = (int)ups.size();
     } else if (Has(args, L"--gameprep-diag")) {  // Л21: что помешало бы игре сейчас -> gameprep_out.txt
         gameprep::In in;
         for (const PROCESSENTRY32W& p : *procsnap::Get(0))

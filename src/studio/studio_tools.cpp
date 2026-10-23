@@ -8,6 +8,7 @@
 
 #include "app/toolsui.h"
 #include "core/bg.h"
+#include "tools/winget.h"
 #include "core/elevate.h"
 #include "core/files.h"
 #include "core/fx.h"
@@ -62,6 +63,31 @@ void Studio::ToolsDemo() {
 }
 
 namespace {
+
+// Л12: «winget upgrade» идёт 5-30 с - в фоне; поток пишет сюда, а не в студию (её могут закрыть раньше)
+SRWLOCK g_wgLock = SRWLOCK_INIT;
+std::vector<tools::Upgrade> g_wg;  // под g_wgLock
+std::atomic<int> g_wgState{0};     // 0 - не искали, 1 - ищу, 2 - готово, 3 - winget нет или не ответил
+
+void WingetFind() {
+    if (g_wgState.exchange(1) == 1) return;
+    if (!bg::Run([] {
+            std::vector<tools::Upgrade> v;
+            bool ok = tools::WingetUpgrades(v);
+            AcquireSRWLockExclusive(&g_wgLock);
+            g_wg = v;
+            ReleaseSRWLockExclusive(&g_wgLock);
+            g_wgState = ok ? 2 : 3;
+        }))
+        g_wgState = 0;
+}
+
+std::vector<tools::Upgrade> WingetDemo() {
+    return {{L"Microsoft Visual Studio Code (User)", L"Microsoft.VisualStudioCode", L"1.121.0", L"1.142.0"},
+            {L"Node.js", L"OpenJS.NodeJS.LTS", L"24.13.0", L"24.22.1"},
+            {L"Prism Launcher", L"PrismLauncher.PrismLauncher", L"10.0.5", L"11.1.1"},
+            {L"OBS Studio", L"OBSProject.OBSStudio", L"32.0.1", L"32.2.2"}};
+}
 
 void ToolsThread(const std::shared_ptr<ToolsJob>& job) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -654,6 +680,51 @@ void Studio::ToolsPage(const RectF& r) {
                 ui.EmptyState(ID_LIVE_VERS, vr, L"Ещё не проверялось: нажми «Проверить сейчас» (около 20 секунд)");
             else
                 VersLive(vr);
+        });
+        // Л12: что обновить через winget - список и «Обновить» у каждой строки (окно winget: соглашения и права
+        // спросят он и Windows)
+        bool demo = getenv("RADIAL_DEMO") != nullptr;
+        std::vector<tools::Upgrade> ups;
+        int st = demo ? 2 : g_wgState.load();
+        if (demo) {
+            ups = WingetDemo();
+        } else {
+            AcquireSRWLockShared(&g_wgLock);
+            ups = g_wg;
+            ReleaseSRWLockShared(&g_wgLock);
+        }
+        if (st == 1) RepaintIn(1000);
+        size_t shown = std::min<size_t>(ups.size(), 20);
+        wide(L"Обновить программы", (shown * lineH * 1.2f + ui.S(64)) / rowH, [&](const RectF& b) {
+            if (ui.Button(ID_TOOLS_WG_FIND, RectF(b.X, b.Y, ui.S(200), ui.S(36)),
+                          st == 1 ? L"Ищу" : L"Найти обновления", Kind::Secondary, L"", st == 1) &&
+                !demo)
+                WingetFind();
+            std::wstring head = st == 0       ? L"winget upgrade: что из установленного вышло новее (5-30 секунд)"
+                                : st == 1     ? L"Спрашиваю winget..."
+                                : st == 3     ? L"winget не нашёлся или не ответил"
+                                : ups.empty() ? L"Всё установленное - последних версий"
+                                              : L"Можно обновить: " + std::to_wstring(ups.size()) +
+                                                    L". «Обновить» откроет окно winget - соглашения и права спросят "
+                                                    L"он и Windows";
+            ui.Text(head, RectF(b.X + ui.S(214), b.Y, b.Width - ui.S(214), ui.S(36)), c.faint, 11);
+            float y = b.Y + ui.S(52);
+            for (size_t i = 0; i < shown; ++i, y += lineH * 1.2f) {
+                const tools::Upgrade& u = ups[i];
+                float bw = ui.S(110);
+                ui.Text(Ellip(u.name, 60), RectF(b.X, y, b.Width * 0.5f, lineH), c.text, 12);
+                ui.Text(u.have + L"  →  " + u.avail,
+                        RectF(b.X + b.Width * 0.5f, y, b.Width * 0.5f - bw - ui.S(10), lineH), c.muted, 11.5f);
+                if (ui.Button(ID_TOOLS_WG + (int)i, RectF(b.GetRight() - bw, y - ui.S(2), bw, ui.S(30)), L"Обновить",
+                              Kind::Secondary) &&
+                    !demo) {
+                    if (!tools::WingetUpgradeWindow(u.id))
+                        status_ = L"winget не запустился";
+                    else
+                        status_ = L"Обновляю " + u.name + L" в окне winget";
+                }
+                ui.Tip(ID_TOOLS_WG + (int)i, u.id);
+            }
         });
     } else if (toolsTab_ == 6) {                // ---------------- защита ----------------
         if (secView_.running) RepaintIn(1000);  // итог проверки придёт сам

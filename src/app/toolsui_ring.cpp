@@ -1,5 +1,9 @@
 // Кольцо «Утилиты»: из последнего подсчёта и слежки - пункты дисков, очистки, процессов, «Защиты», системы.
 #include "app/toolsui_internal.h"
+
+#include <ctime>
+
+#include "tools/contests.h"
 #include "tools/important.h"
 
 namespace toolsui {
@@ -1104,6 +1108,24 @@ std::vector<Item> RingItems(std::wstring& status) {
         for (size_t k = 0; k < sizeof(prefixes) / sizeof(prefixes[0]); ++k)
             if (t.key.rfind(prefixes[k], 0) == 0) grp = groupOf[k];
         take(find(grp, t.key), t.why);
+    }
+    // Л7: дедлайны конкурсов ближе трёх дней (ContestReminder) - самыми первыми, не больше двух
+    g_contests = tools::ContestsSoon();
+    LONGLONG nowUnix = (LONGLONG)time(nullptr);
+    for (size_t i = 0; i < g_contests.size() && i < 2; ++i) {
+        const tools::Contest& k = g_contests[i];
+        wchar_t when[32];
+        time_t dl = (time_t)k.deadline;
+        tm t{};
+        localtime_s(&t, &dl);
+        swprintf(when, 32, L"%02d.%02d %02d:%02d", t.tm_mday, t.tm_mon + 1, t.tm_hour, t.tm_min);
+        std::wstring label = k.title.substr(0, k.title.find(L" | "));  // «Волга-IT | Мобильная...» - «Волга-IT»
+        Item c =
+            Act(Short(label, 14), Have(L"tools-alarm.png", L"tools-important.png"), L"contest:" + std::to_wstring(i),
+                L"Дедлайн " + tools::DeadlineLeft(k.deadline, nowUnix) + L" (" + when + L"). " + k.title +
+                    L". 2 клика - открыть страницу конкурса");
+        imp.children.insert(imp.children.begin() + (long long)std::min<size_t>(i, imp.children.size()), c);
+        if (imp.children.size() > 6) imp.children.pop_back();
     }
     if (imp.children.empty()) {
         imp.iconFull = Act(L"", L"tools-ok.png", L"", L"").iconFull;

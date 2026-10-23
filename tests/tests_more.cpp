@@ -2,6 +2,7 @@
 // без окон.
 #include <windows.h>
 
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,8 @@
 #include "tools/devserv.h"
 #include "tools/drain.h"
 #include "tools/projver.h"
+#include "tools/winget.h"
+#include "tools/contests.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
 #include "app/resume.h"
@@ -826,6 +829,56 @@ void TestPlanLaunch() {
     CHECK(!tools::PlanLaunch({}).Any());
 }
 
+// Обновить программы (Л12): разбор winget upgrade - ход через \r, имена с пробелами и кириллицей, «< версия», вторая
+// таблица, итоговая строка не пакет
+void TestWinget() {
+    std::wstring out =
+        L"   - \r   \\ \r   | \r"
+        L"Name                       Id                         Version      Available    Source\r\n"
+        L"--------------------------------------------------------------------------------------\r\n"
+        L"Microsoft Visual Studio Code (User) Microsoft.VisualStudioCode 1.121.0 1.142.0 winget\r\n"
+        L"v2RayTun, версия 3.8.12.0   v2RayTun.Windows           3.8.12.0     3.10.15      winget\r\n"
+        L"Google Chrome               Google.Chrome              < 130.0      131.0.6778   winget\r\n"
+        L"34 upgrades available.\r\n"
+        L"\r\n"
+        L"The following packages have an upgrade available, but require explicit targeting for upgrade:\r\n"
+        L"Name    Id               Version Available Source\r\n"
+        L"-------------------------------------------------\r\n"
+        L"Discord Discord.Discord  1.0.9   1.0.9200  winget\r\n";
+    std::vector<tools::Upgrade> u = tools::ParseWingetUpgrade(out);
+    CHECK(u.size() == 4);
+    CHECK(u[0].name == L"Microsoft Visual Studio Code (User)" && u[0].id == L"Microsoft.VisualStudioCode" &&
+          u[0].have == L"1.121.0" && u[0].avail == L"1.142.0");
+    CHECK(u[1].name == L"v2RayTun, версия 3.8.12.0" && u[1].id == L"v2RayTun.Windows");
+    CHECK(u[2].have == L"< 130.0" && u[2].id == L"Google.Chrome");
+    CHECK(u[3].id == L"Discord.Discord");
+    CHECK(tools::ParseWingetUpgrade(L"No installed package found matching input criteria.\r\n").empty());
+}
+
+// Сроки из ContestReminder (Л7): разбор contests.json, выполненные и прошедшие - мимо, ближе трёх дней - первыми
+void TestContests() {
+    std::wstring j =
+        L"[{\"id\": \"a\", \"title\": \"Volga-IT | \\u0444\\u0438\\u043d\\u0430\\u043b\", \"url\": "
+        L"\"https://volga-it.org\", "
+        L"\"deadline\": \"2026-10-25T23:59:00\", \"reminders\": [1440, 60], \"done\": false, \"snoozed_until\": null},"
+        L"{\"id\": \"b\", \"title\": \"Олимпиада {МГУ}\", \"url\": \"https://x.ru/?a=\\\"1\\\"\", \"deadline\": "
+        L"\"2026-10-24T12:00:00\", \"done\": false},"
+        L"{\"id\": \"c\", \"title\": \"Сдано\", \"deadline\": \"2026-10-24T10:00:00\", \"done\": true},"
+        L"{\"id\": \"d\", \"title\": \"Далеко\", \"deadline\": \"2026-11-24T23:59:00\", \"done\": false},"
+        L"{\"id\": \"e\", \"title\": \"Без срока\", \"deadline\": null, \"done\": false}]";
+    std::vector<tools::Contest> all = tools::ParseContests(j);
+    CHECK(all.size() == 4 && all[0].title == L"Volga-IT | финал" && all[1].title == L"Олимпиада {МГУ}");
+    CHECK(all[1].url == L"https://x.ru/?a=\"1\"" && all[2].done);
+    tm t{};
+    t.tm_year = 126, t.tm_mon = 9, t.tm_mday = 23, t.tm_hour = 10, t.tm_isdst = -1;  // 23.10.2026 10:00
+    LONGLONG now = (LONGLONG)mktime(&t);
+    std::vector<tools::Contest> soon = tools::SoonContests(all, now);
+    CHECK(soon.size() == 2 && soon[0].title == L"Олимпиада {МГУ}" && soon[1].title == L"Volga-IT | финал");
+    CHECK(tools::DeadlineLeft(soon[0].deadline, now) == L"через 1 дн. 2 ч");
+    CHECK(tools::DeadlineLeft(now + 5 * 3600 + 100, now) == L"через 5 ч" &&
+          tools::DeadlineLeft(now + 600, now) == L"через 10 мин");
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -860,4 +913,6 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestFocus();
     TestProjVer();
     TestPlanLaunch();
+    TestWinget();
+    TestContests();
 }

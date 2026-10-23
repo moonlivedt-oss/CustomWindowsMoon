@@ -23,6 +23,7 @@
 #include "net/net.h"
 #include "app/autos.h"
 #include "tools/selfwatch.h"
+#include "tools/contests.h"
 #include "tools/drain.h"
 #include "tools/tools.h"
 #include "tools/weekdiff.h"
@@ -129,7 +130,9 @@ extern tools::CommitInfo g_commit;
 extern double g_netDown, g_netUp;
 extern HANDLE g_watchStop, g_watchThread;
 extern std::atomic<bool> g_game;
-extern std::vector<std::wstring> g_launch;  // Л20: проекты сектора «Запустить» (собирается с кольцом)
+extern std::vector<std::wstring> g_launch;
+extern std::vector<tools::Contest> g_contests;  // Л7: дедлайны в «Важном» (собирается с кольцом)  // Л20: проекты
+                                                // сектора «Запустить» (собирается с кольцом)
 extern bool g_dev;
 extern bool g_ddcAsk;
 extern ULONGLONG g_devEnded;

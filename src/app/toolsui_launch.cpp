@@ -11,6 +11,7 @@
 namespace toolsui {
 
 std::vector<std::wstring> g_launch;
+std::vector<tools::Contest> g_contests;
 
 namespace {
 
