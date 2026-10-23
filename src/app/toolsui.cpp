@@ -233,7 +233,13 @@ bool OnBattery() {
     return GetSystemPowerStatus(&ps) && ps.ACLineStatus == 0;
 }
 
-bool HeavyWait(const std::wstring& what) { return tools::HeavyDefer(OnBattery(), UnixNow(), HeavyLast(what)); }
+std::atomic<bool> g_focusHold{false};  // Л8, Л34: фокус - тяжёлое ждёт
+
+void SetFocusHold(bool on) { g_focusHold = on; }
+
+bool HeavyWait(const std::wstring& what) {
+    return g_focusHold || tools::HeavyDefer(OnBattery(), UnixNow(), HeavyLast(what));
+}
 
 void HeavyDone(const std::wstring& what) {
     LONGLONG now = UnixNow();

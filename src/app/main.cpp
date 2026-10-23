@@ -17,6 +17,7 @@
 #include "app/devcli.h"
 #include "app/netui.h"
 #include "app/afterwork.h"
+#include "app/focus.h"
 #include "app/palette.h"
 #include "app/resume.h"
 #include "app/worksets.h"
@@ -248,6 +249,7 @@ void PollWork() {
     autos::Tick();
     resume::Tick();
     afterwork::Tick();
+    focus::Tick();
     if (!alt) {
         g_armed = true;
         g_altTab = false;
@@ -568,6 +570,10 @@ void TrayMenu() {
     if (g_dev.On() && !g_dev.Manual()) dev += L": " + g_dev.Reason();
     AppendMenuW(m, MF_STRING | (g_dev.On() ? MF_CHECKED : 0), CMD_DEV, dev.c_str());
     AppendMenuW(m, MF_STRING, CMD_BOOST, L"Освободить память...");
+    std::wstring fs = focus::Status();
+    AppendMenuW(
+        m, MF_STRING | (focus::On() ? MF_CHECKED : 0), CMD_FOCUS,
+        (focus::On() ? fs + L" - закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут").c_str());
     // Л6: сон после работы - галочка у взведённого, в подписи - чего ждём
     afterwork::Mode aw = afterwork::Armed();
     std::wstring awWhy = aw == afterwork::OFF ? L"" : L" (" + afterwork::Status() + L")";
@@ -718,6 +724,7 @@ void ShutdownAll() {
     g_askCard.Destroy();
     resume::Shutdown();
     afterwork::Shutdown();
+    focus::Shutdown();
     g_dropCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
@@ -820,6 +827,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     break;
                 case CMD_BOOST:
                     OfferBoost(true);
+                    break;
+                case CMD_FOCUS:
+                    focus::On() ? focus::Stop() : focus::Start(0);
                     break;
                 case CMD_AFTER_SLEEP:
                     afterwork::Arm(afterwork::Armed() == afterwork::SLEEP ? afterwork::OFF : afterwork::SLEEP);
@@ -1154,6 +1164,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     appvol::Start(g_cfg.appVolume);     // Л36: громкость по программам
     resume::Init(inst, g_wnd, &g_cfg);  // Л4: продолжить, где остановился
     afterwork::Init(inst, &g_cfg);      // Л6: сон после работы
+    focus::Init(inst, &g_cfg);          // Л8, Л34: фокус и шахматы без отвлечений
+    g_menu.focusStatus = [] { return focus::Status(); };
+    palette::AddSource([](std::vector<Item>& out) {
+        Item it;
+        it.name = focus::On() ? L"Фокус: закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут";
+        it.path = L"f|toggle";
+        it.special = 3;
+        out.push_back(it);
+    });
+    palette::AddRunner(L"f|", [](const std::wstring&) { focus::On() ? focus::Stop() : focus::Start(0); });
     corners::SetClip([] { cliphist::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {
         for (Item& it : cliphist::Items(L"b|")) {
