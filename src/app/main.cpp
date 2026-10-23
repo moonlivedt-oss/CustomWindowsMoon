@@ -461,12 +461,7 @@ void OnGameMode(bool on) {
         if (g_cfg.autoPower) chips.push_back(battery ? L"От батареи: баланс" : L"Питание: максимум");
         gboost::SetGame(true, g_game.GamePids(), GameExe(), g_game.Reason(), g_cfg.boostIslc);
         if (g_cfg.boostOffer) OfferBoost(false);
-        if (battery)
-            g_gbCard.Show(BoostCard::DONE, L"Игра от батареи",
-                          L"Процессор и видеокарта будут работать медленнее, а заряд "
-                          L"уйдёт за час-полтора. С зарядкой "
-                          L"режим питания сам станет «максимум».",
-                          CurrentTheme(g_cfg), 12000, Toast::G_WARN);
+        GamePrep();  // Л21: обновления, загрузки, батарея - одной карточкой
     } else {
         bool quiet = gboost::QuietOn();
         gboost::SetGame(false, {}, L"", L"", false);
@@ -895,6 +890,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             if (wp == WTS_SESSION_UNLOCK) netui::Wake();
             if (wp == WTS_SESSION_LOCK) resume::OnLock();  // Л4: запомнить, что открыто
             if (wp == WTS_SESSION_UNLOCK) resume::OnUnlock();
+            return 0;
+        case WM_GAMEPREP:
+            GamePrepShow(lp);
             return 0;
         case resume::WM_RESUME:
             resume::OnMessage(wp, lp);

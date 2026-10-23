@@ -288,6 +288,8 @@ DWORD WINAPI WatchLoop(void*) {
     return 0;
 }
 
+double NetDownBps() { return g_netDown; }
+
 ULONGLONG WatchAge(ULONGLONG& periodMs) {
     periodMs = g_game ? 300000 : 60000;
     ULONGLONG b = g_watchBeat;

@@ -6,10 +6,13 @@
 #include <algorithm>
 #include <map>
 
+#include "app/afterwork.h"
 #include "app/autos.h"
+#include "app/gameprep.h"
 #include "app/toolsui.h"
 #include "core/bg.h"
 #include "core/files.h"
+#include "core/procsnap.h"
 #include "core/launch.h"
 #include "core/fx.h"
 #include "core/text.h"
@@ -149,6 +152,48 @@ void ApplyPick(const std::vector<BoostPick::Row>& rows) {
         return;
     }
     StartBoost(job);
+}
+
+// Л21: что помешает игре - обновления Windows (идёт TiWorker), загрузка Steam или браузера, занятая сеть, батарея.
+// Сбор - в фоне (Загрузки и процессы), карточка - в основном потоке.
+void GamePrep() {
+    bg::Run([] {
+        gameprep::In in;
+        std::shared_ptr<const procsnap::List> ps = procsnap::Get(0);
+        for (const PROCESSENTRY32W& p : *ps) in.updates = in.updates || !_wcsicmp(p.szExeFile, L"TiWorker.exe");
+        in.steam = afterwork::SteamDownloading();
+        in.partials = afterwork::FreshPartials();
+        in.downMbps = toolsui::NetDownBps() * 8 / 1e6;
+        tools::BatteryInfo bat = tools::Battery();
+        in.battery = bat.present && !bat.ac;
+        in.percent = bat.percent;
+        auto* out = new gameprep::Out;
+        if (!gameprep::Check(in, *out) || !PostMessageW(g_wnd, WM_GAMEPREP, 0, (LPARAM)out)) delete out;
+    });
+}
+
+void GamePrepShow(LPARAM lp) {
+    std::unique_ptr<gameprep::Out> o((gameprep::Out*)lp);
+    if (!g_game.On()) return;  // игру уже закрыли
+    ThemeInfo t = CurrentTheme(g_cfg);
+    autos::Note(L"Подготовка к игре: " + o->text);
+    if (o->action == gameprep::Out::NONE) {
+        g_gbCard.Show(BoostCard::DONE, o->title, o->text, t, 12000, Toast::G_WARN);
+        return;
+    }
+    gameprep::Out::Action a = o->action;
+    g_gbCard.kind = L"-";  // к моменту, когда заглянете в пропущенные, игра уже идёт или кончилась
+    g_gbCard.yesLabel = o->yes;
+    g_gbCard.noLabel = L"Играть так";
+    g_gbCard.onYes = [a] {
+        g_gbCard.yesLabel.clear(), g_gbCard.noLabel.clear();
+        // обновления откладываются в Параметрах (кнопка «Приостановить» - без прав), Steam - в его списке загрузок
+        ShellExecuteW(nullptr, L"open",
+                      a == gameprep::Out::OPEN_UPDATES ? L"ms-settings:windowsupdate" : L"steam://open/downloads",
+                      nullptr, nullptr, SW_SHOWNORMAL);
+    };
+    g_gbCard.onNo = [] { g_gbCard.yesLabel.clear(), g_gbCard.noLabel.clear(); };
+    g_gbCard.Show(BoostCard::OFFER, o->title, o->text, t, 20000, Toast::G_WARN);
 }
 
 void OfferBoost(bool manual, const std::wstring& why) {

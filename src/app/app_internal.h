@@ -53,6 +53,7 @@ enum Cmd {
 };
 constexpr UINT WM_BOOST_DONE = WM_APP + 60;  // поток Boost закончил: lParam - boost::Result*
 constexpr UINT WM_DROP_DONE = WM_APP + 71;   // бросок на папку кольца разобран: lParam - DropMsg*
+constexpr UINT WM_GAMEPREP = WM_APP + 75;    // подготовка к игре собрана (Л21): lParam - gameprep::Out*
 constexpr UINT WM_POLL_WAKE = WM_APP + 73;   // курсор дошёл до края или что-то началось - опрос снова частый
 
 extern HINSTANCE g_inst;
@@ -119,6 +120,8 @@ std::wstring EditorExe();
 std::vector<std::wstring> KeepApps();
 int DefaultAct(const std::wstring& key);
 void ApplyPick(const std::vector<BoostPick::Row>& rows);
+void GamePrep();               // Л21: при запуске игры - что помешает (в фоне, итог - WM_GAMEPREP)
+void GamePrepShow(LPARAM lp);  // WM_GAMEPREP: одна карточка
 void OfferBoost(bool manual, const std::wstring& why = L"перед игрой");
 void BoostDone(boost::Result* r);
 void OfferRestore();

@@ -21,8 +21,11 @@
 #include "core/elevate.h"
 #include "core/filedlg.h"
 #include "core/files.h"
+#include "core/procsnap.h"
 #include "core/text.h"
 #include "core/themes.h"
+#include "app/afterwork.h"
+#include "app/gameprep.h"
 #include "app/resume.h"
 #include "desk/appvol.h"
 #include "desk/boost.h"
@@ -393,6 +396,23 @@ bool Run(int& exitCode) {
             WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
             CloseHandle(f);
         }
+        exitCode = 0;
+    } else if (Has(args, L"--gameprep-diag")) {  // Л21: что помешало бы игре сейчас -> gameprep_out.txt
+        gameprep::In in;
+        for (const PROCESSENTRY32W& p : *procsnap::Get(0))
+            in.updates = in.updates || !_wcsicmp(p.szExeFile, L"TiWorker.exe");
+        in.steam = afterwork::SteamDownloading();
+        in.partials = afterwork::FreshPartials();
+        tools::BatteryInfo bat = tools::Battery();
+        in.battery = bat.present && !bat.ac;
+        in.percent = bat.percent;
+        gameprep::Out o;
+        bool any = gameprep::Check(in, o);
+        WriteOut(L"gameprep_out.txt",
+                 std::wstring(L"обновления ") + (in.updates ? L"да" : L"нет") + L", Steam " +
+                     (in.steam ? L"качает" : L"нет") + L", недокачанных " + std::to_wstring(in.partials) + L", заряд " +
+                     std::to_wstring(in.percent) + (in.battery ? L"% от батареи" : L"% на зарядке") + L"\r\n" +
+                     (any ? o.title + L"\r\n" + o.text + L"\r\n[" + o.yes + L"]" : L"мешать нечему"));
         exitCode = 0;
     } else if (Has(args, L"--resume-diag")) {  // Л4: что открыто сейчас и что запомнено -> resume_out.txt
         HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
