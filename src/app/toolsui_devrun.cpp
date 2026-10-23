@@ -8,6 +8,7 @@
 
 #include "core/procsnap.h"
 #include "tools/devserv.h"
+#include "tools/projver.h"
 #include "tools/guard.h"
 
 namespace toolsui {
@@ -29,6 +30,25 @@ struct PortBusy {
 };
 std::vector<BuildFail> g_buildFails;  // под g_devLock
 std::vector<PortBusy> g_portBusy;     // под g_devLock
+struct EnvAsk {                       // Л33: терминал открыт в проекте, а нужной версии нет первой в PATH
+    std::wstring project;
+    std::vector<tools::EnvPick> picks;
+};
+std::vector<EnvAsk> g_envAsk;      // под g_devLock
+std::set<std::wstring> g_envSeen;  // проекты, про которые уже смотрели (до перезапуска программы)
+
+// Л33: новый терминал - в каком он проекте и всё ли там с версиями (в фоне: --version у cmake - процесс)
+void CheckEnv(const std::wstring& project) {
+    AcquireSRWLockExclusive(&g_devLock);
+    bool fresh = g_envSeen.insert(Lower(project)).second;
+    ReleaseSRWLockExclusive(&g_devLock);
+    if (!fresh) return;
+    std::vector<tools::EnvPick> picks = tools::ProjectPicks(project);
+    if (picks.empty()) return;
+    AcquireSRWLockExclusive(&g_devLock);
+    g_envAsk.push_back({project, picks});
+    ReleaseSRWLockExclusive(&g_devLock);
+}
 
 std::wstring ReadSmall(const std::wstring& path) {
     HANDLE f =
@@ -104,6 +124,15 @@ DWORD WINAPI DevLoop(void*) {
             if (sk != skip.end() && sk->second == p.created) continue;
             skip[p.pid] = p.created;  // по умолчанию - больше не смотрим; интересное ниже уйдёт в runs
             bool cmake = guard::Match(p.name, L"cmake.exe"), srv = tools::DevServerName(p.name);
+            if (!g_game && p.parent != self && guard::Match(p.name, L"cmd.exe|powershell.exe|pwsh.exe|bash.exe")) {
+                // Л33: терминал - в его папке проект? (папку читаем сразу: потом в нём сделают cd)
+                if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, p.pid)) {
+                    std::wstring proj = tools::ProjectOfPath(tools::ProcCurrentDir(h));
+                    CloseHandle(h);
+                    if (!proj.empty()) CheckEnv(proj);
+                }
+                continue;
+            }
             if ((!cmake && !srv) || p.parent == self || g_game) continue;
             HANDLE h = OpenProcess(
                 SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE,
@@ -196,7 +225,25 @@ void DevrunTick() {
     g_buildFails.clear();
     g_portBusy.clear();
     ReleaseSRWLockExclusive(&g_devLock);
+    std::vector<EnvAsk> envs = std::move(g_envAsk);
+    g_envAsk.clear();
     for (const BuildFail& f : fails) BuildFailed(f.exe, f.dir);
+    for (const EnvAsk& e : envs) {
+        std::wstring what, use;
+        for (const tools::EnvPick& p : e.picks) {
+            what += (what.empty() ? L"" : L"; ") + p.tool + L" " + tools::VerText(p.need.v) +
+                    (p.need.atLeast ? L"+" : L"") + L" (" + p.need.from + L"), а первым в PATH - " +
+                    (p.first.Known() ? tools::VerText(p.first) : std::wstring(L"не нашёлся"));
+            use += (use.empty() ? L"" : L", ") + p.tool + L" " + tools::VerText(p.use.v);
+        }
+        std::wstring proj = e.project;
+        autos::Note(L"Окружение проекта " + LeafOf(proj) + L": " + what);
+        if (g_busy) continue;
+        Ask(
+            L"Проекту «" + LeafOf(proj) + L"» нужна другая версия",
+            what + L". Открыть терминал проекта, где первой будет " + use + L"?", L"Открыть терминал", L"Не надо",
+            [proj] { tools::OpenEnvTerminal(tools::DetectEnv(proj)); }, nullptr, 40000, Toast::G_INFO);
+    }
     for (const PortBusy& b : busy) {
         std::wstring who =
             NoExe(b.holderExe) + (b.holderProject.empty() ? L"" : L" из «" + LeafOf(b.holderProject) + L"»");

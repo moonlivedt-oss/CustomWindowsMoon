@@ -23,6 +23,7 @@
 #include "tools/builderr.h"
 #include "tools/devserv.h"
 #include "tools/drain.h"
+#include "tools/projver.h"
 #include "core/cfgdiff.h"
 #include "app/weekreport.h"
 #include "app/resume.h"
@@ -774,6 +775,30 @@ void TestFocus() {
     CHECK(focus::LeftText(59000) == L"Фокус: меньше минуты");
 }
 
+// Окружение проекта (Л33): что просит проект и какая из установленных подходит
+void TestProjVer() {
+    tools::Ver v = tools::ParseVer(L"v20.11.0");
+    CHECK(v.major == 20 && v.minor == 11 && !tools::ParseVer(L"lts/iron").Known());
+    tools::Need n = tools::NodeNeed(L"v20.11.0\n", L"", L"");
+    CHECK(n.v.major == 20 && n.v.minor == -1 && !n.atLeast && n.from == L".nvmrc");
+    n = tools::NodeNeed(L"", L"", L"{\"name\":\"x\",\"engines\": {\"node\": \">=18.17\"}}");
+    CHECK(n.v.major == 18 && n.atLeast && tools::Fits(n, {22, 1}) && !tools::Fits(n, {16, 20}));
+    n = tools::NodeNeed(L"", L"", L"{\"engines\":{\"node\":\"^20.1\"}}");
+    CHECK(!n.atLeast && tools::Fits(n, {20, 5}) && !tools::Fits(n, {22, 0}));
+    tools::Need p = tools::PythonNeed(L"3.12.1\r\n", L"");
+    CHECK(p.v.major == 3 && p.v.minor == 12 && tools::Fits(p, {3, 12}) && !tools::Fits(p, {3, 10}));
+    p = tools::PythonNeed(L"", L"[project]\nname = \"bot\"\nrequires-python = \">=3.11\"\n");
+    CHECK(p.atLeast && tools::Fits(p, {3, 14}) && !tools::Fits(p, {3, 10}) && p.from == L"requires-python");
+    tools::Need c = tools::CMakeNeed(L"CMAKE_MINIMUM_REQUIRED(VERSION 3.28)\nproject(x)");
+    CHECK(c.v.major == 3 && c.v.minor == 28 && c.atLeast && !tools::Fits(c, {3, 22}) && tools::Fits(c, {4, 0}));
+    CHECK(!tools::CMakeNeed(L"project(x)").v.Known());
+    std::vector<tools::Installed> have = {{{3, 10}, L"A"}, {{3, 14}, L"B"}, {{3, 12}, L"C"}};
+    CHECK(tools::Pick(p, have) == 1);                                // >=3.11 - самая новая подходящая
+    CHECK(tools::Pick(tools::PythonNeed(L"3.12", L""), have) == 2);  // точная ветка
+    CHECK(tools::Pick(tools::PythonNeed(L"3.9", L""), have) == -1);
+    CHECK(tools::VerText({20, -1}) == L"20" && tools::VerText({3, 12}) == L"3.12");
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -806,4 +831,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestAfterWork();
     TestGamePrep();
     TestFocus();
+    TestProjVer();
 }

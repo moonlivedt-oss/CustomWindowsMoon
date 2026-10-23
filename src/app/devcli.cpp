@@ -46,6 +46,7 @@
 #include "gfx/qr.h"
 #include "studio/studio.h"
 #include "tools/builderr.h"
+#include "tools/projver.h"
 #include "tools/tools.h"
 
 namespace devcli {
@@ -396,6 +397,17 @@ bool Run(int& exitCode) {
             WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
             CloseHandle(f);
         }
+        exitCode = 0;
+    } else if (Value(args, L"--projver-diag", v)) {  // Л33: версии проекта и что подставит терминал -> projver_out.txt
+        std::wstring o;
+        for (const tools::EnvPick& p : tools::ProjectPicks(v))
+            o += p.tool + L": нужен " + tools::VerText(p.need.v) + (p.need.atLeast ? L"+" : L"") + L" (" + p.need.from +
+                 L"), первый в PATH " + tools::VerText(p.first) + L", подставлю " + tools::VerText(p.use.v) + L" из " +
+                 p.use.dir + L"\r\n";
+        tools::TermEnv e = tools::DetectEnv(v);
+        o += L"терминал: ";
+        for (const std::wstring& w : e.what) o += w + L"; ";
+        WriteOut(L"projver_out.txt", o + L"\r\n" + e.setup);
         exitCode = 0;
     } else if (Has(args, L"--gameprep-diag")) {  // Л21: что помешало бы игре сейчас -> gameprep_out.txt
         gameprep::In in;
