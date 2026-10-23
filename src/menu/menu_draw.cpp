@@ -431,6 +431,10 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
         if (shift_) return L"Открыть в VS Code";
         if (ctrl_) return L"Терминал в этой папке";
     }
+    if (!it && focusStatus) {  // Л8: ни на что не наведено - сколько фокуса осталось
+        std::wstring f = focusStatus();
+        if (!f.empty()) return f;
+    }
     alpha = 0.55;
     if (it && it->dir) return L"2 клика: открыть   |   ПКМ: внутрь   |   тянуть: вращать";
     if (it) return L"2 клика: открыть   |   тянуть: вращать";

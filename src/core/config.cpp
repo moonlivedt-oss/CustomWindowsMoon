@@ -282,6 +282,12 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.longMin = std::clamp(_wtoi(val.c_str()), 1, 120);
             else if (key == L"app_volume")
                 cfg.appVolume = ParseBool(val);
+            else if (key == L"focus_minutes")
+                cfg.focusMinutes = std::clamp(_wtoi(val.c_str()), 5, 240);
+            else if (key == L"focus_apps")
+                cfg.focusApps = val;
+            else if (key == L"focus_auto")
+                cfg.focusAuto = val;
             else if (key == L"scale")
                 cfg.scale = std::clamp(_wtof(val.c_str()), 0.5, 3.0);
             else if (key == L"accent") {
@@ -578,6 +584,10 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"long_min = " << c.longMin << L"\n";
     o << L"# громкость по программам: уровень из микшера помнится по exe и возвращается при новом запуске\n";
     o << L"app_volume = " << (c.appVolume ? 1 : 0) << L"\n";
+    o << L"# фокус: на сколько минут, что свернуть и усыпить; focus_auto - окно с этим в заголовке включает тишину само\n";
+    o << L"focus_minutes = " << c.focusMinutes << L"\n";
+    o << L"focus_apps = " << c.focusApps << L"\n";
+    o << L"focus_auto = " << c.focusAuto << L"\n";
 
     auto ring = [&](const wchar_t* tag, const std::vector<Item>& v) {
         o << L"\n" << tag << L"\n";

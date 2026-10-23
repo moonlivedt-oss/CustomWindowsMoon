@@ -49,7 +49,8 @@ enum Cmd {
     CMD_EXIT,
     CMD_RESTORE_ALL,
     CMD_AFTER_SLEEP,  // Л6: усыпить, когда всё закончится (второй раз - отменить)
-    CMD_AFTER_OFF     // Л6: выключить, когда всё закончится
+    CMD_AFTER_OFF,    // Л6: выключить, когда всё закончится
+    CMD_FOCUS         // Л8: фокус на N минут (второй раз - закончить)
 };
 constexpr UINT WM_BOOST_DONE = WM_APP + 60;  // поток Boost закончил: lParam - boost::Result*
 constexpr UINT WM_DROP_DONE = WM_APP + 71;   // бросок на папку кольца разобран: lParam - DropMsg*

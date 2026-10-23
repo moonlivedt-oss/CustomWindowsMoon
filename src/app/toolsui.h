@@ -71,7 +71,8 @@ struct Watched {
 Watched Watch();
 // Сколько слежка молчит, мс (0 - ещё не прошла ни разу); periodMs - как часто она должна проходить сейчас
 ULONGLONG WatchAge(ULONGLONG& periodMs);
-double NetDownBps();  // приём по физическим адаптерам за последнюю минуту, байт/с (слежка)
+void SetFocusHold(bool on);  // фокус (Л8, Л34): подсчёт места, «Защита», недельные проверки ждут
+double NetDownBps();         // приём по физическим адаптерам за последнюю минуту, байт/с (слежка)
 // Забытые серверы разработки (Л19): снимок портов, проектов и заголовков окон, решение - tools/devserv
 std::vector<tools::Forgotten> FindForgotten(const std::vector<tools::ProcInfo>& ps,
                                             std::map<std::wstring, ULONGLONG>& lastSeen, ULONGLONG idleMs,

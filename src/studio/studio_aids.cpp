@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "app/afterwork.h"
+#include "app/focus.h"
 #include "app/palette.h"
 #include "app/toolsui.h"
 #include "core/files.h"
@@ -275,6 +276,34 @@ void Studio::AidsPage(const RectF& r) {
                   L"и возвращается при её следующем запуске. Windows помнит это не для всех: браузеры и многие игры "
                   L"начинают со 100%. Проверка раз в 4 с, без прав.",
                   c.faint);
+    });
+    cols.Card(L"Фокус", 5.6f, [&](const RectF& b) {
+        std::wstring fs = focus::Status();
+        RectF rr = cols.Row(b, 0, fs.empty() ? L"Сейчас выключен" : fs);
+        if (ui.Button(ID_AID + 55, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(6), ui.S(150), ui.S(32)),
+                      focus::On() ? L"Закончить" : L"Начать", focus::On() ? Kind::Secondary : Kind::Primary)) {
+            if (focus::On())
+                focus::Stop();
+            else
+                focus::Start(0);
+        }
+        if (focus::On()) RepaintIn(1000);
+        rr = cols.Row(b, 1, L"На " + std::to_wstring(cfg.focusMinutes) + L" минут", 0.5f);
+        int m = cfg.focusMinutes;
+        if (ui.Slider(ID_AID + 56, RectF(rr.GetRight() - ui.S(170), rr.Y + ui.S(8), ui.S(170), ui.S(28)), m, 15, 120)) {
+            Change();
+            cfg.focusMinutes = m;
+            Save();
+        }
+        field(b, 2, ID_AID + 57, cfg.focusApps, L"Что свернуть и усыпить: имена exe через |");
+        field(b, 3, ID_AID + 58, cfg.focusAuto, L"Тишина сама, пока в заголовке окна: через |");
+        cols.Note(
+            b, 4.0f,
+            L"Уведомления молчат, отвлекающие программы свёрнуты и усыплены, подсчёт места и проверки ждут, внизу "
+            L"кольца - сколько осталось; в конце - карточка «Перерыв». Окно с lichess.org или chess.com включает "
+            L"тишину само (без отсчёта и без усыпления) и выключает через 30 с после закрытия. То же - в трее и "
+            L"палитре.",
+            c.faint);
     });
     cols.Card(L"Сон после работы", 3.6f, [&](const RectF& b) {
         afterwork::Mode aw = afterwork::Armed();

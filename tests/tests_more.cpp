@@ -28,6 +28,7 @@
 #include "app/resume.h"
 #include "app/afterwork.h"
 #include "app/gameprep.h"
+#include "app/focus.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
 
@@ -762,6 +763,17 @@ void TestGamePrep() {
     CHECK(gameprep::Check(in, o) && o.text.find(L"45 Мбит/с") != std::wstring::npos);
 }
 
+// Фокус и шахматы (Л8, Л34): маска в заголовке окна без учёта регистра, строка отсчёта
+void TestFocus() {
+    std::vector<std::wstring> t = {L"Telegram", L"Партия с Magnus • lichess.org - Google Chrome"};
+    CHECK(focus::AutoMatch(t, L"lichess.org|chess.com") == L"lichess.org");
+    CHECK(focus::AutoMatch({L"Play Chess Online - Chess.com - Opera"}, L" lichess.org | chess.com ") == L"chess.com");
+    CHECK(focus::AutoMatch(t, L"").empty() && focus::AutoMatch(t, L"ab|x").empty());  // короткие маски не в счёт
+    CHECK(focus::LeftText(23 * 60000 + 1) == L"Фокус: ещё 24 мин");
+    CHECK(focus::LeftText(50 * 60000) == L"Фокус: ещё 50 мин");
+    CHECK(focus::LeftText(59000) == L"Фокус: меньше минуты");
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -793,4 +805,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestResume();
     TestAfterWork();
     TestGamePrep();
+    TestFocus();
 }

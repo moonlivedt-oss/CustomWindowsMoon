@@ -33,7 +33,8 @@ public:
     std::function<void(const std::wstring& key)> onNet;  // выбрали действие сети
     // пункт кольца с path = action:<действие> (как у горячих углов: minecraft, net, tools...)
     std::function<void(const std::wstring& action)> onAction;
-    std::function<std::wstring()> netStatus;  // строка состояния для кольца сети
+    std::function<std::wstring()> netStatus;    // строка состояния для кольца сети
+    std::function<std::wstring()> focusStatus;  // Л8: «Фокус: ещё 23 мин» внизу обычного кольца
     // файлы бросили на папку кольца (Проводник переносит или копирует сам, иногда уже после Drop): что и куда -
     // для карточки «Вернуть»
     std::function<void(std::vector<std::wstring> files, std::wstring dir)> onDropped;

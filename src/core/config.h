@@ -172,6 +172,9 @@ struct Config {
         L"UnrealEditor-Cmd.exe|dotnet.exe";
     int longMin = 3;  // от скольких минут работы команда считается долгой
     bool appVolume = true;  // Л36: помнить громкость каждой программы и возвращать при новом запуске
+    int focusMinutes = 50;                             // Л8: фокус по умолчанию, минут
+    std::wstring focusApps = L"Telegram.exe|Discord.exe";  // Л8: что на время фокуса свернуть и усыпить
+    std::wstring focusAuto = L"lichess.org|chess.com";     // Л34: окно с этим в заголовке - тишина сама
     std::vector<Item> left, right;
     std::vector<AppRing> apps;  // кольца программ
     std::vector<WorkSet> sets;  // рабочие наборы
