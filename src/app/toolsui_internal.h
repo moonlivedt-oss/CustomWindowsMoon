@@ -129,6 +129,7 @@ extern tools::CommitInfo g_commit;
 extern double g_netDown, g_netUp;
 extern HANDLE g_watchStop, g_watchThread;
 extern std::atomic<bool> g_game;
+extern std::vector<std::wstring> g_launch;  // Л20: проекты сектора «Запустить» (собирается с кольцом)
 extern bool g_dev;
 extern bool g_ddcAsk;
 extern ULONGLONG g_devEnded;

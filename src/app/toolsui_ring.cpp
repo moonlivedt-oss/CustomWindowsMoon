@@ -979,10 +979,24 @@ std::vector<Item> RingItems(std::wstring& status) {
     ring.push_back(Act(L"Кто держит", L"tools-lock.png", L"lock-clip",
                        L"Кто не даёт удалить файл или папку: скопируй её в Проводнике и выбери это"));
     ring.push_back(GitItem(scan));
+    // Л20: проекты из колец, которые есть чем запустить - 2 клика: VS Code, терминал с командой, браузер
+    {
+        g_launch = LaunchableProjects();
+        Item run =
+            Act(L"Запустить", Have(L"tools-run.png", L"tools-env.png"), L"",
+                g_launch.empty() ? L"Проектов с командой запуска (package.json, manage.py, Cargo, Go, .uproject) в "
+                                   L"кольцах нет"
+                                 : L"VS Code, терминал проекта с командой запуска и браузер на его порту");
+        for (size_t i = 0; i < g_launch.size() && i < 14; ++i)
+            run.children.push_back(Act(Short(Leaf(g_launch[i]), 12), Have(L"tools-run.png", L"tools-env.png"),
+                                       L"launch:" + std::to_wstring(i),
+                                       g_launch[i] + L". 2 клика - VS Code, команда запуска и браузер"));
+        ring.push_back(run);
+    }
 
     // Первое кольцо - шесть групп (art/tools_rings_sketch.html, вариант A): во втором - утилиты группы,
     // щелчок по утилите - её пункты на месте второго кольца. Последний пункт группы - она же в студии.
-    enum { DISKS, CLEAN, PROJECTS, PATH, PORTS, PROCS, BG, STARTS, TERM, LOCK, GIT };
+    enum { DISKS, CLEAN, PROJECTS, PATH, PORTS, PROCS, BG, STARTS, TERM, LOCK, GIT, LAUNCH };
     auto group = [&](const std::wstring& name, const wchar_t* icon, const std::wstring& note,
                      std::initializer_list<int> tools, int studioTab, const std::wstring& studioNote) {
         Item g = Act(name, icon, L"", note);
@@ -1020,8 +1034,8 @@ std::vector<Item> RingItems(std::wstring& status) {
             Act(L"Баланс: " + std::to_wstring(low.size()), Have(L"tools-balance.png", L"tools-procs.png"),
                 L"balance-restore", L"Придержан приоритет: " + lowNames + L". 2 клика - вернуть всем обычный"));
     groups.push_back(group(L"Разработка", Have(L"grp-dev.png", L"tools-git.png"),
-                           L"Git, PATH, порты, терминал, кто держит файл. " + ring[GIT].note,
-                           {GIT, PATH, PORTS, TERM, LOCK}, 0, L"PATH и переменные, порты, версии в студии"));
+                           L"Запуск проектов, Git, PATH, порты, терминал, кто держит файл. " + ring[GIT].note,
+                           {LAUNCH, GIT, PATH, PORTS, TERM, LOCK}, 0, L"PATH и переменные, порты, версии в студии"));
     groups.push_back(SecurityItem());
     groups.push_back(RecoveryItem());
     groups.push_back(SystemItem(scan));

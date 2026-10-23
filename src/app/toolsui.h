@@ -72,7 +72,11 @@ Watched Watch();
 // Сколько слежка молчит, мс (0 - ещё не прошла ни разу); periodMs - как часто она должна проходить сейчас
 ULONGLONG WatchAge(ULONGLONG& periodMs);
 void SetFocusHold(bool on);  // фокус (Л8, Л34): подсчёт места, «Защита», недельные проверки ждут
-double NetDownBps();         // приём по физическим адаптерам за последнюю минуту, байт/с (слежка)
+double NetDownBps();  // приём по физическим адаптерам за последнюю минуту, байт/с (слежка)
+// Проект одной кнопкой (toolsui_launch.cpp, Л20): проекты из колец, которые есть чем запустить, и сам запуск -
+// VS Code с папкой, терминал проекта с командой (npm run dev...), браузер, когда порт заработает
+std::vector<std::wstring> LaunchableProjects();
+void LaunchProject(const std::wstring& dir);
 // Забытые серверы разработки (Л19): снимок портов, проектов и заголовков окон, решение - tools/devserv
 std::vector<tools::Forgotten> FindForgotten(const std::vector<tools::ProcInfo>& ps,
                                             std::map<std::wstring, ULONGLONG>& lastSeen, ULONGLONG idleMs,

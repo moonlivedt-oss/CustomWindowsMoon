@@ -799,6 +799,33 @@ void TestProjVer() {
     CHECK(tools::VerText({20, -1}) == L"20" && tools::VerText({3, 12}) == L"3.12");
 }
 
+// Проект одной кнопкой (Л20): команда по менеджеру пакетов и скриптам, порт, Django, Cargo, Unreal
+void TestPlanLaunch() {
+    tools::LaunchIn in;
+    in.packageJson = L"{\"scripts\":{\"dev\":\"vite\",\"build\":\"vite build\"}}";
+    tools::LaunchPlan p = tools::PlanLaunch(in);
+    CHECK(p.cmd == L"npm run dev" && p.port == 5173);
+    in.pnpm = true;
+    CHECK(tools::PlanLaunch(in).cmd == L"pnpm dev");
+    in = {};
+    in.packageJson = L"{\"scripts\":{\"start\":\"node server.js\"}}";
+    in.env = L"PORT=4100\n";
+    p = tools::PlanLaunch(in);
+    CHECK(p.cmd == L"npm start" && p.port == 4100);
+    in = {};
+    in.django = true;
+    p = tools::PlanLaunch(in);
+    CHECK(p.cmd == L"python manage.py runserver" && p.port == 8000);
+    in = {};
+    in.cargo = true;
+    CHECK(tools::PlanLaunch(in).cmd == L"cargo run" && tools::PlanLaunch(in).port == 0);
+    in = {};
+    in.uproject = L"D:\\Games\\My\\My.uproject";
+    p = tools::PlanLaunch(in);
+    CHECK(p.cmd.empty() && p.Any() && p.uproject == in.uproject);
+    CHECK(!tools::PlanLaunch({}).Any());
+}
+
 void TestMore(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestConfigRoundTrip();
@@ -832,4 +859,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestGamePrep();
     TestFocus();
     TestProjVer();
+    TestPlanLaunch();
 }

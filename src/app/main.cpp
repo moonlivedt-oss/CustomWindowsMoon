@@ -1174,6 +1174,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         out.push_back(it);
     });
     palette::AddRunner(L"f|", [](const std::wstring&) { focus::On() ? focus::Stop() : focus::Start(0); });
+    palette::AddSource([](std::vector<Item>& out) {  // Л20: «Запустить: shop» - VS Code, сервер, браузер
+        for (const std::wstring& d : toolsui::LaunchableProjects()) {
+            Item it;
+            it.name = L"Запустить: " + d.substr(d.find_last_of(L'\\') + 1);
+            it.path = L"l|" + d;
+            it.special = 3;
+            out.push_back(it);
+        }
+    });
+    palette::AddRunner(L"l|", [](const std::wstring& dir) { toolsui::LaunchProject(dir); });
     corners::SetClip([] { cliphist::ShowRing(g_menu); });
     palette::AddSource([](std::vector<Item>& out) {
         for (Item& it : cliphist::Items(L"b|")) {
