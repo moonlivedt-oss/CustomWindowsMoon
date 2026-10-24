@@ -2,7 +2,9 @@
 // без окон.
 #include <windows.h>
 
+#include <algorithm>
 #include <ctime>
+#include <cwchar>
 #include <string>
 #include <vector>
 
@@ -35,6 +37,7 @@
 #include "app/focus.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
+#include "shutup/catalog.h"
 
 namespace {
 
@@ -384,6 +387,47 @@ void TestSafeUrl() {
     CHECK(tools::SafeUrl(L"file:///C:/Windows").empty());
     CHECK(tools::SafeUrl(L"javascript:alert(1)").empty());
     CHECK(tools::SafeUrl(L"https://").empty());
+}
+
+// RadialShutUp: каталог без повторов и пустых мест, бэкап значения туда и обратно, профиль
+void TestShutUpCatalog() {
+    const auto& all = shutup::Catalog();
+    CHECK(all.size() >= 50);
+    std::vector<std::wstring> ids, groups = shutup::Groups();
+    CHECK(groups.size() == 8);
+    for (const shutup::Setting& s : all) {
+        CHECK(std::find(ids.begin(), ids.end(), s.id) == ids.end());  // id уникален: по нему профиль и бэкап
+        ids.push_back(s.id);
+        CHECK(!s.values.empty() && wcslen(s.title) > 0 && wcslen(s.why) > 0);
+        CHECK(std::find(groups.begin(), groups.end(), s.group) != groups.end());
+        CHECK(shutup::Find(s.id) == &s);
+        for (const shutup::RegValue& v : s.values) {
+            CHECK(v.root == HKEY_CURRENT_USER || v.root == HKEY_LOCAL_MACHINE);
+            CHECK(v.type == REG_DWORD || (v.type == REG_SZ && wcslen(v.text) > 0));
+            // «ключ|имя» в бэкапе разбирается однозначно
+            CHECK(v.key[0] != L'\\' && wcschr(v.name, L'|') == nullptr);
+        }
+    }
+    CHECK(shutup::Find(L"telemetry") && shutup::Find(L"telemetry")->Machine());
+    CHECK(shutup::Find(L"ads_id") && !shutup::Find(L"ads_id")->Machine());
+    CHECK(!shutup::Find(L"нет такой"));
+
+    shutup::Saved a;
+    a.had = true;
+    a.type = REG_SZ;
+    a.value = L"C:\\путь\tс табом\nи строкой\\";
+    shutup::Saved b;
+    CHECK(shutup::DecodeSaved(shutup::EncodeSaved(a), b));
+    CHECK(b.had && b.type == REG_SZ && b.value == a.value);
+    shutup::Saved none;  // значения не было
+    CHECK(shutup::DecodeSaved(shutup::EncodeSaved(none), b) && !b.had && b.value.empty());
+    CHECK(!shutup::DecodeSaved(L"мусор", b));
+    CHECK(shutup::BackupKey(shutup::Find(L"ads_id")->values[0]) ==
+          L"Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo|Enabled");
+
+    std::vector<std::wstring> back =
+        shutup::DecodeProfile(shutup::EncodeProfile({L"ads_id", L"telemetry"}) + L"чужое\r\n# коммент\nads_id\r\n");
+    CHECK(back.size() == 2 && back[0] == L"ads_id" && back[1] == L"telemetry");
 }
 
 }  // namespace
@@ -915,4 +959,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestPlanLaunch();
     TestWinget();
     TestContests();
+    TestShutUpCatalog();
 }

@@ -11,6 +11,7 @@ endif()
 # исходники раскладываются по папкам src/<часть>/, ресурсы - в src/res
 file(GLOB_RECURSE RADIAL_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/act/")  # src/act - отдельный RadialTools.exe
+list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/shutup/")  # src/shutup - отдельный RadialShutUp.exe
 add_executable(RadialMenu WIN32 ${RADIAL_SOURCES} src/res/app.rc)
 target_include_directories(RadialMenu PRIVATE src)
 target_compile_definitions(RadialMenu PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
@@ -45,11 +46,26 @@ if(MINGW)
 endif()
 set_target_properties(RadialTools PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_LINK_DIR})
 
+# RadialShutUp.exe - приватность Windows отдельным окном (как O&O ShutUp10): каталог настроек с откатом, тем же
+# набором элементов интерфейса, что и студия
+add_executable(RadialShutUp WIN32 src/shutup/main.cpp src/shutup/catalog.cpp src/ui/ui.cpp src/gfx/icons.cpp
+  src/gfx/draw.cpp src/gfx/color.cpp src/core/themes.cpp src/core/config.cpp src/core/text.cpp src/core/fx.cpp
+  src/core/perf.cpp src/core/files.cpp src/shutup/shutup.rc)
+target_include_directories(RadialShutUp PRIVATE src)
+target_compile_definitions(RadialShutUp PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
+target_link_libraries(RadialShutUp PRIVATE gdiplus shlwapi shell32 ole32 oleaut32 user32 gdi32 comctl32 comdlg32
+  dwmapi windowscodecs uuid advapi32)
+target_compile_options(RadialShutUp PRIVATE ${RADIAL_WERROR})
+if(MINGW)
+  target_link_options(RadialShutUp PRIVATE -municode -static -s)
+endif()
+set_target_properties(RadialShutUp PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_LINK_DIR})
+
 # тесты без окон (tests/): правило TEMP, разбор хода чистки, обход папок, разбор MFT, журнал, дампы падений, фоновые
 # задачи; запуск - ctest или build.cmd test
 enable_testing()
 add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.cpp tests/tests_more.cpp src/core/edgecheck.cpp src/core/procsnap.cpp src/core/themes.cpp src/gfx/color.cpp src/net/speedlog.cpp src/tools/weekdiff.cpp src/gfx/qr.cpp src/net/wifi.cpp src/tools/extrights.cpp src/tools/sandbox.cpp src/desk/dropundo.cpp src/tools/helper.cpp src/app/rules_logic.cpp src/app/weekreport_logic.cpp src/app/settingsio.cpp src/tools/healthscore.cpp src/tools/important.cpp src/desk/cardlog_logic.cpp src/tools/builderr.cpp src/tools/devserv.cpp src/tools/drain.cpp src/desk/appvol_logic.cpp src/app/resume_logic.cpp src/app/afterwork_logic.cpp src/app/gameprep_logic.cpp src/app/focus_logic.cpp src/tools/projver_logic.cpp src/tools/winget_logic.cpp src/tools/contests_logic.cpp src/tools/scancache.cpp src/core/cfgdiff.cpp src/core/config.cpp src/core/files.cpp src/core/perf.cpp src/core/macro.cpp src/core/stroke.cpp src/core/fuzzy.cpp src/core/secrets.cpp src/desk/zones.cpp src/tools/guard.cpp src/tools/common.cpp src/tools/livesize.cpp
-  src/tools/mft_parse.cpp src/tools/journal.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/tools/selfwatch.cpp)
+  src/tools/mft_parse.cpp src/tools/journal.cpp src/shutup/catalog.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/tools/selfwatch.cpp)
 target_include_directories(radial_tests PRIVATE src)
 target_compile_definitions(radial_tests PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 uuid bcrypt gdiplus wlanapi iphlpapi)
@@ -66,7 +82,7 @@ add_custom_command(TARGET RadialMenu POST_BUILD
 # подпись своим сертификатом, если он настроен (cmake/sign.cmake), потом выкладка с проверкой (не пустой, начинается
 # с MZ) и заменой одним переименованием (cmake/deploy.cmake), потом отметка целостности: SHA-256 выложенного exe -
 # «Защита» заметит, если файл потом изменится (cmake/integrity.cmake)
-foreach(t RadialMenu RadialTools)
+foreach(t RadialMenu RadialTools RadialShutUp)
   set(dst ${RADIAL_OUT_DIR}/${t}.exe)
   add_custom_command(TARGET ${t} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:${t}> -P ${CMAKE_SOURCE_DIR}/cmake/sign.cmake
