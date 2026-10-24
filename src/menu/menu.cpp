@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <set>
 
 #include "core/mem.h"
@@ -347,6 +348,90 @@ void RadialMenu::SnapNet(const Config* cfg, std::vector<Item> items, UINT dpi, i
     cfg_ = cfg;
 }
 
+void RadialMenu::Film(const Config* cfg, UINT dpi, int root, const std::wstring& dir) {
+    Config quiet = *cfg;
+    quiet.sounds = false;
+    bool leftEdge = !quiet.left.empty();
+    const auto& ring = quiet.RingFor(leftEdge);
+    if (ring.empty()) return;
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    demo_ = true;
+    cfg_ = &quiet;
+    ring_ = &ring;
+    geo_ = MakeGeo(dpi / 96.0 * quiet.scale);
+    EnsureSurface();
+    left_ = leftEdge;
+    full_ = winMode_ = netMode_ = false;
+    int cy = (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2;
+    origin_ = {left_ ? mi.rcMonitor.left : mi.rcMonitor.right - geo_.w, cy - geo_.h / 2};
+    center_ = {left_ ? 0 : geo_.w, geo_.h / 2};
+    POINT fake{origin_.x + center_.x + (left_ ? 1 : -1) * (LONG)(geo_.rHub * 0.5), origin_.y + center_.y};
+    fakeCursor_ = &fake;
+    for (ULONGLONG t = GetTickCount64(); !icons_.Idle() && GetTickCount64() - t < 15000;) Sleep(20);
+    // кадры в отметки времени от начала сцены
+    auto scene = [&](const wchar_t* name, std::initializer_list<int> marks, int total) {
+        ULONGLONG t0 = GetTickCount64();
+        int k = 0;
+        auto next = marks.begin();
+        for (ULONGLONG now = t0; now - t0 < (ULONGLONG)total && open_; now = GetTickCount64()) {
+            Tick();
+            if (next != marks.end() && now - t0 >= (ULONGLONG)*next) {
+                Render();
+                SaveFrame(dir + L"\\" + name + L"-" + std::to_wstring(++k) + L".png");
+                ++next;
+            }
+            Sleep(5);
+        }
+    };
+    Start(false);
+    scene(L"open", {30, 110, 230}, 700);
+    int n = (int)ring.size();
+    double step = 2 * Span() / n, r = (geo_.r1 + geo_.r2) / 2;
+    double rel = Rad(-Span() + step * (std::clamp(root, 0, n - 1) + 0.5));
+    fake = {origin_.x + center_.x + (LONG)((left_ ? 1 : -1) * r * std::cos(rel)),
+            origin_.y + center_.y + (LONG)(r * std::sin(rel))};
+    scene(L"hover", {40, 160, 330}, 900);
+    Launch();  // как после выбора, но ничего не открывая
+    scene(L"launch", {40, 110, 200}, 400);
+    Hide();
+    fakeCursor_ = nullptr;
+    cfg_ = cfg;
+}
+
+int RadialMenu::GlassProbe(const Config* cfg, UINT dpi, const std::wstring& dir) {
+    static Config quiet;  // меню держит указатель на настройки до Hide
+    quiet = *cfg;
+    quiet.sounds = false;
+    quiet.blur = true;
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    POINT at{mi.rcMonitor.left, (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2};
+    ULONGLONG t0 = GetTickCount64();
+    Show(&quiet, at, mi.rcMonitor, true, dpi, true);  // demo: далёкий курсор кольцо не закрывает
+    if (!open_) return -1;
+    int glassMs = -1;
+    for (ULONGLONG now = t0; now - t0 < 600; now = GetTickCount64()) {
+        MSG m;
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&m);
+            DispatchMessageW(&m);
+        }
+        if (glassMs < 0 && glassT_) glassMs = (int)(glassT_ - t0);
+        Sleep(5);
+    }
+    if (!blurPx_.empty()) {
+        std::vector<uint32_t> keep((uint32_t*)bits_, (uint32_t*)bits_ + (size_t)geo_.w * geo_.h);
+        memcpy(bits_, blurPx_.data(), blurPx_.size() * 4);
+        SaveFrame(dir + L"\\glass-backdrop.png");
+        memcpy(bits_, keep.data(), keep.size() * 4);
+    }
+    SaveFrame(dir + L"\\glass-frame.png");
+    Hide();
+    cfg_ = cfg;
+    return glassMs;
+}
+
 void RadialMenu::Start(bool live) {
     const auto& ring = *ring_;
     mode_ = Mode::None;
@@ -396,7 +481,12 @@ void RadialMenu::Start(bool live) {
         stroke_.Start(tOpen_, c.x, c.y);
     }
 
-    CaptureBackdrop();  // до показа окна, чтобы в снимок не попало само меню
+    // живое меню показывается сразу, стекло подтягивается снимком в фоне; без мыши (замеры, снимки) - как раньше,
+    // снимком до показа окна, чтобы в него не попало само меню
+    if (live)
+        CaptureBackdropAsync();
+    else
+        CaptureBackdrop();
     EnsureHexGlass();
     Render();
     if (!live) return;
@@ -450,6 +540,8 @@ void RadialMenu::Hide() {
     grabSpun_ = false;
     if (GetCapture() == hwnd_) ReleaseCapture();
     ShowWindow(hwnd_, SW_HIDE);
+    ++glassGen_;  // снимок, который ещё идёт, уже не нужен
+    SetWindowDisplayAffinity(hwnd_, WDA_NONE);
     blurPx_ = {};
     maskPx_ = {};
     baseCache_ = {};
@@ -459,9 +551,13 @@ void RadialMenu::Hide() {
     searchPool_.shrink_to_fit();
     palette_ = false;
     paletteExtra_ = {};
-    labels_.clear();  // подписи и ширины строк соберутся заново при следующем открытии
-    textW_.clear();
-    labelFit_.clear();
+    // подписи и их раскладка остаются: первый кадр следующего открытия не собирает их заново (~70 картинок по
+    // нескольку КБ); растут только при смене размера или темы - тогда разом в чистку
+    if (labels_.size() > 600 || labelFit_.size() > 1500) {
+        labels_.clear();
+        textW_.clear();
+        labelFit_.clear();
+    }
     mem::TrimSoon();  // в покое память не держим
 }
 
@@ -574,7 +670,7 @@ void RadialMenu::Tick() {
     } else if (grabSpun_) {
         moved = 1;
     }
-    bool anim = closing_ || now - hoverT_ < 1100 ||
+    bool anim = closing_ || now - hoverT_ < 1100 || (glassT_ && now - glassT_ < fx::Dur(kGlassMs) + 30) ||
                 now - tOpen_ < fx::Dur(kOpenMs + kStaggerMs * hlRoot_.size() + 200) ||
                 (mode_ != Mode::None && now - tSub_ < fx::Dur(kSubMs + kSubWaveMs * subItems_.size()) + 30);
     static std::wstring lastHint;
@@ -627,6 +723,17 @@ LRESULT RadialMenu::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MENU_CHAR:
             if (open_ && !closing_) OnChar((wchar_t)wp);
             return 0;
+        case WM_MENU_GLASS: {
+            std::unique_ptr<std::vector<uint32_t>> px((std::vector<uint32_t>*)lp);
+            if ((int)wp != glassGen_) return 0;  // меню уже закрыли или открыли заново
+            SetWindowDisplayAffinity(hwnd_, WDA_NONE);
+            if (open_ && px->size() == (size_t)geo_.w * geo_.h) {
+                blurPx_ = std::move(*px);
+                glassT_ = GetTickCount64();
+                for (RingCache& c : ringCache_) c = {};
+            }
+            return 0;
+        }
         case WM_MENU_WHEEL:
             if (open_ && !closing_) OnWheel((int)(short)wp);
             return 0;

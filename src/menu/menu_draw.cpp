@@ -12,6 +12,7 @@
 #include <set>
 #include <vector>
 
+#include "core/bg.h"
 #include "core/files.h"
 #include "core/launch.h"
 #include "core/perf.h"
@@ -53,15 +54,14 @@ void AnnulusSpans(double cx, double cy, int y, double r0, double r1, int lo, int
 
 // Снимок того, что под меню, уменьшенный в 4 раза, размытый и растянутый обратно: из него делается «стекло».
 // Всё на своих простых циклах: StretchBlt с экрана и растягивание GDI+ стоили по 10 мс каждое.
-void RadialMenu::CaptureBackdrop() {
-    PERF_SCOPE("menu.CaptureBackdrop");
-    blurPx_ = {};
-    if (!cfg_->blur || fx::Game()) return;  // в игровом режиме без стекла
-    constexpr int kDown = 4;
-    int w = geo_.w, h = geo_.h;
-    int sw = std::max(1, w / kDown), sh = std::max(1, h / kDown);
+namespace {
 
-    // копия экрана под будущим окном (оно ещё не показано, в снимок не попадёт)
+// Снимок экрана под окном (origin, w x h), размытый: из любого потока - пишет только в свой результат.
+std::vector<uint32_t> CaptureBlurred(POINT origin, int w, int h, double k) {
+    PERF_SCOPE("menu.CaptureBackdrop");
+    constexpr int kDown = 4;
+    int sw = std::max(1, w / kDown), sh = std::max(1, h / kDown);
+    std::vector<uint32_t> out;
     HDC scr = GetDC(nullptr);
     HDC dc = CreateCompatibleDC(scr);
     BITMAPINFO bi{};
@@ -76,21 +76,62 @@ void RadialMenu::CaptureBackdrop() {
     HGDIOBJ old = SelectObject(dc, bmp);
     {
         PERF_SCOPE("menu.cap.BitBlt");
-        BitBlt(dc, 0, 0, w, h, scr, origin_.x, origin_.y, SRCCOPY);
+        BitBlt(dc, 0, 0, w, h, scr, origin.x, origin.y, SRCCOPY);
         GdiFlush();
     }
     ReleaseDC(nullptr, scr);
 
-    std::vector<uint32_t> small((size_t)sw * sh);
-    Downscale((const uint32_t*)px, w, h, small.data(), sw, sh, kDown);
-    BoxBlur(small.data(), sw, sh, std::max(1, (int)(2 * geo_.k)));
-
-    PERF_SCOPE("menu.cap.Up");
-    blurPx_.resize((size_t)w * h);
-    UpscaleBilinear(small.data(), sw, sh, blurPx_.data(), w, h, w);
+    if (px) {
+        std::vector<uint32_t> small((size_t)sw * sh);
+        Downscale((const uint32_t*)px, w, h, small.data(), sw, sh, kDown);
+        BoxBlur(small.data(), sw, sh, std::max(1, (int)(2 * k)));
+        PERF_SCOPE("menu.cap.Up");
+        out.resize((size_t)w * h);
+        UpscaleBilinear(small.data(), sw, sh, out.data(), w, h, w);
+    }
     SelectObject(dc, old);
     DeleteObject(bmp);
     DeleteDC(dc);
+    return out;
+}
+
+}  // namespace
+
+// Снимок под окном до его показа (окно ещё скрыто - в снимок не попадёт): для снимков без мыши и как запасной путь.
+void RadialMenu::CaptureBackdrop() {
+    blurPx_ = {};
+    glassT_ = 0;
+    if (!cfg_->blur || fx::Game()) return;  // в игровом режиме без стекла
+    blurPx_ = CaptureBlurred(origin_, geo_.w, geo_.h, geo_.k);
+}
+
+// Живое открытие: кольцо уже на экране, снимок - в фоне. Чтобы окно не попало в собственный снимок, на это время
+// оно исключено из захвата экрана (Windows 10 2004+); не вышло - снимок как раньше, до показа (false).
+void RadialMenu::CaptureBackdropAsync() {
+    blurPx_ = {};
+    glassT_ = 0;
+    if (!cfg_->blur || fx::Game()) return;
+    if (!SetWindowDisplayAffinity(hwnd_, 0x11 /* WDA_EXCLUDEFROMCAPTURE */)) {
+        CaptureBackdrop();
+        return;
+    }
+    int gen = ++glassGen_;
+    POINT o = origin_;
+    int w = geo_.w, h = geo_.h;
+    double k = geo_.k;
+    HWND wnd = hwnd_;
+    if (!bg::Run([=] {
+            auto* px = new std::vector<uint32_t>(CaptureBlurred(o, w, h, k));
+            if (!PostMessageW(wnd, WM_MENU_GLASS, (WPARAM)gen, (LPARAM)px)) delete px;
+        })) {
+        SetWindowDisplayAffinity(hwnd_, WDA_NONE);
+        CaptureBackdrop();
+    }
+}
+
+double RadialMenu::GlassA() const {
+    if (blurPx_.empty()) return 0;
+    return glassT_ ? Clamp01((GetTickCount64() - glassT_) / fx::Dur(kGlassMs)) : 1.0;
 }
 
 namespace {
@@ -188,9 +229,10 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
     // кадра. Под кольцом только подложка, а кольца друг друга не касаются (между r2 и r3 зазор), поэтому
     // кусок кадра в его полосе зависит лишь от подложки и состояния секторов - это и есть ключ.
     RingCache& rc = ringCache_[!secs.empty() && secs[0].ring.sub ? 1 : 0];
-    const bool glassOn = !blurPx_.empty(), hexOn = hexOn_ && !hexPx_.empty();
-    std::vector<double> key = {baseNow_.ext,        baseNow_.catcherR, (double)baseNow_.color, clip ? 1.0 : 0.0,
-                               glassOn ? 1.0 : 0.0, hexOn ? 1.0 : 0.0, (double)geo_.w,         (double)geo_.h};
+    const double ga = GlassA();  // стекло проявляется после первого кадра
+    const bool glassOn = ga > 0, hexOn = hexOn_ && !hexPx_.empty();
+    std::vector<double> key = {baseNow_.ext, baseNow_.catcherR, (double)baseNow_.color, clip ? 1.0 : 0.0,
+                               ga,           hexOn ? 1.0 : 0.0, (double)geo_.w,         (double)geo_.h};
     bool still = true;
     double bandLo = 1e9, bandHi = 0;
     ULONGLONG nowMs = GetTickCount64();
@@ -244,13 +286,14 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         for (size_t k = 0; k < secs.size(); ++k)
             if (shapes[k].ok && secs[k].appear > 0.5) mg.FillPath(&white, &shapes[k].path);
     }
-    auto composite = [&](const std::vector<uint32_t>& src) {
+    auto composite = [&](const std::vector<uint32_t>& src, uint32_t strength) {
         for (int y = y0; y < y1; ++y) {
             size_t row = (size_t)y * geo_.w;
             const uint32_t* m = &maskPx_[row];
             spans(y, x0, x1, [&](int a, int b) {
                 for (int x = a; x < b; ++x) {
                     uint32_t cov = m[x] >> 24;
+                    if (strength < 255) cov = cov * strength / 255;
                     if (cov) px[row + x] = Over(px[row + x], src[row + x], cov);
                 }
             });
@@ -258,7 +301,7 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
     };
     if (masked && glassOn) {
         PERF_SCOPE("menu.r.Glass");
-        composite(blurPx_);  // размытая подложка: обои просвечивают сквозь кольцо
+        composite(blurPx_, (uint32_t)(255 * ga + 0.5));  // размытая подложка: обои просвечивают сквозь кольцо
     }
 
     std::vector<Palette> pals(secs.size(), Pal(cfg_));
@@ -266,6 +309,9 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         if (!shapes[k].ok) continue;
         const Sector& s = secs[k];
         Palette& pal = pals[k];
+        // у ступицы второй акцент лишь подмешан к основному: два разных цвета темы (багрянец и сталь) в одном
+        // секторе спорили и давали грязный сиреневый переход; так переход - от глубокого тона к яркому
+        pal.hotIn = MixColor(pal.hotIn, MixColor(pal.hotOut, pal.base, 0.35), 0.6);
         if (s.hue != 0) {  // у каждой группы свой оттенок
             pal.hotIn = HueShift(pal.hotIn, s.hue);
             pal.hotOut = HueShift(pal.hotOut, s.hue);
@@ -274,7 +320,7 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         }
         Color base = s.ring.sub ? pal.baseSub : pal.base;
         bool glass = glassOn && s.appear > 0.5;
-        BYTE alpha = (BYTE)((glass ? 178 : 232) * s.appear);
+        BYTE alpha = (BYTE)((glass ? 232 - 54 * ga : 232) * s.appear);  // со стеклом сектор прозрачнее
         // наведённый сектор переливается от центра к краю: малина -> коралл (в тёмной теме - один акцент)
         double t = std::max(s.hl, s.active ? 0.32 : 0.0);
         BYTE fillAlpha = std::max<BYTE>(alpha, (BYTE)(232 * s.appear * t));
@@ -291,7 +337,7 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
 
     if (masked && hexOn) {
         PERF_SCOPE("menu.r.Hex");
-        composite(hexPx_);  // грани сотового стекла
+        composite(hexPx_, 255);  // грани сотового стекла
     }
 
     blitOk_ = !clip;
@@ -303,7 +349,33 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
         const Palette& pal = pals[k];
         bool glass = glassOn && s.appear > 0.5;
         if (hexOn && s.appear > 0.5 && s.hl > 0.02) DrawHexLift(g, sh.path, s.hl);
-        Pen border(WithAlpha(pal.border, (BYTE)((glass ? 46 : 34) * s.appear)), 1.0f);
+        if (s.hl > 0.02 && s.appear > 0.5 && !fx::Game()) {
+            GraphicsState st = g.Save();
+            g.SetClip(&sh.path, CombineModeIntersect);
+            double span = sh.o1 - sh.o0 + 4;
+            auto arc = [&](Pen& p, double r) {
+                g.DrawArc(&p, (REAL)(cx - r), (REAL)(cy - r), (REAL)(2 * r), (REAL)(2 * r), (REAL)AbsAngle(sh.o0 - 2),
+                          (REAL)(sgn * span));
+            };
+            // свечение изнутри у внешнего края: сектор как будто подсвечен снизу
+            for (int i = 0; i < 4; ++i) {
+                Pen glow(WithAlpha(pal.rim, (BYTE)(64 * s.hl * (1 - i / 4.0))), (REAL)(2.4 * geo_.k));
+                arc(glow, sh.rOut - (1.2 + 2.4 * i) * geo_.k);
+            }
+            // блик: при наведении (и щелчке) светлая полоса пробегает от ступицы к краю
+            double bt = s.hot ? (nowMs - hoverT_) / fx::Dur(560) : 1;
+            if (bt < 1) {
+                double w = 16 * geo_.k, e = EaseOut(bt);
+                double r = s.ring.rIn - w + (sh.rOut - s.ring.rIn + 2 * w) * e;
+                for (int i = 0; i < 3; ++i) {
+                    double f = 1 - i * 0.33;
+                    Pen band(Color((BYTE)(26 * (1 - bt) * s.hl * (1 + i)), 255, 255, 255), (REAL)(w * f));
+                    arc(band, r);
+                }
+            }
+            g.Restore(st);
+        }
+        Pen border(WithAlpha(pal.border, (BYTE)((glass ? 34 + 12 * ga : 34) * s.appear)), 1.0f);
         g.DrawPath(&border, &sh.path);
         {  // тонкая полоса оттенка группы у внутреннего края: видно, чьё второе кольцо
             Pen band(WithAlpha(pal.rim, (BYTE)((70 + 90 * std::max(s.hl, s.active ? 1.0 : 0.0)) * s.appear)),
@@ -341,7 +413,7 @@ void RadialMenu::DrawRing(Graphics& g, const std::vector<Sector>& secs, Graphics
 }
 // Плашка с текстом у края экрана: путь вверху, поиск и подсказки внизу.
 void RadialMenu::DrawPill(Graphics& g, const std::wstring& text, const std::wstring& iconFile, double y, double alpha,
-                          bool accentEdge) {
+                          bool accentEdge, double dim) {
     if (text.empty() || alpha <= 0.01) return;
     Font font(Family(), geo_.font, FontStyleRegular, UnitPixel);
     StringFormat sf(StringFormatFlagsNoWrap);
@@ -370,7 +442,7 @@ void RadialMenu::DrawPill(Graphics& g, const std::wstring& text, const std::wstr
         double s = ph * 0.72;
         g.DrawImage(icon, RectF((REAL)(px + pad * 0.7), (REAL)(y + (ph - s) / 2), (REAL)s, (REAL)s));
     }
-    SolidBrush txt(WithAlpha(pal.text, a));
+    SolidBrush txt(WithAlpha(pal.text, (BYTE)(a * (0.35 + 0.65 * Clamp01(dim)))));
     RectF box((REAL)(px + pad + iw * 0.9), (REAL)y, (REAL)(pw - 2 * pad - iw * 0.9), (REAL)ph);
     g.DrawString(text.c_str(), -1, &font, box, &sf, &txt);
 }
@@ -446,8 +518,8 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
 // Это в разы быстрее заливки градиентом GDI+ и заодно очищает кадр.
 void RadialMenu::PaintBase(double ext, double catcherR) {
     Color sc = Pal(cfg_).shadow;
-    const double peak = blurPx_.empty() ? 120 : 70;  // со стеклом тень слабее
-    const double soft = 26 * geo_.k;                 // ширина размытого края
+    const double peak = 120 - 50 * GlassA();  // со стеклом тень слабее
+    const double soft = 26 * geo_.k;          // ширина размытого края
     const double outer = ext + soft;
     auto* px = static_cast<uint32_t*>(bits_);
     const double cx = center_.x, cy = center_.y;
@@ -658,6 +730,33 @@ void RadialMenu::Render() {
             g.DrawArc(&pen, (REAL)(cx - rr), (REAL)(cy - rr), (REAL)(2 * rr), (REAL)(2 * rr),
                       (REAL)AbsAngle(ripple.a0 - pad), (REAL)(sgn * (ripple.a1 - ripple.a0 + 2 * pad)));
         }
+        // искры: с внешнего края сектора разлетаются точки и гаснут. Разброс - от номера искры, без случайности:
+        // кадр зависит только от времени, его можно снять и сравнить
+        if (closeT > 0 && !fx::Game()) {
+            Palette sp = Pal(cfg_);
+            double hue = launchSub_ >= 0 ? (mode_ == Mode::Root ? RootHue(subParent_) : 0) : RootHue(launchRoot_);
+            Color ac = HueShift(sp.hotOut, hue);
+            double depth = ripple.ring.rOut - ripple.ring.rIn;
+            for (int j = 0; j < 11; ++j) {
+                uint32_t h = (uint32_t)(j + 1) * 2654435761u ^ (uint32_t)(launchRoot_ * 97 + launchSub_ * 31);
+                h ^= h >> 15;
+                h *= 0x45d9f3bu;
+                h ^= h >> 16;
+                double u = (h & 1023) / 1023.0, v = (h >> 10 & 1023) / 1023.0, w = (h >> 20 & 1023) / 1023.0;
+                double t = Clamp01(closeT * (1.0 + 0.6 * v) - 0.12 * w);
+                if (t <= 0 || t >= 1) continue;
+                double e = EaseOut(t);
+                // вылетает из глубины сектора, летит наружу и чуть вбок
+                double a = ripple.a0 + (ripple.a1 - ripple.a0) * (0.12 + 0.76 * u) + (u - 0.5) * 10 * e;
+                double r = ripple.ring.rIn + depth * (0.5 + 0.45 * w) + (18 + 64 * v) * e * geo_.k;
+                double x = cx + std::cos(Rad(AbsAngle(a))) * r, y = cy + std::sin(Rad(AbsAngle(a))) * r;
+                double halo = (6 + 3 * v) * geo_.k * (1 - 0.4 * t), core = (1.9 + 1.2 * w) * geo_.k * (1 - 0.5 * t);
+                SolidBrush hb(WithAlpha(ac, (BYTE)(120 * (1 - t))));
+                g.FillEllipse(&hb, (REAL)(x - halo), (REAL)(y - halo), (REAL)(2 * halo), (REAL)(2 * halo));
+                SolidBrush cb(MixColor(ac, Color(255, 255, 255), 0.75, (BYTE)(250 * (1 - t * t))));
+                g.FillEllipse(&cb, (REAL)(x - core), (REAL)(y - core), (REAL)(2 * core), (REAL)(2 * core));
+            }
+        }
     }
 
     // полное имя наведённого сектора, если подпись не влезла
@@ -708,8 +807,8 @@ void RadialMenu::Render() {
         double ha = 1;
         std::wstring bottom = below ? L"" : BottomHint(ha);
         bool search = mode_ == Mode::Search;
-        DrawPill(g, bottom, search ? ExeDir() + L"\\icons\\search.png" : L"", cy + geo_.r4 * grow + 18 * geo_.k,
-                 openE * ha, search || dragging_ || ha >= 1);
+        DrawPill(g, bottom, search ? ExeDir() + L"\\icons\\search.png" : L"", cy + geo_.r4 * grow + 18 * geo_.k, openE,
+                 search || dragging_ || ha >= 1, ha);
     }
 
     // ступица у края экрана и световой шов
@@ -755,6 +854,14 @@ void RadialMenu::Render() {
             SolidBrush dot(pal.dot);
             double dx = full_ ? cx : cx + (left_ ? rh * 0.45 : -rh * 0.45);
             g.FillEllipse(&dot, (REAL)(dx - rd), (REAL)(cy - rd), (REAL)(2 * rd), (REAL)(2 * rd));
+        }
+
+        // при открытии от ступицы расходится световое кольцо и гаснет у края первого яруса
+        double pt = (now - tOpen_) / fx::Dur(480);
+        if (pt < 1 && !closing_ && !fx::Game()) {
+            double e = EaseOut(pt), pr = rh + (geo_.r2 * grow - rh) * e;
+            Pen pulse(WithAlpha(pal.rim, (BYTE)(150 * (1 - pt) * (1 - pt))), (REAL)((3.2 - 2.2 * e) * geo_.k));
+            g.DrawEllipse(&pulse, (REAL)(cx - pr), (REAL)(cy - pr), (REAL)(2 * pr), (REAL)(2 * pr));
         }
 
         double len = geo_.r2 * 1.15 * grow, wseam = full_ ? 0 : 3 * geo_.k;

@@ -503,16 +503,28 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
         detail = in.detail;
         path = in.path;
     }
-    // у действий сети пояснение длинное: ему две строки с переносом вместо строки пути
-    bool note2 = it->special == 3;
+    // у действий сети пояснение длинное: ему две строки с переносом вместо строки пути; пояснения нет -
+    // хватит одной строки «Группа» / «Действие», без пустого места под ней
+    bool note2 = it->special == 3 && !detail.empty();
     std::wstring line2 = note2 ? detail : kind + (detail.empty() ? L"" : L"   |   " + detail);
 
     const double k = geo_.k, pad = 10 * k, isz = 38 * k;
     double fTitle = geo_.font * 1.12, fSmall = geo_.font * 0.92;
-    double ch = pad * 2 + fTitle * 1.3 + fSmall * 1.35 * (path.empty() && !note2 ? 1 : 2);
+    double textH = fTitle * 1.3 + fSmall * 1.35 * (path.empty() && !note2 ? 1 : 2);
+    double ch = std::max(pad * 2 + textH, isz + pad * 1.4);  // значок не упирается в края
     double cw = std::min(geo_.w - 24 * k, 340 * k);
+    if (!note2 && path.empty()) {  // короткая карточка - по тексту, а не во всю ширину с пустотой справа
+        Font ft(Family(), (REAL)fTitle, FontStyleRegular, UnitPixel),
+            fs(Family(), (REAL)fSmall, FontStyleRegular, UnitPixel);
+        RectF a1, a2;
+        g.MeasureString(it->name.c_str(), -1, &ft, PointF(0, 0), &a1);
+        g.MeasureString(line2.c_str(), -1, &fs, PointF(0, 0), &a2);
+        double need = pad * 2 + 3 * k + isz + 10 * k + std::max(a1.Width, a2.Width) + 6 * k;
+        cw = std::clamp(need, std::min(cw, 200 * k), cw);
+    }
     double cx = full_ ? (geo_.w - cw) / 2 : left_ ? 12 * k : geo_.w - 12 * k - cw;
     double cy = below ? center_.y + geo_.r4 * grow + 14 * k : center_.y - geo_.r4 * grow - 14 * k - ch;
+    cy += (below ? -1 : 1) * 8 * k * (1 - EaseOut(a));  // появляясь, карточка чуть подплывает от кольца
     RectF card((REAL)cx, (REAL)cy, (REAL)cw, (REAL)ch);
     Palette pal = Pal(cfg_);
     BYTE ba = (BYTE)(240 * a);
@@ -523,8 +535,15 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
     double hue = mode_ == Mode::Root ? RootHue(subParent_) : hoverRoot_ >= 0 ? RootHue(hoverRoot_) : 0;
     Pen edge(WithAlpha(HueShift(pal.pillEdge, hue), (BYTE)(200 * a)), (REAL)(1.2 * k));
     g.DrawPath(&edge, &p);
+    {  // полоска цвета группы слева: видно, из какого сектора пункт
+        GraphicsState st = g.Save();
+        g.SetClip(&p, CombineModeIntersect);
+        SolidBrush bar(WithAlpha(HueShift(pal.hotOut, hue), (BYTE)(230 * a)));
+        g.FillRectangle(&bar, RectF((REAL)cx, (REAL)cy, (REAL)(3.5 * k), (REAL)ch));
+        g.Restore(st);
+    }
 
-    double tx = cx + pad;
+    double tx = cx + pad + 3 * k;
     if (Bitmap* icon = ItemIcon(*it, (int)isz)) {
         ColorMatrix cm = {{{1, 0, 0, 0, 0}, {0, 1, 0, 0, 0}, {0, 0, 1, 0, 0}, {0, 0, 0, (REAL)a, 0}, {0, 0, 0, 0, 1}}};
         ImageAttributes ia;
@@ -533,7 +552,7 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
                     (REAL)icon->GetWidth(), (REAL)icon->GetHeight(), UnitPixel, &ia);
         tx += isz + 10 * k;
     }
-    double tw = cx + cw - pad - tx, y = cy + pad;
+    double tw = cx + cw - pad - tx, y = cy + (ch - textH) / 2;  // текст - по середине карточки, как значок
     StringFormat sf(StringFormatFlagsNoWrap);
     sf.SetTrimming(StringTrimmingEllipsisCharacter);
     Font title(Family(), (REAL)fTitle, FontStyleRegular, UnitPixel);
