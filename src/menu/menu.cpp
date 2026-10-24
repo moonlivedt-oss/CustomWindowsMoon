@@ -331,7 +331,10 @@ void RadialMenu::SnapNet(const Config* cfg, std::vector<Item> items, UINT dpi, i
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
     POINT mid{(mi.rcWork.left + mi.rcWork.right) / 2, (mi.rcWork.top + mi.rcWork.bottom) / 2};
+    quiet.blur = false;  // стекло - снимок того, что сейчас на экране: эталон от него зависел бы
+    syncGlass_ = true;
     ShowNet(&quiet, std::move(items), mid, mi.rcWork, dpi);
+    syncGlass_ = false;
     demo_ = true;
     double step = 2 * Span() / std::max<size_t>(1, netRing_.size()), r = (geo_.r1 + geo_.r2) / 2;
     double a = Rad(AbsAngle(-Span() + step * (root + 0.5)));  // середина сектора, как его раскладывает кадр
@@ -483,7 +486,7 @@ void RadialMenu::Start(bool live) {
 
     // живое меню показывается сразу, стекло подтягивается снимком в фоне; без мыши (замеры, снимки) - как раньше,
     // снимком до показа окна, чтобы в него не попало само меню
-    if (live)
+    if (live && !syncGlass_)
         CaptureBackdropAsync();
     else
         CaptureBackdrop();
