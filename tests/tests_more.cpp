@@ -37,6 +37,7 @@
 #include "app/focus.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
+#include "desk/modeswitch.h"
 #include "shutup/catalog.h"
 
 namespace {
@@ -387,6 +388,51 @@ void TestSafeUrl() {
     CHECK(tools::SafeUrl(L"file:///C:/Windows").empty());
     CHECK(tools::SafeUrl(L"javascript:alert(1)").empty());
     CHECK(tools::SafeUrl(L"https://").empty());
+}
+
+// Режимы: включаются сразу, выключаются с запасом; «выключить вручную» держится, пока игра идёт
+void TestModeSwitch() {
+    // опрос раз в 2 с; sw.on - как его выставит режим
+    auto step = [](ModeSwitch& sw, ULONGLONG t, bool seen) {
+        sw.on = sw.Want(t, seen);
+        return sw.on;
+    };
+    ModeSwitch sw;
+    CHECK(!step(sw, 1000, false));
+    CHECK(step(sw, 3000, true));   // игра появилась - сразу
+    CHECK(step(sw, 5000, false));  // лаунчер передаёт игру exe-шнику: пропала на миг
+    CHECK(step(sw, 7000, false));
+    CHECK(step(sw, 9000, true));  // вернулась - режим не дёрнулся
+    CHECK(step(sw, 11000, false));
+    CHECK(step(sw, 17000, false));   // 8 с без игры - ещё держится
+    CHECK(!step(sw, 19000, false));  // 10 с - выключился
+
+    // выключили руками посреди игры: один пропущенный опрос (раньше снимал отметку) - режим не возвращается
+    ModeSwitch m;
+    step(m, 0, true);
+    m.SetManual(false, 2000, true);
+    m.on = false;
+    CHECK(!step(m, 4000, true));
+    CHECK(!step(m, 6000, false));
+    CHECK(!step(m, 8000, true));
+    // игру закрыли надолго - в следующий раз режим снова включится сам
+    CHECK(!step(m, 10000, false));
+    CHECK(!step(m, 20000, false));
+    CHECK(step(m, 22000, true));
+
+    // вручную включили без игры - держится; выключили без игры - сразу, без запаса
+    ModeSwitch h;
+    h.SetManual(true, 0, false);
+    CHECK(step(h, 2000, false));
+    CHECK(step(h, 60000, false));
+    h.SetManual(false, 61000, false);
+    CHECK(!step(h, 62000, false));
+    // игра закрылась только что, режим ещё держится запасом - «выключить» гасит сразу
+    ModeSwitch g;
+    step(g, 1000, true);  // время 0 значит «не видели» - часы Windows с нуля не идут
+    CHECK(step(g, 2000, false));
+    g.SetManual(false, 3000, false);
+    CHECK(!step(g, 4000, false));
 }
 
 // «Защита»: маскировка по имени (похожее на системное, двойное расширение, невидимые знаки) и скрипты в автозапуске
@@ -1033,4 +1079,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestShutUpCatalog();
     TestSecurityHeuristics();
     TestSysItemOff();
+    TestModeSwitch();
 }

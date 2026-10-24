@@ -6,6 +6,8 @@
 
 #include <windows.h>
 
+#include "desk/modeswitch.h"
+
 struct Config;
 
 // Общее с режимом разработки (desk/devmode).
@@ -27,11 +29,13 @@ public:
     std::function<void(bool on)> onChange;
     // своё распознавание игр, которых нет в масках (Minecraft - это javaw): имя игры или пусто
     std::function<std::wstring(DWORD pid, const std::wstring& path)> recognize;
+    // обои на паузе держит кто-то ещё (режим разработки): при выходе из игры их не запускать
+    std::function<bool()> wallpaperHeld;
 
     void Recover();                // при запуске: вернуть то, что осталось от прошлого раза
     void Tick(const Config& cfg);  // из общего опроса; сама проверка раз в 2 секунды
     void SetManual(bool on, const Config& cfg);
-    bool Manual() const { return manual_; }
+    bool Manual() const { return sw_.manual; }
     bool On() const { return on_; }
     const std::wstring& Reason() const { return reason_; }  // что включило режим: имя игры или «вручную»
     std::vector<DWORD> GamePids() const;  // процессы игр; для полноэкранной без маски - процесс активного окна
@@ -43,10 +47,10 @@ private:
     void Enter(const Config& cfg);
     void Leave();
 
-    bool on_ = false, manual_ = false, detected_ = false, suppress_ = false;
+    bool on_ = false, detected_ = false;
+    ModeSwitch sw_;  // когда включаться и выключаться (с запасом, desk/modeswitch.h)
     std::wstring reason_;
     ULONGLONG lastCheck_ = 0;
-    int misses_ = 0;
     struct Seen {
         std::wstring exe;   // имя файла процесса: номер мог достаться новому процессу
         std::wstring game;  // имя файла игры или пусто (уже проверен, не игра)
