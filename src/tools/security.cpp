@@ -209,49 +209,8 @@ SignState CatalogSign(const std::wstring& path, std::wstring* signer) {
 
 // ---------------- системные имена ----------------
 
-// Расстояние правки не больше одного (замена, вставка, удаление, перестановка соседних): «scvhost», «svch0st».
-bool OneEdit(const std::wstring& a, const std::wstring& b) {
-    if (a == b) return false;
-    size_t la = a.size(), lb = b.size();
-    if (la == lb) {
-        std::vector<size_t> diff;
-        for (size_t i = 0; i < la && diff.size() < 3; ++i)
-            if (a[i] != b[i]) diff.push_back(i);
-        if (diff.size() == 1) return true;
-        return diff.size() == 2 && diff[1] == diff[0] + 1 && a[diff[0]] == b[diff[1]] && a[diff[1]] == b[diff[0]];
-    }
-    if (la + 1 != lb && lb + 1 != la) return false;
-    const std::wstring& s = la < lb ? a : b;
-    const std::wstring& l = la < lb ? b : a;
-    size_t i = 0;
-    while (i < s.size() && s[i] == l[i]) ++i;
-    return s.compare(i, std::wstring::npos, l, i + 1, std::wstring::npos) == 0;
-}
-
-std::wstring LookAlike(const std::wstring& lowerLeaf) {
-    if (!EndsWithI(lowerLeaf, L".exe")) return L"";
-    std::wstring base = lowerLeaf.substr(0, lowerLeaf.size() - 4);
-    if (base.size() < 5) return L"";
-    for (const std::wstring& n : SystemExeNames()) {
-        std::wstring sys = n.substr(0, n.size() - 4);
-        if (sys.size() >= 5 && OneEdit(base, sys)) return n;
-    }
-    return L"";
-}
-
-// «отчёт.pdf.exe»: документ, который на деле программа
-bool DoubleExt(const std::wstring& lowerLeaf) {
-    static const wchar_t* kDoc[] = {L".pdf", L".doc", L".docx", L".xls", L".xlsx", L".jpg", L".jpeg", L".png",
-                                    L".txt", L".mp4", L".mp3",  L".zip", L".rar",  L".avi", L".mkv",  L".pptx"};
-    static const wchar_t* kExe[] = {L".exe", L".scr", L".com", L".bat", L".cmd", L".pif"};
-    for (const wchar_t* e : kExe) {
-        if (!EndsWithI(lowerLeaf, e)) continue;
-        std::wstring rest = lowerLeaf.substr(0, lowerLeaf.size() - wcslen(e));
-        for (const wchar_t* d : kDoc)
-            if (EndsWithI(rest, d)) return true;
-    }
-    return false;
-}
+// похожие имена, двойное расширение, невидимые знаки и скрипты в строке запуска - в security_logic.cpp (под тестами)
+std::wstring LookAlike(const std::wstring& lowerLeaf) { return LookAlikeIn(lowerLeaf, SystemExeNames()); }
 
 // Длинная форма пути в нижнем регистре: %TEMP% бывает коротким (C:\Users\MOONLI~1\...), а путь процесса - длинным.
 std::wstring LongLower(const std::wstring& p) {
@@ -314,6 +273,7 @@ void JudgeFile(Suspect& s) {
     bool microsoft = trusted && s.signer.find(L"Microsoft") != std::wstring::npos;
     if (SystemImposter(lp) && !microsoft) Flag(s, 6, L"имя системного " + leaf + L", но лежит не в папке Windows");
     if (DoubleExt(leaf)) Flag(s, 4, L"двойное расширение - притворяется документом");
+    if (BidiSpoof(leaf)) Flag(s, 6, L"в имени невидимые знаки направления - Проводник покажет его наоборот");
     if (s.sign == SIGN_BAD) Flag(s, 5, L"подпись повреждена: файл изменён после подписи");
     if (trusted) return;  // подписанное доверенным издателем дальше по месту не судим
     // приложения Магазина подписаны целиком пакетом, а в WindowsApps пишет только система
@@ -475,24 +435,6 @@ void CheckRegistry(std::vector<Suspect>& out) {
     if (!exeCmd.empty())
         out.push_back(RegFinding(L"Запуск .exe", L"HKCU\\Software\\Classes\\exefile\\shell\\open\\command", exeCmd, 6,
                                  L"каждая программа запускается через " + exeCmd));
-}
-
-// Строка автозапуска запускает скрипт (часто так прячутся без своего exe).
-std::wstring ScriptLaunch(const std::wstring& cmd) {
-    std::wstring l = Lower(cmd);
-    auto has = [&](const wchar_t* s) { return l.find(s) != std::wstring::npos; };
-    if (has(L"mshta")) return L"запускает mshta (HTML-приложение)";
-    if (has(L"wscript") || has(L"cscript")) return L"запускает скрипт Windows Script Host";
-    if ((has(L"powershell") || has(L"pwsh")) &&
-        (has(L" -enc") || has(L" -e ") || has(L"frombase64") || has(L"hidden") || has(L"downloadstring") ||
-         has(L"iex ") || has(L"iex(")))
-        return L"скрытый или закодированный PowerShell";
-    if (has(L"regsvr32") && (has(L"/i:http") || has(L"scrobj"))) return L"regsvr32 грузит скрипт из сети";
-    if (has(L"rundll32") && (has(L"\\appdata\\") || has(L"\\temp\\") || has(L"javascript:")))
-        return L"rundll32 с библиотекой из AppData или TEMP";
-    if (has(L"cmd") && (has(L"/c ") || has(L"/k ")) && (has(L"\\appdata\\") || has(L"\\temp\\")))
-        return L"командная строка из AppData или TEMP";
-    return L"";
 }
 
 // Первое слово командной строки как файл: «"C:\x y\a.exe" -k» -> C:\x y\a.exe, «wscript.exe» - по PATH.

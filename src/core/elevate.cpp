@@ -10,6 +10,8 @@
 #include <cwchar>
 #include <vector>
 
+#include "core/bg.h"
+
 namespace elevate {
 
 namespace {
@@ -217,6 +219,21 @@ bool TaskReady(Task t) {
     g_ready[t] = ok;
     g_readyAt[t] = GetTickCount64();
     return ok;
+}
+
+std::atomic<bool> g_readyBusy[2];
+
+bool TaskReadyCached(Task t) {
+    ULONGLONG at = g_readyAt[t];
+    if ((!at || GetTickCount64() - at >= 30000) && !g_readyBusy[t].exchange(true) &&
+        !bg::Run(
+            [t] {
+                TaskReady(t);
+                g_readyBusy[t] = false;
+            },
+            THREAD_PRIORITY_BELOW_NORMAL))
+        g_readyBusy[t] = false;
+    return g_ready[t];
 }
 
 // Ставит системный cmd с правами, а не сам RadialMenu.exe: Касперский останавливает программу, которая кладёт

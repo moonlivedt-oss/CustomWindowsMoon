@@ -379,7 +379,7 @@ std::wstring MftAdminMain(const std::wstring& dirIn) {
 
 MftState MftReady() {
     if (elevate::Blocked(elevate::TASK_NET)) return MFT_BLOCKED;
-    if (net::AdminReady()) return MFT_READY;
+    if (net::AdminReadyNow()) return MFT_READY;  // зовут из фонового подсчёта
     return elevate::TaskExists(elevate::TASK_NET) ? MFT_OLD : MFT_NONE;
 }
 

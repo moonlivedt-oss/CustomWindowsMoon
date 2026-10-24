@@ -300,12 +300,13 @@ std::wstring SysItemRefuse(const SysItem& it) {
     std::wstring low = Lower(it.path);
     if (low.find(L"radialmenu") != std::wstring::npos || low.find(L"\\moonradial\\") != std::wstring::npos)
         return L"это сама RadialMenu";
-    for (const wchar_t* av : {L"\\windows defender", L"\\kaspersky", L"\\eset\\", L"\\avast", L"\\bitdefender",
-                              L"\\malwarebytes", L"\\drweb", L"\\norton", L"\\mcafee"})
-        if (low.find(av) != std::wstring::npos) return L"это защита компьютера";
+    if (SecurityVendor(low)) return L"это защита компьютера";
     std::wstring signer;
-    if (CheckSign(it.path, &signer) == SIGN_OK && Lower(signer).find(L"microsoft") != std::wstring::npos)
-        return L"служба Windows (подпись Microsoft)";
+    if (CheckSign(it.path, &signer) == SIGN_OK) {
+        std::wstring ls = Lower(signer);
+        if (ls.find(L"microsoft") != std::wstring::npos) return L"служба Windows (подпись Microsoft)";
+        if (SecurityVendor(ls)) return L"это защита компьютера (по подписи)";
+    }
     return L"";
 }
 
@@ -331,7 +332,46 @@ bool SetTaskEnabled(const std::wstring& path, bool on) {
     return ok;
 }
 
-// Задача с правами: запрос «svc|имя» или «drv|имя» (выключить), «on|svc|имя|тип запуска» (вернуть как было).
+namespace {
+
+std::wstring OffFile() { return elevate::DataDir() + L"\\sysitems-off.tsv"; }
+
+std::wstring ReadOff() {
+    HANDLE f = CreateFileW(OffFile().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return L"";
+    std::string bytes;
+    char buf[4096];
+    DWORD got = 0;
+    while (ReadFile(f, buf, sizeof(buf), &got, nullptr) && got) bytes.append(buf, got);
+    CloseHandle(f);
+    return Widen(bytes);
+}
+
+bool WriteOff(const std::wstring& table) {
+    std::string bytes = Narrow(table);
+    std::wstring file = OffFile(), tmp = file + L".tmp";
+    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD put = 0;
+    BOOL ok = WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr);
+    CloseHandle(f);
+    return ok && MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING);
+}
+
+// Защищённая служба (PPL антивируса или EDR): Windows сама не даёт её трогать даже администратору - и мы не пробуем
+bool LaunchProtected(SC_HANDLE h) {
+    struct Info {
+        DWORD dwLaunchProtected;
+    } info{};
+    DWORD need = 0;
+    return QueryServiceConfig2W(h, 12 /* SERVICE_CONFIG_LAUNCH_PROTECTED */, (BYTE*)&info, sizeof(info), &need) &&
+           info.dwLaunchProtected != 0;
+}
+
+}  // namespace
+
+// Задача с правами: запрос «svc|имя» или «drv|имя» (выключить), «on|svc|имя» (вернуть как было). Запрос пишет
+// обычный процесс - вернуть можно только выключенное этой задачей и только с записанным ею типом запуска.
 bool SysItemAdminMain(const std::wstring& req, const Log& log) {
     std::vector<std::wstring> p = Split(req, L'|');
     bool back = !p.empty() && p[0] == L"on";
@@ -343,6 +383,12 @@ bool SysItemAdminMain(const std::wstring& req, const Log& log) {
     SysItem it;
     it.kind = p[0];
     it.name = p[1];
+    std::wstring table = back ? ReadOff() : L"";
+    DWORD recorded = 0;
+    if (back && !SysOffTake(table, it.kind, it.name, recorded)) {
+        log(L"Не трогаю: " + it.name + L" выключали не мы - возвращать нечего.");
+        return false;
+    }
     SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     SC_HANDLE h =
         scm ? OpenServiceW(scm, it.name.c_str(), SERVICE_QUERY_CONFIG | SERVICE_CHANGE_CONFIG | SERVICE_STOP) : nullptr;
@@ -355,22 +401,26 @@ bool SysItemAdminMain(const std::wstring& req, const Log& log) {
     QueryServiceConfigW(h, nullptr, 0, &n);
     std::vector<BYTE> cb(n + 16);
     auto* qc = (QUERY_SERVICE_CONFIGW*)cb.data();
+    DWORD type = 0;
     if (n && QueryServiceConfigW(h, qc, (DWORD)cb.size(), &n)) {
         it.command = qc->lpBinaryPathName ? qc->lpBinaryPathName : L"";
         it.path = ImageOf(it.command);
         it.start = (int)qc->dwStartType;
+        type = qc->dwServiceType;
     }
     // проверка заново, здесь: запрос пришёл от обычного процесса
-    std::wstring why = SysItemRefuse(it);
+    std::wstring why = it.command.empty() ? L"не прочитать, что это за служба" : SysItemRefuse(it);
+    bool driver = (type & (SERVICE_KERNEL_DRIVER | SERVICE_FILE_SYSTEM_DRIVER)) != 0;
+    if (why.empty() && driver != (it.kind == L"drv")) why = L"вид не совпадает: служба выдана за драйвер или наоборот";
+    if (why.empty() && LaunchProtected(h)) why = L"защищённая служба (антивирус или EDR)";
     bool ok = false;
     if (!why.empty()) {
         log(L"Не трогаю: " + why + L".");
     } else if (back) {
-        DWORD start = p.size() >= 3 ? (DWORD)_wtoi(p[2].c_str()) : SERVICE_DEMAND_START;
-        if (start > SERVICE_DISABLED) start = SERVICE_DEMAND_START;
-        ok = ChangeServiceConfigW(h, SERVICE_NO_CHANGE, start, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr,
+        ok = ChangeServiceConfigW(h, SERVICE_NO_CHANGE, recorded, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr, nullptr,
                                   nullptr, nullptr, nullptr);
-        log(ok ? it.name + L": запуск снова «" + StartName(start) + L"»." : it.name + L": вернуть не получилось.");
+        if (ok && !WriteOff(table)) log(L"Список выключенного не обновился.");
+        log(ok ? it.name + L": запуск снова «" + StartName(recorded) + L"»." : it.name + L": вернуть не получилось.");
     } else {
         ok = ChangeServiceConfigW(h, SERVICE_NO_CHANGE, SERVICE_DISABLED, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr,
                                   nullptr, nullptr, nullptr, nullptr);
@@ -381,6 +431,11 @@ bool SysItemAdminMain(const std::wstring& req, const Log& log) {
         log(ok ? it.name + L": отключена (было «" + StartName((DWORD)it.start) + L"»)." +
                      (it.kind == L"drv" ? L" Драйвер перестанет грузиться после перезагрузки." : L"")
                : it.name + L": отключить не получилось.");
+        if (ok && (DWORD)it.start != SERVICE_DISABLED) {
+            CreateDirectoryW(elevate::DataDir().c_str(), nullptr);
+            if (!WriteOff(SysOffAdd(ReadOff(), it.kind, it.name, (DWORD)it.start)))
+                log(L"Не записалось, как было: вернуть - вручную (sc config).");
+        }
         if (ok) log(L"@start=" + std::to_wstring(it.start));
     }
     CloseServiceHandle(h);

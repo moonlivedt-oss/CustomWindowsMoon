@@ -30,6 +30,7 @@
 #include "core/bg.h"
 #include "core/crash.h"
 #include "core/edgecheck.h"
+#include "core/elevate.h"
 #include "core/mem.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -779,6 +780,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 AutostartRefresh();
                 ReportCrashes();
                 WarnEdgeConflict();
+                // готовы ли задачи с правами - узнать заранее в фоне: кольцо и студия берут готовый ответ
+                elevate::TaskReadyCached(elevate::TASK_NET);
+                elevate::TaskReadyCached(elevate::TASK_PURGE);
             }
             if (wp == kIntroTimer) {
                 KillTimer(h, kIntroTimer);
