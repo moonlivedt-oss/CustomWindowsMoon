@@ -58,6 +58,12 @@ public:
     int Bench(const Config* cfg, UINT dpi, int ms);
     // кольцо-действие в картинку без мыши (проверка): курсор на секторе root, ms кадров анимации
     void SnapNet(const Config* cfg, std::vector<Item> items, UINT dpi, int root, int ms, const std::wstring& path);
+    // Кадры анимаций без мыши (--ring-film): раскрытие, наведение на сектор root и запуск (без самого запуска) -
+    // в dir\open-N.png, hover-N.png, launch-N.png. Окно скрыто, как у Bench.
+    void Film(const Config* cfg, UINT dpi, int root, const std::wstring& dir);
+    // Проверка живого стекла (--glass-probe): кольцо по-настоящему на экране полсекунды, снимок под стекло - в фоне;
+    // в dir\glass-backdrop.png (в нём не должно быть самого кольца) и glass-frame.png. Возвращает мс до стекла.
+    int GlassProbe(const Config* cfg, UINT dpi, const std::wstring& dir);
     int BenchDiff() const { return benchDiff_; }  // пикселей, где кадр из кэша колец не совпал (-1 - кэш не включился)
     void ResetIcons() {
         icons_.Clear();
@@ -210,8 +216,9 @@ private:
     // картинка 1:1 прямо в пиксели кадра, с той же билинейной выборкой на дробной позиции, что у GDI+;
     // false - когда так нельзя (кадр обрезан клипом), тогда рисует сам GDI+
     bool Blit(Gdiplus::Bitmap* bmp, double x, double y);
+    // dim < 1 - второстепенная подсказка: плашка такая же плотная, приглушён только текст
     void DrawPill(Gdiplus::Graphics& g, const std::wstring& text, const std::wstring& iconFile, double y, double alpha,
-                  bool accentEdge);
+                  bool accentEdge, double dim = 1);
     std::wstring BottomHint(double& alpha) const;
     std::wstring TopHint() const;
 
@@ -237,6 +244,12 @@ private:
     // стекло, соты и маска секторов - прямо пиксели размером с окно (PARGB): заливка TextureBrush
     // стоила по 0.35 мс на сектор, проход по пикселям под маской - доли миллисекунды на всё кольцо
     std::vector<uint32_t> blurPx_;
+    // Снимок под стекло стоит ~25 мс (экран отдаётся из видеокарты): живое кольцо показывается сразу, без стекла,
+    // снимок идёт в фоне - на это время окно исключено из захвата экрана - и стекло проявляется за kGlassMs
+    ULONGLONG glassT_ = 0;  // когда пришёл снимок (0 - сразу полностью)
+    int glassGen_ = 0;      // поколение снимка: пришедший после закрытия или нового открытия - выбрасывается
+    double GlassA() const;  // 0..1 - насколько проявилось стекло
+    void CaptureBackdropAsync();
     std::vector<uint32_t> hexPx_;   // сотовое стекло: тонкие грани поверх секторов
     bool blitOk_ = false;           // Blit разрешён: рисуется кольцо без клипа
     std::vector<uint32_t> maskPx_;  // покрытие секторов кольца (альфа), рисуется GDI+ сплошной заливкой

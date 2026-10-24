@@ -334,6 +334,40 @@ bool Run(int& exitCode) {
     } else if (Has(args, L"--ring-bench")) {
         size_t i = std::find(args.begin(), args.end(), L"--ring-bench") - args.begin();
         exitCode = RingBench(i + 1 < args.size() ? std::max(500, _wtoi(args[i + 1].c_str())) : 4000);
+    } else if (Has(args, L"--ring-film")) {  // --ring-film <папка> [сектор]: кадры раскрытия, наведения и запуска
+        size_t i = std::find(args.begin(), args.end(), L"--ring-film") - args.begin();
+        std::wstring dir = i + 1 < args.size() ? args[i + 1] : ExeDir();
+        int root = i + 2 < args.size() ? _wtoi(args[i + 2].c_str()) : 1;
+        SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");
+        _putenv("RADIAL_DEMO=1");
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Gdip gdip;
+        static Config cfg = LoadOwnConfig();
+        static RadialMenu menu;
+        if (menu.Create(GetModuleHandleW(nullptr))) {
+            UINT dpi = GetDpiForSystem();
+            while (!menu.Prewarm(&cfg, dpi, 1000)) {}
+            menu.Film(&cfg, dpi, root, dir);
+        }
+        TerminateProcess(GetCurrentProcess(), 0);
+    } else if (Has(args,
+                   L"--glass-probe")) {  // --glass-probe <папка>: живое стекло - снимок фона и кадр, glass_out.txt
+        size_t i = std::find(args.begin(), args.end(), L"--glass-probe") - args.begin();
+        std::wstring dir = i + 1 < args.size() ? args[i + 1] : ExeDir();
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Gdip gdip;
+        static Config cfg = LoadOwnConfig();
+        static RadialMenu menu;
+        int ms = -1;
+        if (menu.Create(GetModuleHandleW(nullptr))) {
+            UINT dpi = GetDpiForSystem();
+            while (!menu.Prewarm(&cfg, dpi, 1000)) {}
+            ms = menu.GlassProbe(&cfg, dpi, dir);
+        }
+        WriteOut(L"glass_out.txt", L"стекло через " + std::to_wstring(ms) + L" мс после открытия\r\n");
+        TerminateProcess(GetCurrentProcess(), ms >= 0 ? 0 : 1);
     } else if (Has(args, L"--forecast")) {  // прогноз места по free.tsv -> forecast_out.txt
         std::wstring o;
         for (const tools::Forecast& f : tools::SpaceForecast())
