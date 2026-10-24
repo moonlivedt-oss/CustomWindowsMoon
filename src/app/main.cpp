@@ -398,9 +398,26 @@ void UpdateTrayTip() {
 
 std::wstring BoostDir() { return boost::Dir(g_cfg.boostDir); }
 
+// Включения и выключения режимов - в журнал автоматики: видно, когда и почему режим включался, сколько шёл
+// (если режим «дёргается», это сразу видно по коротким записям)
+void NoteMode(const wchar_t* name, bool on, const std::wstring& reason, ULONGLONG& since) {
+    ULONGLONG now = GetTickCount64();
+    if (on) {
+        since = now;
+        autos::Note(std::wstring(name) + L" включён: " + reason);
+    } else {
+        ULONGLONG s = since ? (now - since) / 1000 : 0;
+        std::wstring dur = s >= 120 ? std::to_wstring(s / 60) + L" мин" : std::to_wstring(s) + L" с";
+        autos::Note(std::wstring(name) + L" выключен (" + reason + L", шёл " + dur + L")");
+        since = 0;
+    }
+}
+ULONGLONG g_gameSince = 0, g_devSince = 0;
+
 // Режим разработки включился или выключился: обои и память, красота и перехват
 // мыши не трогаются.
 void OnDevMode(bool on) {
+    NoteMode(L"Режим разработки", on, g_dev.Reason(), g_devSince);
     UpdateTrayTip();
     autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
     toolsui::OnModes(g_game.On(), on);
@@ -433,6 +450,7 @@ void OnDevMode(bool on) {
 
 // Игровой режим включился или выключился: эффекты, рамки окон и перехват мыши.
 void OnGameMode(bool on) {
+    NoteMode(L"Игровой режим", on, g_game.Reason(), g_gameSince);
     fx::SetGame(on);
     g_frame.Suspend(on);
     llmouse::Suspend(on);            // перехват мыши снят: каждое движение мыши не ходит через нас
@@ -456,7 +474,7 @@ void OnGameMode(bool on) {
             if (n) chips.push_back(L"Фон в экономии: " + std::to_wstring(n));
         }
         if (g_cfg.boostQuiet) {
-            gboost::Quiet(true);
+            gboost::QuietFor(L'g', true);
             if (gboost::QuietOn()) chips.push_back(L"Уведомления молчат");
         }
         if (McBegin()) chips.push_back(L"Prism усыплён");
@@ -476,9 +494,9 @@ void OnGameMode(bool on) {
             SessionSummary(sess);
         g_dev.Reapply(g_cfg);  // игра вернула обои, а редактор ещё открыт
         chips.push_back(L"Красота вернулась");
-        if (g_cfg.gameWallpaper) chips.push_back(L"Обои снова идут");
+        if (g_cfg.gameWallpaper && !(g_dev.On() && g_cfg.devWallpaper)) chips.push_back(L"Обои снова идут");
         if (g_cfg.boostEco) chips.push_back(L"Приоритеты как были");
-        if (quiet) chips.push_back(L"Уведомления включены");
+        if (quiet && !gboost::QuietOn()) chips.push_back(L"Уведомления включены");  // фокус может держать тишину
     }
     if (g_cfg.hexGlass)
         g_modefx.Play(ModeFx::GAME, on, on ? L"Игровой режим: " + g_game.Reason() : L"Игровой режим выключен", chips,
@@ -1221,6 +1239,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_game.onChange = OnGameMode;
     g_dev.onChange = OnDevMode;
     g_dev.gameOn = [] { return g_game.On() && g_cfg.gameWallpaper; };
+    g_game.wallpaperHeld = [] { return g_dev.On() && g_cfg.devWallpaper; };
     AddTray();
     SetTimer(g_wnd, kPollTimer, 20, nullptr);
     SetTimer(g_wnd, kWarmTimer, 1500, nullptr);

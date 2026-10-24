@@ -59,7 +59,7 @@ void Soften() {
             return TRUE;
         },
         (LPARAM)&box);
-    gboost::Soften(pids);
+    gboost::Soften(pids, L'f');
     g_softened = true;
 }
 
@@ -68,7 +68,7 @@ void Begin(bool automatic, int minutes) {
     g_auto = automatic;
     g_startedAt = GetTickCount64();
     g_until = automatic ? 0 : g_startedAt + (ULONGLONG)minutes * 60000;
-    gboost::Quiet(true);
+    gboost::QuietFor(L'f', true);
     toolsui::SetFocusHold(true);
     if (!automatic) Soften();
     autos::Note(automatic ? L"Фокус сам: открыт " + g_autoWhat + L" - тишина, тяжёлое ждёт"
@@ -79,9 +79,9 @@ void End(bool timeUp) {
     if (!g_on) return;
     ULONGLONG mins = (GetTickCount64() - g_startedAt) / 60000;
     g_on = false;
-    if (!fx::Game()) gboost::Quiet(false);  // в игре тишину держит игровой режим
+    gboost::QuietFor(L'f', false);  // в игре тишину держит игровой режим - своей отметкой
     toolsui::SetFocusHold(false);
-    if (g_softened && !fx::Game()) gboost::Restore(L's');
+    if (g_softened) gboost::Restore(L'f');  // только усыплённые фокусом: игра и редактор будят своих сами
     g_softened = false;
     autos::Note((g_auto ? L"Фокус сам закончился (" + g_autoWhat + L" закрыт)" : std::wstring(L"Фокус закончился")) +
                 L", " + std::to_wstring(mins) + L" мин");
@@ -140,7 +140,6 @@ void Tick() {
     }
     if (now < g_checkAt) return;
     g_checkAt = now + 3000;
-    if (g_on) gboost::Quiet(true);  // игра кончилась и вернула уведомления - а фокус ещё идёт
     if (g_cfg->focusAuto.empty() || (g_on && !g_auto)) return;
     std::wstring hit = AutoMatch(Titles(), g_cfg->focusAuto);
     if (!hit.empty()) {

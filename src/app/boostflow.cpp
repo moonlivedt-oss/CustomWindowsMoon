@@ -291,7 +291,7 @@ void BoostAfterGame() {
     boost::GameTweaks(s, false);
     gboost::Restore(L'g');
     if (!g_dev.On()) gboost::Restore(L's');  // усыплённые для редактора спят, пока он открыт
-    gboost::Quiet(false);
+    gboost::QuietFor(L'g', false);  // фокус и показ экрана держат тишину сами
     if (g_cfg.boostAfter && s.purge) boost::RunPurge(s);
     OfferRestore();
 }

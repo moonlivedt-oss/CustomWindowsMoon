@@ -42,13 +42,16 @@ int GameFirst(const std::vector<DWORD>& game, const std::vector<std::wstring>& k
 // Только фон в экономию (компиляция шейдеров): кроме exclude по имени.
 int BackgroundEco(const std::vector<std::wstring>& exclude, const std::vector<std::wstring>& guarded);
 // «Усыпить»: память в подкачку, EcoQoS, приоритет ниже обычного. Возвращает, сколько МБ ушло из памяти.
-double Soften(const std::vector<DWORD>& pids);
-void Restore(wchar_t tag);  // только свои: L'g' игра и фон, L's' усыплённые, L'c' компиляция
+double Soften(const std::vector<DWORD>& pids, wchar_t tag = L's');  // L'f' - усыплённые фокусом
+void Restore(wchar_t tag);  // только свои: L'g' игра и фон, L's' усыплённые, L'f' фокусом, L'c' компиляция
 void RestoreAll();          // вернуть приоритеты и экономию всем, кого трогали
 int Tamed();                // сколько процессов сейчас изменено
 
 // ---------------- тишина ----------------
-void Quiet(bool on);  // уведомления Windows: «только будильники» на время игры
+// Уведомления Windows: «только будильники». Тишину держат несколько режимов сразу (L'g' игра, L'f' фокус,
+// L'p' показ экрана) - вернутся уведомления, только когда отпустят все. Quiet(false) - снять тишину совсем.
+void QuietFor(wchar_t who, bool on);
+void Quiet(bool on);
 bool QuietOn();
 
 void Recover();  // при запуске: вернуть то, что осталось от упавшего прошлого раза

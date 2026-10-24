@@ -527,7 +527,7 @@ int BackgroundEco(const std::vector<std::wstring>& exclude, const std::vector<st
     return n;
 }
 
-double Soften(const std::vector<DWORD>& pids) {
+double Soften(const std::vector<DWORD>& pids, wchar_t tag) {
     double freed = 0;
     AcquireSRWLockExclusive(&g_lock);
     for (DWORD pid : pids) {
@@ -547,7 +547,7 @@ double Soften(const std::vector<DWORD>& pids) {
                 g_changes.erase(g_changes.begin() + i);
                 break;
             }
-        Tame(pid, IDLE_PRIORITY_CLASS, true, L's');
+        Tame(pid, IDLE_PRIORITY_CLASS, true, tag);
     }
     SaveState();
     ReleaseSRWLockExclusive(&g_lock);
@@ -611,10 +611,11 @@ void QuietBack(const std::wstring& was) {
             RegSetKeyValueW(HKEY_CURRENT_USER, kNoc, L"NOC_GLOBAL_SETTING_TOASTS_ENABLED", REG_DWORD, &v, 4);
     }
 }
-}  // namespace
 
-void Quiet(bool on) {
-    AcquireSRWLockExclusive(&g_lock);
+std::wstring g_quietBy;  // кто держит тишину: L'g', L'f', L'p'
+
+// включить или вернуть тишину; под g_lock
+void QuietApply(bool on) {
     if (on && g_quietWas.empty()) {
         DWORD cur = 0;
         if (WnfGet(cur)) {
@@ -636,6 +637,22 @@ void Quiet(bool on) {
         g_quietWas.clear();
         SaveState();
     }
+}
+}  // namespace
+
+void QuietFor(wchar_t who, bool on) {
+    AcquireSRWLockExclusive(&g_lock);
+    size_t at = g_quietBy.find(who);
+    if (on && at == std::wstring::npos) g_quietBy += who;
+    if (!on && at != std::wstring::npos) g_quietBy.erase(at, 1);
+    QuietApply(!g_quietBy.empty());
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void Quiet(bool on) {
+    AcquireSRWLockExclusive(&g_lock);
+    if (!on) g_quietBy.clear();
+    QuietApply(on || !g_quietBy.empty());
     ReleaseSRWLockExclusive(&g_lock);
 }
 

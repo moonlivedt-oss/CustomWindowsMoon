@@ -5,6 +5,8 @@
 
 #include <windows.h>
 
+#include "desk/modeswitch.h"
+
 struct Config;
 
 // Режим разработки: пока открыт тяжёлый редактор (Unreal Editor - по маскам dev_apps из radial.cfg),
@@ -21,7 +23,7 @@ public:
     void Tick(const Config& cfg);  // из общего опроса; сама проверка раз в 3 секунды
     void SetManual(bool on, const Config& cfg);
     void Reapply(const Config& cfg);  // игровой режим кончился и вернул обои - снова пауза, если режим идёт
-    bool Manual() const { return manual_; }
+    bool Manual() const { return sw_.manual; }
     bool On() const { return on_; }
     const std::wstring& Reason() const { return reason_; }  // имя редактора или «вручную»
     void Shutdown();
@@ -32,10 +34,10 @@ private:
     void Enter(const Config& cfg);
     void Leave();
 
-    bool on_ = false, manual_ = false, detected_ = false, suppress_ = false;
+    bool on_ = false, detected_ = false;
+    ModeSwitch sw_;  // когда включаться и выключаться (с запасом, desk/modeswitch.h)
     std::wstring reason_;
     ULONGLONG lastCheck_ = 0;
-    int misses_ = 0;
     struct Seen {
         std::wstring exe, app;  // имя файла процесса и, если подошёл по маске, имя редактора
     };

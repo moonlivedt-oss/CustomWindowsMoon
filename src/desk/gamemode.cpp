@@ -11,7 +11,6 @@
 namespace {
 
 constexpr ULONGLONG kCheckMs = 2000;
-constexpr int kLeaveMisses = 2;  // игра пропала на две проверки подряд - выходим
 
 std::wstring StateFile() {
     wchar_t ad[MAX_PATH];
@@ -206,28 +205,20 @@ void GameMode::Tick(const Config& cfg) {
     std::wstring name;
     bool game = cfg.gameAuto && Detect(cfg, name);
     detected_ = game;
-    if (game) {
-        misses_ = 0;
-        if (!manual_) reason_ = name;
-    } else if (on_ && !manual_ && ++misses_ < kLeaveMisses) {
-        return;  // игра могла на миг пропасть из списка (перезапуск, загрузка) - ждём ещё
-    }
-    if (!game) suppress_ = false;  // игра закрылась: в следующий раз режим снова включится сам
-    Update(cfg, manual_ || (game && !suppress_));
+    if (game && !sw_.manual) reason_ = name;
+    Update(cfg, sw_.Want(now, game));
 }
 
 void GameMode::SetManual(bool on, const Config& cfg) {
-    manual_ = on;
-    suppress_ = !on && detected_;  // выключили посреди игры - не включать снова, пока она идёт
+    sw_.SetManual(on, GetTickCount64(), detected_);
     if (on) reason_ = L"вручную";
-    misses_ = kLeaveMisses;
     lastCheck_ = 0;
     Update(cfg, on);
 }
 
 void GameMode::Update(const Config& cfg, bool want) {
     if (want == on_) return;
-    on_ = want;
+    on_ = sw_.on = want;
     if (on_)
         Enter(cfg);
     else
@@ -249,7 +240,8 @@ void GameMode::Enter(const Config& cfg) {
 void GameMode::Leave() {
     if (changedAnim_) SetWindowsAnimations(true);
     if (changedTransp_) WriteTransparency(1);
-    WallpaperControl(pausedWallpaper_, L"play");
+    // обои на паузе держит ещё и режим разработки (редактор открыт) - не запускать их на миг
+    if (!(wallpaperHeld && wallpaperHeld())) WallpaperControl(pausedWallpaper_, L"play");
     changedAnim_ = changedTransp_ = false;
     pausedWallpaper_.clear();
     DeleteFileW(StateFile().c_str());

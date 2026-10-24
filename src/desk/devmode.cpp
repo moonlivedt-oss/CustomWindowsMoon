@@ -10,7 +10,6 @@
 namespace {
 
 constexpr ULONGLONG kCheckMs = 3000;
-constexpr int kLeaveMisses = 2;  // редактор перезапускается (смена версии, проекта) - не дёргаемся сразу
 
 std::wstring StateFile() {
     wchar_t ad[MAX_PATH];
@@ -82,28 +81,20 @@ void DevMode::Tick(const Config& cfg) {
     std::wstring name;
     bool dev = cfg.devAuto && Detect(cfg, name);
     detected_ = dev;
-    if (dev) {
-        misses_ = 0;
-        if (!manual_) reason_ = name;
-    } else if (on_ && !manual_ && ++misses_ < kLeaveMisses) {
-        return;
-    }
-    if (!dev) suppress_ = false;  // редактор закрыли: в следующий раз режим снова включится сам
-    Update(cfg, manual_ || (dev && !suppress_));
+    if (dev && !sw_.manual) reason_ = name;
+    Update(cfg, sw_.Want(now, dev));
 }
 
 void DevMode::SetManual(bool on, const Config& cfg) {
-    manual_ = on;
-    suppress_ = !on && detected_;  // выключили при открытом редакторе - не включать, пока он открыт
+    sw_.SetManual(on, GetTickCount64(), detected_);
     if (on) reason_ = L"вручную";
-    misses_ = kLeaveMisses;
     lastCheck_ = 0;
     Update(cfg, on);
 }
 
 void DevMode::Update(const Config& cfg, bool want) {
     if (want == on_) return;
-    on_ = want;
+    on_ = sw_.on = want;
     if (on_)
         Enter(cfg);
     else
