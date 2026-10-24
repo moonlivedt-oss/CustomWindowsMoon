@@ -134,7 +134,8 @@ enum Job {
     JOB_PRIVACY,           // приватность для всего компьютера (HKCU PrivacyJob: on|id, off|id, off|*)
     kJobs
 };
-bool AdminReady();  // задача есть
+bool AdminReady();     // задача есть - без ожидания, последний известный ответ (для интерфейса)
+bool AdminReadyNow();  // то же с проверкой на месте (schtasks, сотни мс) - только из фоновых потоков
 bool SetupAdmin();  // создать задачу (Windows спросит разрешение)
 // cancel - «Стоп»: перестать ждать (задание доработает само, следующее дождётся его конца), false
 bool RunAdmin(Job j, const Log& log, int timeoutMs = 90000, const std::atomic<bool>* cancel = nullptr);

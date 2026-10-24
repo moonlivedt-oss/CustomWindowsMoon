@@ -7,6 +7,7 @@
 
 #include "app/autostart.h"
 #include "core/bg.h"
+#include "core/elevate.h"
 #include "core/config.h"
 #include "core/files.h"
 #include "core/text.h"
@@ -18,6 +19,7 @@
 #include "desk/boostcard.h"
 #include "desk/scenecard.h"
 #include "gfx/scene.h"
+#include "net/net.h"
 
 namespace autos {
 
@@ -493,6 +495,19 @@ void UndoEntry(const Entry& e) {
                             n ? L"вернул в Загрузки " + std::to_wstring(n) + L" из " + std::to_wstring(paths.size())
                               : L"в Корзине их уже нет",
                             0, n};
+                m->undo = box;
+                Post(m);
+            }))
+            delete box;
+    } else if (u.kind == L"sysitem" && u.args.size() == 2) {
+        // вернуть службу или драйвер: задача с правами сама помнит, что выключала и как оно запускалось
+        g_card.Show(BoostCard::WORKING, L"Возвращаю", u.args[1], Theme());
+        auto* box = new std::function<void(bool, const std::wstring&)>(done);
+        if (!bg::Run([kind = u.args[0], name = u.args[1], box] {
+                elevate::Put(L"SysItem", L"on|" + kind + L"|" + name);
+                std::wstring last;
+                bool ok = net::RunAdmin(net::JOB_SYS_ITEM, [&](const std::wstring& s) { last = s; });
+                auto* m = new Msg{Msg::UNDONE, ok ? name + L" запускается как раньше" : last, 0, ok ? 1 : 0};
                 m->undo = box;
                 Post(m);
             }))

@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "core/bg.h"
+#include "core/elevate.h"
 #include "core/themes.h"
 #include "desk/boost.h"
 #include "desk/gameboost.h"
@@ -228,7 +229,8 @@ void Studio::StylePage(const RectF& r) {
         toggle(row(b, 0, L"Предлагать освободить память"), ID_BOOST_OFFER, cfg.boostOffer);
         toggle(row(b, 1, L"После игры вернуть закрытое"), ID_BOOST_RESTORE, cfg.boostRestore);
         toggle(row(b, 2, L"После игры почистить ещё раз"), ID_BOOST_AFTER, cfg.boostAfter);
-        if (!boostTask_) boostTask_ = std::make_shared<std::atomic<int>>(boost::PurgeTaskExists() ? 1 : 0);
+        if (!boostTask_) boostTask_ = std::make_shared<std::atomic<int>>(
+                !elevate::Blocked(elevate::TASK_PURGE) && elevate::TaskReadyCached(elevate::TASK_PURGE) ? 1 : 0);
         int task = *boostTask_;
         RectF tr = row(b, 3, task == 1 ? L"Очистка кэша: без запросов" : L"Очистка кэша без запросов");
         if (task == 2) {

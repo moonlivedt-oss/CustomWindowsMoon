@@ -64,7 +64,7 @@ void Weekly() {
             }
             if (want->health) {
                 std::vector<tools::Physical> d = tools::PhysicalDisks();
-                if (net::AdminReady()) tools::DiskHealth(d, [](const std::wstring&) {});
+                if (net::AdminReadyNow()) tools::DiskHealth(d, [](const std::wstring&) {});
                 m->health = tools::HealthWeekly(d);
                 SetDay(L"health", today);
             }

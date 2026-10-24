@@ -164,7 +164,8 @@ struct Junk {
     bool admin = false;
     bool slow = false;  // пересоздаётся дорого (шейдеры): в «Всё сразу» не входит
 };
-// sizes=false - только список, быстро (для кольца); ddcOld - заодно старое в кэше Unreal, как OldBytes(DdcDir(), ddcDays)
+// sizes=false - только список, быстро (для кольца); ddcOld - заодно старое в кэше Unreal, как OldBytes(DdcDir(),
+// ddcDays)
 std::vector<Junk> FindJunk(bool sizes = true, ULONGLONG* ddcOld = nullptr, int ddcDays = 30);
 ULONGLONG DirBytes(const std::wstring& root, int* files = nullptr, std::atomic<bool>* cancel = nullptr,
                    std::atomic<long>* progress = nullptr);
@@ -412,10 +413,17 @@ struct SysItem {
     SignState sign = SIGN_NOFILE;
 };
 std::vector<SysItem> SysItems();
-std::vector<SysItem> NewSysItems();  // новое против sysitems.tsv (первый раз - только снимок); подписанное Microsoft - нет
+std::vector<SysItem>
+NewSysItems();  // новое против sysitems.tsv (первый раз - только снимок); подписанное Microsoft - нет
 std::wstring ImageOf(const std::wstring& command);  // exe или sys из строки запуска (\SystemRoot\, \??\, кавычки)
-std::wstring SysItemKey(const SysItem& it);  // ключ снимка: без версии и GUID в хвосте имени
+std::wstring SysItemKey(const SysItem& it);         // ключ снимка: без версии и GUID в хвосте имени
 std::wstring SysItemRefuse(const SysItem& it);      // пусто - службу можно выключить задачей с правами
+bool SecurityVendor(const std::wstring& lower);     // путь или подпись (в нижнем регистре) - антивирус или EDR
+// «Вернуть»: что выключила задача с правами и как оно запускалось. Список ведёт только она, в папке помощника, -
+// обычный процесс не может «вернуть» с правами то, чего мы не выключали, или поставить свой тип запуска.
+// Строки «вид<TAB>имя<TAB>тип запуска»; Add возвращает таблицу с новой строкой (прежняя для того же имени - прочь).
+std::wstring SysOffAdd(const std::wstring& table, const std::wstring& kind, const std::wstring& name, DWORD start);
+bool SysOffTake(std::wstring& table, const std::wstring& kind, const std::wstring& name, DWORD& start);
 bool SetTaskEnabled(const std::wstring& path, bool on);
 bool SysItemAdminMain(const std::wstring& req, const Log& log);
 
@@ -428,7 +436,7 @@ struct Tweak {
 std::vector<Tweak> PrivacyTweaks();
 bool SetPrivacyTweak(const std::wstring& id, bool priv, const Log& log);  // только свои (HKCU)
 int RevertPrivacy(const Log& log);                                        // свои - как были до нас
-bool PrivacyAdminMain(const std::wstring& req, const Log& log);  // JOB_SYS_ITEM: «svc|имя», «on|svc|имя|тип»
+bool PrivacyAdminMain(const std::wstring& req, const Log& log);           // JOB_SYS_ITEM: «svc|имя», «on|svc|имя|тип»
 
 constexpr int kSuspectScore = 3;  // с какого счёта показывать; 6 и выше - «опасно»
 enum FindKind {
@@ -474,8 +482,8 @@ enum ExtRight {
     EXT_REQUESTS = 256
 };
 int ExtRightsOf(const std::string& manifest);  // биты ExtRight
-std::wstring ExtRightsText(int rights);       // «читает и меняет все сайты, читает буфер обмена»
-int ExtRisk(int rights);                      // 0 - ничего особого; от 4 - доступ к входам и паролям
+std::wstring ExtRightsText(int rights);        // «читает и меняет все сайты, читает буфер обмена»
+int ExtRisk(int rights);                       // 0 - ничего особого; от 4 - доступ к входам и паролям
 struct BrowserExt {
     std::wstring browser, profile, id, name, dir;
     int rights = 0;
@@ -606,7 +614,8 @@ struct Leftover2 {
 std::vector<Leftover2> AppLeftovers(int idleDays = 90, ULONGLONG minBytes = 50ull * 1024 * 1024);
 int RecycleLeftovers(const std::vector<std::wstring>& paths, const Log& log);  // через RadialTools.exe
 bool ResetExplorer(const Log& log);                                            // через RadialTools.exe
-// отмена броска на папку кольца: копии в Корзину; pairs - оригинал, копия, оригинал, копия... (RadialTools recycle-copy)
+// отмена броска на папку кольца: копии в Корзину; pairs - оригинал, копия, оригинал, копия... (RadialTools
+// recycle-copy)
 int RecycleCopies(const std::vector<std::wstring>& pairs, const Log& log);
 
 // Песочница Windows (sandbox.cpp): одноразовая Windows для незнакомой программы.
@@ -637,6 +646,13 @@ const std::vector<std::wstring>& SystemExeNames();  // svchost.exe, lsass.exe...
 bool InWindowsDir(const std::wstring& path);        // файл прямо в Windows, System32, SysWOW64 (или их wbem)
 // Имя системного процесса, но файл не в папке Windows: такой не защищён от завершения.
 bool SystemImposter(const std::wstring& fullPath);
+// Маскировка по имени и строке запуска (security_logic.cpp, без системы - под тестами)
+bool OneEdit(const std::wstring& a, const std::wstring& b);  // расстояние правки ровно 1 (с перестановкой соседних)
+// имя exe на одну правку от системного («scvhost.exe») - какое; пусто - не похоже
+std::wstring LookAlikeIn(const std::wstring& lowerLeaf, const std::vector<std::wstring>& systemNames);
+bool DoubleExt(const std::wstring& lowerLeaf);       // «отчёт.pdf.exe», «фото.jpg   .scr», «счёт.pdf.js»
+bool BidiSpoof(const std::wstring& leaf);            // невидимые знаки направления (RLO): имя читается наоборот
+std::wstring ScriptLaunch(const std::wstring& cmd);  // строка запуска прячет скрипт - чем; пусто - нет
 
 // ---------------- слежка: процессы, память, батарея, сеть ----------------
 // Раз в минуту из фонового потока: снимок процессов копится в ProcHistory, по нему - утечки и фоновый процессор.

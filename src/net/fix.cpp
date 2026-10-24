@@ -135,7 +135,9 @@ void FlushDns(const Log& log) {
 
 // ---- задача планировщика ----
 
-bool AdminReady() { return elevate::TaskReady(elevate::TASK_NET); }
+bool AdminReady() { return elevate::TaskReadyCached(elevate::TASK_NET); }
+
+bool AdminReadyNow() { return elevate::TaskReady(elevate::TASK_NET); }
 
 bool SetupAdmin() { return elevate::Setup(elevate::TASK_NET); }
 
@@ -231,7 +233,7 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* can
     }
     // задачу уже не пускал антивирус: не ставить её заново после каждой пересборки, а сразу одно окно UAC
     bool blocked = elevate::Blocked(elevate::TASK_NET);
-    if (!blocked && !AdminReady()) {
+    if (!blocked && !AdminReadyNow()) {
         log(elevate::TaskExists(elevate::TASK_NET)
                 ? L"Помощник с правами устарел или стоит не там - обновляю его, Windows спросит разрешение."
                 : L"Нужны права администратора: один раз создаю задачу, Windows спросит разрешение.");

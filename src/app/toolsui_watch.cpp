@@ -8,6 +8,7 @@
 #include "core/perf.h"
 #include "tools/devserv.h"
 #include "tools/drain.h"
+#include "tools/journal.h"
 
 namespace toolsui {
 
@@ -412,8 +413,8 @@ void AskSysItem(const tools::SysItem& it) {
                         log(s);
                 });
                 if (ok)
-                    autos::Note(L"Отключена " + copy.kind + L" " + copy.name + L" (прежний запуск " + start +
-                                L"; вернуть: sc config " + copy.name + L" start= demand)");
+                    autos::Note(L"Отключена " + copy.kind + L" " + copy.name + L" (прежний запуск " + start + L")",
+                                tools::UndoPack(L"sysitem", {copy.kind, copy.name}));
                 res = ok ? copy.display + L" отключена." : L"";
                 return ok;
             });
