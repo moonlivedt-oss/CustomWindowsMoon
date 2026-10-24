@@ -1,0 +1,46 @@
+# Сборка RadialMenu, RadialTools и RadialShutUp тем же MSYS2 ucrt64 (cmake + ninja + g++), что и build.cmd, и тесты без
+# окон (radial_tests). Эталонные снимки студии (build.cmd snaps) здесь не идут: им нужны шрифты и экран этого ПК.
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRADIAL_OUT_DIR="$PWD/out"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Tests
+        run: |
+          cmake --build build --target radial_tests
+          ./build/radial_tests.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: radial-exe
+          path: |
+            out/RadialMenu.exe
+            out/RadialTools.exe
+            out/RadialShutUp.exe
+          if-no-files-found: warn
