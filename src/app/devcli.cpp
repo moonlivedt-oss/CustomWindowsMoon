@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "life/btbattery.h"
 #include "life/picker.h"
 #include "phone/phone.h"
 #include "core/bg.h"
@@ -487,6 +488,9 @@ bool Run(int& exitCode) {
             menu.SnapNet(&cfg, LifeRing(what), dpi, root, 900, out);
         }
         TerminateProcess(GetCurrentProcess(), 0);
+    } else if (Has(args, L"--bt-diag")) {  // заряд Bluetooth-устройств -> bt_out.txt
+        WriteOut(L"bt_out.txt", btbattery::Diag() + L"\n");
+        exitCode = 0;
     } else if (Has(args, L"--phone-diag")) {  // что видит «Телефон рядом» -> phone_out.txt
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         WriteOut(L"phone_out.txt", phone::Diag());

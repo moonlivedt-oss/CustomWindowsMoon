@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "life/awake.h"
+#include "life/btbattery.h"
 #include "life/nightupd.h"
 #include "life/picker.h"
 #include "life/remind.h"
@@ -170,10 +171,25 @@ void TestNightUpdate() {
     CHECK(nightupd::Summary(many) == L"обновлено 6: P, P, P, P и ещё 2");
 }
 
+void TestBtBattery() {
+    CHECK(btbattery::BaseName(L"realme Buds Air7 Pro Hands-Free") == L"realme Buds Air7 Pro");
+    CHECK(btbattery::BaseName(L"Транспорт AVRCP realme Buds Air7 Pro") == L"realme Buds Air7 Pro");
+    CHECK(btbattery::BaseName(L"S21 пользователя Максим Hands-Free HF") == L"S21 пользователя Максим");
+    CHECK(btbattery::BaseName(L"WH-1000XM4 Stereo") == L"WH-1000XM4");
+    CHECK(btbattery::BaseName(L"Stereo") == L"Stereo");  // имя из одного хвоста не съедается
+    btbattery::LowWatch w;
+    CHECK(!w.Feed(L"A", 40) && w.Feed(L"A", 15) && !w.Feed(L"A", 10));  // один раз
+    CHECK(!w.Feed(L"A", 20) && !w.Feed(L"A", 14));                      // подзарядили чуть-чуть - молчим
+    CHECK(!w.Feed(L"A", 80) && w.Feed(L"A", 12));                       // зарядили - снова скажем
+    CHECK(w.Feed(L"B", 5));
+    CHECK(btbattery::Line({{L"A", 64}, {L"B", 20}}) == L"A: 64%, B: 20%");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestBtBattery();
     TestNightUpdate();
     TestRemind();
     TestPicker();

@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/btbattery.h"
 #include "life/nightupd.h"
 #include "life/remind.h"
 #include "life/picker.h"
@@ -264,6 +265,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    btbattery::Tick();
     nightupd::Tick();
     remind::Tick();
     picker::Tick();
@@ -397,7 +399,7 @@ void ShowFromStudio(bool left, HWND studio) {
     g_menu.Show(&g_cfg, pt, r, left, MonitorDpi(mon), true);
 }
 
-std::wstring TrayTip() {
+std::wstring TrayTipBase() {
     if (g_game.On())
         return L"Radial Menu: игровой режим (" + g_game.Reason() + L")" +
                (GameInBackground() ? L" - игра свёрнута, углы работают" : L"");
@@ -406,6 +408,11 @@ std::wstring TrayTip() {
     std::wstring awake = toolsui::AwakeReason();
     if (!awake.empty()) return L"Radial Menu: не сплю, пока идёт " + awake;
     return L"Radial Menu: Alt + край экрана";
+}
+
+std::wstring TrayTip() {  // Ж4: заряд наушников - второй строкой
+    std::wstring bt = btbattery::Status();
+    return TrayTipBase() + (bt.empty() ? L"" : L"\n" + bt);
 }
 
 void UpdateTrayTip() {
@@ -885,6 +892,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    btbattery::Shutdown();
     nightupd::Shutdown();
     remind::Shutdown();
     picker::Shutdown();
@@ -1347,9 +1355,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
-    nightupd::Init(inst, &g_cfg, [] { return g_game.On() || g_dev.On(); });  // Е1
+    btbattery::Init(inst, &g_cfg, UpdateTrayTip);                                    // Ж4
+    nightupd::Init(inst, &g_cfg, [] { return g_game.On() || g_dev.On(); });          // Е1
     remind::Init(inst, &g_cfg, &g_menu, [] { return g_game.On() || share::On(); });  // Е2
-    picker::Init(inst, &g_cfg);          // Е3: пипетка и линейка
+    picker::Init(inst, &g_cfg);                                                      // Е3: пипетка и линейка
     awake::Init(inst, &g_cfg, &g_menu);  // Ж6: не спать на время  // Ф1, Ф4-Ф6: телефон рядом
     share::onChange = OnShareMode;
     // фокус: время в режимах и анимация (только ручной: шахматы включают тишину сами и без представлений)
