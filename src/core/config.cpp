@@ -246,6 +246,10 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.downloadsDays = std::clamp(_wtoi(val.c_str()), 3, 180);
             else if (key == L"auto_power")
                 cfg.autoPower = ParseBool(val);
+            else if (key == L"bright_by_app")
+                cfg.brightByApp = ParseBool(val);
+            else if (key == L"bright_apps")
+                cfg.brightApps = val;
             else if (key == L"winget_night")
                 cfg.wingetNight = ParseBool(val);
             else if (key == L"winget_skip")
@@ -593,6 +597,9 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"downloads_days = " << c.downloadsDays << L"\n";
     o << L"auto_power = " << (c.autoPower ? 1 : 0) << L"\n";
     o << L"# обновление программ ночью (winget): исключения - ИД или имена через |, маски *\n";
+    o << L"# яркость по программе: exe=+N/-N (от нынешней) или exe=N, через |\n";
+    o << L"bright_by_app = " << (c.brightByApp ? 1 : 0) << L"\n";
+    o << L"bright_apps = " << c.brightApps << L"\n";
     o << L"winget_night = " << (c.wingetNight ? 1 : 0) << L"\n";
     o << L"winget_skip = " << c.wingetSkip << L"\n";
     o << L"winget_night_accept = " << (c.wingetAccept ? 1 : 0) << L"\n";

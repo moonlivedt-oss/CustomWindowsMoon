@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "life/appbright.h"
 #include "life/awake.h"
 #include "life/btbattery.h"
 #include "life/capwatch.h"
@@ -200,10 +201,33 @@ void TestCapWatch() {
     CHECK(capwatch::Fresh({discord, cam}, seen).empty());
 }
 
+void TestAppBright() {
+    auto rules = appbright::ParseRules(L"Figma.exe=+20 | vlc.exe=90| sumatrapdf.exe=-15|bad|x.exe=-5x|y.exe=-200");
+    CHECK(rules.size() == 5 && rules[L"figma.exe"].relative && rules[L"figma.exe"].value == 20);
+    CHECK(!rules[L"vlc.exe"].relative && rules[L"vlc.exe"].value == 90 && rules[L"y.exe"].value == -100);
+    CHECK(appbright::SaveRules(appbright::ParseRules(L"a.exe=+5|b.exe=40|c.exe=-3")) == L"a.exe=+5|b.exe=40|c.exe=-3");
+    CHECK(appbright::Target(90, {20, true}) == 100 && appbright::Target(10, {-15, true}) == 0);
+    CHECK(appbright::Target(10, {60, false}) == 60);
+
+    appbright::Planner p;
+    p.rules = appbright::ParseRules(L"figma.exe=+20|sumatrapdf.exe=-15");
+    CHECK(p.OnApp(L"explorer.exe", 40) == -1);    // обычная программа - не трогаем
+    CHECK(p.OnApp(L"Figma.exe", 40) == 60);       // ярче от 40
+    CHECK(p.OnApp(L"SumatraPDF.exe", 60) == 25);  // из правила в правило - от исходных 40
+    CHECK(p.OnApp(L"code.exe", 25) == 40);        // ушли - как было
+    CHECK(p.OnApp(L"code.exe", 40) == -1 && p.Active().empty());
+    CHECK(p.OnApp(L"figma.exe", 0) == 20);  // вечером яркость 0 - Figma всё равно ярче
+    CHECK(!p.Learn(20) && p.Learn(35));     // поправили руками до 35 - запомнили +35
+    CHECK(p.rules[L"figma.exe"].value == 35);
+    CHECK(p.OnApp(L"code.exe", 35) == 0);
+    CHECK(!p.Learn(50));  // ни в какой программе с правилом - учить нечего
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestAppBright();
     TestCapWatch();
     TestBtBattery();
     TestNightUpdate();

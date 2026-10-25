@@ -166,6 +166,11 @@ struct Config {
     bool autoDownloads = true;
     int downloadsDays = 14;  // установщики и архивы старше стольких дней - кандидаты в корзину
     bool autoPower = true;
+    // Ж7: яркость по программе (life/appbright): exe=+N/-N от нынешней яркости или exe=N, через |
+    bool brightByApp = true;
+    std::wstring brightApps =
+        L"figma.exe=+20|vlc.exe=+25|mpc-hc64.exe=+25|potplayermini64.exe=+25|sumatrapdf.exe=-15|acrobat.exe=-15|"
+        L"acrord32.exe=-15";
     // Е1: обновлять программы через winget ночью (02:00-05:30, от сети, в простое); исключения - ИД или имена через |
     bool wingetNight = false;
     std::wstring wingetSkip;
