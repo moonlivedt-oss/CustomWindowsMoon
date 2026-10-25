@@ -56,6 +56,9 @@ std::wstring BackupKey(const RegValue& v);
 std::wstring EncodeSaved(const Saved& s);
 bool DecodeSaved(const std::wstring& text, Saved& out);
 Backup LoadBackup(HKEY root);
+// Старый бэкап вкладки «Приватность» студии (файл «корень<TAB>ключ<TAB>имя<TAB>было<TAB>число», до общего каталога):
+// записи этого корня, которых ещё нет, - в бэкап в реестре; файл переименовывается в .imported. Сколько перенесено.
+int ImportLegacy(HKEY root, const std::wstring& file);
 
 // ---------------- реестр ----------------
 bool IsAdmin();

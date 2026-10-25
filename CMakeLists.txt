@@ -11,7 +11,8 @@ endif()
 # исходники раскладываются по папкам src/<часть>/, ресурсы - в src/res
 file(GLOB_RECURSE RADIAL_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/act/")  # src/act - отдельный RadialTools.exe
-list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/shutup/")  # src/shutup - отдельный RadialShutUp.exe
+# src/shutup/main.cpp - окно отдельного RadialShutUp.exe; каталог (catalog.cpp) общий с вкладкой «Приватность»
+list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/shutup/main\\.cpp$")
 add_executable(RadialMenu WIN32 ${RADIAL_SOURCES} src/res/app.rc)
 target_include_directories(RadialMenu PRIVATE src)
 target_compile_definitions(RadialMenu PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)

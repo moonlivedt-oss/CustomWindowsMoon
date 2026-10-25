@@ -616,6 +616,39 @@ Backup LoadBackup(HKEY root) {
     return out;
 }
 
+int ImportLegacy(HKEY root, const std::wstring& file) {
+    HANDLE f = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    std::string bytes;
+    char buf[4096];
+    DWORD got = 0;
+    while (ReadFile(f, buf, sizeof(buf), &got, nullptr) && got) bytes.append(buf, got);
+    CloseHandle(f);
+    const wchar_t* want = root == HKEY_LOCAL_MACHINE ? L"HKLM" : L"HKCU";
+    Backup have = LoadBackup(root);
+    int n = 0;
+    bool ok = true;
+    for (const std::wstring& line : Split(Widen(bytes), L'\n')) {
+        std::vector<std::wstring> p;
+        size_t a = 0;
+        for (size_t e; (e = line.find(L'\t', a)) != std::wstring::npos; a = e + 1) p.push_back(line.substr(a, e - a));
+        p.push_back(line.substr(a));
+        if (p.size() != 5 || p[0] != want) continue;
+        std::wstring key = p[1] + L"|" + p[2];
+        if (have.count(key)) continue;
+        Saved s;
+        s.had = p[3] == L"1";
+        s.type = REG_DWORD;
+        s.value = std::to_wstring(wcstoul(p[4].c_str(), nullptr, 10));
+        if (SaveEntry(root, key, s))
+            ++n;
+        else
+            ok = false;
+    }
+    if (ok) MoveFileExW(file.c_str(), (file + L".imported").c_str(), MOVEFILE_REPLACE_EXISTING);
+    return n;
+}
+
 // ---------------- реестр ----------------
 
 bool IsAdmin() {
