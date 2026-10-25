@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "life/awake.h"
+#include "life/picker.h"
 #include "phone/phone.h"
 
 namespace {
@@ -115,10 +116,21 @@ void TestAwake() {
     CHECK(awake::Left(59 * m + 1) == L"ещё 1 ч 00 мин");
 }
 
+void TestPicker() {
+    CHECK(picker::Hex(200, 50, 63) == L"#C8323F" && picker::Hex(0, 0, 0) == L"#000000");
+    CHECK(picker::RgbText(200, 50, 63) == L"rgb(200, 50, 63)");
+    CHECK(picker::Measure(312, -48) == L"312 x 48, 315,7 px");
+    CHECK(picker::Measure(0, -40) == L"40 px" && picker::Measure(7, 0) == L"7 px");
+    POINT a{10, 10};
+    POINT h = picker::Constrain(a, {100, 30}), v = picker::Constrain(a, {15, -90});
+    CHECK(h.x == 100 && h.y == 10 && v.x == 10 && v.y == -90);
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestPicker();
     TestAwake();
     TestPhoneHttp();
     TestPhoneNames();

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "life/picker.h"
 #include "phone/phone.h"
 #include "core/bg.h"
 #include "core/config.h"
@@ -466,6 +467,15 @@ bool Run(int& exitCode) {
         std::wstring what = i + 1 < args.size() ? args[i + 1] : L"awake";
         std::wstring out = i + 2 < args.size() ? args[i + 2] : ExeDir() + L"\\life_ring.png";
         int root = i + 3 < args.size() ? _wtoi(args[i + 3].c_str()) : -1;
+        if (what == L"picker") {  // пипетка поверх нынешнего экрана: курсор в центре, замер от точки левее и выше
+            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            Gdip gdip;
+            static Config cfg = LoadOwnConfig();
+            picker::Init(GetModuleHandleW(nullptr), &cfg);
+            int cx = GetSystemMetrics(SM_CXSCREEN) / 2, cy = GetSystemMetrics(SM_CYSCREEN) / 2;
+            bool ok = picker::Snap({cx, cy}, {cx - 312, cy - 148}, root != 0, out);
+            TerminateProcess(GetCurrentProcess(), ok ? 0 : 1);
+        }
         OleInitialize(nullptr);
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         Gdip gdip;

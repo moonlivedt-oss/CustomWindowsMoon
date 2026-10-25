@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/picker.h"
 #include "life/awake.h"
 #include "app/worksets.h"
 #include "desk/appvol.h"
@@ -261,6 +262,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    picker::Tick();
     awake::Tick();
     ModeFlowTick(nowMs);
     if (!alt) {
@@ -500,6 +502,10 @@ bool RunExtra(const std::wstring& a) {
     }
     if (a == L"phone") {
         phone::OpenPage();
+        return true;
+    }
+    if (a == L"picker") {
+        picker::Show();
         return true;
     }
     if (a == L"awake") {
@@ -871,6 +877,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    picker::Shutdown();
     awake::Shutdown();
     selring::Stop();
     g_dropCard.Destroy();
@@ -1330,6 +1337,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
+    picker::Init(inst, &g_cfg);          // Е3: пипетка и линейка
     awake::Init(inst, &g_cfg, &g_menu);  // Ж6: не спать на время  // Ф1, Ф4-Ф6: телефон рядом
     share::onChange = OnShareMode;
     // фокус: время в режимах и анимация (только ручной: шахматы включают тишину сами и без представлений)
