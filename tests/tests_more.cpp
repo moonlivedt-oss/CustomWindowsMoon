@@ -433,6 +433,13 @@ void TestModeSwitch() {
     CHECK(step(g, 2000, false));
     g.SetManual(false, 3000, false);
     CHECK(!step(g, 4000, false));
+
+    // игра без маски: на весь экран, но браузер, плеер, слайды, редактор - не игра
+    CHECK(NotAGame(L"chrome.exe") && NotAGame(L"vlc.exe") && NotAGame(L"powerpnt.exe"));
+    CHECK(NotAGame(L"potplayermini64.exe") && NotAGame(L"unrealeditor.exe"));
+    CHECK(!NotAGame(L"eldenring.exe") && !NotAGame(L"minecraft.windows.exe"));
+    CHECK(Is3dModule(L"d3d12.dll") && Is3dModule(L"vulkan-1.dll") && Is3dModule(L"opengl32.dll"));
+    CHECK(!Is3dModule(L"dxgi.dll") && !Is3dModule(L"d3dcompiler_47.dll"));
 }
 
 // «Защита»: маскировка по имени (похожее на системное, двойное расширение, невидимые знаки) и скрипты в автозапуске

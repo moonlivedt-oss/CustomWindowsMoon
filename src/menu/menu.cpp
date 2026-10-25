@@ -19,6 +19,7 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "core/winlist.h"
+#include "desk/share.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "gfx/sound.h"
@@ -544,7 +545,7 @@ void RadialMenu::Hide() {
     if (GetCapture() == hwnd_) ReleaseCapture();
     ShowWindow(hwnd_, SW_HIDE);
     ++glassGen_;  // снимок, который ещё идёт, уже не нужен
-    SetWindowDisplayAffinity(hwnd_, WDA_NONE);
+    SetWindowDisplayAffinity(hwnd_, share::Affinity());  // в показе экрана - мимо захвата
     blurPx_ = {};
     maskPx_ = {};
     baseCache_ = {};
@@ -729,7 +730,7 @@ LRESULT RadialMenu::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MENU_GLASS: {
             std::unique_ptr<std::vector<uint32_t>> px((std::vector<uint32_t>*)lp);
             if ((int)wp != glassGen_) return 0;  // меню уже закрыли или открыли заново
-            SetWindowDisplayAffinity(hwnd_, WDA_NONE);
+            SetWindowDisplayAffinity(hwnd_, share::Affinity());  // в показе экрана - мимо захвата
             if (open_ && px->size() == (size_t)geo_.w * geo_.h) {
                 blurPx_ = std::move(*px);
                 glassT_ = GetTickCount64();

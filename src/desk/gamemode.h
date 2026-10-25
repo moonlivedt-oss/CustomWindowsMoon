@@ -43,6 +43,11 @@ public:
 
 private:
     bool Detect(const Config& cfg, std::wstring& name);
+    bool FullscreenGame(const Config& cfg, DWORD& pid, std::wstring& exe);  // игра без маски - окно на весь экран
+    static bool Draws3d(DWORD pid);
+    DWORD fsPid_ = 0;                // чьё окно сейчас на весь экран
+    ULONGLONG fsSince_ = 0;          // с какого момента
+    std::map<DWORD, bool> draws3d_;  // по pid: рисует ли через 3D (список модулей спрашиваем один раз)
     void Update(const Config& cfg, bool want);
     void Enter(const Config& cfg);
     void Leave();

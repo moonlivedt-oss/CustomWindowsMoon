@@ -156,6 +156,14 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.windowCaptions = ParseBool(val);
             else if (key == L"game_auto")
                 cfg.gameAuto = ParseBool(val);
+            else if (key == L"game_fullscreen")
+                cfg.gameFullscreen = ParseBool(val);
+            else if (key == L"share_auto")
+                cfg.shareAuto = ParseBool(val);
+            else if (key == L"share_apps")
+                cfg.shareApps = val;
+            else if (key == L"share_hide")
+                cfg.shareHide = ParseBool(val);
             else if (key == L"games")
                 cfg.games = val;
             else if (key == L"games_skip")
@@ -485,6 +493,11 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
          L"# game_win_anim, game_transparency - заодно выключить анимации и прозрачность Windows,\n"
          L"# game_wallpaper - пауза Wallpaper Engine\n";
     o << L"game_auto = " << (c.gameAuto ? 1 : 0) << L"\n";
+    o << L"game_fullscreen = " << (c.gameFullscreen ? 1 : 0) << L"\n";
+    o << L"# показ экрана: share_apps - программы трансляции (exe через |), share_hide - окна мимо захвата\n";
+    o << L"share_auto = " << (c.shareAuto ? 1 : 0) << L"\n";
+    o << L"share_apps = " << c.shareApps << L"\n";
+    o << L"share_hide = " << (c.shareHide ? 1 : 0) << L"\n";
     o << L"games = " << c.games << L"\n";
     o << L"games_skip = " << c.gamesSkip << L"\n";
     o << L"game_win_anim = " << (c.gameWinAnim ? 1 : 0) << L"\n";
@@ -545,7 +558,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"# раз в неделю отчёт картинкой, раз в сутки копия radial.cfg, если он поменялся\n";
     o << L"auto_report = " << (c.autoReport ? 1 : 0) << L"\n";
     o << L"auto_backup = " << (c.autoBackup ? 1 : 0) << L"\n";
-    o << L"# цвета по времени суток: утром свежее, вечером теплее, ночью тёплые и приглушённые; кромка - в цвет обоев\n";
+    o << L"# цвета по времени суток: утром свежее, вечером теплее, ночью тёплые и приглушённые; кромка - в цвет "
+         L"обоев\n";
     o << L"day_tint = " << (c.dayTint ? 1 : 0) << L"\n";
     o << L"# сотовое стекло в углах, кольце, свечении заряда и волне игрового режима\n";
     o << L"hex_glass = " << (c.hexGlass ? 1 : 0) << L"\n";
@@ -567,7 +581,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"# proc_rules - постоянные правила процессов: маска=idle|below|normal|above|high, eco, noeco, cores:0-3+6;\n"
          L"# правила через | (chrome.exe=below,eco | blender.exe=high)\n";
     o << L"proc_rules = " << c.procRules << L"\n";
-    o << L"# rule = условие -> действия: app:blender.exe, ac, battery, battery<30, time:23:00-07:00, weekend (через &)\n"
+    o << L"# rule = условие -> действия: app:blender.exe, ac, battery, battery<30, time:23:00-07:00, weekend (через "
+         L"&)\n"
          L"# -> power:eco|balanced|perf, volume:30, mute, theme:<тема>, run:<действие угла>\n";
     for (const std::wstring& r : c.rules) o << L"rule = " << r << L"\n";
     o << L"clip_secrets = " << (c.clipSecrets ? 1 : 0) << L"\n";
@@ -584,7 +599,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"long_min = " << c.longMin << L"\n";
     o << L"# громкость по программам: уровень из микшера помнится по exe и возвращается при новом запуске\n";
     o << L"app_volume = " << (c.appVolume ? 1 : 0) << L"\n";
-    o << L"# фокус: на сколько минут, что свернуть и усыпить; focus_auto - окно с этим в заголовке включает тишину само\n";
+    o << L"# фокус: на сколько минут, что свернуть и усыпить; focus_auto - окно с этим в заголовке включает тишину "
+         L"само\n";
     o << L"focus_minutes = " << c.focusMinutes << L"\n";
     o << L"focus_apps = " << c.focusApps << L"\n";
     o << L"focus_auto = " << c.focusAuto << L"\n";

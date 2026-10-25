@@ -60,6 +60,7 @@
 #include "desk/lockscreen.h"
 #include "desk/minecraft.h"
 #include "desk/modefx.h"
+#include "desk/share.h"
 #include "desk/snip.h"
 #include "desk/widget.h"
 #include "desk/winfx.h"
@@ -251,6 +252,7 @@ void PollWork() {
     resume::Tick();
     afterwork::Tick();
     focus::Tick();
+    share::Tick();
     if (!alt) {
         g_armed = true;
         g_altTab = false;
@@ -382,6 +384,7 @@ void ShowFromStudio(bool left, HWND studio) {
 std::wstring TrayTip() {
     if (g_game.On()) return L"Radial Menu: игровой режим (" + g_game.Reason() + L")";
     if (g_dev.On()) return L"Radial Menu: режим разработки (" + g_dev.Reason() + L")";
+    if (share::On()) return L"Radial Menu: показ экрана (" + share::Reason() + L") - окна не видны в записи";
     std::wstring awake = toolsui::AwakeReason();
     if (!awake.empty()) return L"Radial Menu: не сплю, пока идёт " + awake;
     return L"Radial Menu: Alt + край экрана";
@@ -412,7 +415,38 @@ void NoteMode(const wchar_t* name, bool on, const std::wstring& reason, ULONGLON
         since = 0;
     }
 }
-ULONGLONG g_gameSince = 0, g_devSince = 0;
+ULONGLONG g_gameSince = 0, g_devSince = 0, g_shareSince = 0;
+
+// Показ экрана включился или выключился: карточка (её саму зрители уже не видят), журнал, подсказка трея.
+void OnShareMode(bool on) {
+    NoteMode(L"Показ экрана", on, share::Reason(), g_shareSince);
+    UpdateTrayTip();
+    if (on)
+        g_boostCard.Show(BoostCard::DONE, L"Показ экрана: " + share::Reason(),
+                         g_cfg.shareHide ? L"Окна RadialMenu не видны в записи и трансляции, уведомления молчат."
+                                         : L"Уведомления молчат.",
+                         CurrentTheme(g_cfg), 5000);
+    else
+        g_boostCard.Show(BoostCard::DONE, L"Показ экрана закончился",
+                         L"Окна снова видны в захвате, уведомления приходят.", CurrentTheme(g_cfg), 4000);
+}
+
+// Действия углов и колец, которые делает main: показ экрана, режимы, кольцо выделенного
+bool RunExtra(const std::wstring& a) {
+    if (a == L"share") {
+        share::Toggle();
+        return true;
+    }
+    if (a == L"game") {
+        g_game.SetManual(!g_game.On(), g_cfg);
+        return true;
+    }
+    if (a == L"focus") {
+        focus::On() ? focus::Stop() : focus::Start(0);
+        return true;
+    }
+    return false;
+}
 
 // Режим разработки включился или выключился: обои и память, красота и перехват
 // мыши не трогаются.
@@ -549,6 +583,10 @@ void RestoreEverything() {
         g_dev.SetManual(false, g_cfg);
         done.push_back(L"режим разработки выключен");
     }
+    if (share::On()) {
+        share::Toggle();
+        done.push_back(L"показ экрана выключен");
+    }
     gboost::RestoreAll();
     gboost::Quiet(false);
     boost::GameTweaks(boost::Load(BoostDir()), false);
@@ -593,6 +631,9 @@ void TrayMenu() {
     AppendMenuW(
         m, MF_STRING | (focus::On() ? MF_CHECKED : 0), CMD_FOCUS,
         (focus::On() ? fs + L" - закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут").c_str());
+    std::wstring sh = L"Показ экрана: окна не видны в записи";
+    if (share::On() && !share::Manual()) sh += L" (" + share::Reason() + L")";
+    AppendMenuW(m, MF_STRING | (share::On() ? MF_CHECKED : 0), CMD_SHARE, sh.c_str());
     // Л6: сон после работы - галочка у взведённого, в подписи - чего ждём
     afterwork::Mode aw = afterwork::Armed();
     std::wstring awWhy = aw == afterwork::OFF ? L"" : L" (" + afterwork::Status() + L")";
@@ -744,6 +785,7 @@ void ShutdownAll() {
     resume::Shutdown();
     afterwork::Shutdown();
     focus::Shutdown();
+    share::Shutdown();
     g_dropCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
@@ -852,6 +894,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     break;
                 case CMD_FOCUS:
                     focus::On() ? focus::Stop() : focus::Start(0);
+                    break;
+                case CMD_SHARE:
+                    share::Toggle();
                     break;
                 case CMD_AFTER_SLEEP:
                     afterwork::Arm(afterwork::Armed() == afterwork::SLEEP ? afterwork::OFF : afterwork::SLEEP);
@@ -1187,6 +1232,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     resume::Init(inst, g_wnd, &g_cfg);  // Л4: продолжить, где остановился
     afterwork::Init(inst, &g_cfg);      // Л6: сон после работы
     focus::Init(inst, &g_cfg);          // Л8, Л34: фокус и шахматы без отвлечений
+    share::Init(&g_cfg);
+    share::onChange = OnShareMode;
+    corners::SetExtra(RunExtra);
     g_menu.focusStatus = [] { return focus::Status(); };
     palette::AddSource([](std::vector<Item>& out) {
         Item it;

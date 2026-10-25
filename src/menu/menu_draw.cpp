@@ -20,6 +20,7 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "core/winlist.h"
+#include "desk/share.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "gfx/hex.h"
@@ -124,7 +125,7 @@ void RadialMenu::CaptureBackdropAsync() {
             auto* px = new std::vector<uint32_t>(CaptureBlurred(o, w, h, k));
             if (!PostMessageW(wnd, WM_MENU_GLASS, (WPARAM)gen, (LPARAM)px)) delete px;
         })) {
-        SetWindowDisplayAffinity(hwnd_, WDA_NONE);
+        SetWindowDisplayAffinity(hwnd_, share::Affinity());  // в показе экрана - мимо захвата
         CaptureBackdrop();
     }
 }
