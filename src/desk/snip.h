@@ -37,6 +37,7 @@ private:
     void Show();
     void Save(bool thenOpen);
     std::wstring SaveFolder() const;
+    void FindTarget();  // Л29: из какого окна сняли - папка проекта и понятное имя
 
     float BodyHeight(Gdiplus::Graphics& g) override;
     void Paint(Gdiplus::Graphics& g, const Gdiplus::RectF& body) override;
@@ -51,6 +52,9 @@ private:
     int shotW_ = 0, shotH_ = 0;
     float pw_ = 150, ph_ = 104;  // превью, dip
     std::wstring status_, savedPath_;
+    std::wstring context_;      // «MyGame Player.cpp» - откуда снимок, для имени файла
+    std::wstring targetDir_;    // папка проекта\screenshots или папка Проводника; пусто - «Снимки экрана»
+    std::wstring targetLabel_;  // как назвать её в карточке: имя проекта или папки
     bool busy_ = false, statusGood_ = true;
     ULONGLONG busySince_ = 0;
 };
