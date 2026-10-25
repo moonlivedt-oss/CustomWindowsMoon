@@ -510,10 +510,10 @@ void Studio::ToolsPage(const RectF& r) {
                 tools::Tweak& t = toolsPriv_[i];
                 bool on = t.on;
                 if (ui.Toggle(ID_TOOLS_PRIV + (int)i, RectF(b.X, y + ui.S(4), ui.S(42), ui.S(30)), on) && !busy) {
-                    if (t.admin) {
+                    if (!on && !t.ours) {
+                        Toast(L"Это включено не RadialMenu - возвращать нечего (настройка самой Windows).");
+                    } else if (t.admin) {
                         adminRun((on ? L"on|" : L"off|") + t.id, t.title);
-                    } else if (!on && !t.ours) {
-                        Toast(L"Это выключено не RadialMenu - возвращать нечего (настройка самой Windows).");
                     } else {
                         std::wstring msg;
                         tools::SetPrivacyTweak(t.id, on, [&](const std::wstring& s) { msg = s; });
@@ -536,7 +536,8 @@ void Studio::ToolsPage(const RectF& r) {
                 std::wstring msg;
                 tools::RevertPrivacy([&](const std::wstring& s) { msg = s; });
                 bool anyAdmin = false;
-                for (const tools::Tweak& t : toolsPriv_) anyAdmin = anyAdmin || (t.admin && t.on);
+                // окно UAC - только если для компьютера что-то меняли мы (бэкап в HKLM читается и без прав)
+                for (const tools::Tweak& t : toolsPriv_) anyAdmin = anyAdmin || (t.admin && t.ours);
                 if (anyAdmin) adminRun(L"off|*", L"Приватность: как было");
                 Toast(msg);
                 refresh();
@@ -544,7 +545,8 @@ void Studio::ToolsPage(const RectF& r) {
             note(b, (y + ui.S(46) - b.Y) / rowH,
                  L"Каждый переключатель пишет известные значения реестра, прежние - в бэкап до первой правки; «как "
                  L"было» возвращает их (или убирает значение, если его не было). Свои настройки - сразу, для всего "
-                 L"компьютера - одно окно UAC.",
+                 L"компьютера - одно окно UAC. Каталог и бэкап общие с RadialShutUp.exe рядом с программой - там "
+                 L"ещё около 60 настроек по группам.",
                  c.muted);
         });
     } else if (toolsTab_ == 2) {  // ---------------- автозагрузка ----------------
