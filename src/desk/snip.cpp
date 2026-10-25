@@ -1,5 +1,6 @@
 #include "desk/snip.h"
 
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <shellscalingapi.h>
 #include <shlobj.h>
@@ -13,7 +14,9 @@
 #include "core/config.h"
 #include "core/night.h"
 #include "core/text.h"
+#include "app/resume.h"
 #include "desk/ocr.h"
+#include "desk/snipname.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 
@@ -140,6 +143,98 @@ void SnipCard::Apply(const Config& cfg) {
     Invalidate();
 }
 
+namespace {
+
+std::wstring ExeOf(HWND w) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return L"";
+    wchar_t buf[MAX_PATH];
+    DWORD n = MAX_PATH;
+    std::wstring r;
+    if (QueryFullProcessImageNameW(p, 0, buf, &n)) r = PathFindFileNameW(buf);
+    CloseHandle(p);
+    return r;
+}
+
+// Окно, из которого сняли: верхнее видимое окно с заголовком, не «Ножницы», не стол и не своё (EnumWindows
+// идёт сверху вниз по Z-порядку)
+HWND SourceWindow() {
+    HWND found = nullptr;
+    EnumWindows(
+        [](HWND w, LPARAM lp) -> BOOL {
+            if (!IsWindowVisible(w) || GetWindow(w, GW_OWNER) || (GetWindowLongW(w, GWL_EXSTYLE) & WS_EX_TOOLWINDOW))
+                return TRUE;
+            BOOL cloaked = FALSE;
+            DwmGetWindowAttribute(w, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+            if (cloaked || GetWindowTextLengthW(w) == 0) return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(w, &pid);
+            if (pid == GetCurrentProcessId()) return TRUE;
+            std::wstring exe = Lower(ExeOf(w));
+            if (exe == L"screenclippinghost.exe" || exe == L"snippingtool.exe" || exe == L"shellexperiencehost.exe" ||
+                exe == L"searchhost.exe" || exe == L"startmenuexperiencehost.exe")
+                return TRUE;
+            wchar_t cls[64];
+            GetClassNameW(w, cls, 64);
+            if (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") || !wcscmp(cls, L"Shell_TrayWnd")) return TRUE;
+            *(HWND*)lp = w;
+            return FALSE;
+        },
+        (LPARAM)&found);
+    return found;
+}
+
+bool HasAny(const std::wstring& dir, std::initializer_list<const wchar_t*> names) {
+    for (const wchar_t* n : names) {
+        std::wstring p = dir + L"\\" + n;
+        if (wcschr(n, L'*')) {
+            WIN32_FIND_DATAW fd;
+            HANDLE h = FindFirstFileW(p.c_str(), &fd);
+            if (h != INVALID_HANDLE_VALUE) {
+                FindClose(h);
+                return true;
+            }
+        } else if (GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+// Л29: окно, из которого сняли, -> понятное имя («MyGame Player.cpp») и папка: проект из VS Code, Unreal или
+// папка Проводника с тем же именем в заголовке (resume::Now знает, какие открыты); у проекта - его screenshots
+void SnipCard::FindTarget() {
+    context_.clear();
+    targetDir_.clear();
+    targetLabel_.clear();
+    HWND w = SourceWindow();
+    if (!w) return;
+    wchar_t title[512] = {};
+    GetWindowTextW(w, title, 512);
+    std::wstring t = title, lt = Lower(t);
+    context_ = snipname::Context(t, ExeOf(w));
+    const resume::Thing* best = nullptr;
+    std::vector<resume::Thing> open = resume::Now();
+    for (const resume::Thing& th : open) {
+        if (th.kind == resume::Thing::APP || th.label.size() < 2) continue;
+        if (lt.find(Lower(th.label)) == std::wstring::npos) continue;
+        if (!best || th.label.size() > best->label.size()) best = &th;
+    }
+    if (!best) return;
+    std::wstring folder = best->path;
+    if (best->kind == resume::Thing::UNREAL) folder = folder.substr(0, folder.find_last_of(L'\\'));
+    if (GetFileAttributesW(folder.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    bool project = best->kind != resume::Thing::FOLDER ||
+                   HasAny(folder, {L".git", L"package.json", L"CMakeLists.txt", L"*.uproject", L"*.sln", L"Cargo.toml",
+                                   L"pyproject.toml"});
+    targetDir_ = snipname::TargetDir(folder, project);
+    targetLabel_ = best->label;
+}
+
 std::wstring SnipCard::SaveFolder() const {
     for (const KNOWNFOLDERID* id : {&FOLDERID_Screenshots, &FOLDERID_Pictures}) {
         PWSTR p = nullptr;
@@ -175,6 +270,7 @@ void SnipCard::OnClipboard() {
     status_.clear();
     savedPath_.clear();
     busy_ = false;
+    FindTarget();
     Show();
 }
 
@@ -284,7 +380,10 @@ void SnipCard::Paint(Graphics& g, const RectF& body) {
     SolidBrush tB(fg), mB(MixColor(muted, fg, 0.2));
     g.DrawString(L"Снимок области", -1, &fT, RectF(x0, body.Y + 15 * K, tw - 26 * K, 22 * K), &sf, &tB);
     std::wstring size = std::to_wstring(shotW_) + L" x " + std::to_wstring(shotH_) + L" px";
-    if (!savedPath_.empty()) size += L"   |   сохранён";
+    if (!savedPath_.empty())
+        size += L"   |   сохранён";
+    else if (!targetLabel_.empty())
+        size += L"   |   в " + targetLabel_;  // Л29: куда ляжет по «Сохранить»
     g.DrawString(size.c_str(), -1, &fS, RectF(x0, body.Y + 38 * K, tw, 18 * K), &sf, &mB);
     if (!status_.empty()) {
         StringFormat wf;
@@ -317,14 +416,18 @@ void SnipCard::Save(bool thenOpen) {
     }
     SYSTEMTIME t;
     GetLocalTime(&t);
-    wchar_t name[80];
-    swprintf(name, 80, L"Снимок %04d-%02d-%02d %02d%02d%02d.png", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
-             t.wSecond);
-    std::wstring dir = SaveFolder();
+    // Л29: понятное имя по окну («MyGame Player.cpp 2026-10-25 10-41.png») и папка проекта, если снимали из него
+    std::wstring name = snipname::FileName(context_, t);
+    std::wstring dir = targetDir_;
+    if (!dir.empty()) SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+    if (dir.empty() || GetFileAttributesW(dir.c_str()) == INVALID_FILE_ATTRIBUTES) dir = SaveFolder();
     std::wstring path = dir + L"\\" + name;
+    for (int n = 2; n < 100 && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; ++n)  // уже есть - «(2)»
+        path = dir + L"\\" + name.substr(0, name.size() - 4) + L" (" + std::to_wstring(n) + L").png";
     if (!dir.empty() && WriteFileBytes(path, png_)) {
         savedPath_ = path;
-        status_ = std::wstring(L"Сохранено: ") + name;
+        std::wstring where = dir == targetDir_ && !targetLabel_.empty() ? L" - в " + targetLabel_ : L"";
+        status_ = L"Сохранено" + where + L": " + path.substr(dir.size() + 1);
         statusGood_ = true;
     } else {
         status_ = L"Не удалось сохранить";

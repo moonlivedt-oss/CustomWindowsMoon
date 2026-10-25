@@ -39,6 +39,7 @@
 #include "desk/cardlog.h"
 #include "desk/modeswitch.h"
 #include "app/selring.h"
+#include "desk/snipname.h"
 #include "shutup/catalog.h"
 
 namespace {
@@ -389,6 +390,24 @@ void TestSafeUrl() {
     CHECK(tools::SafeUrl(L"file:///C:/Windows").empty());
     CHECK(tools::SafeUrl(L"javascript:alert(1)").empty());
     CHECK(tools::SafeUrl(L"https://").empty());
+}
+
+// Л29: имя снимка по окну и папка для него
+void TestSnipName() {
+    using namespace snipname;
+    CHECK(Context(L"Player.cpp - MyGame - Visual Studio Code", L"Code.exe") == L"MyGame Player.cpp");
+    CHECK(Context(L"● main.cpp - RadialMenu - Visual Studio Code", L"Code.exe") == L"RadialMenu main.cpp");
+    CHECK(Context(L"Лекция 5 - YouTube - Google Chrome", L"chrome.exe") == L"Лекция 5 - YouTube");
+    CHECK(Context(L"Загрузки", L"explorer.exe") == L"Загрузки");
+    SYSTEMTIME t{};
+    t.wYear = 2026, t.wMonth = 10, t.wDay = 25, t.wHour = 10, t.wMinute = 41, t.wSecond = 5;
+    CHECK(FileName(L"MyGame Player.cpp", t) == L"MyGame Player.cpp 2026-10-25 10-41.png");
+    CHECK(FileName(L"a/b:c*d?", t) == L"a b c d 2026-10-25 10-41.png");  // запрещённое в имени - пробелами
+    CHECK(FileName(L"", t) == L"Снимок 2026-10-25 10-41-05.png");
+    CHECK(FileName(std::wstring(200, L'x'), t).size() < 90);
+    CHECK(TargetDir(L"D:\\Proj\\", true) == L"D:\\Proj\\screenshots");
+    CHECK(TargetDir(L"C:\\Users\\u\\Downloads", false) == L"C:\\Users\\u\\Downloads");
+    CHECK(TargetDir(L"", true).empty());
 }
 
 // Кольцо выделенного: раскладка, калькулятор, регистр, пробелы, адрес поиска
@@ -1120,4 +1139,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestSysItemOff();
     TestModeSwitch();
     TestSelRing();
+    TestSnipName();
 }
