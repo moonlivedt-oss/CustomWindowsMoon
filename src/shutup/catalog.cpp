@@ -1,7 +1,9 @@
 // Каталог RadialShutUp: настройки, их состояние в реестре, правка с бэкапом и откат.
 #include "shutup/catalog.h"
 
+#include <shlobj.h>
 #include <shlwapi.h>
+#include <taskschd.h>
 
 #include <algorithm>
 
@@ -37,21 +39,36 @@ constexpr wchar_t kBackup[] = L"Software\\RadialShutUp\\Backup";
     S(CU, L"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\" cap, L"Value", \
       L"Deny")
 
-const wchar_t* const kGroups[] = {
-    L"Общая приватность",      L"Телеметрия и отчёты", L"Пуск, поиск и реклама", L"Разрешения приложений",
-    L"Синхронизация и облако", L"Обновления и защита", L"Microsoft Edge",        L"Разное"};
+const wchar_t* const kGroups[] = {L"Общая приватность",
+                                  L"Телеметрия и отчёты",
+                                  L"Пуск, поиск и реклама",
+                                  L"Разрешения приложений",
+                                  L"Синхронизация и облако",
+                                  L"Обновления и защита",
+                                  L"Microsoft Edge",
+                                  L"Разное",
+                                  L"Программы"};
+constexpr wchar_t kOffice[] = L"Software\\Policies\\Microsoft\\Office\\16.0\\Common";
+constexpr char kHostsMark[] = "# RadialShutUp";
 
 }  // namespace
 
 bool Setting::Machine() const {
     for (const RegValue& v : values)
         if (v.root == HKEY_LOCAL_MACHINE) return true;
-    return false;
+    return !tasks.empty() || !hosts.empty();
 }
 
 bool Setting::User() const {
     for (const RegValue& v : values)
         if (v.root == HKEY_CURRENT_USER) return true;
+    return false;
+}
+
+bool Setting::Admin() const {
+    if (Machine()) return true;
+    for (const RegValue& v : values)
+        if (_wcsnicmp(v.key, L"Software\\Policies\\", 18) == 0) return true;
     return false;
 }
 
@@ -516,6 +533,114 @@ const std::vector<Setting>& Catalog() {
          L"Windows не ведёт счёт запусков. В Пуске пропадёт список «Часто используемые».",
          L,
          {D(CU, kAdv, L"Start_TrackProgs", 0)}},
+
+        // ---------------- задачи планировщика и hosts (телеметрия) ----------------
+        {L"tasks_ceip",
+         kGroups[1],
+         L"Задачи сбора статистики (CEIP)",
+         L"Задачи планировщика, которые раз в день собирают и отправляют статистику использования и USB.",
+         R,
+         {},
+         {L"\\Microsoft\\Windows\\Customer Experience Improvement Program\\Consolidator",
+          L"\\Microsoft\\Windows\\Customer Experience Improvement Program\\UsbCeip",
+          L"\\Microsoft\\Windows\\Autochk\\Proxy"}},
+        {L"tasks_feedback",
+         kGroups[1],
+         L"Задачи отзывов (Feedback)",
+         L"Задачи, которые присылают сценарии опросов и собирают данные для центра отзывов.",
+         R,
+         {},
+         {L"\\Microsoft\\Windows\\Feedback\\Siuf\\DmClient",
+          L"\\Microsoft\\Windows\\Feedback\\Siuf\\DmClientOnScenarioDownload"}},
+        {L"tasks_diskdiag",
+         kGroups[1],
+         L"Задача сбора данных о дисках",
+         L"Сведения о дисках для диагностики Microsoft. Предупреждения SMART в Windows остаются.",
+         R,
+         {},
+         {L"\\Microsoft\\Windows\\DiskDiagnostic\\Microsoft-Windows-DiskDiagnosticDataCollector"}},
+        {L"tasks_appraiser",
+         kGroups[1],
+         L"Задачи проверки совместимости",
+         L"Опись программ и драйверов для проверки перед крупным обновлением. Без неё Windows хуже предупредит, что "
+         L"старая программа не заработает после обновления.",
+         L,
+         {},
+         {L"\\Microsoft\\Windows\\Application Experience\\Microsoft Compatibility Appraiser",
+          L"\\Microsoft\\Windows\\Application Experience\\ProgramDataUpdater",
+          // в новых сборках Windows 11 - под другими именами
+          L"\\Microsoft\\Windows\\Application Experience\\Microsoft Compatibility Appraiser Exp",
+          L"\\Microsoft\\Windows\\Application Experience\\MareBackup"}},
+        {L"tasks_wer",
+         kGroups[1],
+         L"Задача отправки отчётов об ошибках",
+         L"Очередь отчётов о падениях не отправляется по расписанию. Решения от Microsoft для падений не придут.",
+         L,
+         {},
+         {L"\\Microsoft\\Windows\\Windows Error Reporting\\QueueReporting"}},
+        {L"hosts_block",
+         kGroups[1],
+         L"Закрыть адреса телеметрии в hosts",
+         L"Серверы телеметрии и отчётов недоступны всему компьютеру. Defender считает такую правку hosts угрозой "
+         L"(HostsFileHijack) и может её откатить; ломаются центр отзывов и решения для падений.",
+         N,
+         {},
+         {},
+         {L"v10.events.data.microsoft.com", L"v20.events.data.microsoft.com", L"self.events.data.microsoft.com",
+          L"umwatsonc.events.data.microsoft.com", L"watson.telemetry.microsoft.com", L"watson.microsoft.com",
+          L"telecommand.telemetry.microsoft.com", L"oca.telemetry.microsoft.com", L"vortex-win.data.microsoft.com"}},
+
+        // ---------------- программы ----------------
+        {L"office_telemetry",
+         kGroups[8],
+         L"Телеметрия Office",
+         L"Word, Excel и другие программы Office 2016-365 не отправляют данные о работе. Если Office нет - ничего "
+         L"не меняет.",
+         R,
+         {D(CU, L"Software\\Policies\\Microsoft\\Office\\16.0\\Common\\ClientTelemetry", L"DisableTelemetry", 1),
+          D(CU, L"Software\\Policies\\Microsoft\\Office\\16.0\\Common\\ClientTelemetry", L"SendTelemetry", 3)}},
+        {L"office_feedback",
+         kGroups[8],
+         L"Отзывы и статистика Office",
+         L"Office не просит отзывов, не прикладывает к ним снимки экрана и не участвует в программе улучшения.",
+         R,
+         {D(CU, kOffice, L"QMEnable", 0),
+          D(CU, L"Software\\Policies\\Microsoft\\Office\\16.0\\Common\\Feedback", L"Enabled", 0),
+          D(CU, L"Software\\Policies\\Microsoft\\Office\\16.0\\Common\\Feedback", L"IncludeScreenshot", 0)}},
+        {L"office_content",
+         kGroups[8],
+         L"Облачный анализ документов Office",
+         L"Документы не отправляются на анализ ради Designer, «Редактора», перевода и подсказок. Эти функции "
+         L"перестанут работать.",
+         L,
+         {D(CU, L"Software\\Policies\\Microsoft\\Office\\16.0\\Common\\Privacy", L"UserContentDisabled", 2)}},
+        {L"vscode_telemetry",
+         kGroups[8],
+         L"Телеметрия Visual Studio Code",
+         L"VS Code не отправляет данные об использовании и ошибках - политикой, поверх своей настройки. "
+         L"Расширения с собственной телеметрией обычно уважают эту настройку.",
+         R,
+         {S(LM, L"SOFTWARE\\Policies\\Microsoft\\VSCode", L"TelemetryLevel", L"off")}},
+        {L"vs_telemetry",
+         kGroups[8],
+         L"Программа улучшения Visual Studio",
+         L"Visual Studio не участвует в программе улучшения качества (SQM).",
+         R,
+         {D(LM, L"SOFTWARE\\Policies\\Microsoft\\VisualStudio\\SQM", L"OptIn", 0)}},
+        {L"dotnet_telemetry",
+         kGroups[8],
+         L"Телеметрия .NET SDK",
+         L"Команды dotnet не отправляют статистику (переменная DOTNET_CLI_TELEMETRY_OPTOUT). Действует в новых "
+         L"терминалах.",
+         R,
+         {S(CU, L"Environment", L"DOTNET_CLI_TELEMETRY_OPTOUT", L"1")}},
+        {L"pwsh_telemetry",
+         kGroups[8],
+         L"Телеметрия PowerShell 7",
+         L"PowerShell 7 не отправляет данные о запуске (переменная POWERSHELL_TELEMETRY_OPTOUT). Действует в "
+         L"новых окнах.",
+         R,
+         {S(CU, L"Environment", L"POWERSHELL_TELEMETRY_OPTOUT", L"1")}},
     };
     return all;
 }
@@ -711,7 +836,11 @@ bool ReadRaw(const RegValue& v, Saved& out) {
 bool Matches(const RegValue& v, const Saved& cur) {
     if (!cur.had) return false;
     if (v.type == REG_DWORD) return cur.type == REG_DWORD && cur.value == std::to_wstring(v.num);
-    return (cur.type == REG_SZ || cur.type == REG_EXPAND_SZ) && _wcsicmp(cur.value.c_str(), v.text) == 0;
+    if (cur.type != REG_SZ && cur.type != REG_EXPAND_SZ) return false;
+    if (_wcsicmp(cur.value.c_str(), v.text) == 0) return true;
+    // переменные-флаги (DOTNET_CLI_TELEMETRY_OPTOUT...) понимают и true/yes - такое тоже «включено»
+    return wcscmp(v.text, L"1") == 0 &&
+           (_wcsicmp(cur.value.c_str(), L"true") == 0 || _wcsicmp(cur.value.c_str(), L"yes") == 0);
 }
 
 LONG Write(HKEY k, const wchar_t* name, DWORD type, const std::wstring& value) {
@@ -731,6 +860,278 @@ LONG Write(HKEY k, const wchar_t* name, DWORD type, const std::wstring& value) {
 
 bool ReadValue(const RegValue& v, Saved& out) { return ReadRaw(v, out); }
 
+// ---------------- задачи планировщика ----------------
+
+namespace {
+
+// COM на время вызова: окно уже в STA (OleInitialize), запуск без окна - нет
+struct Com {
+    bool mine;
+    Com() : mine(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {}
+    ~Com() {
+        if (mine) CoUninitialize();
+    }
+};
+
+IRegisteredTask* OpenTask(const wchar_t* path, ITaskService** svcOut) {
+    ITaskService* svc = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&svc)))
+        return nullptr;
+    VARIANT empty;
+    VariantInit(&empty);
+    IRegisteredTask* task = nullptr;
+    if (SUCCEEDED(svc->Connect(empty, empty, empty, empty))) {
+        std::wstring p = path;
+        size_t cut = p.find_last_of(L'\\');
+        ITaskFolder* folder = nullptr;
+        BSTR dir = SysAllocString(cut == 0 ? L"\\" : p.substr(0, cut).c_str());
+        BSTR name = SysAllocString(p.substr(cut + 1).c_str());
+        if (SUCCEEDED(svc->GetFolder(dir, &folder))) {
+            if (FAILED(folder->GetTask(name, &task))) task = nullptr;
+            folder->Release();
+        }
+        SysFreeString(dir);
+        SysFreeString(name);
+    }
+    *svcOut = svc;
+    return task;
+}
+
+bool SetTaskEnabled(const wchar_t* path, bool on) {
+    Com com;
+    ITaskService* svc = nullptr;
+    IRegisteredTask* t = OpenTask(path, &svc);
+    bool ok = t && SUCCEEDED(t->put_Enabled(on ? VARIANT_TRUE : VARIANT_FALSE));
+    if (t) t->Release();
+    if (svc) svc->Release();
+    return ok;
+}
+
+std::wstring TaskKey(const wchar_t* path) { return std::wstring(L"task|") + path; }
+
+// ---------------- hosts ----------------
+
+std::wstring HostsPath() {
+    wchar_t win[MAX_PATH] = {};
+    GetWindowsDirectoryW(win, MAX_PATH);
+    return std::wstring(win) + L"\\System32\\drivers\\etc\\hosts";
+}
+
+std::string ReadHosts() {
+    std::string out;
+    HANDLE f = CreateFileW(HostsPath().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return out;
+    char buf[8192];
+    DWORD got = 0;
+    while (ReadFile(f, buf, sizeof(buf), &got, nullptr) && got && out.size() < (4u << 20)) out.append(buf, got);
+    CloseHandle(f);
+    return out;
+}
+
+bool WriteHosts(const std::string& text) {
+    std::wstring path = HostsPath();
+    DWORD attr = GetFileAttributesW(path.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_READONLY))
+        SetFileAttributesW(path.c_str(), attr & ~FILE_ATTRIBUTE_READONLY);
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD put = 0;
+    bool ok = WriteFile(f, text.data(), (DWORD)text.size(), &put, nullptr) && put == text.size();
+    CloseHandle(f);
+    return ok;
+}
+
+std::vector<std::string> Lines(const std::string& text) {
+    std::vector<std::string> out;
+    size_t a = 0;
+    for (size_t e; (e = text.find('\n', a)) != std::string::npos; a = e + 1) out.push_back(text.substr(a, e - a));
+    if (a < text.size()) out.push_back(text.substr(a));
+    for (std::string& l : out)
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+    return out;
+}
+
+std::string LowA(std::string s) {
+    for (char& c : s) c = (char)tolower((unsigned char)c);
+    return s;
+}
+
+// строка «адрес домен [# ...]»: закрывает ли она домен
+bool LineBlocks(const std::string& line, const std::string& domain) {
+    std::string l = LowA(line.substr(0, line.find('#')));
+    size_t a = l.find_first_not_of(" \t");
+    if (a == std::string::npos) return false;
+    size_t b = l.find_first_of(" \t", a);
+    if (b == std::string::npos) return false;
+    std::string ip = l.substr(a, b - a);
+    if (ip != "0.0.0.0" && ip != "127.0.0.1" && ip != "::" && ip != "::1") return false;
+    for (size_t p = b;;) {
+        size_t s = l.find_first_not_of(" \t", p);
+        if (s == std::string::npos) return false;
+        size_t e = l.find_first_of(" \t", s);
+        if (l.substr(s, e == std::string::npos ? std::string::npos : e - s) == LowA(domain)) return true;
+        if (e == std::string::npos) return false;
+        p = e;
+    }
+}
+
+std::vector<std::string> Narrow8(const std::vector<const wchar_t*>& v) {
+    std::vector<std::string> out;
+    for (const wchar_t* w : v) {
+        std::string s;
+        for (const wchar_t* c = w; *c; ++c) s += (char)*c;  // домены - только латиница
+        out.push_back(s);
+    }
+    return out;
+}
+
+bool OursInHosts(const std::string& hosts, const std::vector<std::string>& domains) {
+    for (const std::string& l : Lines(hosts))
+        if (l.find(kHostsMark) != std::string::npos)
+            for (const std::string& d : domains)
+                if (LineBlocks(l, d)) return true;
+    return false;
+}
+
+}  // namespace
+
+int TaskEnabled(const wchar_t* path) {
+    Com com;
+    ITaskService* svc = nullptr;
+    IRegisteredTask* t = OpenTask(path, &svc);
+    int r = -1;
+    VARIANT_BOOL on = VARIANT_FALSE;
+    if (t && SUCCEEDED(t->get_Enabled(&on))) r = on ? 1 : 0;
+    if (t) t->Release();
+    if (svc) svc->Release();
+    return r;
+}
+
+std::string HostsText() { return ReadHosts(); }
+
+bool HostsBlocks(const std::string& hosts, const std::string& domain) {
+    for (const std::string& l : Lines(hosts))
+        if (LineBlocks(l, domain)) return true;
+    return false;
+}
+
+std::string HostsAdd(const std::string& hosts, const std::vector<std::string>& domains) {
+    std::string out = hosts;
+    if (!out.empty() && out.back() != '\n') out += "\r\n";
+    for (const std::string& d : domains)
+        if (!HostsBlocks(hosts, d)) out += "0.0.0.0 " + d + " " + kHostsMark + "\r\n";
+    return out;
+}
+
+std::string HostsRemove(const std::string& hosts, const std::vector<std::string>& domains) {
+    std::string out;
+    bool crlf = hosts.find("\r\n") != std::string::npos || hosts.empty();
+    for (const std::string& l : Lines(hosts)) {
+        bool drop = false;
+        if (l.find(kHostsMark) != std::string::npos)
+            for (const std::string& d : domains) drop = drop || LineBlocks(l, d);
+        if (!drop) out += l + (crlf ? "\r\n" : "\n");
+    }
+    return out;
+}
+
+// ---------------- журнал ----------------
+
+namespace {
+
+std::wstring t_source = L"окно";  // один на процесс: окно и RadialMenu правят из одного потока
+
+std::wstring JournalFile(bool create) {
+    wchar_t* app = nullptr;
+    std::wstring dir;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &app))) dir = std::wstring(app);
+    CoTaskMemFree(app);
+    if (dir.empty()) return L"";
+    dir += L"\\RadialShutUp";
+    if (create) CreateDirectoryW(dir.c_str(), nullptr);
+    return dir + L"\\journal.tsv";
+}
+
+void WriteJournal(const Setting& s, bool priv, bool ok) {
+    std::wstring file = JournalFile(true);
+    if (file.empty()) return;
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    wchar_t when[32];
+    swprintf(when, 32, L"%02d.%02d.%04d %02d:%02d", t.wDay, t.wMonth, t.wYear, t.wHour, t.wMinute);
+    JournalEntry e{when, t_source, s.id, priv, ok};
+    std::string line = Narrow(EncodeJournal(e) + L"\r\n");
+    HANDLE f = CreateFileW(file.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD put = 0;
+    WriteFile(f, line.data(), (DWORD)line.size(), &put, nullptr);
+    CloseHandle(f);
+}
+
+}  // namespace
+
+void SetSource(const std::wstring& source) { t_source = source; }
+
+std::wstring EncodeJournal(const JournalEntry& e) {
+    auto clean = [](std::wstring v) {
+        for (wchar_t& c : v)
+            if (c == L'\t' || c == L'\r' || c == L'\n') c = L' ';
+        return v;
+    };
+    return clean(e.when) + L"\t" + clean(e.source) + L"\t" + clean(e.id) + L"\t" + (e.priv ? L"1" : L"0") + L"\t" +
+           (e.ok ? L"1" : L"0");
+}
+
+bool DecodeJournal(const std::wstring& line, JournalEntry& out) {
+    std::vector<std::wstring> p;
+    size_t a = 0;
+    for (size_t e; (e = line.find(L'\t', a)) != std::wstring::npos; a = e + 1) p.push_back(line.substr(a, e - a));
+    p.push_back(line.substr(a));
+    if (p.size() != 5 || p[2].empty()) return false;
+    while (!p[4].empty() && (p[4].back() == L'\r' || p[4].back() == L' ')) p[4].pop_back();
+    out = {p[0], p[1], p[2], p[3] == L"1", p[4] == L"1"};
+    return true;
+}
+
+std::vector<JournalEntry> ReadJournal(size_t max) {
+    std::vector<JournalEntry> out;
+    std::wstring file = JournalFile(false);
+    if (file.empty()) return out;
+    HANDLE f =
+        CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return out;
+    std::string bytes;
+    char buf[8192];
+    DWORD got = 0;
+    while (ReadFile(f, buf, sizeof(buf), &got, nullptr) && got) bytes.append(buf, got);
+    CloseHandle(f);
+    std::vector<std::wstring> lines = Split(Widen(bytes), L'\n');
+    for (size_t i = lines.size(); i-- > 0 && out.size() < max;) {
+        JournalEntry e;
+        if (DecodeJournal(lines[i], e)) out.push_back(e);
+    }
+    return out;
+}
+
+// ---------------- готовые профили ----------------
+
+const wchar_t* BuiltinName(int which) {
+    static const wchar_t* names[kBuiltinProfiles] = {L"Мягкий", L"Строгий", L"Игровой"};
+    return which >= 0 && which < kBuiltinProfiles ? names[which] : L"";
+}
+
+std::vector<std::wstring> BuiltinProfile(int which) {
+    std::vector<std::wstring> out;
+    for (const Setting& s : Catalog())
+        if (s.level == Level::Recommended || (which == 1 && s.level == Level::Limited)) out.push_back(s.id);
+    if (which == 2)  // во время игры меньше фона: Edge, виджеты и Copilot не висят в памяти, Windows не ставит своё
+        for (const wchar_t* id :
+             {L"edge_background", L"widgets", L"copilot_off", L"no_auto_reboot", L"tasks_appraiser"})
+            out.push_back(id);
+    return out;
+}
+
 Status StatusOf(const Setting& s, const Backup& user, const Backup& machine) {
     Status st;
     size_t on = 0;
@@ -740,12 +1141,29 @@ Status StatusOf(const Setting& s, const Backup& user, const Backup& machine) {
         const Backup& b = v.root == HKEY_LOCAL_MACHINE ? machine : user;
         st.ours = st.ours || b.count(BackupKey(v));
     }
-    st.state = on == 0 ? State::Off : on == s.values.size() ? State::On : State::Partial;
+    size_t total = s.values.size();
+    for (const wchar_t* t : s.tasks) {
+        int e = TaskEnabled(t);
+        if (e < 0) continue;  // такой задачи в этой Windows нет - не считается
+        ++total;
+        on += e == 0;
+        st.ours = st.ours || machine.count(TaskKey(t));
+    }
+    if (!s.hosts.empty()) {
+        std::string hosts = ReadHosts();
+        std::vector<std::string> d = Narrow8(s.hosts);
+        size_t blocked = 0;
+        for (const std::string& x : d) blocked += HostsBlocks(hosts, x);
+        on += blocked == d.size();
+        ++total;
+        st.ours = st.ours || OursInHosts(hosts, d);
+    }
+    st.state = on == 0 ? State::Off : on >= total ? State::On : State::Partial;
     return st;
 }
 
 bool Apply(const Setting& s, bool priv, const Log& log) {
-    if (s.Machine() && !IsAdmin()) {
+    if (s.Admin() && !IsAdmin()) {
         if (log) log(std::wstring(s.title) + L": нужны права администратора.");
         return false;
     }
@@ -794,6 +1212,40 @@ bool Apply(const Setting& s, bool priv, const Log& log) {
                 ok = false;  // запись в бэкапе остаётся: вернуть можно будет позже
         }
     }
+    // задачи планировщика: прежнее состояние - в бэкап компьютера, как значения HKLM
+    for (const wchar_t* t : s.tasks) {
+        std::wstring key = TaskKey(t);
+        int e = TaskEnabled(t);
+        if (priv) {
+            if (e < 0) continue;  // такой задачи нет - нечего выключать
+            if (!machine.count(key)) {
+                Saved old;
+                old.had = true;
+                old.value = e ? L"1" : L"0";
+                if (!SaveEntry(HKEY_LOCAL_MACHINE, key, old)) {
+                    ok = false;
+                    continue;
+                }
+                machine[key] = old;
+            }
+            ok = SetTaskEnabled(t, false) && ok;
+        } else {
+            auto it = machine.find(key);
+            if (it == machine.end()) continue;
+            if (e < 0 || SetTaskEnabled(t, it->second.value == L"1"))
+                ok = DropEntry(HKEY_LOCAL_MACHINE, key) && ok;
+            else
+                ok = false;
+        }
+    }
+    // hosts: свои строки помечены - «как было» убирает только их
+    if (!s.hosts.empty()) {
+        std::string hosts = ReadHosts();
+        std::vector<std::string> d = Narrow8(s.hosts);
+        std::string next = priv ? HostsAdd(hosts, d) : HostsRemove(hosts, d);
+        if (next != hosts) ok = WriteHosts(next) && ok;
+    }
+    WriteJournal(s, priv, ok);
     if (log) log(std::wstring(s.title) + (ok ? (priv ? L": включено." : L": как было.") : L": не всё получилось."));
     return ok;
 }
@@ -803,7 +1255,7 @@ void NotifyChanged(bool wait) {
     HANDLE t = CreateThread(
         nullptr, 0,
         [](LPVOID) -> DWORD {
-            for (const wchar_t* what : {L"Policy", L"TraySettings"})
+            for (const wchar_t* what : {L"Policy", L"TraySettings", L"Environment"})
                 SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)what, SMTO_ABORTIFHUNG, 300, nullptr);
             return 0;
         },

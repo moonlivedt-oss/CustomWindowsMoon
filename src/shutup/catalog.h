@@ -29,8 +29,13 @@ struct Setting {
     const wchar_t* why;
     Level level;
     std::vector<RegValue> values;
-    bool Machine() const;  // есть значения в HKLM - нужны права
+    // задачи планировщика телеметрии (путь «\\Microsoft\\Windows\\...»): «включено» - задача выключена
+    std::vector<const wchar_t*> tasks = {};
+    // домены, закрытые строкой «0.0.0.0 домен # RadialShutUp» в hosts
+    std::vector<const wchar_t*> hosts = {};
+    bool Machine() const;  // для всего компьютера: HKLM, задачи, hosts
     bool User() const;     // есть значения в HKCU - пишутся в профиль того, от чьего имени запущено
+    bool Admin() const;    // нужны права: для компьютера или политики в HKCU\Software\Policies (их пишет только админ)
 };
 
 // что нужно, чтобы правка заработала: значения Проводника он перечитывает при перезапуске, службы - при загрузке
@@ -77,6 +82,34 @@ bool ReadValue(const RegValue& v, Saved& out);
 using Log = std::function<void(const std::wstring&)>;
 // Включить (priv) или вернуть как было. HKLM без прав не трогается - false и пояснение в log.
 bool Apply(const Setting& s, bool priv, const Log& log);
+// откуда правка - для журнала: «окно», «профиль», «без окна», «RadialMenu»...
+void SetSource(const std::wstring& source);
+
+// ---------------- журнал ----------------
+// %APPDATA%\RadialShutUp\journal.tsv: время, откуда, id, включено (1) или как было (0), получилось ли
+struct JournalEntry {
+    std::wstring when, source, id;
+    bool priv = false, ok = false;
+};
+std::wstring EncodeJournal(const JournalEntry& e);
+bool DecodeJournal(const std::wstring& line, JournalEntry& out);
+std::vector<JournalEntry> ReadJournal(size_t max);  // свежие первыми
+
+// ---------------- готовые профили ----------------
+// 0 - мягкий (рекомендуемое), 1 - строгий (+ с оговорками), 2 - игровой (мягкий + меньше фона во время игры)
+constexpr int kBuiltinProfiles = 3;
+const wchar_t* BuiltinName(int which);
+std::vector<std::wstring> BuiltinProfile(int which);
+// страница Параметров Windows для настройки (ms-settings:...); nullptr - своей страницы нет (details.cpp)
+const wchar_t* SettingsUri(const std::wstring& id);
+
+// задачи планировщика и hosts - для проверки и тестов
+int TaskEnabled(const wchar_t* path);  // 1 - включена, 0 - выключена, -1 - нет такой
+std::string HostsText();               // содержимое hosts как есть
+// строки hosts: закрыт ли домен (любой строкой 0.0.0.0/127.0.0.1 домен), добавить свои, убрать свои
+bool HostsBlocks(const std::string& hosts, const std::string& domain);
+std::string HostsAdd(const std::string& hosts, const std::vector<std::string>& domains);
+std::string HostsRemove(const std::string& hosts, const std::vector<std::string>& domains);
 // разослать окнам «политики и настройки поменялись» - часть значений Проводник и Параметры подхватят без перезапуска
 void NotifyChanged(bool wait = false);
 

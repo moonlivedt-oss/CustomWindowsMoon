@@ -650,6 +650,32 @@ void TestSysItemOff() {
 }
 
 // «Подробнее»: знакомые программы в любом регистре и с путём, у каждого действия кольца утилит есть текст
+// RadialShutUp: hosts (свои строки помечены, чужие не трогаются), журнал, готовые профили
+void TestShutUpExtras() {
+    std::string hosts = "# Copyright\r\n127.0.0.1 localhost\r\n0.0.0.0 watson.microsoft.com\r\n";
+    CHECK(shutup::HostsBlocks(hosts, "watson.microsoft.com"));
+    CHECK(!shutup::HostsBlocks(hosts, "v10.events.data.microsoft.com"));
+    CHECK(!shutup::HostsBlocks("# 0.0.0.0 v10.events.data.microsoft.com\r\n", "v10.events.data.microsoft.com"));
+    std::string added = shutup::HostsAdd(hosts, {"watson.microsoft.com", "v10.events.data.microsoft.com"});
+    CHECK(shutup::HostsBlocks(added, "v10.events.data.microsoft.com"));
+    CHECK(added.find("0.0.0.0 watson.microsoft.com # RadialShutUp") == std::string::npos);  // уже был - не дублируем
+    std::string back = shutup::HostsRemove(added, {"watson.microsoft.com", "v10.events.data.microsoft.com"});
+    CHECK(back == hosts);  // своя строка ушла, чужая (без пометки) осталась
+    shutup::JournalEntry e{L"25.10.2026 21:40", L"окно\tс табуляцией", L"ads_id", true, false}, d;
+    CHECK(shutup::DecodeJournal(shutup::EncodeJournal(e), d));
+    CHECK(d.id == L"ads_id" && d.priv && !d.ok && d.source == L"окно с табуляцией");
+    CHECK(!shutup::DecodeJournal(L"мусор", d));
+    std::vector<std::wstring> soft = shutup::BuiltinProfile(0), strict = shutup::BuiltinProfile(1),
+                              game = shutup::BuiltinProfile(2);
+    CHECK(!soft.empty() && strict.size() > soft.size() && game.size() > soft.size());
+    for (const std::wstring& id : game) CHECK(shutup::Find(id) != nullptr);
+    CHECK(std::find(soft.begin(), soft.end(), L"onedrive") == soft.end());  // не рекомендуемое - ни в одном
+    CHECK(std::find(strict.begin(), strict.end(), L"onedrive") == strict.end());
+    CHECK(shutup::Find(L"office_telemetry")->Admin() && !shutup::Find(L"office_telemetry")->Machine());
+    CHECK(shutup::Find(L"tasks_ceip")->Machine() && shutup::Find(L"hosts_block")->Machine());
+    CHECK(shutup::SettingsUri(L"app_webcam") != nullptr && shutup::SettingsUri(L"нет") == nullptr);
+}
+
 void TestExplain() {
     CHECK(!explain::Process(L"chrome.exe").empty());
     CHECK(explain::Process(L"C:\\Program Files\\Google\\Chrome.EXE") == explain::Process(L"chrome.exe"));
@@ -677,11 +703,11 @@ void TestShutUpCatalog() {
     const auto& all = shutup::Catalog();
     CHECK(all.size() >= 50);
     std::vector<std::wstring> ids, groups = shutup::Groups();
-    CHECK(groups.size() == 8);
+    CHECK(groups.size() == 9);
     for (const shutup::Setting& s : all) {
         CHECK(std::find(ids.begin(), ids.end(), s.id) == ids.end());  // id уникален: по нему профиль и бэкап
         ids.push_back(s.id);
-        CHECK(!s.values.empty() && wcslen(s.title) > 0 && wcslen(s.why) > 0);
+        CHECK((!s.values.empty() || !s.tasks.empty() || !s.hosts.empty()) && wcslen(s.title) > 0 && wcslen(s.why) > 0);
         CHECK(std::find(groups.begin(), groups.end(), s.group) != groups.end());
         CHECK(shutup::Find(s.id) == &s);
         for (const shutup::RegValue& v : s.values) {
@@ -1255,6 +1281,7 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestContests();
     TestShutUpCatalog();
     TestExplain();
+    TestShutUpExtras();
     TestSecurityHeuristics();
     TestSysItemOff();
     TestModeSwitch();

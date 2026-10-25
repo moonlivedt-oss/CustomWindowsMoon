@@ -55,7 +55,7 @@ add_executable(RadialShutUp WIN32 src/shutup/main.cpp src/shutup/catalog.cpp src
 target_include_directories(RadialShutUp PRIVATE src)
 target_compile_definitions(RadialShutUp PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 target_link_libraries(RadialShutUp PRIVATE gdiplus shlwapi shell32 ole32 oleaut32 user32 gdi32 comctl32 comdlg32
-  dwmapi windowscodecs uuid advapi32)
+  dwmapi windowscodecs uuid advapi32 taskschd)
 target_compile_options(RadialShutUp PRIVATE ${RADIAL_WERROR})
 if(MINGW)
   target_link_options(RadialShutUp PRIVATE -municode -static -s)
@@ -69,7 +69,7 @@ add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.c
   src/tools/mft_parse.cpp src/tools/journal.cpp src/shutup/catalog.cpp src/shutup/details.cpp src/tools/explain.cpp src/tools/security_logic.cpp src/tools/sysitems_logic.cpp src/app/selring_logic.cpp src/desk/snipname.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/tools/selfwatch.cpp)
 target_include_directories(radial_tests PRIVATE src)
 target_compile_definitions(radial_tests PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
-target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 uuid bcrypt gdiplus wlanapi iphlpapi)
+target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 oleaut32 uuid taskschd bcrypt gdiplus wlanapi iphlpapi)
 target_compile_options(radial_tests PRIVATE ${RADIAL_WERROR})
 if(MINGW)
   target_link_options(radial_tests PRIVATE -municode -static)

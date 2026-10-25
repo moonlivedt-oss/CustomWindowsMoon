@@ -164,6 +164,9 @@ struct WeeklyMsg {  // kWeeklyTag: итог недельной проверки
     tools::Driver driver;
     std::vector<tools::ToolVersion> versions;
     bool versionsChecked = false;
+    // приватность (RadialShutUp и вкладка студии): включали у нас, а обновление Windows вернуло
+    std::vector<std::wstring> privacyDrift;  // id сброшенных
+    bool privacyChecked = false;
 };
 // видеокарта за игру: собирает поток слежки, итог - карточкой после игры (toolsui_watch.cpp)
 struct GpuStats {

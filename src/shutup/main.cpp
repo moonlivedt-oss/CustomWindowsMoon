@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -56,8 +57,17 @@ enum {
     ID_GROUP = 100,   // + номер группы: свернуть
     ID_TOGGLE = 1000,  // + номер настройки
     ID_MORE = 2000,    // + номер настройки: «Подробнее»
-    ID_MORE_ANIM = 3000
+    ID_MORE_ANIM = 3000,
+    ID_URI = 4000,      // + номер настройки: «Открыть в Параметрах Windows»
+    ID_JOURNAL = 6000,  // + строка журнала: откатить
+    ID_GROUPREC = 200,  // + номер группы: «Рекомендуемое» в заголовке группы
+    ID_PROFILES = 50,
+    ID_COMPARE_APPLY,
+    ID_COMPARE_CLOSE
 };
+
+constexpr wchar_t kWinKey[] = L"Software\\RadialShutUp\\Window";
+constexpr int kJournalFilter = 5;  // вкладка «Журнал» в фильтре
 
 std::wstring ExeFolder() {
     wchar_t p[MAX_PATH];
@@ -120,9 +130,11 @@ bool ForeignAdmin() {
 
 // почему настройку сейчас не тронуть; пусто - можно
 std::wstring BlockReason(const shutup::Setting& s, bool admin, bool foreign) {
-    if (s.Machine() && !admin)
+        if (s.Admin() && !admin)
         return L"«" + std::wstring(s.title) +
-               L"» - для всего компьютера: нужны права. Нажмите «Перезапустить с правами».";
+               (s.Machine() ? L"» - для всего компьютера: нужны права. Нажмите «Перезапустить с правами»."
+                            : L"» - политика, которую пишет только администратор (действует только для вас). Нажмите "
+                              L"«Перезапустить с правами».");
     if (s.User() && foreign)
         return L"«" + std::wstring(s.title) +
                L"» - ваша личная настройка, а права получены от другой учётной записи: запустите без прав.";
@@ -226,7 +238,14 @@ private:
     void Say(const std::wstring& s);
     std::wstring Blocked(size_t i) const { return BlockReason(shutup::Catalog()[i], admin_, foreign_); }
     // общая часть всех действий: правка, запись для «Отменить», что нужно перезапустить, рассылка, перечитать
-    Result Run(const std::vector<size_t>& items, bool priv, const std::wstring& what);
+    Result Run(const std::vector<size_t>& items, bool priv, const std::wstring& what, const wchar_t* source = L"окно");
+    // перед правкой сразу нескольких: что именно включится, что для компьютера, что потребует перезапуска
+    bool Preview(const std::vector<size_t>& items, const std::wstring& what);
+    void ApplyIds(const std::vector<std::wstring>& ids, const std::wstring& what, const wchar_t* source);
+    void GroupRecommended(size_t gi);
+    void Profiles();  // меню: готовые профили, отличия от них, файл
+    void SavePlacement();
+    bool LoadPlacement();  // размер и место окна, фильтр, свёрнутые группы; true - окно показано по сохранённому
     std::wstring Summary(const Result& r, const wchar_t* verb) const;
     void Toggle(size_t i, bool on);
     void Bulk(shutup::Level upTo);
@@ -259,6 +278,11 @@ private:
     std::vector<bool> folded_;
     std::wstring query_, msg_;
     int filter_ = 0;                             // все, рекомендуемые, с оговорками, не рекомендуемые, изменённые здесь
+    int compare_ = -1;                           // показать отличия от готового профиля (номер); -1 - нет
+    std::vector<std::wstring> compareIds_;
+    std::vector<shutup::JournalEntry> journal_;
+    std::map<std::wstring, int> taskState_;  // задачи планировщика: 1 включена, 0 выключена, -1 нет (на кадр - из кэша)
+    std::string hosts_;
     std::vector<std::pair<size_t, bool>> last_;  // последнее действие: что и в какую сторону правили
     std::wstring lastWhat_;
     HDC memDC_ = nullptr;
@@ -314,7 +338,7 @@ bool App::Create(HINSTANCE inst, int show) {
     UiColors c = UiPalette(cfg_);
     COLORREF cap = RGB(c.rail.GetR(), c.rail.GetG(), c.rail.GetB());
     DwmSetWindowAttribute(wnd_, 35, &cap, sizeof(cap));
-    ShowWindow(wnd_, show);
+    if (show == SW_HIDE || !LoadPlacement()) ShowWindow(wnd_, show);
     return true;
 }
 
@@ -324,6 +348,11 @@ void App::Reload() {
     st_.clear();
     for (const shutup::Setting& s : shutup::Catalog()) st_.push_back(shutup::StatusOf(s, user_, machine_));
     open_.resize(st_.size(), false);
+    journal_ = shutup::ReadJournal(200);
+    taskState_.clear();
+    for (const shutup::Setting& s : shutup::Catalog())
+        for (const wchar_t* t : s.tasks) taskState_[t] = shutup::TaskEnabled(t);
+    hosts_ = shutup::HostsText();
 }
 
 float App::Detail(size_t i, const RectF& r, bool draw) {
@@ -354,6 +383,27 @@ float App::Detail(size_t i, const RectF& r, bool draw) {
         if (it != b.end()) state += L",  до RadialShutUp: " + Shown(it->second);
         para(state, 10.0f, false, c.muted, u.S(7));
     }
+    for (const wchar_t* t : s.tasks) {
+        auto it = taskState_.find(t);
+        int e = it == taskState_.end() ? -1 : it->second;
+        para(std::wstring(L"Задача планировщика ") + t, 10.5f, false, c.text, u.S(1));
+        para(std::wstring(L"после включения: выключена,  сейчас: ") +
+                 (e < 0 ? L"нет в этой Windows" : e ? L"включена" : L"выключена"),
+             10.0f, false, c.muted, u.S(7));
+    }
+    if (!s.hosts.empty()) {
+        int blocked = 0;
+        std::wstring list;
+        for (const wchar_t* d : s.hosts) {
+            std::string a;
+            for (const wchar_t* ch = d; *ch; ++ch) a += (char)*ch;
+            blocked += shutup::HostsBlocks(hosts_, a);
+            list += (list.empty() ? L"" : L", ") + std::wstring(d);
+        }
+        para(L"hosts: 0.0.0.0 для " + list, 10.5f, false, c.text, u.S(1));
+        para(L"закрыто сейчас: " + std::to_wstring(blocked) + L" из " + std::to_wstring(s.hosts.size()), 10.0f, false,
+             c.muted, u.S(7));
+    }
     std::wstring when;
     switch (shutup::RestartOf(s)) {
         case shutup::Restart::Explorer:
@@ -370,8 +420,20 @@ float App::Detail(size_t i, const RectF& r, bool draw) {
         : st_[i].state == shutup::State::Off
             ? L" Вернуть можно в любой момент: RadialShutUp запомнит прежние значения перед правкой."
             : L" Это включено не RadialShutUp - вернуть отсюда нельзя, прежних значений нет.";
-    std::wstring who = s.Machine() ? L" Для всего компьютера - нужны права." : L" Только для вас - без прав.";
+    std::wstring who = s.Machine() ? L" Для всего компьютера - нужны права."
+                       : s.Admin() ? L" Только для вас, но политику пишет администратор - нужны права."
+                                   : L" Только для вас - без прав.";
     para(std::wstring(L"Уровень: ") + LevelName(s.level) + L". " + when + back + who, 10.5f, false, c.muted, 0);
+    if (const wchar_t* uri = shutup::SettingsUri(s.id)) {  // посмотреть, что показывает сама Windows
+        const wchar_t* t = L"Открыть в Параметрах Windows";
+        y += u.S(10);
+        RectF b(r.X, y, u.Measure(t, 12.5f, true) + u.S(34), u.S(32));
+        if (draw && u.Button(ID_URI + (int)i, b, t, Kind::Secondary)) {
+            std::wstring target = uri;
+            Defer([target] { ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
+        }
+        y += b.Height;
+    }
     return y - r.Y + u.S(14);
 }
 
@@ -387,6 +449,9 @@ bool App::Visible(size_t i) const {
     if (filter_ == 2 && s.level != shutup::Level::Limited) return false;
     if (filter_ == 3 && s.level != shutup::Level::NotRecommended) return false;
     if (filter_ == 4 && !st_[i].ours) return false;
+    if (compare_ >= 0 && (st_[i].state == shutup::State::On ||
+                          std::find(compareIds_.begin(), compareIds_.end(), s.id) == compareIds_.end()))
+        return false;
     if (query_.empty()) return true;
     std::wstring q = Lower(query_);
     return Lower(s.title).find(q) != std::wstring::npos || Lower(s.why).find(q) != std::wstring::npos ||
@@ -410,8 +475,9 @@ bool App::AskRestorePoint() {
     return true;
 }
 
-App::Result App::Run(const std::vector<size_t>& items, bool priv, const std::wstring& what) {
+App::Result App::Run(const std::vector<size_t>& items, bool priv, const std::wstring& what, const wchar_t* source) {
     Result r;
+    shutup::SetSource(source);
     std::vector<std::pair<size_t, bool>> did;
     const auto& all = shutup::Catalog();
     HCURSOR old = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
@@ -433,6 +499,7 @@ App::Result App::Run(const std::vector<size_t>& items, bool priv, const std::wst
         needReboot_ = needReboot_ || need == shutup::Restart::Reboot;
     }
     SetCursor(old);
+    shutup::SetSource(L"окно");
     if (!did.empty()) {
         last_ = std::move(did);
         lastWhat_ = what;
@@ -449,6 +516,140 @@ std::wstring App::Summary(const Result& r, const wchar_t* verb) const {
                       : L". Без прав пропущено: " + std::to_wstring(r.skipped) + L" (для всего компьютера)";
     if (r.failed) s += L". Не получилось: " + std::to_wstring(r.failed);
     return s + L".";
+}
+
+bool App::Preview(const std::vector<size_t>& items, const std::wstring& what) {
+    const auto& all = shutup::Catalog();
+    int can = 0, machine = 0, explorer = 0, reboot = 0, risky = 0;
+    std::wstring list, why;
+    for (size_t i : items) {
+        std::wstring b = Blocked(i);
+        if (!b.empty()) {
+            why = b;
+            continue;
+        }
+        const shutup::Setting& s = all[i];
+        ++can;
+        machine += s.Machine();
+        explorer += shutup::RestartOf(s) == shutup::Restart::Explorer;
+        reboot += shutup::RestartOf(s) == shutup::Restart::Reboot;
+        risky += s.level == shutup::Level::NotRecommended;
+        if (can <= 14)
+            list += L"\n    " + std::wstring(s.title) +
+                    (s.level == shutup::Level::NotRecommended ? L"  - не рекомендуется"
+                     : s.level == shutup::Level::Limited      ? L"  - с оговорками"
+                                                              : L"");
+    }
+    if (!can) {
+        Say(why.empty() ? L"Включать нечего." : why);
+        return false;
+    }
+    if (can > 14) list += L"\n    ... и ещё " + std::to_wstring(can - 14);
+    std::wstring text = what + L": включится " + Plural(can, L"настройка", L"настройки", L"настроек") + L":" + list;
+    std::wstring notes;
+    if (machine) notes += L"\nДля всего компьютера: " + std::to_wstring(machine) + L".";
+    if (items.size() > (size_t)can)
+        notes += L"\nПропущено без прав: " + std::to_wstring(items.size() - can) + L".";
+    if (explorer) notes += L"\nПосле перезапуска Проводника заработает: " + std::to_wstring(explorer) + L".";
+    if (reboot) notes += L"\nПосле перезагрузки заработает: " + std::to_wstring(reboot) + L".";
+    if (risky) notes += L"\nСреди них не рекомендуемых: " + std::to_wstring(risky) + L" - почитайте «Подробнее».";
+    text += L"\n" + notes + L"\n\nКаждую можно вернуть как было. Применить?";
+    return MessageBoxW(wnd_, text.c_str(), L"RadialShutUp", MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
+}
+
+void App::ApplyIds(const std::vector<std::wstring>& ids, const std::wstring& what, const wchar_t* source) {
+    std::vector<size_t> items;
+    const auto& all = shutup::Catalog();
+    for (const std::wstring& id : ids)
+        for (size_t i = 0; i < all.size(); ++i)
+            if (id == all[i].id && st_[i].state != shutup::State::On &&
+                std::find(items.begin(), items.end(), i) == items.end())
+                items.push_back(i);
+    if (items.empty()) {
+        Say(L"Из профиля включать нечего: всё уже включено.");
+        return;
+    }
+    if (!Preview(items, what) || !AskRestorePoint()) return;
+    Say(Summary(Run(items, true, what, source), L"Включено"));
+}
+
+void App::GroupRecommended(size_t gi) {
+    std::vector<size_t> items;
+    const auto& all = shutup::Catalog();
+    for (size_t i = 0; i < all.size(); ++i)
+        if (all[i].group == groups_[gi] && all[i].level == shutup::Level::Recommended &&
+            st_[i].state != shutup::State::On)
+            items.push_back(i);
+    if (items.empty() || !Preview(items, L"«" + groups_[gi] + L"», рекомендуемое") || !AskRestorePoint()) return;
+    Say(Summary(Run(items, true, groups_[gi]), L"Включено"));
+}
+
+void App::Profiles() {
+    HMENU m = CreatePopupMenu();
+    for (int k = 0; k < shutup::kBuiltinProfiles; ++k)
+        AppendMenuW(m, MF_STRING, 100 + k, (L"Включить профиль «" + std::wstring(shutup::BuiltinName(k)) + L"»").c_str());
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    for (int k = 0; k < shutup::kBuiltinProfiles; ++k)
+        AppendMenuW(m, MF_STRING | (compare_ == k ? MF_CHECKED : 0), 200 + k,
+                    (L"Отличия от «" + std::wstring(shutup::BuiltinName(k)) + L"»").c_str());
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_STRING, 300, L"Сохранить включённое в файл...");
+    AppendMenuW(m, MF_STRING, 301, L"Загрузить профиль из файла...");
+    POINT p;
+    GetCursorPos(&p);
+    SetForegroundWindow(wnd_);
+    int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, p.x, p.y, 0, wnd_, nullptr);
+    DestroyMenu(m);
+    if (cmd >= 100 && cmd < 100 + shutup::kBuiltinProfiles) {
+        int k = cmd - 100;
+        ApplyIds(shutup::BuiltinProfile(k), L"Профиль «" + std::wstring(shutup::BuiltinName(k)) + L"»", L"профиль");
+    } else if (cmd >= 200 && cmd < 200 + shutup::kBuiltinProfiles) {
+        compare_ = compare_ == cmd - 200 ? -1 : cmd - 200;
+        compareIds_ = compare_ >= 0 ? shutup::BuiltinProfile(compare_) : std::vector<std::wstring>{};
+        if (filter_ == kJournalFilter) filter_ = 0;
+    } else if (cmd == 300) {
+        Export();
+    } else if (cmd == 301) {
+        Import();
+    }
+}
+
+void App::SavePlacement() {
+    if (!IsWindowVisible(wnd_)) return;  // снимок --snap окна не показывает - его место не запоминаем
+    WINDOWPLACEMENT wp{sizeof(wp)};
+    GetWindowPlacement(wnd_, &wp);
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kWinKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &k, nullptr) != ERROR_SUCCESS)
+        return;
+    RegSetValueExW(k, L"Placement", 0, REG_BINARY, (const BYTE*)&wp, sizeof(wp));
+    DWORD f = (DWORD)filter_;
+    RegSetValueExW(k, L"Filter", 0, REG_DWORD, (const BYTE*)&f, sizeof(f));
+    std::wstring folded;
+    for (bool b : folded_) folded += b ? L'1' : L'0';
+    RegSetValueExW(k, L"Folded", 0, REG_SZ, (const BYTE*)folded.c_str(), (DWORD)((folded.size() + 1) * 2));
+    RegCloseKey(k);
+}
+
+bool App::LoadPlacement() {
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kWinKey, 0, KEY_QUERY_VALUE, &k) != ERROR_SUCCESS) return false;
+    DWORD f = 0, n = sizeof(f);
+    if (RegQueryValueExW(k, L"Filter", nullptr, nullptr, (BYTE*)&f, &n) == ERROR_SUCCESS && f <= kJournalFilter)
+        filter_ = (int)f;
+    wchar_t folded[64] = {};
+    n = sizeof(folded) - 2;
+    if (RegQueryValueExW(k, L"Folded", nullptr, nullptr, (BYTE*)folded, &n) == ERROR_SUCCESS)
+        for (size_t i = 0; i < folded_.size() && folded[i]; ++i) folded_[i] = folded[i] == L'1';
+    WINDOWPLACEMENT wp{};
+    n = sizeof(wp);
+    bool ok = RegQueryValueExW(k, L"Placement", nullptr, nullptr, (BYTE*)&wp, &n) == ERROR_SUCCESS &&
+              n == sizeof(wp) && wp.length == sizeof(wp);
+    RegCloseKey(k);
+    if (!ok) return false;
+    // окно вне всех мониторов (монитор отключили) - не прятать его туда
+    if (!MonitorFromRect(&wp.rcNormalPosition, MONITOR_DEFAULTTONULL)) return false;
+    wp.showCmd = wp.showCmd == SW_SHOWMAXIMIZED ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+    return SetWindowPlacement(wnd_, &wp) != 0;
 }
 
 void App::Toggle(size_t i, bool on) {
@@ -482,9 +683,9 @@ void App::Bulk(shutup::Level upTo) {
         Say(L"Всё это уже включено.");
         return;
     }
-    if (!AskRestorePoint()) return;
-    Say(Summary(Run(items, true, upTo == shutup::Level::Recommended ? L"рекомендуемые" : L"с оговорками"),
-                L"Включено"));
+    const wchar_t* what = upTo == shutup::Level::Recommended ? L"Рекомендуемые" : L"Рекомендуемые и с оговорками";
+    if (!Preview(items, what) || !AskRestorePoint()) return;
+    Say(Summary(Run(items, true, what), L"Включено"));
 }
 
 // включали здесь, а потом выключило обновление Windows, Параметры или чистильщик - включить снова
@@ -492,8 +693,8 @@ void App::Reapply() {
     std::vector<size_t> items;
     for (size_t i = 0; i < st_.size(); ++i)
         if (st_[i].Drifted()) items.push_back(i);
-    if (items.empty()) return;
-    Say(Summary(Run(items, true, L"сброшенное"), L"Снова включено"));
+    if (items.empty() || !Preview(items, L"Сброшенное")) return;
+    Say(Summary(Run(items, true, L"сброшенное", L"включить снова"), L"Снова включено"));
 }
 
 void App::RevertAll() {
@@ -574,17 +775,12 @@ void App::Import() {
         Say(L"Не удалось открыть файл.");
         return;
     }
-    std::vector<size_t> items;
-    const auto& all = shutup::Catalog();
-    for (const std::wstring& id : shutup::DecodeProfile(Widen(bytes)))
-        for (size_t i = 0; i < all.size(); ++i)
-            if (id == all[i].id && st_[i].state != shutup::State::On) items.push_back(i);
-    if (items.empty()) {
-        Say(L"Из профиля включать нечего: в файле нет настроек RadialShutUp или всё уже включено.");
+    std::vector<std::wstring> ids = shutup::DecodeProfile(Widen(bytes));
+    if (ids.empty()) {
+        Say(L"В файле нет настроек RadialShutUp.");
         return;
     }
-    if (!AskRestorePoint()) return;
-    Say(Summary(Run(items, true, L"профиль"), L"Из профиля включено"));
+    ApplyIds(ids, L"Профиль из файла", L"профиль");
 }
 
 void App::Elevate() {
@@ -651,6 +847,8 @@ void App::Paint() {
 bool App::Snap(const std::wstring& file, int w, int h, int filter, const std::wstring& open) {
     filter_ = filter;
     for (size_t i = 0; i < open_.size(); ++i) open_[i] = shutup::Catalog()[i].id == open;
+    if (const shutup::Setting* o = shutup::Find(open))  // раскрытая настройка - на виду: прочие группы свёрнуты
+        for (size_t gi = 0; gi < groups_.size(); ++gi) folded_[gi] = groups_[gi] != o->group;
     Bitmap bmp(w, h, PixelFormat32bppARGB);
     for (int n = 0; n < 30; ++n) {
         Graphics g(&bmp);
@@ -678,13 +876,20 @@ void App::Frame(float w, float h) {
     u.Fill(RectF(0, 0, w, h), c.win);
     const auto& all = shutup::Catalog();
     const float pad = u.S(24), top = u.S(178), bottom = u.S(44);
-    int drift = 0;
+    int drift = 0, diff = 0;
     for (const shutup::Status& s : st_) drift += s.Drifted();
+    if (compare_ >= 0)
+        for (size_t i = 0; i < all.size(); ++i)
+            diff += st_[i].state != shutup::State::On &&
+                    std::find(compareIds_.begin(), compareIds_.end(), all[i].id) != compareIds_.end();
+    const bool journal = filter_ == kJournalFilter;
+    const Color green = LevelColor(shutup::Level::Recommended);
 
     // ---------------- список по группам ----------------
     RectF view(0, top, w, std::max(0.0f, h - top - bottom));
     const float rowH = u.S(66), headH = u.S(48), gap = u.S(14), cardW = std::min(w - 2 * pad, u.S(1100));
-    const float cardX = (w - cardW) / 2, bannerH = drift ? u.S(64) + gap : 0;
+    const float banner1 = drift ? u.S(64) + gap : 0, banner2 = compare_ >= 0 ? u.S(64) + gap : 0;
+    const float cardX = (w - cardW) / 2, bannerH = banner1 + banner2, jH = u.S(44);
     float content = u.S(6) + bannerH;
     std::vector<std::vector<size_t>> rows(groups_.size());
     for (size_t i = 0; i < all.size(); ++i)
@@ -704,6 +909,7 @@ void App::Frame(float w, float h) {
         }
     for (size_t gi = 0; gi < groups_.size(); ++gi)
         if (!rows[gi].empty()) content += headH + (folded_[gi] ? 0 : gh[gi]) + gap;
+    if (journal) content = u.S(6) + bannerH + std::max<size_t>(journal_.size(), 1) * jH + u.S(20);
     float off = u.Scroll(ID_LIST, view, content + u.S(10));
     GraphicsState clip = u.G().Save();
     u.G().SetClip(view);
@@ -719,10 +925,65 @@ void App::Frame(float w, float h) {
                RectF(cardX + u.S(20), y + u.S(33), cardW - u.S(240), u.S(22)), c.muted, 11.0f);
         RectF b(cardX + cardW - u.S(200), y + u.S(15), u.S(180), u.S(34));
         if (u.Button(ID_DRIFT, b, L"Включить снова", Kind::Primary)) Defer([this] { Reapply(); });
-        y += bannerH;
+        y += banner1;
+    }
+    // ---------------- отличия от готового профиля ----------------
+    if (compare_ >= 0) {
+        RectF ban(cardX, y, cardW, banner2 - gap);
+        u.Fill(ban, WithAlpha(c.accent, 26), u.S(14));
+        u.Stroke(ban, WithAlpha(c.accent, 90), u.S(14));
+        std::wstring name = shutup::BuiltinName(compare_);
+        u.Text(diff ? L"До профиля «" + name + L"» не хватает " + Plural(diff, L"настройки", L"настроек", L"настроек")
+                    : L"Всё из профиля «" + name + L"» уже включено",
+               RectF(cardX + u.S(20), y + u.S(11), cardW - u.S(360), u.S(22)), c.text, 13.0f, true);
+        u.Text(L"Ниже - только они. Остальное на месте; лишнего профиль не выключает.",
+               RectF(cardX + u.S(20), y + u.S(33), cardW - u.S(360), u.S(22)), c.muted, 11.0f);
+        RectF close(cardX + cardW - u.S(130), y + u.S(15), u.S(110), u.S(34));
+        if (u.Button(ID_COMPARE_CLOSE, close, L"Закрыть", Kind::Secondary)) Defer([this] {
+                compare_ = -1;
+                compareIds_.clear();
+            });
+        if (diff &&
+            u.Button(ID_COMPARE_APPLY, RectF(close.X - u.S(190), close.Y, u.S(180), close.Height), L"Включить их",
+                     Kind::Primary))
+            Defer([this, name] { ApplyIds(compareIds_, L"Профиль «" + name + L"»", L"профиль"); });
+        y += banner2;
     }
     bool any = false;
-    for (size_t gi = 0; gi < groups_.size(); ++gi) {
+    // ---------------- журнал: что, когда и откуда меняли ----------------
+    if (journal && !journal_.empty()) {
+        any = true;
+        RectF card(cardX, y, cardW, journal_.size() * jH + u.S(8));
+        u.Fill(card, c.card, u.S(14));
+        u.Stroke(card, c.border, u.S(14));
+        for (size_t n = 0; n < journal_.size(); ++n) {
+            const shutup::JournalEntry& e = journal_[n];
+            float ry = y + u.S(4) + n * jH;
+            if (ry + jH < view.Y || ry > view.Y + view.Height) continue;
+            if (n) u.Fill(RectF(cardX + u.S(16), ry, cardW - u.S(32), 1), c.border);
+            const shutup::Setting* js = shutup::Find(e.id);
+            u.Text(e.when, RectF(cardX + u.S(20), ry + u.S(14), u.S(130), u.S(18)), c.muted, 10.5f);
+            float nameW = cardW * 0.42f;
+            u.Text(js ? js->title : e.id, RectF(cardX + u.S(150), ry + u.S(12), nameW, u.S(20)), c.text, 12.0f, true);
+            std::wstring what =
+                std::wstring(e.priv ? L"включено" : L"как было") + (e.ok ? L"" : L", не всё получилось") + L"  |  " + e.source;
+            u.Text(what, RectF(cardX + u.S(160) + nameW, ry + u.S(14), u.S(240), u.S(18)), e.ok ? c.muted : c.warn,
+                   10.5f);
+            if (!js || !e.ok) continue;
+            size_t idx = js - &all[0];
+            // откатить можно, пока так и есть: включённое ещё наше, возвращённое ещё не включено
+            bool can = e.priv ? st_[idx].ours : st_[idx].state != shutup::State::On;
+            if (!can) continue;
+            std::wstring t = e.priv ? L"Вернуть как было" : L"Включить снова";
+            float jbw = u.Measure(t, 12.5f, true) + u.S(30);
+            if (u.Button(ID_JOURNAL + (int)n, RectF(cardX + cardW - u.S(20) - jbw, ry + u.S(7), jbw, u.S(30)), t,
+                         Kind::Ghost)) {
+                bool back = !e.priv;
+                Defer([this, idx, back] { Toggle(idx, back); });
+            }
+        }
+    }
+    for (size_t gi = 0; gi < groups_.size() && !journal; ++gi) {
         if (rows[gi].empty()) continue;
         any = true;
         float folded = u.Anim(ID_GROUP + (int)gi, folded_[gi], 18);
@@ -750,14 +1011,25 @@ void App::Frame(float w, float h) {
                 u.G().DrawLines(&pen, pts, 3);
                 u.G().Restore(st);
             }
-            u.Text(groups_[gi], RectF(cardX + u.S(36), y + u.S(13), cardW * 0.5f, u.S(24)), c.text, 14.5f, true);
             std::wstring count = L"включено " + std::to_wstring(on) + L" из " + std::to_wstring(rows[gi].size());
-            float bw = u.S(120), bx = cardX + cardW - u.S(20) - bw;
+            float bw = u.S(120), bx = cardX + cardW - u.S(20) - bw, nameW = cardW * 0.5f;
+            int recOff = 0;
+            for (size_t i : rows[gi])
+                recOff += all[i].level == shutup::Level::Recommended && st_[i].state != shutup::State::On;
+            if (recOff) {  // включить рекомендуемое только этой группы
+                std::wstring t = L"Рекомендуемое: " + std::to_wstring(recOff);
+                float gbw = u.Measure(t, 12.5f, true) + u.S(30);
+                RectF gb(bx - u.S(180) - gbw, y + u.S(8), gbw, u.S(32));
+                if (u.Button(ID_GROUPREC + (int)gi, gb, t, Kind::Secondary)) Defer([this, gi] { GroupRecommended(gi); });
+                u.Tip(ID_GROUPREC + (int)gi, L"Включить рекомендуемые настройки этой группы");
+                nameW = std::max(u.S(80), gb.X - cardX - u.S(44));
+            }
+            u.Text(groups_[gi], RectF(cardX + u.S(36), y + u.S(13), nameW, u.S(24)), c.text, 14.5f, true);
             u.Text(count, RectF(bx - u.S(170), y + u.S(15), u.S(160), u.S(20)), c.muted, 11.0f, false, ui::Right);
             RectF track(bx, y + u.S(22), bw, u.S(5));
             u.Fill(track, c.field, u.S(3));
             float share = (float)on / rows[gi].size();
-            if (share > 0) u.Fill(RectF(bx, track.Y, bw * share, track.Height), c.accent, u.S(3));
+            if (share > 0) u.Fill(RectF(bx, track.Y, bw * share, track.Height), green, u.S(3));
         }
         y += headH;
         if (bodyH > 0.5f) {
@@ -774,7 +1046,19 @@ void App::Frame(float w, float h) {
                 bool on = st_[i].state == shutup::State::On;
                 RectF tg(cardX + u.S(20), row.Y + u.S(14), u.S(44), u.S(26));
                 bool v = on;
-                if (u.Toggle(ID_TOGGLE + (int)i, tg, v) && folded < 0.01f) Defer([this, i, v] { Toggle(i, v); });
+                // включено = защита: зелёный, как «рекомендуется», в любой теме (красный читался как «опасно»)
+                Color was = u.SwapAccent(green);
+                bool flipped = u.Toggle(ID_TOGGLE + (int)i, tg, v);
+                u.SwapAccent(was);
+                if (flipped && folded < 0.01f) Defer([this, i, v] { Toggle(i, v); });
+                {
+                    const wchar_t* t = st_[i].Drifted()                          ? L"сбросилось"
+                                       : on                                      ? L"защищено"
+                                       : st_[i].state == shutup::State::Partial ? L"частично"
+                                                                                 : L"как в Windows";
+                    Color tc = st_[i].Drifted() || st_[i].state == shutup::State::Partial ? c.warn : on ? green : c.faint;
+                    u.Text(t, RectF(cardX + u.S(4), row.Y + u.S(42), u.S(76), u.S(16)), tc, 9.0f, false, ui::Center);
+                }
                 // уровень - цветная точка у заголовка, как светофор ShutUp10
                 Color lc = LevelColor(s.level);
                 float tx = cardX + u.S(80);
@@ -794,7 +1078,10 @@ void App::Frame(float w, float h) {
                     chip(L"сбросилось", c.warnBg, c.warn);
                 else if (st_[i].state == shutup::State::Partial)
                     chip(L"частично", c.warnBg, c.warn);
-                if (s.Machine()) chip(L"для всех", c.field, c.muted);
+                if (s.Machine())
+                    chip(L"для всех", c.field, c.muted);
+                else if (s.Admin())
+                    chip(L"нужны права", c.field, c.muted);
                 if (st_[i].ours && !st_[i].Drifted()) chip(L"изменено здесь", WithAlpha(c.accent, 40), c.accent);
                 shutup::Restart need = shutup::RestartOf(s);
                 if (need == shutup::Restart::Reboot) chip(L"после перезагрузки", c.field, c.muted);
@@ -835,15 +1122,31 @@ void App::Frame(float w, float h) {
     }
     if (!any)
         u.EmptyState(ID_EMPTY, RectF(cardX, top + bannerH + u.S(40), cardW, u.S(200)),
-                     L"Ничего не найдено - смените фильтр.");
+                     journal ? L"Журнал пуст: здесь появится каждая правка - когда, откуда и что."
+                             : L"Ничего не найдено - смените фильтр.");
     u.G().Restore(clip);
 
     // ---------------- шапка поверх списка ----------------
     u.Fill(RectF(0, 0, w, top), c.win);
     u.Hover(ID_CHROME, RectF(0, 0, w, top));
     u.Text(L"RadialShutUp", RectF(pad, u.S(18), u.S(400), u.S(34)), c.text, 22.0f, true);
-    u.Text(L"Приватность Windows: понятные переключатели, каждый можно вернуть как было.",
-           RectF(pad, u.S(52), w * 0.6f, u.S(22)), c.muted, 12.0f);
+    {  // сводка справа: сколько защищено и сколько из рекомендуемого
+        int prot = 0, rec = 0, recOn = 0;
+        for (size_t i = 0; i < all.size(); ++i) {
+            bool on = st_[i].state == shutup::State::On;
+            prot += on;
+            if (all[i].level == shutup::Level::Recommended) ++rec, recOn += on;
+        }
+        float sw = u.S(330), sx = w - pad - sw;
+        u.Text(L"Защищено " + std::to_wstring(prot) + L" из " + std::to_wstring(all.size()) + L"   |   рекомендуемых " +
+                   std::to_wstring(recOn) + L" из " + std::to_wstring(rec),
+               RectF(sx, u.S(57), sw, u.S(18)), c.text, 11.0f, false, ui::Right);
+        RectF track(sx + u.S(40), u.S(76), sw - u.S(40), u.S(4));
+        u.Fill(track, c.field, u.S(2));
+        if (prot) u.Fill(RectF(track.X, track.Y, track.Width * prot / all.size(), track.Height), green, u.S(2));
+        u.Text(L"Включённый переключатель - защита включена: функция Windows выключена, данные не уходят.",
+               RectF(pad, u.S(52), std::max(u.S(200), std::min(w * 0.6f, sx - pad - u.S(12))), u.S(22)), c.muted, 12.0f);
+    }
     if (admin_) {
         std::wstring t = foreign_ ? L"Права другой учётной записи" : L"С правами администратора";
         float cw = u.Measure(t, 10.5f) + u.S(20);
@@ -857,8 +1160,8 @@ void App::Frame(float w, float h) {
     u.Field(
         ID_SEARCH, RectF(pad, u.S(84), u.S(260), u.S(34)), query_, [this](const std::wstring& v) { query_ = v; },
         L"Поиск настройки  (Ctrl+F)");
-    u.Segmented(ID_FILTER, RectF(pad + u.S(274), u.S(84), std::min(u.S(620), w - pad * 2 - u.S(274)), u.S(34)),
-                {L"Все", L"Рекомендуемые", L"С оговорками", L"Не рекомендуемые", L"Изменённые"}, filter_);
+    u.Segmented(ID_FILTER, RectF(pad + u.S(274), u.S(84), std::min(u.S(720), w - pad * 2 - u.S(274)), u.S(34)),
+                {L"Все", L"Рекомендуемые", L"С оговорками", L"Не рекомендуемые", L"Изменённые", L"Журнал"}, filter_);
     // действия: слева правка, справа служебное; не влезают - короткие подписи
     struct Act {
         int id;
@@ -873,8 +1176,7 @@ void App::Frame(float w, float h) {
         {ID_REVERT, L"Вернуть всё как было", L"Вернуть всё", Kind::Secondary, [this] { RevertAll(); }}};
     std::vector<Act> right = {
         {ID_RESTORE, L"Точка восстановления", L"Точка восст.", Kind::Ghost, [this] { Restore(); }},
-        {ID_EXPORT, L"Сохранить профиль", L"Сохранить", Kind::Ghost, [this] { Export(); }},
-        {ID_IMPORT, L"Загрузить профиль", L"Загрузить", Kind::Ghost, [this] { Import(); }}};
+        {ID_PROFILES, L"Профили", L"Профили", Kind::Ghost, [this] { Profiles(); }}};
     const float by = u.S(130), bh = u.S(34), bgap = u.S(8);
     auto widthOf = [&](const Act& a, bool brief) { return u.Measure(brief ? a.brief : a.full, 12.5f, true) + u.S(34); };
     auto rowW = [&](const std::vector<Act>& v, bool brief) {
@@ -1048,6 +1350,7 @@ LRESULT App::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             }
             break;
         case WM_DESTROY:
+            SavePlacement();
             if (memDC_) {
                 SelectObject(memDC_, oldBmp_);
                 DeleteObject(dib_);
@@ -1096,6 +1399,7 @@ int CliApply(const std::vector<size_t>& items) {
 // -1 - не служебный запуск, открыть окно
 int Cli(const std::vector<std::wstring>& a) {
     if (a.empty()) return -1;
+    shutup::SetSource(L"без окна");
     const auto& all = shutup::Catalog();
     if (a[0] == L"--status") {
         std::vector<shutup::Status> st = AllStatus();

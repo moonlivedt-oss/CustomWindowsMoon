@@ -277,6 +277,116 @@ const wchar_t* Details(const std::wstring& id) {
          L"Windows считает, какие программы вы запускаете, чтобы показывать «Часто используемые» в Пуске и "
          L"подсказки в поиске. Выключение - Пуск перестанет подбирать список по вашим привычкам. Подействует после "
          L"перезапуска Проводника."},
+
+        // ---------------- задачи планировщика и hosts ----------------
+        {L"tasks_ceip",
+         L"Задачи Consolidator и UsbCeip программы улучшения качества раз в день собирают статистику использования "
+         L"Windows и подключённых USB-устройств и отправляют её; Autochk\\Proxy передаёт данные проверки дисков. "
+         L"Задачи выключаются в планировщике (не удаляются) - как кнопкой «Отключить» в «Планировщике заданий». "
+         L"Ничего полезного не ломается."},
+        {L"tasks_feedback",
+         L"DmClient и DmClientOnScenarioDownload скачивают сценарии опросов и собирают данные для центра отзывов. "
+         L"Выключение убирает фоновый сбор; сам центр отзывов можно открыть и отправить отзыв вручную."},
+        {L"tasks_diskdiag",
+         L"Сборщик данных диагностики дисков отправляет сведения о дисках в Microsoft. Предупреждения о скором отказе "
+         L"диска (SMART) Windows и RadialMenu продолжат показывать - они работают отдельно."},
+        {L"tasks_appraiser",
+         L"Microsoft Compatibility Appraiser - одна из самых «тяжёлых» задач телеметрии: раз в день сканирует "
+         L"установленные программы и драйверы, иногда нагружая диск и процессор на несколько минут, и отправляет "
+         L"опись. По ней Windows решает, предлагать ли крупное обновление и о чём предупредить. Если выключить, "
+         L"обновление может прийти без предупреждения о несовместимой программе."},
+        {L"tasks_wer",
+         L"QueueReporting отправляет накопленные отчёты о падениях программ по расписанию. Отчёты останутся на диске, "
+         L"а в «Мониторе стабильности» по-прежнему будут видны падения. Решений от Microsoft для них не будет."},
+        {L"hosts_block",
+         L"В файл hosts дописываются строки «0.0.0.0 адрес # RadialShutUp» для серверов телеметрии и отчётов об "
+         L"ошибках - компьютер не может к ним подключиться, даже если служба телеметрии включена. Обновления Windows "
+         L"и Магазин этими адресами не пользуются. Но Microsoft Defender считает такую правку hosts угрозой "
+         L"(SettingsModifier:Win32/HostsFileHijack) и может вернуть файл - тогда здесь появится «сбросилось». "
+         L"«Как было» убирает только помеченные строки, ваши собственные записи в hosts не трогаются."},
+
+        // ---------------- программы ----------------
+        {L"office_telemetry",
+         L"Политики Office 2016, 2019, 2021 и Microsoft 365 (ветка 16.0): DisableTelemetry выключает агент "
+         L"телеметрии, SendTelemetry = 3 - не отправлять ни обязательные, ни необязательные данные сверх минимума. "
+         L"Политики в HKCU\\Software\\Policies пишет только администратор - нужны права, но действуют они "
+         L"только для вас. Office подхватит их при следующем запуске."},
+        {L"office_feedback",
+         L"QMEnable выключает программу улучшения качества Office, политики Feedback убирают кнопку «Отправить "
+         L"отзыв» с улыбкой и запрет прикладывать к отзыву снимок экрана (на нём мог оказаться документ). Нужны "
+         L"права, действует только для вас."},
+        {L"office_content",
+         L"«Возможности, которые анализируют ваше содержимое»: Designer в PowerPoint, «Редактор» с облачными "
+         L"подсказками, переводчик, преобразование рукописного ввода, подбор картинок. Для них текст документов "
+         L"уходит на серверы Microsoft. После выключения эти функции станут серыми; проверка орфографии на "
+         L"компьютере работает."},
+        {L"vscode_telemetry",
+         L"Политика VS Code TelemetryLevel = off: редактор не отправляет данные об использовании, ошибках и сбоях, "
+         L"а настройка telemetry.telemetryLevel в его параметрах становится недоступной для изменения. Действует "
+         L"для всех пользователей, после перезапуска VS Code. Расширения со своей телеметрией (например, от "
+         L"сторонних компаний) могут не слушаться."},
+        {L"vs_telemetry",
+         L"Visual Studio (2017-2022) перестаёт участвовать в программе улучшения качества: не отправляет "
+         L"статистику использования. Отчёты о сбоях, которые вы отправляете сами, работают."},
+        {L"dotnet_telemetry",
+         L"Переменная окружения DOTNET_CLI_TELEMETRY_OPTOUT = 1 для вашей учётной записи: команды dotnet build, run, "
+         L"new не отправляют статистику. Действует в новых терминалах и после перезапуска VS Code или Visual "
+         L"Studio. «Как было» удаляет переменную, если её не было."},
+        {L"pwsh_telemetry",
+         L"Переменная окружения POWERSHELL_TELEMETRY_OPTOUT = 1: PowerShell 7 при запуске не отправляет сведения о "
+         L"версии и системе. Встроенный Windows PowerShell 5.1 телеметрию не отправляет и так. Действует в новых "
+         L"окнах."},
+    };
+    auto it = all.find(id);
+    return it == all.end() ? nullptr : it->second;
+}
+
+const wchar_t* SettingsUri(const std::wstring& id) {
+    static const std::map<std::wstring, const wchar_t*> all = {
+        {L"ads_id", L"ms-settings:privacy-general"},
+        {L"lang_list", L"ms-settings:privacy-general"},
+        {L"tailored", L"ms-settings:privacy-general"},
+        {L"typing", L"ms-settings:privacy-speechtyping"},
+        {L"online_speech", L"ms-settings:privacy-speech"},
+        {L"activity", L"ms-settings:privacy-activityhistory"},
+        {L"location", L"ms-settings:privacy-location"},
+        {L"app_location", L"ms-settings:privacy-location"},
+        {L"find_device", L"ms-settings:findmydevice"},
+        {L"telemetry", L"ms-settings:privacy-feedback"},
+        {L"device_name", L"ms-settings:privacy-feedback"},
+        {L"diag_dumps", L"ms-settings:privacy-feedback"},
+        {L"feedback", L"ms-settings:privacy-feedback"},
+        {L"start_ads", L"ms-settings:personalization-start"},
+        {L"account_nag", L"ms-settings:personalization-start"},
+        {L"track_progs", L"ms-settings:personalization-start"},
+        {L"lock_tips", L"ms-settings:lockscreen"},
+        {L"lock_toasts", L"ms-settings:notifications"},
+        {L"welcome", L"ms-settings:notifications"},
+        {L"web_search", L"ms-settings:search-permissions"},
+        {L"search_history", L"ms-settings:search-permissions"},
+        {L"cloud_search", L"ms-settings:search-permissions"},
+        {L"search_highlights", L"ms-settings:search-permissions"},
+        {L"copilot", L"ms-settings:taskbar"},
+        {L"widgets", L"ms-settings:taskbar"},
+        {L"pen_suggest", L"ms-settings:pen"},
+        {L"app_account", L"ms-settings:privacy-accountinfo"},
+        {L"app_contacts", L"ms-settings:privacy-contacts"},
+        {L"app_calendar", L"ms-settings:privacy-calendar"},
+        {L"app_calls", L"ms-settings:privacy-callhistory"},
+        {L"app_email", L"ms-settings:privacy-email"},
+        {L"app_messages", L"ms-settings:privacy-messaging"},
+        {L"app_tasks", L"ms-settings:privacy-tasks"},
+        {L"app_radios", L"ms-settings:privacy-radios"},
+        {L"app_webcam", L"ms-settings:privacy-webcam"},
+        {L"app_mic", L"ms-settings:privacy-microphone"},
+        {L"settings_sync", L"ms-settings:backup"},
+        {L"cloud_clip", L"ms-settings:clipboard"},
+        {L"clip_history", L"ms-settings:clipboard"},
+        {L"p2p_updates", L"ms-settings:delivery-optimization"},
+        {L"no_auto_reboot", L"ms-settings:windowsupdate-options"},
+        {L"wu_drivers", L"ms-settings:windowsupdate-options"},
+        {L"defender_samples", L"windowsdefender://threatsettings"},
+        {L"wifi_hotspots", L"ms-settings:network-wifi"},
     };
     auto it = all.find(id);
     return it == all.end() ? nullptr : it->second;

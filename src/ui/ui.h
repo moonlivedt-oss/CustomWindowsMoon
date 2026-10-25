@@ -54,6 +54,12 @@ public:
     float S(float v) const { return (float)(v * k_); }
     double K() const { return k_; }
     const UiColors& C() const { return c_; }
+    // свой цвет одному элементу (переключатель приватности - зелёный в любой теме): вернуть прежний после
+    Color SwapAccent(Color c) {
+        Color o = c_.accent;
+        c_.accent = c;
+        return o;
+    }
     Gdiplus::Graphics& G() { return *g_; }
     bool Scaled() const;       // в кадре масштаб или поворот: картинки - со сглаживанием, не один к одному
     bool interactive = true;   // false - под открытым окном поверх (тур, библиотека)

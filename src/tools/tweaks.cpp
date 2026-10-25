@@ -58,11 +58,13 @@ bool SetPrivacyTweak(const std::wstring& id, bool priv, const Log& log) {
     const shutup::Setting* s = Find(id);
     if (!s || s->Machine()) return false;  // для всего компьютера - через JOB_PRIVACY
     ImportOld(false);
+    shutup::SetSource(L"RadialMenu");
     return shutup::Apply(*s, priv, log);
 }
 
 int RevertPrivacy(const Log& log) {
     ImportOld(false);
+    shutup::SetSource(L"RadialMenu");
     shutup::Backup user = shutup::LoadBackup(HKEY_CURRENT_USER), machine = shutup::LoadBackup(HKEY_LOCAL_MACHINE);
     int n = 0;
     for (const wchar_t* id : kIds) {
@@ -74,8 +76,24 @@ int RevertPrivacy(const Log& log) {
 }
 
 // Задача с правами: «on|id», «off|id» или «off|*» (всё своё для компьютера назад). id - только из списка вкладки.
+// «reapply|*» - снова включить всё, что требует прав и уже включалось нами (есть в бэкапе), а теперь сброшено:
+// значения берутся из каталога, не из запроса - задание не может включить ничего чужого.
 bool PrivacyAdminMain(const std::wstring& req, const Log& log) {
     std::vector<std::wstring> p = Split(req, L'|');
+    shutup::SetSource(L"RadialMenu");
+    if (p.size() == 2 && p[0] == L"reapply" && p[1] == L"*") {
+        shutup::Backup user = shutup::LoadBackup(HKEY_CURRENT_USER), machine = shutup::LoadBackup(HKEY_LOCAL_MACHINE);
+        int n = 0;
+        bool ok = true;
+        for (const shutup::Setting& s : shutup::Catalog())
+            if (s.Admin() && shutup::StatusOf(s, user, machine).Drifted()) {
+                ok = shutup::Apply(s, true, log) && ok;
+                ++n;
+            }
+        if (!n) log(L"Сброшенного для компьютера нет.");
+        if (n) shutup::NotifyChanged(true);
+        return ok;
+    }
     if (p.size() != 2 || (p[0] != L"on" && p[0] != L"off")) {
         log(L"Не понял запрос.");
         return false;

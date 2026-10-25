@@ -4,6 +4,7 @@
 #include <map>
 
 #include "core/perf.h"
+#include "shutup/catalog.h"
 
 namespace toolsui {
 
@@ -34,17 +35,39 @@ void SetDay(const std::wstring& what, int day) {
     ReleaseSRWLockExclusive(&g_dayLock);
 }
 
+// сборка Windows («26200.6899»): сменилась - обновление могло вернуть настройки приватности
+std::wstring WindowsBuild() {
+    wchar_t build[32] = L"";
+    DWORD n = sizeof(build), ubr = 0, un = sizeof(ubr);
+    const wchar_t* key = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+    RegGetValueW(HKEY_LOCAL_MACHINE, key, L"CurrentBuild", RRF_RT_REG_SZ, nullptr, build, &n);
+    RegGetValueW(HKEY_LOCAL_MACHINE, key, L"UBR", RRF_RT_REG_DWORD, nullptr, &ubr, &un);
+    return std::wstring(build) + L"." + std::to_wstring(ubr);
+}
+
+std::wstring SavedBuild() {
+    wchar_t v[64] = L"";
+    AcquireSRWLockShared(&g_dayLock);
+    GetPrivateProfileStringW(L"weekly", L"privacy-build", L"", v, 64, (tools::DataDir() + L"\\weekly.ini").c_str());
+    ReleaseSRWLockShared(&g_dayLock);
+    return v;
+}
+
 void Weekly() {
     if (g_weeklyRunning) return;
     int today = Today();
     bool growth = today - LastDay(L"growth") >= 7, health = today - LastDay(L"health") >= 7,
          driver = today - LastDay(L"driver") >= 3, versions = today - LastDay(L"versions") >= 7;
-    if (!growth && !health && !driver && !versions) return;
+    // приватность: раз в неделю и сразу после смены сборки Windows (крупные обновления возвращают настройки)
+    std::wstring build = WindowsBuild();
+    bool privacy = today - LastDay(L"privacy") >= 7 || build != SavedBuild();
+    if (!growth && !health && !driver && !versions && !privacy) return;
     g_weeklyRunning = true;
     struct Want {
-        bool growth, health, driver, versions;
+        bool growth, health, driver, versions, privacy;
+        std::wstring build;
     };
-    Want wanted{growth, health, driver, versions};
+    Want wanted{growth, health, driver, versions, privacy, build};
     bool started = bg::Run(
         [wanted] {
             const Want* want = &wanted;
@@ -77,6 +100,18 @@ void Weekly() {
                 m->versionsChecked = true;
                 if (!m->versions.empty()) SetDay(L"versions", today);
             }
+            if (want->privacy) {
+                shutup::Backup user = shutup::LoadBackup(HKEY_CURRENT_USER),
+                               machine = shutup::LoadBackup(HKEY_LOCAL_MACHINE);
+                for (const shutup::Setting& s : shutup::Catalog())
+                    if (shutup::StatusOf(s, user, machine).Drifted()) m->privacyDrift.push_back(s.id);
+                m->privacyChecked = true;
+                SetDay(L"privacy", today);
+                AcquireSRWLockExclusive(&g_dayLock);
+                WritePrivateProfileStringW(L"weekly", L"privacy-build", want->build.c_str(),
+                                           (tools::DataDir() + L"\\weekly.ini").c_str());
+                ReleaseSRWLockExclusive(&g_dayLock);
+            }
             CoUninitialize();
             HeavyDone(L"weekly");
             if (!PostMessageW(g_app, WM_TOOLS_JOB, kWeeklyTag, (LPARAM)m)) delete m;
@@ -105,6 +140,56 @@ void OnWeekly(WeeklyMsg* m) {
             }
     }
     if (g_busy) return;
+    if (!m->privacyDrift.empty()) {  // своя карточка: про приватность молчать неделю нельзя
+        std::vector<std::wstring> ids = m->privacyDrift;
+        std::wstring names;
+        int admin = 0;
+        for (const std::wstring& id : ids)
+            if (const shutup::Setting* s = shutup::Find(id)) {
+                admin += s->Admin();
+                if (names.size() < 120) names += (names.empty() ? L"" : L", ") + std::wstring(s->title);
+            }
+        g_askMore =
+            L"Эти настройки приватности включали в RadialShutUp или во вкладке студии, а теперь они снова как в "
+            L"Windows - "
+            L"чаще всего их возвращает крупное обновление. «Включить снова» запишет те же значения ещё раз: свои - "
+            L"сразу, "
+            L"для компьютера - заданием с правами (если оно создано; иначе откроется RadialShutUp). Прежние значения "
+            L"из "
+            L"бэкапа не меняются - «как было» вернёт то, что было до первой правки.";
+        Ask(
+            L"Windows вернула " + Plural((int)ids.size(), L"настройку", L"настройки", L"настроек") + L" приватности",
+            names + (ids.size() > 3 ? L" и др." : L"."), L"Включить снова", L"Открыть RadialShutUp",
+            [ids, admin] {
+                RunJob(L"Приватность", [ids, admin](const tools::Log& log, std::wstring& res) {
+                    shutup::SetSource(L"RadialMenu");
+                    int done = 0;
+                    for (const std::wstring& id : ids)
+                        if (const shutup::Setting* s = shutup::Find(id))
+                            if (!s->Admin()) done += shutup::Apply(*s, true, log);
+                    if (done) shutup::NotifyChanged(true);
+                    bool adminOk = true;
+                    if (admin && net::AdminReadyNow()) {
+                        elevate::Put(L"PrivacyJob", L"reapply|*");
+                        adminOk = net::RunAdmin(net::JOB_PRIVACY, log);
+                        if (adminOk) done += admin;
+                    } else if (admin) {
+                        ShellExecuteW(nullptr, L"open", (ExeDir() + L"\\RadialShutUp.exe").c_str(), nullptr, nullptr,
+                                      SW_SHOWNORMAL);
+                        adminOk = false;
+                    }
+                    res = L"Снова включено: " + std::to_wstring(done) +
+                          (adminOk ? L"." : L". Для компьютера нужны права - открыт RadialShutUp.");
+                    return adminOk;
+                });
+            },
+            [] {
+                ShellExecuteW(nullptr, L"open", (ExeDir() + L"\\RadialShutUp.exe").c_str(), nullptr, nullptr,
+                              SW_SHOWNORMAL);
+            },
+            30000, Toast::G_WARN);
+        return;
+    }
     // по одной карточке за раз: важнее здоровье диска, потом драйвер, потом рост
     if (!m->health.empty()) {
         g_card.Show(BoostCard::DONE, L"Диск: стоит посмотреть", m->health, Theme(), 20000, Toast::G_WARN);
