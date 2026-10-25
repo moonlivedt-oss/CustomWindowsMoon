@@ -27,6 +27,7 @@
 #include "app/afterwork.h"
 #include "app/gameprep.h"
 #include "app/resume.h"
+#include "app/selring.h"
 #include "desk/appvol.h"
 #include "desk/boost.h"
 #include "desk/gamemode.h"
@@ -349,6 +350,24 @@ bool Run(int& exitCode) {
             UINT dpi = GetDpiForSystem();
             while (!menu.Prewarm(&cfg, dpi, 1000)) {}
             menu.Film(&cfg, dpi, root, dir);
+        }
+        TerminateProcess(GetCurrentProcess(), 0);
+    } else if (Has(args, L"--sel-snap")) {  // --sel-snap <png> <текст> [сектор]: кольцо выделенного в картинку
+        size_t i = std::find(args.begin(), args.end(), L"--sel-snap") - args.begin();
+        std::wstring out = i + 1 < args.size() ? args[i + 1] : ExeDir() + L"\\sel_ring.png";
+        std::wstring text = i + 2 < args.size() ? args[i + 2] : L"ghbdtn, rfr ltkf";
+        int root = i + 3 < args.size() ? _wtoi(args[i + 3].c_str()) : 0;
+        SetEnvironmentVariableW(L"RADIAL_DEMO", L"1");
+        _putenv("RADIAL_DEMO=1");
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Gdip gdip;
+        static Config cfg = LoadOwnConfig();
+        static RadialMenu menu;
+        if (menu.Create(GetModuleHandleW(nullptr))) {
+            UINT dpi = GetDpiForSystem();
+            while (!menu.Prewarm(&cfg, dpi, 1000)) {}
+            menu.SnapNet(&cfg, selring::RingItems(text, false), dpi, root, 900, out);
         }
         TerminateProcess(GetCurrentProcess(), 0);
     } else if (Has(args,

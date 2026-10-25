@@ -349,6 +349,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.winFx = ParseBool(val);
             else if (key == L"window_ring")
                 cfg.winRing = ParseBool(val);
+            else if (key == L"selection_ring")
+                cfg.selectionRing = ParseBool(val);
             else if (key == L"desk_double")
                 cfg.deskDouble = ParseBool(val);
             else if (key == L"battery_glow")
@@ -470,6 +472,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"window_fx = " << (c.winFx ? 1 : 0) << L"\n";
     o << L"# Alt + ` (клавиша Ё) - кольцо открытых окон с миниатюрой, средняя кнопка закрывает окно\n";
     o << L"window_ring = " << (c.winRing ? 1 : 0) << L"\n";
+    o << L"# Ctrl + Alt + Пробел - кольцо выделенного текста: найти, перевести, раскладка, регистр, посчитать\n";
+    o << L"selection_ring = " << (c.selectionRing ? 1 : 0) << L"\n";
     o << L"# двойной клик по пустому столу - целое кольцо вокруг курсора\n";
     o << L"desk_double = " << (c.deskDouble ? 1 : 0) << L"\n";
     o << L"# свечение у нижнего края: заряд ниже battery_low процентов, подключили зарядку\n";

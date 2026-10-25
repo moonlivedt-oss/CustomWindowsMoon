@@ -38,6 +38,7 @@
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
 #include "desk/modeswitch.h"
+#include "app/selring.h"
 #include "shutup/catalog.h"
 
 namespace {
@@ -388,6 +389,37 @@ void TestSafeUrl() {
     CHECK(tools::SafeUrl(L"file:///C:/Windows").empty());
     CHECK(tools::SafeUrl(L"javascript:alert(1)").empty());
     CHECK(tools::SafeUrl(L"https://").empty());
+}
+
+// Кольцо выделенного: раскладка, калькулятор, регистр, пробелы, адрес поиска
+void TestSelRing() {
+    using namespace selring;
+    CHECK(FixLayout(L"ghbdtn") == L"привет");
+    CHECK(FixLayout(L"руддщ") == L"hello");
+    CHECK(FixLayout(L"Ghbdtn? rfr ltkf&") == L"Привет, как дела?");
+    CHECK(FixLayout(L"ntcn 123") == L"тест 123");  // цифры как были
+
+    double v = 0;
+    CHECK(Calc(L"2+2", v) && v == 4);
+    CHECK(Calc(L"2 * (3 + 4)", v) && v == 14);
+    CHECK(Calc(L"1,5*2", v) && v == 3);
+    CHECK(Calc(L"2^3^2", v) && v == 512);
+    CHECK(Calc(L"-3+10/4", v) && v == -0.5);
+    CHECK(Calc(L"7 % 3", v) && v == 1);
+    CHECK(Calc(L"6×7=", v) && v == 42);
+    CHECK(!Calc(L"42", v));     // просто число - не выражение
+    CHECK(!Calc(L"10:30", v));  // время, а не деление
+    CHECK(!Calc(L"1/0", v));
+    CHECK(!Calc(L"2+", v));
+    CHECK(!Calc(L"привет", v));
+    CHECK(FormatNumber(1.5, true) == L"1,5" && FormatNumber(3, false) == L"3" &&
+          FormatNumber(1.0 / 3, false) == L"0.3333333333");
+
+    CHECK(Sentence(L"пРИВЕТ МИР. ЕЩЁ РАЗ") == L"Привет мир. Ещё раз");
+    CHECK(Squeeze(L"  a   b\t c \r\n\r\n\r\n\r\nd  ") == L"a b c\n\nd");
+    CHECK(UrlEncode(L"a b&я") == L"a%20b%26%D1%8F");
+    CHECK(Words(L"Привет, мир! hello-world 42") == 5);
+    CHECK(HasCyrillic(L"abc ё") && !HasCyrillic(L"abc"));
 }
 
 // Режимы: включаются сразу, выключаются с запасом; «выключить вручную» держится, пока игра идёт
@@ -1087,4 +1119,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestSecurityHeuristics();
     TestSysItemOff();
     TestModeSwitch();
+    TestSelRing();
 }
