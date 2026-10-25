@@ -670,6 +670,7 @@ void TestShutUpCatalog() {
     CHECK(shutup::Find(L"telemetry") && shutup::Find(L"telemetry")->Machine());
     CHECK(shutup::Find(L"ads_id") && !shutup::Find(L"ads_id")->Machine());
     CHECK(!shutup::Find(L"нет такой"));
+    for (const shutup::Setting& s : all) CHECK(shutup::Details(s.id) != nullptr);  // «Подробнее» у каждой
     // что нужно для вступления в силу: службы - перезагрузка, Explorer\Advanced - перезапуск Проводника
     CHECK(shutup::RestartOf(*shutup::Find(L"diagtrack")) == shutup::Restart::Reboot);
     CHECK(shutup::RestartOf(*shutup::Find(L"copilot")) == shutup::Restart::Explorer);

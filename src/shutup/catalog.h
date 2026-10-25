@@ -38,6 +38,8 @@ enum class Restart { None, Explorer, Reboot };
 Restart RestartOf(const Setting& s);
 
 const std::vector<Setting>& Catalog();
+// «Подробнее»: что делает настройка и чем платите, человеческим языком (details.cpp); nullptr - текста нет
+const wchar_t* Details(const std::wstring& id);
 const Setting* Find(const std::wstring& id);
 std::vector<std::wstring> Groups();  // в порядке каталога
 
@@ -70,6 +72,8 @@ int ImportLegacy(HKEY root, const std::wstring& file);
 // ---------------- реестр ----------------
 bool IsAdmin();
 Status StatusOf(const Setting& s, const Backup& user, const Backup& machine);
+// текущее значение в виде записи бэкапа; false - значения нет
+bool ReadValue(const RegValue& v, Saved& out);
 using Log = std::function<void(const std::wstring&)>;
 // Включить (priv) или вернуть как было. HKLM без прав не трогается - false и пояснение в log.
 bool Apply(const Setting& s, bool priv, const Log& log);

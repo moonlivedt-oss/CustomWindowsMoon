@@ -7,7 +7,8 @@
 //   --reapply          снова включить то, что включали здесь, а обновление Windows или другая программа вернули
 //   --profile файл     включить настройки из профиля
 //   --revert           вернуть как было всё, что меняли здесь
-//   --snap файл.png [ширина высота [фильтр]]  кадр окна в PNG (проверка вёрстки без мыши)
+//   --snap файл.png [ширина высота [фильтр [id]]]  кадр окна в PNG (проверка вёрстки без мыши); id - раскрыть
+//                      «Подробнее» у этой настройки
 #include <windows.h>
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -53,7 +54,9 @@ enum {
     ID_UNDO,
     ID_EXPLORER,
     ID_GROUP = 100,   // + номер группы: свернуть
-    ID_TOGGLE = 1000  // + номер настройки
+    ID_TOGGLE = 1000,  // + номер настройки
+    ID_MORE = 2000,    // + номер настройки: «Подробнее»
+    ID_MORE_ANIM = 3000
 };
 
 std::wstring ExeFolder() {
@@ -173,6 +176,14 @@ bool RestartExplorer(bool admin) {
     return (INT_PTR)ShellExecuteW(nullptr, nullptr, exe.c_str(), nullptr, nullptr, SW_SHOWNORMAL) > 32;
 }
 
+// значение для «Подробнее»: число как есть, текст в кавычках, отсутствие словами
+std::wstring Shown(const shutup::Saved& v) {
+    if (!v.had) return L"нет значения";
+    if (v.type == REG_DWORD) return v.value;
+    if (v.type == REG_SZ || v.type == REG_EXPAND_SZ) return L"«" + v.value + L"»";
+    return v.value.size() > 32 ? v.value.substr(0, 32) + L"..." : v.value;
+}
+
 std::vector<shutup::Status> AllStatus() {
     shutup::Backup user = shutup::LoadBackup(HKEY_CURRENT_USER), machine = shutup::LoadBackup(HKEY_LOCAL_MACHINE);
     std::vector<shutup::Status> st;
@@ -199,7 +210,7 @@ public:
     void Bind(HWND h) {
         if (!wnd_) wnd_ = h;
     }
-    bool Snap(const std::wstring& file, int w, int h, int filter);
+    bool Snap(const std::wstring& file, int w, int h, int filter, const std::wstring& open);
 
 private:
     struct Result {
@@ -208,6 +219,9 @@ private:
     };
     void Reload();
     void Paint();
+    // «Подробнее» под строкой: объяснение, значения реестра (сейчас, приватно, как было), когда заработает и как
+    // вернуть. draw = false - только высота
+    float Detail(size_t i, const RectF& r, bool draw);
     void Frame(float w, float h);
     void Say(const std::wstring& s);
     std::wstring Blocked(size_t i) const { return BlockReason(shutup::Catalog()[i], admin_, foreign_); }
@@ -239,6 +253,8 @@ private:
     bool admin_ = false, foreign_ = false, askedRestore_ = false;
     bool needExplorer_ = false, needReboot_ = false;
     std::vector<shutup::Status> st_;
+    shutup::Backup user_, machine_;
+    std::vector<bool> open_;  // раскрыто «Подробнее»
     std::vector<std::wstring> groups_;
     std::vector<bool> folded_;
     std::wstring query_, msg_;
@@ -302,7 +318,62 @@ bool App::Create(HINSTANCE inst, int show) {
     return true;
 }
 
-void App::Reload() { st_ = AllStatus(); }
+void App::Reload() {
+    user_ = shutup::LoadBackup(HKEY_CURRENT_USER);
+    machine_ = shutup::LoadBackup(HKEY_LOCAL_MACHINE);
+    st_.clear();
+    for (const shutup::Setting& s : shutup::Catalog()) st_.push_back(shutup::StatusOf(s, user_, machine_));
+    open_.resize(st_.size(), false);
+}
+
+float App::Detail(size_t i, const RectF& r, bool draw) {
+    ui::Ui& u = ui_;
+    const UiColors& c = u.C();
+    const shutup::Setting& s = shutup::Catalog()[i];
+    float y = r.Y;
+    auto para = [&](const std::wstring& t, float size, bool bold, Color col, float after) {
+        float th = u.MeasureWrapped(t, size, bold, r.Width) + u.S(3);
+        if (draw) u.Text(t, RectF(r.X, y, r.Width, th), col, size, bold, ui::Left, true);
+        y += th + after;
+    };
+    const wchar_t* text = shutup::Details(s.id);
+    para(text ? text : s.why, 11.5f, false, c.text, u.S(12));
+    para(L"Что меняется", 10.5f, true, c.muted, u.S(4));
+    for (const shutup::RegValue& v : s.values) {
+        shutup::Saved want, cur;
+        want.had = true;
+        want.type = v.type;
+        want.value = v.type == REG_DWORD ? std::to_wstring(v.num) : std::wstring(v.text);
+        if (!shutup::ReadValue(v, cur)) cur = shutup::Saved{};
+        std::wstring path =
+            std::wstring(v.root == HKEY_LOCAL_MACHINE ? L"HKLM\\" : L"HKCU\\") + v.key + L"\\" + v.name;
+        para(path, 10.5f, false, c.text, u.S(1));
+        std::wstring state = L"после включения: " + Shown(want) + L",  сейчас: " + Shown(cur);
+        const shutup::Backup& b = v.root == HKEY_LOCAL_MACHINE ? machine_ : user_;
+        auto it = b.find(shutup::BackupKey(v));
+        if (it != b.end()) state += L",  до RadialShutUp: " + Shown(it->second);
+        para(state, 10.0f, false, c.muted, u.S(7));
+    }
+    std::wstring when;
+    switch (shutup::RestartOf(s)) {
+        case shutup::Restart::Explorer:
+            when = L"Заработает после перезапуска Проводника (кнопка появится внизу после правки).";
+            break;
+        case shutup::Restart::Reboot:
+            when = L"Заработает после перезагрузки компьютера.";
+            break;
+        default:
+            when = L"Действует сразу; открытые программы могут заметить изменение только после перезапуска.";
+    }
+    std::wstring back =
+        st_[i].ours ? L" Вернуть: выключите переключатель - вернутся значения «до RadialShutUp»."
+        : st_[i].state == shutup::State::Off
+            ? L" Вернуть можно в любой момент: RadialShutUp запомнит прежние значения перед правкой."
+            : L" Это включено не RadialShutUp - вернуть отсюда нельзя, прежних значений нет.";
+    std::wstring who = s.Machine() ? L" Для всего компьютера - нужны права." : L" Только для вас - без прав.";
+    para(std::wstring(L"Уровень: ") + LevelName(s.level) + L". " + when + back + who, 10.5f, false, c.muted, 0);
+    return y - r.Y + u.S(14);
+}
 
 void App::Say(const std::wstring& s) {
     msg_ = s;
@@ -577,8 +648,9 @@ void App::Paint() {
 }
 
 // кадр в PNG без показа окна: анимации успевают дойти до конца за несколько кадров
-bool App::Snap(const std::wstring& file, int w, int h, int filter) {
+bool App::Snap(const std::wstring& file, int w, int h, int filter, const std::wstring& open) {
     filter_ = filter;
+    for (size_t i = 0; i < open_.size(); ++i) open_[i] = shutup::Catalog()[i].id == open;
     Bitmap bmp(w, h, PixelFormat32bppARGB);
     for (int n = 0; n < 30; ++n) {
         Graphics g(&bmp);
@@ -620,8 +692,18 @@ void App::Frame(float w, float h) {
             size_t gi = std::find(groups_.begin(), groups_.end(), all[i].group) - groups_.begin();
             rows[gi].push_back(i);
         }
+    // высота строки: раскрытое «Подробнее» выезжает под ней
+    const float detX = u.S(96), detW = std::max(u.S(200), cardW - detX - u.S(28));
+    std::vector<float> rh(all.size(), rowH);
+    std::vector<float> gh(groups_.size(), 0);
     for (size_t gi = 0; gi < groups_.size(); ++gi)
-        if (!rows[gi].empty()) content += headH + (folded_[gi] ? 0 : rows[gi].size() * rowH) + gap;
+        for (size_t i : rows[gi]) {
+            float o = u.Anim(ID_MORE_ANIM + (int)i, open_[i], 16);
+            if (o > 0.001f) rh[i] = rowH + o * Detail(i, RectF(0, 0, detW, 0), false);
+            gh[gi] += rh[i];
+        }
+    for (size_t gi = 0; gi < groups_.size(); ++gi)
+        if (!rows[gi].empty()) content += headH + (folded_[gi] ? 0 : gh[gi]) + gap;
     float off = u.Scroll(ID_LIST, view, content + u.S(10));
     GraphicsState clip = u.G().Save();
     u.G().SetClip(view);
@@ -644,7 +726,7 @@ void App::Frame(float w, float h) {
         if (rows[gi].empty()) continue;
         any = true;
         float folded = u.Anim(ID_GROUP + (int)gi, folded_[gi], 18);
-        float bodyH = rows[gi].size() * rowH * (1 - folded);
+        float bodyH = gh[gi] * (1 - folded);
         RectF card(cardX, y, cardW, headH + bodyH);
         if (card.Y + card.Height >= view.Y && card.Y <= view.Y + view.Height) {
             u.Fill(card, c.card, u.S(14));
@@ -681,10 +763,12 @@ void App::Frame(float w, float h) {
         if (bodyH > 0.5f) {
             GraphicsState inner = u.G().Save();
             u.G().SetClip(RectF(cardX, y, cardW, bodyH), CombineModeIntersect);
+            float ry = y;
             for (size_t n = 0; n < rows[gi].size(); ++n) {
                 size_t i = rows[gi][n];
                 const shutup::Setting& s = all[i];
-                RectF row(cardX, y + n * rowH, cardW, rowH);
+                RectF row(cardX, ry, cardW, rh[i]);
+                ry += rh[i];
                 if (row.Y + row.Height < view.Y || row.Y > view.Y + view.Height || row.Y > y + bodyH) continue;
                 u.Fill(RectF(cardX + u.S(16), row.Y, cardW - u.S(32), 1), c.border);  // разделитель
                 bool on = st_[i].state == shutup::State::On;
@@ -714,8 +798,36 @@ void App::Frame(float w, float h) {
                 if (st_[i].ours && !st_[i].Drifted()) chip(L"изменено здесь", WithAlpha(c.accent, 40), c.accent);
                 shutup::Restart need = shutup::RestartOf(s);
                 if (need == shutup::Restart::Reboot) chip(L"после перезагрузки", c.field, c.muted);
-                u.Text(s.why, RectF(tx + u.S(16), row.Y + u.S(34), cardW - u.S(140), u.S(30)), c.muted, 11.0f, false,
+                u.Text(s.why, RectF(tx + u.S(16), row.Y + u.S(34), cardW - u.S(250), u.S(30)), c.muted, 11.0f, false,
                        ui::Left, true);
+                // «Подробнее» справа: раскрывает объяснение и значения реестра под строкой
+                float o = u.Anim(ID_MORE_ANIM + (int)i, open_[i], 16);
+                std::wstring more = open_[i] ? L"Скрыть" : L"Подробнее";
+                float lw = u.Measure(more, 11.0f, true) + u.S(30);
+                RectF link(cardX + cardW - u.S(24) - lw, row.Y + u.S(18), lw, u.S(30));
+                if (u.Click(ID_MORE + (int)i, link) && folded < 0.01f) open_[i] = !open_[i];
+                if (u.Hot(ID_MORE + (int)i)) u.Fill(link, WithAlpha(c.accent, 28), u.S(8));
+                u.Text(more, RectF(link.X + u.S(8), link.Y + u.S(6), lw, u.S(20)), c.accent, 11.0f, true);
+                {  // галочка: вниз - раскроется, вверх - свернётся
+                    GraphicsState st = u.G().Save();
+                    u.G().TranslateTransform(link.X + lw - u.S(12), link.Y + link.Height / 2);
+                    u.G().RotateTransform(180.0f * o);
+                    Pen pen(c.accent, u.S(1.6f));
+                    pen.SetStartCap(LineCapRound);
+                    pen.SetEndCap(LineCapRound);
+                    PointF pts[3] = {{-u.S(3.5f), -u.S(1.6f)}, {0, u.S(2.0f)}, {u.S(3.5f), -u.S(1.6f)}};
+                    u.G().DrawLines(&pen, pts, 3);
+                    u.G().Restore(st);
+                }
+                if (o > 0.001f) {
+                    GraphicsState dc = u.G().Save();
+                    u.G().SetClip(RectF(cardX, row.Y + rowH - u.S(6), cardW, rh[i] - rowH + u.S(6)),
+                                  CombineModeIntersect);
+                    u.Fill(RectF(cardX + u.S(80), row.Y + rowH - u.S(4), cardW - u.S(100), rh[i] - rowH - u.S(6)),
+                           WithAlpha(c.field, 170), u.S(10));
+                    Detail(i, RectF(cardX + detX, row.Y + rowH + u.S(8), detW, 0), true);
+                    u.G().Restore(dc);
+                }
             }
             u.G().Restore(inner);
         }
@@ -1074,7 +1186,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
                 int w = args.size() >= 4 ? _wtoi(args[2].c_str()) : 1100,
                     h = args.size() >= 4 ? _wtoi(args[3].c_str()) : 780;
                 int filter = args.size() >= 5 ? _wtoi(args[4].c_str()) : 0;
-                code = app.Snap(args[1], std::max(w, 200), std::max(h, 200), filter) ? 0 : 1;
+                code = app.Snap(args[1], std::max(w, 200), std::max(h, 200), filter, args.size() >= 6 ? args[5] : L"") ? 0 : 1;
                 DestroyWindow(FindWindowW(kClass, nullptr));
             } else {
                 MSG m;

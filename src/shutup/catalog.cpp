@@ -729,6 +729,8 @@ LONG Write(HKEY k, const wchar_t* name, DWORD type, const std::wstring& value) {
 
 }  // namespace
 
+bool ReadValue(const RegValue& v, Saved& out) { return ReadRaw(v, out); }
+
 Status StatusOf(const Setting& s, const Backup& user, const Backup& machine) {
     Status st;
     size_t on = 0;
