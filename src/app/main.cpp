@@ -26,6 +26,7 @@
 #include "desk/cliphist.h"
 #include "desk/layout.h"
 #include "app/autos.h"
+#include "app/selring.h"
 #include "app/toolsui.h"
 #include "core/bg.h"
 #include "core/crash.h"
@@ -154,6 +155,8 @@ void Reload() {
         g_reveal.Apply(g_cfg);
         UnregisterHotKey(g_wnd, kHotWindows);
         if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
+        UnregisterHotKey(g_wnd, kHotSelection);
+        if (g_cfg.selectionRing) RegisterHotKey(g_wnd, kHotSelection, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE);
     }
     if (g_wnd) netui::Apply(g_cfg);
     if (g_wnd) palette::Apply();
@@ -435,6 +438,10 @@ void OnShareMode(bool on) {
 bool RunExtra(const std::wstring& a) {
     if (a == L"share") {
         share::Toggle();
+        return true;
+    }
+    if (a == L"selection") {
+        selring::Trigger();
         return true;
     }
     if (a == L"game") {
@@ -786,6 +793,7 @@ void ShutdownAll() {
     afterwork::Shutdown();
     focus::Shutdown();
     share::Shutdown();
+    selring::Stop();
     g_dropCard.Destroy();
     mc::StopWatch();
     netui::Shutdown();
@@ -862,6 +870,7 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_HOTKEY:
             if (wp == kHotWindows) ShowWindowsRing();
+            if (wp == kHotSelection) selring::Trigger();
             if (wp == palette::kHotId) palette::Show();
             return 0;
         case WM_TRAY:
@@ -1112,6 +1121,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_wnd = CreateWindowExW(0, kClass, L"Radial Menu", 0, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     if (g_cfg.winRing) RegisterHotKey(g_wnd, kHotWindows, MOD_ALT | MOD_NOREPEAT, VK_OEM_3);
+    if (g_cfg.selectionRing) RegisterHotKey(g_wnd, kHotSelection, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE);
     corners::SetWindowsRing(ShowWindowsRing);
     mem::SetBusy([] { return g_menu.IsOpen(); });
 
@@ -1233,6 +1243,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     afterwork::Init(inst, &g_cfg);      // Л6: сон после работы
     focus::Init(inst, &g_cfg);          // Л8, Л34: фокус и шахматы без отвлечений
     share::Init(&g_cfg);
+    selring::Start(inst, &g_cfg, &g_menu);
     share::onChange = OnShareMode;
     corners::SetExtra(RunExtra);
     g_menu.focusStatus = [] { return focus::Status(); };

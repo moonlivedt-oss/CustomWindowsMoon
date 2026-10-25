@@ -1,5 +1,7 @@
 #include "desk/cliphist.h"
 
+#include <atomic>
+
 #include <shlwapi.h>
 #include <wincrypt.h>
 #include <objidl.h>
@@ -195,10 +197,13 @@ void LoadPins() {
     LocalFree(out.pbData);
 }
 
+std::atomic<bool> g_paused{false};
+std::atomic<DWORD> g_pausedSeq{0};  // изменения не новее этого - служебные
+
 void OnUpdate() {
     if (!g_cfg || (!g_cfg->clipHistory && !g_cfg->clipSecrets)) return;
     DWORD seq = GetClipboardSequenceNumber();
-    if (seq == g_ownSeq) return;
+    if (seq == g_ownSeq || g_paused || seq <= g_pausedSeq) return;
     if (Excluded()) return;
     bool text = IsClipboardFormatAvailable(CF_UNICODETEXT), img = IsClipboardFormatAvailable(CF_DIB);
     if (!text && !img) return;
@@ -457,6 +462,11 @@ void ShowRing(RadialMenu& menu) {
     GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), &mi);
     UINT dpi = GetDpiForSystem();
     menu.ShowNet(g_cfg, std::move(ring), pt, mi.rcWork, dpi ? dpi : 96);
+}
+
+void Pause(bool on) {
+    if (!on) g_pausedSeq = GetClipboardSequenceNumber();
+    g_paused = on;
 }
 
 std::wstring Status() {

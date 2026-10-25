@@ -36,6 +36,7 @@ constexpr UINT WM_TRAY = WM_APP + 1;
 constexpr UINT_PTR kPollTimer = 1, kWarmTimer = 2, kIntroTimer = 3, kAutostartTimer = 4;
 constexpr UINT kTrayId = 1;
 constexpr int kHotWindows = 1;  // Alt + ` - кольцо окон
+constexpr int kHotSelection = 7;  // Ctrl + Alt + Пробел - кольцо выделенного
 enum Cmd {
     CMD_EDITOR = 100,
     CMD_EDIT,

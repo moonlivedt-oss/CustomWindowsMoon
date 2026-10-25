@@ -79,6 +79,7 @@ struct Config {
     bool mediaToast = true;
     bool winFx = true;
     bool winRing = true;              // Alt + ` - кольцо открытых окон
+    bool selectionRing = true;        // Ctrl + Alt + Пробел - кольцо выделенного текста (app/selring)
     bool deskDouble = true;           // двойной клик по пустому столу - целое кольцо вокруг курсора
     bool batteryGlow = true;          // свечение у нижнего края: мало заряда, подключили зарядку
     int batteryLow = 15;              // с какого процента заряд считается низким
