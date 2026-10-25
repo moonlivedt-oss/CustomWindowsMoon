@@ -11,6 +11,9 @@
 #include "core/files.h"
 #include "core/perf.h"
 #include "core/themes.h"
+#include "desk/boostcard.h"
+#include "desk/boostpick.h"
+#include "tools/explain.h"
 #include "gfx/scene.h"
 #include "menu/menu.h"
 #include "studio/studio.h"
@@ -200,6 +203,72 @@ int SceneFilm(const std::wstring& what, const std::wstring& out) {
         if (!wcscmp(codecs[i].MimeType, L"image/png"))
             return sheet.Save(out.c_str(), &codecs[i].Clsid, nullptr) == Ok ? 0 : 1;
     return 1;
+}
+
+int CardSnap(const std::wstring& what, bool more, const std::wstring& out) {
+    using namespace Gdiplus;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    Gdip gdip;
+    Config cfg = LoadOwnConfig();
+    ThemeInfo theme = CurrentTheme(cfg);
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    static BoostCard card;
+    static BoostPick pick;
+    Toast* shown = nullptr;
+    if (what == L"pick") {
+        pick.Create(inst);
+        std::vector<BoostPick::Row> rows = {{L"Google Chrome", L"chrome.exe", 1840, 0},
+                                            {L"Discord", L"discord.exe", 620, 1},
+                                            {L"Telegram", L"telegram.exe", 310, 2}};
+        pick.Show(L"Освободить память для Minecraft?", L"Выберите, что сделать с каждой программой.", rows, theme);
+        if (more) pick.ExpandRow(1);
+        shown = &pick;
+    } else {
+        card.Create(inst);
+        card.yesLabel = L"Закрыть";
+        card.noLabel = L"Не надо";
+        card.onYes = [] {};
+        card.more = explain::Action(L"app:0", L"discord.exe");
+        card.kind = L"-";
+        card.Show(BoostCard::OFFER, L"Закрыть Discord?",
+                  L"3 процесса, 620 МБ. Сначала попрошу закрыться (окна сохранят своё), через 5 с - силой.", theme, 60000);
+        if (more) card.ExpandMore();
+        shown = &card;
+    }
+    for (ULONGLONG until = GetTickCount64() + 1600; GetTickCount64() < until;) {
+        MSG m;
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+        shown->Tick();
+        Sleep(16);
+    }
+    // карточка - справа внизу рабочей области основного монитора
+    RECT wa;
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+    UINT dpi = GetDpiForSystem();
+    int w = MulDiv(470, dpi, 96), h = std::min<int>(MulDiv(760, dpi, 96), wa.bottom - wa.top);
+    HDC screen = GetDC(nullptr), mem = CreateCompatibleDC(screen);
+    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
+    HGDIOBJ old = SelectObject(mem, bmp);
+    BitBlt(mem, 0, 0, w, h, screen, wa.right - w, wa.bottom - h, SRCCOPY | CAPTUREBLT);
+    SelectObject(mem, old);
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+    shown->Hide();
+    int code = 1;
+    {
+        Bitmap shot(bmp, nullptr);
+        UINT num = 0, size = 0;
+        GetImageEncodersSize(&num, &size);
+        std::vector<BYTE> buf(size);
+        auto* codecs = (ImageCodecInfo*)buf.data();
+        GetImageEncoders(num, size, codecs);
+        for (UINT i = 0; i < num; ++i)
+            if (!wcscmp(codecs[i].MimeType, L"image/png"))
+                code = shot.Save(out.c_str(), &codecs[i].Clsid, nullptr) == Ok ? 0 : 1;
+    }
+    DeleteObject(bmp);
+    TerminateProcess(GetCurrentProcess(), code);  // окна карточек и кэши GDI+ разбирать незачем
+    return code;
 }
 
 int SnapSuite(const std::wstring& refDir, const std::wstring& outDir, bool update) {

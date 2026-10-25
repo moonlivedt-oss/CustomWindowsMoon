@@ -44,5 +44,8 @@ DWORD WINAPI FakeClean(void*);
 int SceneFilm(const std::wstring& what, const std::wstring& out);
 int SnapSuite(const std::wstring& refDir, const std::wstring& outDir, bool update);
 int RingBench(int ms);
+// --card-snap файл.png ask|pick [more]: карточка справа внизу на секунду показывается по-настоящему и снимается с
+// экрана; more - с раскрытым «Подробнее»
+int CardSnap(const std::wstring& what, bool more, const std::wstring& out);
 
 }  // namespace devcli

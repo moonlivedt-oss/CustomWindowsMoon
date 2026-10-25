@@ -452,6 +452,8 @@ void RadialMenu::Start(bool live) {
     hoverKey_.clear();
     project::ForgetInfo();
     query_.clear();
+    moreOn_ = GetEnvironmentVariableW(L"RADIAL_MORE", nullptr, 0) > 0;  // для снимков: сразу раскрыто
+    infoCard_ = Gdiplus::RectF();
     searchPool_.clear();
     poolBuilt_ = false;
     kbSel_ = 0;
@@ -751,6 +753,12 @@ LRESULT RadialMenu::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             if (!open_ || closing_ || dragging_) return 0;
             POINT p;
             GetCursorPos(&p);
+            {  // щелчок по карточке над кольцом - «Подробнее», а не захват кольца
+                POINT c = p;
+                ScreenToClient(hwnd_, &c);
+                if (infoCard_.Width > 0 && infoCard_.Contains((Gdiplus::REAL)c.x, (Gdiplus::REAL)c.y) && ToggleMore())
+                    return 0;
+            }
             BeginGrab(p);
             return 0;
         }

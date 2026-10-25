@@ -480,6 +480,7 @@ RadialMenu::LabelFit RadialMenu::LayoutLabelAt(const Ring& r, double a0, double 
 // Карточка над кольцом: что это, сколько внутри, когда менялось, где лежит.
 void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below) {
     const Item* it = HoveredItem();
+    infoCard_ = RectF();
     if (!it || winMode_ || (it->special && it->special != 3 && it->special != 4) || alpha <= 0.01) return;
     double a = alpha * Clamp01((GetTickCount64() - keyT_ - 120) / 160.0);
     if (a <= 0.01) return;
@@ -527,10 +528,28 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
         double need = pad * 2 + 3 * k + isz + 10 * k + std::max(a1.Width, a2.Width) + 6 * k;
         cw = std::clamp(need, std::min(cw, 200 * k), cw);
     }
+    // «Подробнее» (Item::more): строка-подсказка внизу, по пробелу или щелчку - объяснение целиком
+    const bool hasMore = !it->more.empty(), showMore = hasMore && moreOn_;
+    const std::wstring more = showMore ? share::Mask(it->more) : L"";
+    const double baseH = ch, hintH = hasMore ? fSmall * 1.5 : 0;
+    double moreH = 0;
+    if (showMore) {
+        cw = std::min(geo_.w - 24 * k, 470 * k);
+        Font fs(Family(), (REAL)fSmall, FontStyleRegular, UnitPixel);
+        RectF box;
+        g.MeasureString(more.c_str(), -1, &fs, RectF(0, 0, (REAL)(cw - pad * 2 - 3 * k), 10000), nullptr, &box);
+        // над кольцом места мало (окно меню чуть больше кольца) - раскрытая карточка наплывает на кольцо
+        moreH = std::min((double)box.Height + 8 * k, std::max(0.0, geo_.h - 16 * k - baseH - hintH));
+    } else if (hasMore) {
+        cw = std::max(cw, std::min(geo_.w - 24 * k, 250 * k));  // подсказке хватает места
+    }
+    ch += hintH + moreH;
     double cx = full_ ? (geo_.w - cw) / 2 : left_ ? 12 * k : geo_.w - 12 * k - cw;
     double cy = below ? center_.y + geo_.r4 * grow + 14 * k : center_.y - geo_.r4 * grow - 14 * k - ch;
     cy += (below ? -1 : 1) * 8 * k * (1 - EaseOut(a));  // появляясь, карточка чуть подплывает от кольца
+    cy = std::clamp(cy, 8 * k, std::max(8 * k, geo_.h - 8 * k - ch));  // раскрытая не уходит за край окна
     RectF card((REAL)cx, (REAL)cy, (REAL)cw, (REAL)ch);
+    infoCard_ = card;
     Palette pal = Pal(cfg_);
     BYTE ba = (BYTE)(240 * a);
     GraphicsPath p;
@@ -553,11 +572,11 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
         ColorMatrix cm = {{{1, 0, 0, 0, 0}, {0, 1, 0, 0, 0}, {0, 0, 1, 0, 0}, {0, 0, 0, (REAL)a, 0}, {0, 0, 0, 0, 1}}};
         ImageAttributes ia;
         ia.SetColorMatrix(&cm);
-        g.DrawImage(icon, RectF((REAL)tx, (REAL)(cy + (ch - isz) / 2), (REAL)isz, (REAL)isz), 0, 0,
+        g.DrawImage(icon, RectF((REAL)tx, (REAL)(cy + (baseH - isz) / 2), (REAL)isz, (REAL)isz), 0, 0,
                     (REAL)icon->GetWidth(), (REAL)icon->GetHeight(), UnitPixel, &ia);
         tx += isz + 10 * k;
     }
-    double tw = cx + cw - pad - tx, y = cy + (ch - textH) / 2;  // текст - по середине карточки, как значок
+    double tw = cx + cw - pad - tx, y = cy + (baseH - textH) / 2;  // текст - по середине карточки, как значок
     StringFormat sf(StringFormatFlagsNoWrap);
     sf.SetTrimming(StringTrimmingEllipsisCharacter);
     Font title(Family(), (REAL)fTitle, FontStyleRegular, UnitPixel);
@@ -579,5 +598,24 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
         pf.SetTrimming(StringTrimmingEllipsisPath);  // длинный путь сокращается в середине
         SolidBrush pb(WithAlpha(pal.text, (BYTE)(120 * a)));
         g.DrawString(path.c_str(), -1, &small, RectF((REAL)tx, (REAL)y, (REAL)tw, (REAL)(fSmall * 1.4)), &pf, &pb);
+    }
+    if (hasMore) {
+        double lx = cx + pad + 3 * k, lw = cw - pad * 2 - 3 * k, ly = cy + baseH - pad * 0.45;
+        if (showMore && moreH > 0) {
+            SolidBrush line(WithAlpha(pal.text, (BYTE)(40 * a)));
+            g.FillRectangle(&line, RectF((REAL)lx, (REAL)(ly - 2 * k), (REAL)lw, (REAL)std::max(1.0, k)));
+            StringFormat wf;
+            wf.SetTrimming(StringTrimmingEllipsisWord);
+            SolidBrush tb2(WithAlpha(pal.text, (BYTE)(225 * a)));
+            g.DrawString(more.c_str(), -1, &small, RectF((REAL)lx, (REAL)(ly + 4 * k), (REAL)lw, (REAL)(moreH - 6 * k)),
+                         &wf, &tb2);
+            ly += moreH;
+        }
+        StringFormat hf(StringFormatFlagsNoWrap);
+        hf.SetAlignment(StringAlignmentFar);
+        hf.SetTrimming(StringTrimmingEllipsisCharacter);
+        SolidBrush hb(WithAlpha(HueShift(pal.hotOut, hue), (BYTE)(235 * a)));
+        g.DrawString(showMore ? L"Пробел - свернуть" : L"Подробнее - пробел или щелчок", -1, &small,
+                     RectF((REAL)lx, (REAL)ly, (REAL)lw, (REAL)hintH), &hf, &hb);
     }
 }

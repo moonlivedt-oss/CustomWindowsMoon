@@ -43,6 +43,7 @@
 #include "app/selring.h"
 #include "desk/snipname.h"
 #include "shutup/catalog.h"
+#include "tools/explain.h"
 
 namespace {
 
@@ -648,6 +649,29 @@ void TestSysItemOff() {
     CHECK(!tools::SysOffTake(bad, L"svc", L"Off", start));
 }
 
+// «Подробнее»: знакомые программы в любом регистре и с путём, у каждого действия кольца утилит есть текст
+void TestExplain() {
+    CHECK(!explain::Process(L"chrome.exe").empty());
+    CHECK(explain::Process(L"C:\\Program Files\\Google\\Chrome.EXE") == explain::Process(L"chrome.exe"));
+    CHECK(explain::Process(L"javaw") == explain::Process(L"javaw.exe"));
+    CHECK(explain::Process(L"нет-такой.exe").empty());
+    // незнакомая программа - всё равно объяснено, как закрывается и как усыпляется
+    CHECK(explain::Close(L"нет-такой.exe").find(L"5 секунд") != std::wstring::npos);
+    CHECK(explain::Sleep(L"discord.exe").find(L"Discord") != std::wstring::npos);
+    CHECK(!explain::Keep(L"x.exe").empty() && !explain::BoostOffer().empty());
+    for (const wchar_t* k :
+         {L"app:0",      L"leak:1",      L"hog:2",      L"port:0",          L"ports-old",  L"tails",
+          L"pagefile",   L"start-off:3", L"clean:0",    L"clean-all",       L"bin",        L"ddc-trim",
+          L"sys-clean",  L"vhd",         L"left:0",     L"dup:0",           L"dup-scan",   L"proj:1",
+          L"proj-idle",  L"giant:hiber", L"path-clean", L"path-add",        L"path-acl",   L"conflict:0",
+          L"net-top",    L"power",       L"wake",       L"balance-restore", L"health",     L"driver",
+          L"sys-reboot", L"rec-repair",  L"rec-wu",     L"rec-unbreak",     L"rec-points", L"rec-explorer",
+          L"rec-boot",   L"rec-offline", L"sec-find:0", L"sec-sandbox",     L"term",       L"lock-clip"})
+        CHECK(!explain::Action(k).empty());
+    CHECK(explain::Action(L"").empty() && explain::Action(L"open").empty());
+    CHECK(explain::Action(L"app:0", L"discord.exe").find(L"Discord") != std::wstring::npos);
+}
+
 // RadialShutUp: каталог без повторов и пустых мест, бэкап значения туда и обратно, профиль
 void TestShutUpCatalog() {
     const auto& all = shutup::Catalog();
@@ -1230,6 +1254,7 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestWinget();
     TestContests();
     TestShutUpCatalog();
+    TestExplain();
     TestSecurityHeuristics();
     TestSysItemOff();
     TestModeSwitch();

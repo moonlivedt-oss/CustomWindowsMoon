@@ -4,6 +4,7 @@
 #include <ctime>
 
 #include "tools/contests.h"
+#include "tools/explain.h"
 #include "tools/important.h"
 
 namespace toolsui {
@@ -605,6 +606,30 @@ Item GitItem(const Scan& scan) {
     return item;
 }
 
+std::wstring ExeOfKey(const std::wstring& k) {
+    auto at = [&](size_t prefix, size_t size) {
+        size_t i = (size_t)_wtoi(k.c_str() + prefix);
+        return i < size ? i : (size_t)-1;
+    };
+    size_t i;
+    if (k.rfind(L"app:", 0) == 0 && (i = at(4, g_apps.size())) != (size_t)-1) return g_apps[i].name;
+    if (k.rfind(L"leak:", 0) == 0 && (i = at(5, g_leakList.size())) != (size_t)-1) return g_leakList[i].name;
+    if (k.rfind(L"hog:", 0) == 0 && (i = at(4, g_hogs.size())) != (size_t)-1) return g_hogs[i].name;
+    if (k.rfind(L"port:", 0) == 0 && (i = at(5, g_ports.size())) != (size_t)-1) return g_ports[i].process;
+    return L"";
+}
+
+// «Подробнее» каждому пункту с действием: что произойдёт, что можно потерять, как вернуть (tools/explain)
+void FillMore(std::vector<Item>& items) {
+    for (Item& it : items) {
+        if (it.more.empty() && !it.path.empty()) {
+            const std::wstring& k = it.path;
+            it.more = explain::Action(k, ExeOfKey(k));
+        }
+        FillMore(it.children);
+    }
+}
+
 std::vector<Item> RingItems(std::wstring& status) {
     g_roots = ProjectRoots(*g_cfg);
     ULONGLONG now = GetTickCount64();
@@ -1159,6 +1184,7 @@ std::vector<Item> RingItems(std::wstring& status) {
         status += L"   |   можно освободить " + tools::Bytes(quickTotal + scan.ddcOld + bin);
     if (projTotal) status += L"   |   мусор проектов " + tools::Bytes(projTotal);
     status += L"   |   память свободна " + tools::Bytes(mem.avail);
+    FillMore(ring);
     return ring;
 }
 

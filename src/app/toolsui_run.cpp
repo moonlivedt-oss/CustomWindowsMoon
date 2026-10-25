@@ -1,5 +1,6 @@
 // Что делает пункт кольца «Утилиты»: Run(ключ сектора).
 #include "app/toolsui_internal.h"
+#include "tools/explain.h"
 
 namespace toolsui {
 
@@ -28,6 +29,11 @@ void OpenExtension(const tools::BrowserExt& e) {
 }
 
 void Run(const std::wstring& key) {
+    // вопрос, который задаст это действие, получит «Подробнее»; ответ позже (после фоновой работы) - уже без него
+    g_askMore = explain::Action(key, ExeOfKey(key));
+    struct Forget {
+        ~Forget() { g_askMore.clear(); }
+    } forget;
     auto idx = [&](size_t prefix, size_t size) {
         size_t i = (size_t)_wtoi(key.c_str() + prefix);
         return i < size ? i : (size_t)-1;

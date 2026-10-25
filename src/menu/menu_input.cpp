@@ -147,8 +147,21 @@ bool RadialMenu::OnRawKey(DWORD vk, DWORD scan, bool down) {
     return false;
 }
 
+bool RadialMenu::ToggleMore() {
+    const Item* it = HoveredItem();
+    if (!it || it->more.empty()) return false;
+    moreOn_ = !moreOn_;
+    if (cfg_->sounds) Sound::Play(Sound::Hover);
+    Render();
+    return true;
+}
+
 void RadialMenu::OnChar(wchar_t ch) {
-    if (netMode_ || (query_.empty() && ch == L' ')) return;  // в кольце сети искать нечего
+    if (query_.empty() && ch == L' ') {  // пробел без поиска - «Подробнее» у наведённого пункта
+        ToggleMore();
+        return;
+    }
+    if (netMode_) return;  // в кольце сети искать нечего
     if (!poolBuilt_) BuildSearchPool();
     bool entering = mode_ != Mode::Search;
     query_ += ch;

@@ -74,6 +74,10 @@ extern HWND g_app;
 extern std::function<void(int, const std::wstring&)> g_openStudio;
 extern const Config* g_cfg;
 extern BoostCard g_card;
+// «Подробнее» для следующего Ask (задаёт Run по ключу действия, Ask забирает); пусто - без ссылки
+extern std::wstring g_askMore;
+// процесс, над которым действие кольца (app:, leak:, hog:, port:); пусто - не над процессом
+std::wstring ExeOfKey(const std::wstring& key);
 extern std::atomic<bool> g_busy;
 extern std::atomic<bool> g_jobCancel;
 extern std::atomic<bool> g_cleanBusy;

@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "gfx/color.h"
+#include "tools/explain.h"
 #include "gfx/draw.h"
 
 using namespace Gdiplus;
@@ -34,6 +35,7 @@ void BoostPick::Show(const std::wstring& title, const std::wstring& sub, std::ve
     rows_ = std::move(rows);
     theme_ = theme;
     for (size_t i = 0; i < rows_.size(); ++i) slide_[i] = (float)rows_[i].act;
+    open_ = -1;
     Open(30000);
 }
 
@@ -43,6 +45,16 @@ double BoostPick::Freed() const {
     return mb;
 }
 
+float BoostPick::RowY(size_t i) const {
+    return rowsY_ + i * kRowH + (open_ >= 0 && (int)i > open_ ? moreH_ / k() + 10 : 0);
+}
+
+std::wstring BoostPick::MoreText() const {
+    if (open_ < 0 || open_ >= (int)rows_.size()) return L"";
+    const Row& r = rows_[open_];
+    return r.act == 0 ? explain::Close(r.key) : r.act == 1 ? explain::Sleep(r.key) : explain::Keep(r.key);
+}
+
 float BoostPick::BodyHeight(Graphics& g) {
     float K = k();
     FontFamily fam(L"Segoe UI");
@@ -50,11 +62,19 @@ float BoostPick::BodyHeight(Graphics& g) {
     subH_ = std::min(TextHeight(g, sub_, fS, (kW - kText - kPad) * K), 2 * 17.5f * K);
     rowsY_ = std::max(kPad + 21 + (subH_ > 0 ? 4 + subH_ / K : 0) + 12, 62.0f);
     RectF body(kM * K, kM * K, kW * K, 0);
+    moreH_ = 0;
+    if (open_ >= 0 && open_ < (int)rows_.size()) {
+        Font fM(&fam, 11.5f * K, FontStyleRegular, UnitPixel);
+        moreH_ = std::min(TextHeight(g, MoreText(), fM, (kW - 2 * kPad) * K), 18 * 16.0f * K);
+    }
     float segX = body.GetRight() - kPad * K - 3 * kSegW * K;
-    for (size_t i = 0; i < rows_.size(); ++i)
+    for (size_t i = 0; i < rows_.size(); ++i) {
         for (int s = 0; s < 3; ++s)
-            seg_[i][s] = RectF(segX + s * kSegW * K, body.Y + (rowsY_ + i * kRowH + 3) * K, kSegW * K, (kRowH - 6) * K);
-    float top = rowsY_ + rows_.size() * kRowH + 12, bh = 32;
+            seg_[i][s] = RectF(segX + s * kSegW * K, body.Y + (RowY(i) + 3) * K, kSegW * K, (kRowH - 6) * K);
+        name_[i] = RectF(body.X + (kPad - 6) * K, body.Y + (RowY(i) + 2) * K, segX - body.X - (kPad + 64) * K,
+                         (kRowH - 4) * K);
+    }
+    float top = (rows_.empty() ? rowsY_ : RowY(rows_.size() - 1) + kRowH) + 12, bh = 32;
     float aw = ButtonWidth(g, L"Применить") / K, sw = ButtonWidth(g, L"Не сейчас") / K;
     skip_ = RectF(body.GetRight() - kPad * K - sw * K, body.Y + top * K, sw * K, bh * K);
     apply_ = RectF(skip_.X - 8 * K - aw * K, skip_.Y, aw * K, bh * K);
@@ -97,11 +117,40 @@ void BoostPick::Paint(Graphics& g, const RectF& body) {
     rf.SetAlignment(StringAlignmentFar);
     for (size_t i = 0; i < rows_.size(); ++i) {
         const Row& r = rows_[i];
-        float y = body.Y + (rowsY_ + i * kRowH) * K;
-        // имя и память
-        float nameW = seg_[i][0].X - body.X - kPad * K - 60 * K;
+        float y = body.Y + RowY(i) * K;
+        // имя и память; имя - кнопка «Подробнее»: подсветка и галочка
+        float nameW = seg_[i][0].X - body.X - kPad * K - 60 * K - 14 * K;
+        float hn = HoverOf(H_NAME + (int)i);
+        if (hn > 0.01f || open_ == (int)i) {
+            GraphicsPath np;
+            RoundRectPath(np, name_[i], 7 * K);
+            SolidBrush hb(WithAlpha(ac, (BYTE)(open_ == (int)i ? 30 : 24 * hn)));
+            g.FillPath(&hb, &np);
+        }
         SolidBrush nb(r.act == 2 ? MixColor(muted, fg, 0.35) : fg);
-        g.DrawString(r.title.c_str(), -1, &fR, RectF(body.X + kPad * K, y, nameW, kRowH * K), &one, &nb);
+        RectF nameR(body.X + kPad * K, y, nameW, kRowH * K);
+        g.DrawString(r.title.c_str(), -1, &fR, nameR, &one, &nb);
+        {
+            RectF used;
+            g.MeasureString(r.title.c_str(), -1, &fR, nameR, &one, &used);
+            GraphicsState st = g.Save();
+            g.TranslateTransform(nameR.X + std::min(used.Width, nameW) + 8 * K, y + kRowH * K / 2);
+            g.RotateTransform(open_ == (int)i ? 180.0f : 0.0f);
+            Pen pen(WithAlpha(MixColor(muted, ac, 0.4 + 0.6 * hn), 230), 1.4f * K);
+            pen.SetStartCap(LineCapRound);
+            pen.SetEndCap(LineCapRound);
+            PointF pts[3] = {{-3.0f * K, -1.4f * K}, {0, 1.8f * K}, {3.0f * K, -1.4f * K}};
+            g.DrawLines(&pen, pts, 3);
+            g.Restore(st);
+        }
+        if (open_ == (int)i && moreH_ > 0) {  // пояснение под строкой
+            Font fM(&fam, 11.5f * K, FontStyleRegular, UnitPixel);
+            StringFormat wf;
+            wf.SetTrimming(StringTrimmingEllipsisWord);
+            SolidBrush b(MixColor(muted, fg, 0.55));
+            g.DrawString(MoreText().c_str(), -1, &fM,
+                         RectF(body.X + kPad * K, y + (kRowH + 4) * K, (kW - 2 * kPad) * K, moreH_ + 1), &wf, &b);
+        }
         g.DrawString(Mb(r.mb).c_str(), -1, &fSeg, RectF(seg_[i][0].X - 62 * K, y, 54 * K, kRowH * K), &rf, &mB);
         // переключатель из трёх: плашка скользит к выбранному
         RectF track(seg_[i][0].X, seg_[i][0].Y, 3 * kSegW * K, seg_[i][0].Height);
@@ -145,12 +194,19 @@ int BoostPick::HitContent(const PointF& p) const {
     for (size_t i = 0; i < rows_.size(); ++i)
         for (int s = 0; s < 3; ++s)
             if (seg_[i][s].Contains(p)) return H_SEG + (int)i * 3 + s;
+    for (size_t i = 0; i < rows_.size(); ++i)
+        if (name_[i].Contains(p)) return H_NAME + (int)i;
     if (apply_.Contains(p)) return H_APPLY;
     if (skip_.Contains(p)) return H_SKIP;
     return H_NONE;
 }
 
 void BoostPick::Click(int id) {
+    if (id >= H_NAME && id < H_NAME + (int)rows_.size()) {
+        open_ = open_ == id - H_NAME ? -1 : id - H_NAME;
+        Invalidate();
+        return;
+    }
     if (id >= H_SEG && id < H_SEG + (int)rows_.size() * 3) {
         rows_[(id - H_SEG) / 3].act = (id - H_SEG) % 3;
         lastPaint_ = 0;

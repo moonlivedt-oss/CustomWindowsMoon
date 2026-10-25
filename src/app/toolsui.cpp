@@ -3,6 +3,7 @@
 #include <map>
 
 #include "core/perf.h"
+#include "tools/explain.h"
 #include "tools/important.h"
 
 namespace toolsui {
@@ -10,6 +11,7 @@ namespace toolsui {
 HWND g_app = nullptr;
 const Config* g_cfg = nullptr;
 BoostCard g_card;
+std::wstring g_askMore;
 std::function<void(int, const std::wstring&)> g_openStudio;
 std::atomic<bool> g_busy{false};
 std::atomic<bool> g_jobCancel{false};  // «Стоп» в карточке задачи RunJob (stoppable)
@@ -467,6 +469,8 @@ void Ask(const std::wstring& title, const std::wstring& sub, const std::wstring&
     };
     g_card.yesLabel = yes;
     g_card.noLabel = no;
+    g_card.more = std::move(g_askMore);
+    g_askMore.clear();
     g_card.onYes = [reset, onYes] {
         reset();
         if (onYes) onYes();
@@ -623,6 +627,7 @@ bool MemoryOffer(const std::wstring& why, const std::vector<std::wstring>& keep,
     for (size_t i = 0; i < pick.size() && i < 3; ++i)
         list += (i ? L", " : L"") + NoExe(pick[i].name) + L" " + tools::Bytes(pick[i].bytes);
     tools::HeavyApp top = pick[0];
+    g_askMore = explain::Close(top.name);
     Ask(
         L"Свободно " + tools::Bytes(m.avail) + (why.empty() ? L"" : L" " + why),
         L"Из " + tools::Bytes(m.total) + L". Тяжелее всего: " + list + L".", L"Закрыть " + Short(NoExe(top.name), 14),
@@ -987,7 +992,20 @@ void SnapRing(RadialMenu& menu, const Config* cfg, UINT dpi, int root, const std
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     PrimeSecurityForSnapshot();
     std::wstring status;
-    menu.SnapNet(cfg, RingItems(status), dpi, root, 1500, path);
+    std::vector<Item> items = RingItems(status);
+    // RADIAL_MORE (проверка «Подробнее»): пункты-действия группы root - первым кольцом, курсор на первом
+    if (GetEnvironmentVariableW(L"RADIAL_MORE", nullptr, 0) > 0 && root >= 0 && root < (int)items.size()) {
+        std::vector<Item> leaves;
+        std::function<void(const std::vector<Item>&)> walk = [&](const std::vector<Item>& v) {
+            for (const Item& it : v) {
+                if (!it.more.empty() && it.children.empty() && leaves.size() < 8) leaves.push_back(it);
+                walk(it.children);
+            }
+        };
+        walk(items[root].children);
+        if (!leaves.empty()) items = leaves, root = 0;
+    }
+    menu.SnapNet(cfg, items, dpi, root, 1500, path);
 }
 
 bool Busy() { return g_busy; }

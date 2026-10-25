@@ -18,6 +18,9 @@ public:
     // Вид для памяти карточек (desk/cardlog, Л10/Л11): пусто - по заголовку, «-» - не помнить (вечерний дайджест
     // сам себя не глушит). Сбрасывается каждым Show.
     std::wstring kind;
+    // «Подробнее» под текстом: что именно произойдёт и что можно потерять (tools/explain). Задаётся перед Show,
+    // сбрасывается каждым Show - как kind.
+    std::wstring more;
 
     void Create(HINSTANCE inst);
     enum Mode { OFFER, WORKING, DONE, RESTORE };
@@ -26,9 +29,13 @@ public:
     void Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs = 0,
               Glyph glyph = G_NONE);
     Mode CurrentMode() const { return mode_; }
+    void ExpandMore() {  // раскрыть «Подробнее» (снимки --card-snap)
+        moreOpen_ = !more_.empty();
+        Invalidate();
+    }
 
 private:
-    enum { H_YES = H_USER, H_NO };
+    enum { H_YES = H_USER, H_NO, H_MORE };
     float BodyHeight(Gdiplus::Graphics& g) override;
     void Paint(Gdiplus::Graphics& g, const Gdiplus::RectF& body) override;
     int HitContent(const Gdiplus::PointF& p) const override;
@@ -46,7 +53,8 @@ private:
     std::wstring askKind_, askYes_, askNo_;
     std::function<void()> askOnYes_, askOnNo_;
     Glyph glyph_ = G_NONE;
-    std::wstring title_, sub_;
-    float subH_ = 0;
-    Gdiplus::RectF yes_, no_;  // кнопки в координатах окна (считаются при раскладке)
+    std::wstring title_, sub_, more_;
+    bool moreOpen_ = false;
+    float subH_ = 0, moreH_ = 0;
+    Gdiplus::RectF yes_, no_, link_;  // кнопки и ссылка «Подробнее» в координатах окна (считаются при раскладке)
 };

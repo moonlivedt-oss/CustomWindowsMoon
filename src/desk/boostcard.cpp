@@ -46,6 +46,8 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
                      Glyph glyph) {
     std::wstring k = kind.empty() ? cardlog::KindOf(title) : kind;
     kind.clear();
+    std::wstring moreText = std::move(more);
+    more.clear();
     // прежний вопрос сменился другим, так и не отвеченный (тот же вид - просто обновление)
     if (Visible() && k != askKind_) Unanswered();
     bool ask = (mode == OFFER || mode == RESTORE) && onYes && k != L"-";
@@ -73,6 +75,10 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
         askOnYes_ = onYes, askOnNo_ = onNo;
     }
     if (mode != WORKING) onStop = nullptr, progress = -1;
+    // то же «Подробнее» при обновлении (ход работы над тем же вопросом) остаётся раскрытым
+    std::wstring masked = share::Mask(moreText);
+    if (masked != more_) moreOpen_ = false;
+    more_ = masked;
     title_ = share::Mask(title);  // в показе экрана - без путей с именем пользователя и адресов
     sub_ = share::Mask(Pretty(sub));
     theme_ = theme;
@@ -129,6 +135,18 @@ float BoostCard::BodyHeight(Graphics& g) {
     float tw = (kW - kText - kPad) * K;
     subH_ = std::min(TextHeight(g, sub_, fS, tw), 4 * 17.5f * K);  // не больше четырёх строк
     float h = kPad + 21 + (subH_ > 0 ? 4 + subH_ / K : 0);
+    moreH_ = 0;
+    if (!more_.empty() && moreOpen_) {
+        Font fM(&fam, 11.5f * K, FontStyleRegular, UnitPixel);
+        moreH_ = std::min(TextHeight(g, more_, fM, tw), 22 * 16.0f * K);  // до 22 строк
+        h += 10 + moreH_ / K;
+    }
+    float linkW = 0;
+    if (!more_.empty()) {
+        RectF m;
+        g.MeasureString(moreOpen_ ? L"Скрыть" : L"Подробнее", -1, &fS, PointF(0, 0), &m);
+        linkW = m.Width / K + 22;
+    }
     if (mode_ == WORKING && progress >= 0) h += 12;  // полоска хода
     if (Buttons()) {
         float bh = 32, top = std::max(h + 12, 52.0f);
@@ -138,8 +156,20 @@ float BoostCard::BodyHeight(Graphics& g) {
         no_ = RectF(right - nw * K, body.Y + top * K, nw * K, bh * K);
         yes_ = StopButton() ? RectF() : RectF(no_.X - 8 * K - bw * K, no_.Y, bw * K, bh * K);
         h = top + bh;
+        link_ = RectF();
+        if (linkW > 0) {
+            float left = (StopButton() ? no_.X : yes_.X) - 8 * K, x = body.X + (kText - 8) * K;
+            if (x + linkW * K <= left) {  // слева от кнопок
+                link_ = RectF(x, no_.Y, linkW * K, bh * K);
+            } else {  // не влезла - строкой под кнопками
+                link_ = RectF(x, body.Y + (h + 6) * K, linkW * K, 26 * K);
+                h += 32;
+            }
+        }
     } else {
         yes_ = no_ = RectF();
+        link_ = linkW > 0 ? RectF(kM * K + (kText - 8) * K, kM * K + (h + 6) * K, linkW * K, 26 * K) : RectF();
+        if (linkW > 0) h += 32;
     }
     return std::max(h + kPad + 2, 70.0f);
 }
@@ -164,8 +194,43 @@ void BoostCard::Paint(Graphics& g, const RectF& body) {
         wf.SetTrimming(StringTrimmingEllipsisWord);
         g.DrawString(sub_.c_str(), -1, &fS, RectF(x0, body.Y + (kPad + 25) * K, tw, subH_ + 1), &wf, &mB);
     }
+    if (!more_.empty() && moreOpen_ && moreH_ > 0) {  // «Подробнее»: черта и объяснение под текстом
+        float y = body.Y + (kPad + 25 + 8) * K + subH_;
+        SolidBrush line(WithAlpha(muted, 60));
+        g.FillRectangle(&line, RectF(x0, y - 4 * K, tw, std::max(1.0f, K)));
+        Font fM(&fam, 11.5f * K, FontStyleRegular, UnitPixel);
+        StringFormat wf;
+        wf.SetTrimming(StringTrimmingEllipsisWord);
+        SolidBrush b(MixColor(muted, fg, 0.55));
+        g.DrawString(more_.c_str(), -1, &fM, RectF(x0, y, tw, moreH_ + 1), &wf, &b);
+    }
+    if (link_.Width > 0) {  // ссылка «Подробнее» / «Скрыть» с галочкой
+        float hv = HoverOf(H_MORE);
+        Color ac = ToColor(theme_.ac);
+        if (hv > 0.01f) {
+            GraphicsPath lp;
+            RoundRectPath(lp, link_, 8 * K);
+            SolidBrush hb(WithAlpha(ac, (BYTE)(34 * hv)));
+            g.FillPath(&hb, &lp);
+        }
+        StringFormat lf;
+        lf.SetLineAlignment(StringAlignmentCenter);
+        lf.SetFormatFlags(StringFormatFlagsNoWrap);
+        SolidBrush lb(MixColor(ac, Color(255, 255, 255), 0.25 * hv));
+        g.DrawString(moreOpen_ ? L"Скрыть" : L"Подробнее", -1, &fS,
+                     RectF(link_.X + 8 * K, link_.Y, link_.Width, link_.Height), &lf, &lb);
+        GraphicsState st = g.Save();
+        g.TranslateTransform(link_.GetRight() - 10 * K, link_.Y + link_.Height / 2);
+        g.RotateTransform(moreOpen_ ? 180.0f : 0.0f);
+        Pen pen(ac, 1.5f * K);
+        pen.SetStartCap(LineCapRound);
+        pen.SetEndCap(LineCapRound);
+        PointF pts[3] = {{-3.5f * K, -1.6f * K}, {0, 2.0f * K}, {3.5f * K, -1.6f * K}};
+        g.DrawLines(&pen, pts, 3);
+        g.Restore(st);
+    }
     if (mode_ == WORKING && progress >= 0) {  // полоска хода под текстом
-        float y = body.Y + (kPad + 25 + 6) * K + subH_;
+        float y = body.Y + (kPad + 25 + 6) * K + subH_ + (moreH_ > 0 ? moreH_ + 10 * K : 0);
         RectF track(x0, y, tw, 4 * K);
         SolidBrush back(MixColor(muted, ToColor(theme_.bg), 0.6)), fill(Tone());
         g.FillRectangle(&back, track);
@@ -178,6 +243,7 @@ void BoostCard::Paint(Graphics& g, const RectF& body) {
 }
 
 int BoostCard::HitContent(const PointF& p) const {
+    if (link_.Width > 0 && link_.Contains(p)) return H_MORE;
     if (!Buttons()) return H_NONE;
     if (!StopButton() && yes_.Contains(p)) return H_YES;
     if (no_.Contains(p)) return H_NO;
@@ -185,6 +251,11 @@ int BoostCard::HitContent(const PointF& p) const {
 }
 
 void BoostCard::Click(int id) {
+    if (id == H_MORE) {
+        moreOpen_ = !moreOpen_;
+        Invalidate();  // высота пересчитается
+        return;
+    }
     if ((id == H_YES || (id == H_NO && !StopButton())) && asked_) {
         // ответили: «да» или вторая кнопка со своим действием - это действие, «Не сейчас» без него - нет
         if (id == H_YES || onNo) {

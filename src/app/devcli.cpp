@@ -459,6 +459,9 @@ bool Run(int& exitCode) {
         exitCode = SecDiag();
     } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
         exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--card-snap")) {  // --card-snap файл.png ask|pick [more]: карточка в картинку
+        size_t i = std::find(args.begin(), args.end(), L"--card-snap") - args.begin();
+        exitCode = i + 2 < args.size() ? CardSnap(args[i + 2], Has(args, L"more"), args[i + 1]) : 2;
     } else if (Has(args, L"--snap-suite")) {  // --snap-suite <эталоны> <выход> [update]
         size_t i = std::find(args.begin(), args.end(), L"--snap-suite") - args.begin();
         if (i + 2 < args.size())
