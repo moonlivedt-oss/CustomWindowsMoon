@@ -8,6 +8,7 @@
 
 #include "core/fx.h"
 #include "core/mem.h"
+#include "desk/share.h"
 #include "core/night.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -292,6 +293,7 @@ void Toast::Render() {
     UpdateLayeredWindow(wnd_, scr, &at, &sz, memDC_, &src, 0, &bf, ULW_ALPHA);
     ReleaseDC(nullptr, scr);
     if (!IsWindowVisible(wnd_)) {
+        share::Cover(wnd_);  // в показе экрана карточку видите только вы
         ShowWindow(wnd_, SW_SHOWNOACTIVATE);
         SetWindowPos(wnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
     }

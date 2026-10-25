@@ -61,6 +61,10 @@ const Action kActions[] = {
     {L"sets", L"Рабочие наборы"},
     {L"recent", L"Недавние файлы"},
     {L"monitors", L"Кольцо мониторов"},
+    {L"selection", L"Кольцо выделенного"},
+    {L"share", L"Показ экрана"},
+    {L"game", L"Игровой режим"},
+    {L"focus", L"Фокус"},
 };
 
 const Action kWheel[] = {
@@ -191,6 +195,9 @@ void (*g_sets)() = nullptr;
 
 void SetSets(void (*sets)()) { g_sets = sets; }
 
+bool (*g_extra)(const std::wstring&) = nullptr;
+void SetExtra(bool (*run)(const std::wstring&)) { g_extra = run; }
+
 void (*g_recent)() = nullptr;
 void (*g_monitors)() = nullptr;
 
@@ -200,6 +207,7 @@ void SetRecent(void (*recent)()) { g_recent = recent; }
 
 void Run(const std::wstring& a) {
     if (a.empty()) return;
+    if (g_extra && g_extra(a)) return;
     if (a == L"monitors") {
         if (g_monitors) g_monitors();
         return;

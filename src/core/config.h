@@ -95,6 +95,14 @@ struct Config {
     bool windowCaptions = true;  // заголовки окон в цветах темы
     // игровой режим: всё красивое выключается, пока запущена игра
     bool gameAuto = true;
+    // игра без маски: окно на весь монитор (в том числе без рамки), процесс рисует через Direct3D, Vulkan или
+    // OpenGL, и это не браузер и не плеер
+    bool gameFullscreen = true;
+    // показ экрана (desk/share): включать самому, пока запущена программа трансляции или показа (имена exe через
+    // |); share_hide - окна RadialMenu мимо захвата экрана (вы их видите, зрители нет)
+    bool shareAuto = true;
+    std::wstring shareApps = L"obs64.exe|obs32.exe|CptHost.exe|Streamlabs OBS.exe|XSplit.Core.exe";
+    bool shareHide = true;
     // игры: маски путей через | (как исключения Windhawk); games_skip - что не считать игрой
     std::wstring games = L"*\\steamapps\\common\\*|*\\Epic Games\\*|*\\EA Games\\*|*\\Wuthering Waves*\\*|NFS14.exe";
     std::wstring gamesSkip = L"*\\wallpaper_engine\\*|*\\Steamworks Shared\\*";
@@ -129,23 +137,23 @@ struct Config {
     bool boostSummary = true;  // после игры - итог: пик памяти, подкачка, видеопамять
     bool devWatch = true;      // в Unreal: видеопамять, шейдеры, сборки UBT - сообщать
     // сеть: сторож связи, смена выходного узла, проверка маршрута игры
-    bool netWatch = true;  // следить за интернетом и предлагать починку при обрыве
-    bool netExit = true;   // сообщать, когда выходной узел (страна) сменился
-    bool netGame = true;   // при запуске игры проверить, идёт ли она через туннель, и пинг
-    int netInterval = 20;  // раз во сколько секунд проверять связь
+    bool netWatch = true;   // следить за интернетом и предлагать починку при обрыве
+    bool netExit = true;    // сообщать, когда выходной узел (страна) сменился
+    bool netGame = true;    // при запуске игры проверить, идёт ли она через туннель, и пинг
+    int netInterval = 20;   // раз во сколько секунд проверять связь
     bool speedAuto = true;  // раз в сутки, пока компьютер простаивает, тихо замерить скорость (50-130 МБ)
     // автоматика: тихая чистка раз в неделю и при нехватке места, разбор Загрузок (с вопросом),
     // режим питания по батарее и игре, самовосстановление автозапуска и настроек
     bool autoClean = true;
     bool crashRestart = true;  // упала - запуститься заново (не чаще раза в 10 минут, core/crash)
-    bool digest = true;    // несрочные итоги - одной карточкой вечером (digest_hour), а не по одной
+    bool digest = true;        // несрочные итоги - одной карточкой вечером (digest_hour), а не по одной
     int digestHour = 20;
     bool autoDownloads = true;
     int downloadsDays = 14;  // установщики и архивы старше стольких дней - кандидаты в корзину
     bool autoPower = true;
     bool autoRepair = true;
-    bool autoReport = true;  // раз в неделю сам собрать отчёт картинкой (app/weekreport), итог - в дайджест
-    bool autoBackup = true;  // раз в сутки копия radial.cfg в backups, если он поменялся (правка не из студии)
+    bool autoReport = true;     // раз в неделю сам собрать отчёт картинкой (app/weekreport), итог - в дайджест
+    bool autoBackup = true;     // раз в сутки копия radial.cfg в backups, если он поменялся (правка не из студии)
     bool toolsDiskWarn = true;  // карточка, когда на диске мало места (меньше 10% и меньше 20 ГБ)
     int lockPattern = 1;        // узор стекла при переходе: 0 - нет, 1 - соты, 2 - осколки
     std::wstring avatarSource;  // своя картинка в середине аватара, пусто - эмблема-полумесяц
@@ -153,15 +161,15 @@ struct Config {
     bool stroke = true;                      // росчерк: махнули с зажатым Alt и отпустили над пунктом - открыть
     bool palette = true;                     // командная палитра по сочетанию
     std::wstring paletteKey = L"alt+space";  // её сочетание
-    std::vector<std::wstring> rules;  // «если - то» (app/rules): строки rule = условие -> действия
-    std::wstring procRules;  // постоянные правила процессов (И25): chrome.exe=below,eco | blender.exe=high
-    bool gamepad = true;  // геймпад: зажать View - кольцо, стик - сектор, A - открыть (desk/gamepad)
-    bool clipHistory = true;                 // история буфера: последние тексты и картинки
-    bool clipSecrets = true;                 // токены, ключи и номера карт не запоминать, из буфера стирать
-    int clipSecretSec = 60;                  // через сколько секунд стирать секрет из буфера
-    bool winDrag = true;                     // Alt + левая - тащить окно за любое место, Alt + правая - размер
-    bool cpuBalance = true;                  // тихий баланс процессора: фоновым обжорам - пониже приоритет
-    bool noSleep = true;                     // не спать, пока идёт сборка, загрузка или копирование
+    std::vector<std::wstring> rules;         // «если - то» (app/rules): строки rule = условие -> действия
+    std::wstring procRules;   // постоянные правила процессов (И25): chrome.exe=below,eco | blender.exe=high
+    bool gamepad = true;      // геймпад: зажать View - кольцо, стик - сектор, A - открыть (desk/gamepad)
+    bool clipHistory = true;  // история буфера: последние тексты и картинки
+    bool clipSecrets = true;  // токены, ключи и номера карт не запоминать, из буфера стирать
+    int clipSecretSec = 60;   // через сколько секунд стирать секрет из буфера
+    bool winDrag = true;      // Alt + левая - тащить окно за любое место, Alt + правая - размер
+    bool cpuBalance = true;   // тихий баланс процессора: фоновым обжорам - пониже приоритет
+    bool noSleep = true;      // не спать, пока идёт сборка, загрузка или копирование
     std::wstring noSleepApps =
         L"cmake.exe|ninja.exe|cl.exe|link.exe|MSBuild.exe|UnrealBuildTool.exe|"
         L"ShaderCompileWorker.exe|robocopy.exe|steamwebhelper.exe|git.exe|cc1plus.exe";
@@ -170,9 +178,9 @@ struct Config {
         L"cmake.exe|ninja.exe|MSBuild.exe|UnrealBuildTool.exe|UnrealPak.exe|"
         L"ShaderCompileWorker.exe|git.exe|cargo.exe|npm.cmd|node.exe|RunUAT.bat|"
         L"UnrealEditor-Cmd.exe|dotnet.exe";
-    int longMin = 3;  // от скольких минут работы команда считается долгой
+    int longMin = 3;        // от скольких минут работы команда считается долгой
     bool appVolume = true;  // Л36: помнить громкость каждой программы и возвращать при новом запуске
-    int focusMinutes = 50;                             // Л8: фокус по умолчанию, минут
+    int focusMinutes = 50;  // Л8: фокус по умолчанию, минут
     std::wstring focusApps = L"Telegram.exe|Discord.exe";  // Л8: что на время фокуса свернуть и усыпить
     std::wstring focusAuto = L"lichess.org|chess.com";     // Л34: окно с этим в заголовке - тишина сама
     std::vector<Item> left, right;

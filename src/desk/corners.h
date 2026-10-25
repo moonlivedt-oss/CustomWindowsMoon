@@ -37,6 +37,8 @@ void SetMonitors(void (*monitors)());  // monitors: кольцо монитор�
 void SetRecent(void (*recent)());  // recent: кольцо недавних файлов и папок
 void SetLayout(void (*layout)());  // layout: кольцо раскладки окон
 void SetSets(void (*sets)());      // sets: кольцо рабочих наборов         // clip: кольцо истории буфера
+// share: показ экрана вкл/выкл, selection: кольцо выделенного текста, game, focus - режимы; false - не знает
+void SetExtra(bool (*run)(const std::wstring& action));
 // keys:ctrl+shift+esc -> «Ctrl + Shift + Esc»; виртуальная клавиша -> имя для keys:
 std::wstring KeyName(UINT vk);
 // на этом мониторе открыта игра или видео на весь экран

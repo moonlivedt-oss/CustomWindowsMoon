@@ -11,6 +11,7 @@
 #include "desk/boost.h"
 #include "desk/gameboost.h"
 #include "desk/lockscreen.h"
+#include "desk/share.h"
 #include "desk/whreg.h"
 #include "gfx/draw.h"
 #include "studio/studio.h"
@@ -91,12 +92,13 @@ void Studio::StylePage(const RectF& r) {
     });
 
     // игровой режим
-    card(L"Игровой режим", 6.6f, [&](const RectF& b) {
+    card(L"Игровой режим", 7.6f, [&](const RectF& b) {
         toggle(row(b, 0, L"Включать сам, когда запущена игра"), ID_GAME_AUTO, cfg.gameAuto);
         toggle(row(b, 1, L"Выключать анимации Windows"), ID_GAME_ANIM, cfg.gameWinAnim);
         toggle(row(b, 2, L"Выключать прозрачность Windows"), ID_GAME_TRANSP, cfg.gameTransparency);
         toggle(row(b, 3, L"Пауза Wallpaper Engine"), ID_GAME_WALL, cfg.gameWallpaper);
-        RectF fr(b.X, b.Y + 4 * rowH + ui.S(4), b.Width, ui.S(36));
+        toggle(row(b, 4, L"Узнавать игру на весь экран без маски"), ID_GAME_FULLSCREEN, cfg.gameFullscreen);
+        RectF fr(b.X, b.Y + 5 * rowH + ui.S(4), b.Width, ui.S(36));
         FieldOrText(
             ID_GAME_LIST, fr, view, cfg.games,
             [this](const std::wstring& s) {
@@ -105,9 +107,11 @@ void Studio::StylePage(const RectF& r) {
             },
             L"Маски игр через |, например *\\steamapps\\common\\*|NFS14.exe");
         std::wstring now = GameStatus();
-        note(b, 5, 3,
+        note(b, 6, 3,
              (now.empty() ? L"" : L"Сейчас: " + now + L". ") +
-                 L"Игрой считается программа из этих папок или всё, что идёт в эксклюзивном полноэкранном режиме. "
+                 L"Игрой считается программа из этих папок, всё в эксклюзивном полноэкранном режиме и (переключатель "
+                 L"выше) окно на весь монитор, которое рисует через Direct3D, Vulkan или OpenGL, - не браузер и не "
+                 L"плеер; лишнее - в games_skip. "
                  L"Без анимаций, стекла, свечений и рамок; включить вручную - в меню значка в трее.",
              c.muted);
     });
@@ -131,6 +135,26 @@ void Studio::StylePage(const RectF& r) {
              (now.empty() ? L"" : L"Сейчас: " + now + L". ") +
                  L"Пока открыт редактор, обои стоят на паузе, а при его запуске можно закрыть лишнее (как перед "
                  L"игрой). Сообщу, когда видеопамять на пределе, шейдеры готовы или сборка кончилась.",
+             c.muted);
+    });
+
+    // показ экрана: свои окна мимо захвата, уведомления молчат
+    card(L"Показ экрана", 5.6f, [&](const RectF& b) {
+        toggle(row(b, 0, L"Включать сам, пока идёт трансляция"), ID_SHARE_AUTO, cfg.shareAuto);
+        toggle(row(b, 1, L"Окна RadialMenu не видны в записи"), ID_SHARE_HIDE, cfg.shareHide);
+        RectF fr(b.X, b.Y + 2 * rowH + ui.S(4), b.Width, ui.S(36));
+        FieldOrText(
+            ID_SHARE_LIST, fr, view, cfg.shareApps,
+            [this](const std::wstring& s) {
+                FieldEdit(ID_SHARE_LIST);
+                cfg.shareApps = s;
+            },
+            L"Программы через |, например obs64.exe|CptHost.exe");
+        note(b, 3, 3,
+             (share::On() ? L"Сейчас: " + share::Reason() + L". " : std::wstring()) +
+                 L"Пока идёт показ экрана, кольца, карточки и студию видите только вы - в OBS, Discord, Zoom и "
+                 L"записи их нет; уведомления Windows молчат. CptHost.exe - показ экрана в Zoom. Включить вручную - "
+                 L"в меню значка в трее или действием «Показ экрана» на углу.",
              c.muted);
     });
 

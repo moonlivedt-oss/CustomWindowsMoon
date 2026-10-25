@@ -1,5 +1,9 @@
 #include "desk/gamemode.h"
 
+#include <algorithm>
+#include <vector>
+
+#include <psapi.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <tlhelp32.h>
@@ -7,6 +11,7 @@
 #include "core/config.h"
 #include "core/procsnap.h"
 #include "core/text.h"
+#include "desk/corners.h"
 
 namespace {
 
@@ -183,7 +188,67 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
         }
     }
     games_.swap(seen);
+    // игра без маски: узнанная однажды держит режим, пока её процесс жив (её запоминает games_ по pid)
+    DWORD fsPid = 0;
+    std::wstring fsExe;
+    if (!found && cfg.gameFullscreen && FullscreenGame(cfg, fsPid, fsExe)) {
+        auto it = games_.find(fsPid);
+        if (it != games_.end()) {
+            it->second.game = fsExe;
+            found = true;
+            name = fsExe;
+        }
+    }
     return found;
+}
+
+// Впереди окно на весь монитор (и без рамки - так идут почти все нынешние игры) уже 4 с, его процесс рисует через
+// Direct3D, Vulkan или OpenGL, и это не браузер, не плеер, не редактор и не games_skip - значит, игра.
+bool GameMode::FullscreenGame(const Config& cfg, DWORD& pid, std::wstring& exe) {
+    HWND fg = GetForegroundWindow();
+    HMONITOR mon = fg ? MonitorFromWindow(fg, MONITOR_DEFAULTTONULL) : nullptr;
+    MONITORINFO mi{sizeof(mi)};
+    if (!mon || !GetMonitorInfoW(mon, &mi) || !corners::FullscreenOn(mon, mi.rcMonitor)) {
+        fsPid_ = 0;
+        return false;
+    }
+    GetWindowThreadProcessId(fg, &pid);
+    if (!pid || pid == GetCurrentProcessId()) return false;
+    ULONGLONG now = GetTickCount64();
+    if (pid != fsPid_) {  // только что вышло на весь экран (или Alt+Tab) - подождать
+        fsPid_ = pid;
+        fsSince_ = now;
+        return false;
+    }
+    if (now - fsSince_ < 4000) return false;
+    std::wstring path = ProcessPath(pid);
+    exe = FileName(path);
+    if (path.empty() || NotAGame(Lower(exe)) || MatchAny(path, cfg.gamesSkip) || MatchAny(path, cfg.devApps))
+        return false;
+    auto known = draws3d_.find(pid);
+    if (known == draws3d_.end()) {
+        if (draws3d_.size() > 64) draws3d_.clear();
+        known = draws3d_.emplace(pid, Draws3d(pid)).first;
+    }
+    return known->second;
+}
+
+// Загружена ли библиотека 3D. Список модулей не отдают защищённые античитом игры - их и считаем играми.
+bool GameMode::Draws3d(DWORD pid) {
+    HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!h) return GetLastError() == ERROR_ACCESS_DENIED;
+    std::vector<HMODULE> mods(1024);
+    DWORD need = 0;
+    bool yes = false;
+    if (K32EnumProcessModulesEx(h, mods.data(), (DWORD)(mods.size() * sizeof(HMODULE)), &need, LIST_MODULES_ALL)) {
+        size_t n = std::min<size_t>(mods.size(), need / sizeof(HMODULE));
+        for (size_t i = 0; i < n && !yes; ++i) {
+            wchar_t name[MAX_PATH];
+            if (K32GetModuleBaseNameW(h, mods[i], name, MAX_PATH)) yes = Is3dModule(Lower(name));
+        }
+    }
+    CloseHandle(h);
+    return yes;
 }
 
 std::vector<DWORD> GameMode::GamePids() const {
