@@ -30,7 +30,12 @@ struct Setting {
     Level level;
     std::vector<RegValue> values;
     bool Machine() const;  // есть значения в HKLM - нужны права
+    bool User() const;     // есть значения в HKCU - пишутся в профиль того, от чьего имени запущено
 };
+
+// что нужно, чтобы правка заработала: значения Проводника он перечитывает при перезапуске, службы - при загрузке
+enum class Restart { None, Explorer, Reboot };
+Restart RestartOf(const Setting& s);
 
 const std::vector<Setting>& Catalog();
 const Setting* Find(const std::wstring& id);
@@ -40,6 +45,8 @@ enum class State { Off, On, Partial };
 struct Status {
     State state = State::Off;
     bool ours = false;  // хотя бы одно значение меняли мы (есть в бэкапе)
+    // меняли мы, а сейчас не включено: вернуло обновление Windows, Параметры или другая программа
+    bool Drifted() const { return ours && state != State::On; }
 };
 
 // ---------------- бэкап ----------------
@@ -66,6 +73,8 @@ Status StatusOf(const Setting& s, const Backup& user, const Backup& machine);
 using Log = std::function<void(const std::wstring&)>;
 // Включить (priv) или вернуть как было. HKLM без прав не трогается - false и пояснение в log.
 bool Apply(const Setting& s, bool priv, const Log& log);
+// разослать окнам «политики и настройки поменялись» - часть значений Проводник и Параметры подхватят без перезапуска
+void NotifyChanged(bool wait = false);
 
 // ---------------- профиль ----------------
 // Профиль - список id включённых, по одному в строке; # - комментарий. Чужие id пропускаются.

@@ -235,8 +235,10 @@ void TestModeStats() {
     CHECK(modestats::ParseRow(modestats::RowLine({day, modestats::FOCUS, 1500}), r));
     CHECK(r.day == day && r.mode == modestats::FOCUS && r.sec == 1500);
     CHECK(!modestats::ParseRow(L"2026-10-25\t9\t60", r) && !modestats::ParseRow(L"мусор", r));
-    std::vector<modestats::Row> all = {{day, modestats::GAME, 3600},  {day - 1, modestats::DEV, 7200},
-                                       {day - 6, modestats::GAME, 600}, {day - 7, modestats::GAME, 99999},
+    std::vector<modestats::Row> all = {{day, modestats::GAME, 3600},
+                                       {day - 1, modestats::DEV, 7200},
+                                       {day - 6, modestats::GAME, 600},
+                                       {day - 7, modestats::GAME, 99999},
                                        {day + 1, modestats::DEV, 60}};
     modestats::Week w = modestats::Sum(all, day);
     CHECK(w.total[modestats::GAME] == 4200 && w.total[modestats::DEV] == 7200);
@@ -250,8 +252,7 @@ void TestModeStats() {
 void TestShareMask() {
     std::vector<std::wstring> prof = {L"C:\\Users\\IvanPetrov", L"C:\\Users\\IVANPE~1"},
                               words = {L"IvanPetrov", L"DESKTOP-7Q2", L"HomeNet_5G"};
-    CHECK(share::MaskText(L"c:\\users\\ivanpetrov\\Desktop\\shop", prof, words) ==
-          L"%USERPROFILE%\\Desktop\\shop");
+    CHECK(share::MaskText(L"c:\\users\\ivanpetrov\\Desktop\\shop", prof, words) == L"%USERPROFILE%\\Desktop\\shop");
     CHECK(share::MaskText(L"C:\\Users\\IVANPE~1\\AppData", prof, words) == L"%USERPROFILE%\\AppData");
     CHECK(share::MaskText(L"Сеть «HomeNet_5G 2», ПК DESKTOP-7Q2", prof, words) == L"Сеть «*** 2», ПК ***");
     CHECK(share::MaskText(L"адрес 192.168.1.34, свой 127.0.0.1", prof, words) == L"адрес x.x.x.x, свой 127.0.0.1");
@@ -669,6 +670,16 @@ void TestShutUpCatalog() {
     CHECK(shutup::Find(L"telemetry") && shutup::Find(L"telemetry")->Machine());
     CHECK(shutup::Find(L"ads_id") && !shutup::Find(L"ads_id")->Machine());
     CHECK(!shutup::Find(L"нет такой"));
+    // что нужно для вступления в силу: службы - перезагрузка, Explorer\Advanced - перезапуск Проводника
+    CHECK(shutup::RestartOf(*shutup::Find(L"diagtrack")) == shutup::Restart::Reboot);
+    CHECK(shutup::RestartOf(*shutup::Find(L"copilot")) == shutup::Restart::Explorer);
+    CHECK(shutup::RestartOf(*shutup::Find(L"ads_id")) == shutup::Restart::None);
+    CHECK(shutup::Find(L"feedback")->User() && shutup::Find(L"feedback")->Machine());
+    shutup::Status drift;  // меняли мы, а сейчас выключено - сбросилось
+    drift.ours = true;
+    CHECK(drift.Drifted());
+    drift.state = shutup::State::On;
+    CHECK(!drift.Drifted());
 
     shutup::Saved a;
     a.had = true;

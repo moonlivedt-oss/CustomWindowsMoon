@@ -1,6 +1,8 @@
 // Каталог RadialShutUp: настройки, их состояние в реестре, правка с бэкапом и откат.
 #include "shutup/catalog.h"
 
+#include <shlwapi.h>
+
 #include <algorithm>
 
 #include "core/text.h"
@@ -45,6 +47,21 @@ bool Setting::Machine() const {
     for (const RegValue& v : values)
         if (v.root == HKEY_LOCAL_MACHINE) return true;
     return false;
+}
+
+bool Setting::User() const {
+    for (const RegValue& v : values)
+        if (v.root == HKEY_CURRENT_USER) return true;
+    return false;
+}
+
+Restart RestartOf(const Setting& s) {
+    Restart r = Restart::None;
+    for (const RegValue& v : s.values) {
+        if (StrStrIW(v.key, L"\\CurrentControlSet\\Services\\")) return Restart::Reboot;
+        if (_wcsicmp(v.key, kAdv) == 0) r = Restart::Explorer;
+    }
+    return r;
 }
 
 const std::vector<Setting>& Catalog() {
@@ -760,7 +777,10 @@ bool Apply(const Setting& s, bool priv, const Log& log) {
             auto it = b.find(key);
             if (it == b.end()) continue;  // не мы меняли - не трогаем
             HKEY k;
-            LONG rc = RegOpenKeyExW(v.root, v.key, 0, KEY_SET_VALUE | View(v.root), &k);
+            // значение было, а ключ с тех пор удалили (чистильщик, сброс политик) - создать ключ заново
+            LONG rc = it->second.had ? RegCreateKeyExW(v.root, v.key, 0, nullptr, 0, KEY_SET_VALUE | View(v.root),
+                                                       nullptr, &k, nullptr)
+                                     : RegOpenKeyExW(v.root, v.key, 0, KEY_SET_VALUE | View(v.root), &k);
             if (rc == ERROR_SUCCESS) {
                 rc = it->second.had ? Write(k, v.name, it->second.type, it->second.value) : RegDeleteValueW(k, v.name);
                 RegCloseKey(k);
@@ -775,6 +795,22 @@ bool Apply(const Setting& s, bool priv, const Log& log) {
     if (log) log(std::wstring(s.title) + (ok ? (priv ? L": включено." : L": как было.") : L": не всё получилось."));
     return ok;
 }
+
+void NotifyChanged(bool wait) {
+    // в своём потоке: рассылка ждёт каждое окно до 300 мс, подвисшее окно не должно тормозить интерфейс
+    HANDLE t = CreateThread(
+        nullptr, 0,
+        [](LPVOID) -> DWORD {
+            for (const wchar_t* what : {L"Policy", L"TraySettings"})
+                SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)what, SMTO_ABORTIFHUNG, 300, nullptr);
+            return 0;
+        },
+        nullptr, 0, nullptr);
+    if (!t) return;
+    if (wait) WaitForSingleObject(t, 3000);  // без окна процесс сразу выйдет - дождаться рассылки
+    CloseHandle(t);
+}
+
 // ---------------- профиль ----------------
 
 std::wstring EncodeProfile(const std::vector<std::wstring>& ids) {
