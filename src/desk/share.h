@@ -2,14 +2,29 @@
 // Режим показа экрана: идёт трансляция или запись (OBS, показ экрана в Zoom) или включили руками - окна
 // RadialMenu (кольца, карточки, студия, свечения) не попадают в захват экрана: вы их видите, зрители нет.
 // Уведомления Windows на это время молчат (тишину держит своей отметкой, как игра и фокус).
+// Узнаёт показ по программам (share_apps) и по окну-полоске показа из браузера и звонков (share_titles: «... is
+// sharing your screen», индикатор Firefox, панель Teams). С share_mask в показе прячет личное: пути с именем
+// пользователя, имя компьютера, адреса IPv4, почту, имена сетей; кольцо «Буфер» - без содержимого.
+// share_logic.cpp - замены в тексте и совпадение заголовка (под тестами).
 #include <windows.h>
 
 #include <functional>
 #include <string>
+#include <vector>
 
 struct Config;
 
 namespace share {
+
+// --- без окон (под тестами) ---
+// profiles - папки пользователя (заменяются на %USERPROFILE%), words - имя, компьютер, сети (на ***)
+std::wstring MaskText(std::wstring s, const std::vector<std::wstring>& profiles, const std::vector<std::wstring>& words);
+bool TitleHit(const std::wstring& title, const std::wstring& masks);  // есть ли в заголовке одно из слов (через |)
+
+// --- в программе ---
+bool Masking();                                         // идёт показ и включено share_mask
+std::wstring Mask(const std::wstring& s);               // при Masking() - без личного, иначе как есть
+void HideWords(const std::vector<std::wstring>& words);  // ещё что прятать (имена сетей - их знает сеть и правила)
 
 void Init(const Config* cfg);
 void Tick();    // из общего опроса; проверка раз в секунду

@@ -18,6 +18,7 @@
 #include "app/netui.h"
 #include "app/afterwork.h"
 #include "app/focus.h"
+#include "app/modestats.h"
 #include "app/palette.h"
 #include "app/resume.h"
 #include "app/worksets.h"
@@ -246,6 +247,7 @@ void PollWork() {
     }
     netui::Tick();
     toolsui::Tick();
+    rules::SetModes(g_game.On(), g_dev.On(), focus::On(), share::On());
     if (!g_menu.IsOpen())
         rules::Tick(g_cfg, [](const std::wstring& theme) {
             g_themeOverride = theme;
@@ -256,6 +258,7 @@ void PollWork() {
     afterwork::Tick();
     focus::Tick();
     share::Tick();
+    ModeFlowTick(nowMs);
     if (!alt) {
         g_armed = true;
         g_altTab = false;
@@ -385,7 +388,9 @@ void ShowFromStudio(bool left, HWND studio) {
 }
 
 std::wstring TrayTip() {
-    if (g_game.On()) return L"Radial Menu: игровой режим (" + g_game.Reason() + L")";
+    if (g_game.On())
+        return L"Radial Menu: игровой режим (" + g_game.Reason() + L")" +
+               (GameInBackground() ? L" - игра свёрнута, углы работают" : L"");
     if (g_dev.On()) return L"Radial Menu: режим разработки (" + g_dev.Reason() + L")";
     if (share::On()) return L"Radial Menu: показ экрана (" + share::Reason() + L") - окна не видны в записи";
     std::wstring awake = toolsui::AwakeReason();
@@ -412,18 +417,35 @@ void NoteMode(const wchar_t* name, bool on, const std::wstring& reason, ULONGLON
         since = now;
         autos::Note(std::wstring(name) + L" включён: " + reason);
     } else {
+        if (!since) return;  // выключение без включения (выход программы после уже записанного)
         ULONGLONG s = since ? (now - since) / 1000 : 0;
         std::wstring dur = s >= 120 ? std::to_wstring(s / 60) + L" мин" : std::to_wstring(s) + L" с";
         autos::Note(std::wstring(name) + L" выключен (" + reason + L", шёл " + dur + L")");
         since = 0;
     }
 }
-ULONGLONG g_gameSince = 0, g_devSince = 0, g_shareSince = 0;
+ULONGLONG g_gameSince = 0, g_devSince = 0, g_shareSince = 0, g_focusSince = 0;
 
-// Показ экрана включился или выключился: карточка (её саму зрители уже не видят), журнал, подсказка трея.
+void StatMode(int mode, bool on) { on ? modestats::Begin(mode) : modestats::End(mode); }
+
+// Показ экрана включился или выключился: анимация или карточка (их саму зрители уже не видят), журнал, трей.
 void OnShareMode(bool on) {
     NoteMode(L"Показ экрана", on, share::Reason(), g_shareSince);
+    StatMode(modestats::SHARE, on);
     UpdateTrayTip();
+    if (g_cfg.hexGlass) {
+        std::vector<std::wstring> chips;
+        if (on) {
+            if (g_cfg.shareHide) chips.push_back(L"Окна RadialMenu не в записи");
+            chips.push_back(L"Уведомления молчат");
+            if (g_cfg.shareMask) chips.push_back(L"Личное спрятано");
+        } else {
+            chips = {L"Окна снова в захвате", L"Уведомления приходят"};
+        }
+        g_modefx.Play(ModeFx::SHARE, on, on ? L"Показ экрана: " + share::Reason() : L"Показ экрана закончился", chips,
+                      CurrentTheme(g_cfg));
+        return;
+    }
     if (on)
         g_boostCard.Show(BoostCard::DONE, L"Показ экрана: " + share::Reason(),
                          g_cfg.shareHide ? L"Окна RadialMenu не видны в записи и трансляции, уведомления молчат."
@@ -432,6 +454,28 @@ void OnShareMode(bool on) {
     else
         g_boostCard.Show(BoostCard::DONE, L"Показ экрана закончился",
                          L"Окна снова видны в захвате, уведомления приходят.", CurrentTheme(g_cfg), 4000);
+}
+
+// Фокус включился или выключился: время в режимах и анимация (только у ручного - шахматы включают тишину сами,
+// анимация посреди партии отвлекала бы)
+void NoteFocus(bool on) {
+    StatMode(modestats::FOCUS, on);
+    static bool shown = false;
+    if (on) shown = !focus::Auto() && g_cfg.hexGlass && !g_game.On();
+    if (shown) {
+        std::vector<std::wstring> chips;
+        if (on) {
+            chips.push_back(L"Уведомления молчат");
+            if (!g_cfg.focusApps.empty()) chips.push_back(L"Отвлекающее усыплено");
+            chips.push_back(L"Тяжёлое ждёт");
+        } else {
+            chips = {L"Уведомления приходят", L"Программы проснулись"};
+        }
+        g_modefx.Play(ModeFx::FOCUS, on,
+                      on ? focus::Status() : L"Фокус закончился", chips,
+                      CurrentTheme(g_cfg));
+    }
+    if (!on) shown = false;
 }
 
 // Действия углов и колец, которые делает main: показ экрана, режимы, кольцо выделенного
@@ -459,11 +503,14 @@ bool RunExtra(const std::wstring& a) {
 // мыши не трогаются.
 void OnDevMode(bool on) {
     NoteMode(L"Режим разработки", on, g_dev.Reason(), g_devSince);
+    StatMode(modestats::DEV, on);
     UpdateTrayTip();
     autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
     toolsui::OnModes(g_game.On(), on);
     netui::Dev(on);
-    gboost::SetDev(on && g_cfg.devWatch, g_dev.Reason());
+    // видеокарту проверяем только у редактора из dev_apps (рендер Blender и так на чём выбран в нём самом)
+    gboost::SetDev(on && g_cfg.devWatch, g_dev.Reason(), g_dev.Busy() ? std::vector<DWORD>() : g_dev.Pids(),
+                   g_dev.Busy() ? L"" : g_dev.ExePath());
     std::vector<std::wstring> chips;
     if (on) {
         if (WallpaperPaused(g_cfg.devWallpaper)) chips.push_back(L"Обои на паузе");
@@ -473,7 +520,7 @@ void OnDevMode(bool on) {
             chips.push_back(L"Сборки UBT");
         }
         if (g_cfg.autoPower && !tools::OnBattery()) chips.push_back(L"Питание: максимум");
-        if (g_cfg.devBoost && !g_game.On()) OfferBoost(false, L"для " + g_dev.Reason());
+        if (g_cfg.devBoost && !g_game.On() && !g_dev.Busy()) OfferBoost(false, L"для " + g_dev.Reason());
         g_avHintAt = GetTickCount64() + 90000;
     } else {
         g_avHintAt = 0;
@@ -492,9 +539,16 @@ void OnDevMode(bool on) {
 // Игровой режим включился или выключился: эффекты, рамки окон и перехват мыши.
 void OnGameMode(bool on) {
     NoteMode(L"Игровой режим", on, g_game.Reason(), g_gameSince);
-    fx::SetGame(on);
-    g_frame.Suspend(on);
-    llmouse::Suspend(on);            // перехват мыши снят: каждое движение мыши не ходит через нас
+    StatMode(modestats::GAME, on);
+    // лёгкая игра (games_light): красота, рамки окон и перехват мыши остаются
+    static bool heavy = false;
+    if (on) heavy = !g_game.Light();
+    if (heavy) {
+        fx::SetGame(on);
+        g_frame.Suspend(on);
+        llmouse::Suspend(on);  // перехват мыши снят: каждое движение мыши не ходит через нас
+    }
+    if (!on) heavy = false;
     autos::OnModes(on, g_dev.On());  // питание: в игре - производительность
     toolsui::OnModes(on, g_dev.On());
     UpdateTrayTip();
@@ -506,8 +560,8 @@ void OnGameMode(bool on) {
     if (on) {
         boost::Settings s = boost::Load(BoostDir());
         boost::GameTweaks(s, true);
-        chips.push_back(L"Красота выключена");
-        if (WallpaperPaused(g_cfg.gameWallpaper)) chips.push_back(L"Обои на паузе");
+        chips.push_back(g_game.Light() ? L"Лёгкая игра: красота остаётся" : L"Красота выключена");
+        if (!g_game.Light() && WallpaperPaused(g_cfg.gameWallpaper)) chips.push_back(L"Обои на паузе");
         if (s.ok && s.timer) chips.push_back(L"Таймер 0.5 мс");
         if (g_cfg.boostEco) {
             int n = gboost::GameFirst(g_game.GamePids(), Split(g_cfg.boostKeepFast, L'|'), s.guarded);
@@ -534,6 +588,7 @@ void OnGameMode(bool on) {
         else
             SessionSummary(sess);
         g_dev.Reapply(g_cfg);  // игра вернула обои, а редактор ещё открыт
+        GameLearnOffer();      // игру узнали по окну на весь экран - запомнить?
         chips.push_back(L"Красота вернулась");
         if (g_cfg.gameWallpaper && !(g_dev.On() && g_cfg.devWallpaper)) chips.push_back(L"Обои снова идут");
         if (g_cfg.boostEco) chips.push_back(L"Приоритеты как были");
@@ -789,6 +844,11 @@ void ShutdownAll() {
     g_mcCard2.Destroy();
     g_edgeCard.Destroy();
     g_askCard.Destroy();
+    ModeFlowShutdown();
+    // идущие режимы - в время за неделю (их выключение при выходе onChange не зовёт)
+    if (g_game.On()) modestats::End(modestats::GAME);
+    if (g_dev.On()) modestats::End(modestats::DEV);
+    if (share::On()) modestats::End(modestats::SHARE);
     resume::Shutdown();
     afterwork::Shutdown();
     focus::Shutdown();
@@ -1183,6 +1243,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_mcCard.Create(inst);
     g_mcCard2.Create(inst);
     g_askCard.Create(inst);
+    ModeFlowInit(inst);
     // Л11: вид карточек трижды подряд закрыт без действия - один раз спросить; заглушённое - в вечерний дайджест
     cardlog::SetDigest([](const std::wstring& title, const std::wstring& text) { return autos::Digest(title, text); });
     cardlog::SetAsk([](const std::wstring& kind) {
@@ -1245,6 +1306,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     share::onChange = OnShareMode;
+    // фокус: время в режимах и анимация (только ручной: шахматы включают тишину сами и без представлений)
+    focus::onChange = [](bool on) { NoteFocus(on); };
     corners::SetExtra(RunExtra);
     g_menu.focusStatus = [] { return focus::Status(); };
     palette::AddSource([](std::vector<Item>& out) {

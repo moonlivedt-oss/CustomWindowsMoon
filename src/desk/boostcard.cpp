@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "desk/cardlog.h"
+#include "desk/share.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 
@@ -72,8 +73,8 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
         askOnYes_ = onYes, askOnNo_ = onNo;
     }
     if (mode != WORKING) onStop = nullptr, progress = -1;
-    title_ = title;
-    sub_ = Pretty(sub);
+    title_ = share::Mask(title);  // в показе экрана - без путей с именем пользователя и адресов
+    sub_ = share::Mask(Pretty(sub));
     theme_ = theme;
     if (glyph == G_NONE) {
         // знак по виду карточки и по словам заголовка

@@ -35,7 +35,7 @@ constexpr wchar_t kClass[] = L"MoonRadialMenuApp";
 constexpr UINT WM_TRAY = WM_APP + 1;
 constexpr UINT_PTR kPollTimer = 1, kWarmTimer = 2, kIntroTimer = 3, kAutostartTimer = 4;
 constexpr UINT kTrayId = 1;
-constexpr int kHotWindows = 1;  // Alt + ` - кольцо окон
+constexpr int kHotWindows = 1;    // Alt + ` - кольцо окон
 constexpr int kHotSelection = 7;  // Ctrl + Alt + Пробел - кольцо выделенного
 enum Cmd {
     CMD_EDITOR = 100,
@@ -137,6 +137,17 @@ void ShowAvHint();
 bool WallpaperPaused(bool cfgFlag);
 void OnBoostNote(const gboost::Note& n);
 void BoostDemo(int what);
+
+// modeflow.cpp
+extern BoostCard g_modeCard;              // «запомнить игру», память в режиме разработки
+bool ModeAsked(const std::wstring& key);  // ответили «Не спрашивать» (game:имя.exe, gpu:путь)
+void ModeMarkAsked(const std::wstring& key);
+void EditConfig(const std::function<void(Config&)>& change);  // поправить radial.cfg на диске
+void ModeFlowInit(HINSTANCE inst);
+void ModeFlowShutdown();
+void ModeFlowTick(ULONGLONG now);
+bool GameInBackground();  // игра идёт, но свёрнута: перехват мыши и эффекты вернули (Г2)
+void GameLearnOffer();    // после игры: запомнить игру, узнанную по окну на весь экран (Г1)
 
 // mcflow.cpp
 std::wstring McIni();

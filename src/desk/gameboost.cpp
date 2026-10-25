@@ -295,6 +295,10 @@ std::vector<DWORD> g_gamePids;
 std::wstring g_gameExe;
 ULONGLONG g_gameAt = 0;
 int g_gpuChecks = 0;
+std::vector<DWORD> g_devPids;  // редактор: проверить видеокарту, как у игры
+std::wstring g_devExe;
+ULONGLONG g_devAt = 0;
+int g_devGpuChecks = 0;
 Session g_sess[2];  // 0 - игра, 1 - редактор
 bool g_sessOn[2] = {};
 double g_pageStart[2] = {};
@@ -389,6 +393,10 @@ DWORD WINAPI Loop(void*) {
         std::wstring exe = g_gameExe;
         ULONGLONG gameAt = g_gameAt;
         int gpuChecks = g_gpuChecks;
+        std::vector<DWORD> devPids = g_devPids;
+        std::wstring devExe = g_devExe;
+        ULONGLONG devAt = g_devAt;
+        int devGpuChecks = g_devGpuChecks;
         ReleaseSRWLockShared(&g_lock);
 
         // сборка UBT: лог поменялся и 4 секунды не меняется - сборка кончилась
@@ -465,6 +473,29 @@ DWORD WINAPI Loop(void*) {
                     Post(EV_GPU_WRONG, load, 0, exe, it->name + L"|" + discrete);
                     AcquireSRWLockExclusive(&g_lock);
                     g_gpuChecks = 2;
+                    ReleaseSRWLockExclusive(&g_lock);
+                }
+            }
+        }
+
+        // на какой видеокарте редактор (Р2): через 40 с после открытия (заставка и загрузка проекта), потом ещё раз
+        if (dev && !devPids.empty() && devGpuChecks < 2 && now - devAt > (devGpuChecks ? 180000ull : 40000ull)) {
+            AcquireSRWLockExclusive(&g_lock);
+            g_devGpuChecks++;
+            ReleaseSRWLockExclusive(&g_lock);
+            LUID l;
+            double load = 0;
+            std::vector<Adapter> ads = Adapters();
+            bool hasDiscrete = std::any_of(ads.begin(), ads.end(), [](const Adapter& a) { return !a.integrated; });
+            if (hasDiscrete && GpuOfPids(std::set<DWORD>(devPids.begin(), devPids.end()), l, load) && load > 1) {
+                auto it = std::find_if(ads.begin(), ads.end(), [&](const Adapter& a) { return SameLuid(a.luid, l); });
+                if (it != ads.end() && it->integrated) {
+                    std::wstring discrete;
+                    for (const Adapter& a : ads)
+                        if (!a.integrated) discrete = a.name;
+                    Post(EV_GPU_WRONG, load, 1, devExe, it->name + L"|" + discrete);
+                    AcquireSRWLockExclusive(&g_lock);
+                    g_devGpuChecks = 2;
                     ReleaseSRWLockExclusive(&g_lock);
                 }
             }
@@ -774,10 +805,16 @@ void SetGame(bool on, const std::vector<DWORD>& pids, const std::wstring& exe, c
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-void SetDev(bool on, const std::wstring& name) {
+void SetDev(bool on, const std::wstring& name, const std::vector<DWORD>& pids, const std::wstring& exe) {
     double page = on && !g_sessOn[1] ? tools::PagefileUsed() / 1048576.0 : 0;
     AcquireSRWLockExclusive(&g_lock);
+    if (on && (!g_dev || g_devExe != exe)) {
+        g_devAt = GetTickCount64();
+        g_devGpuChecks = 0;
+    }
     g_dev = on;
+    g_devPids = on ? pids : std::vector<DWORD>();
+    g_devExe = on ? exe : L"";
     if (on && !g_sessOn[1]) {
         BeginSession(1, name);
         g_pageStart[1] = page;

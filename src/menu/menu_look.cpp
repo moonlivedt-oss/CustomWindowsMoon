@@ -14,6 +14,7 @@
 #include "core/project.h"
 #include "core/macro.h"
 #include "core/text.h"
+#include "desk/share.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "menu/menu_internal.h"
@@ -503,6 +504,10 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
         detail = in.detail;
         path = in.path;
     }
+    // в показе экрана зрители не видят путей с именем пользователя, адресов и имени компьютера
+    const std::wstring name = share::Mask(it->name);
+    detail = share::Mask(detail);
+    path = share::Mask(path);
     // у действий сети пояснение длинное: ему две строки с переносом вместо строки пути; пояснения нет -
     // хватит одной строки «Группа» / «Действие», без пустого места под ней
     bool note2 = it->special == 3 && !detail.empty();
@@ -517,7 +522,7 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
         Font ft(Family(), (REAL)fTitle, FontStyleRegular, UnitPixel),
             fs(Family(), (REAL)fSmall, FontStyleRegular, UnitPixel);
         RectF a1, a2;
-        g.MeasureString(it->name.c_str(), -1, &ft, PointF(0, 0), &a1);
+        g.MeasureString(name.c_str(), -1, &ft, PointF(0, 0), &a1);
         g.MeasureString(line2.c_str(), -1, &fs, PointF(0, 0), &a2);
         double need = pad * 2 + 3 * k + isz + 10 * k + std::max(a1.Width, a2.Width) + 6 * k;
         cw = std::clamp(need, std::min(cw, 200 * k), cw);
@@ -557,7 +562,7 @@ void RadialMenu::DrawInfoCard(Graphics& g, double grow, double alpha, bool below
     sf.SetTrimming(StringTrimmingEllipsisCharacter);
     Font title(Family(), (REAL)fTitle, FontStyleRegular, UnitPixel);
     SolidBrush tb(WithAlpha(pal.text, (BYTE)(255 * a)));
-    g.DrawString(it->name.c_str(), -1, &title, RectF((REAL)tx, (REAL)y, (REAL)tw, (REAL)(fTitle * 1.35)), &sf, &tb);
+    g.DrawString(name.c_str(), -1, &title, RectF((REAL)tx, (REAL)y, (REAL)tw, (REAL)(fTitle * 1.35)), &sf, &tb);
     y += fTitle * 1.3;
     Font small(Family(), (REAL)fSmall, FontStyleRegular, UnitPixel);
     SolidBrush mb(WithAlpha(pal.text, (BYTE)(175 * a)));

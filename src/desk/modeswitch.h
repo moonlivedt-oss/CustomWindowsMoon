@@ -76,6 +76,41 @@ inline bool Is3dModule(const std::wstring& moduleLower) {
            moduleLower == L"vulkan-1.dll" || moduleLower == L"opengl32.dll";
 }
 
+// Игра свёрнута (Г2): пока игровой режим идёт, но впереди не игра уже awayMs подряд, углам и кольцам возвращаются
+// перехват мыши и эффекты; игра снова впереди - сразу обратно. Свои окна (кольцо, студия) состояние не меняют.
+struct GameFocus {
+    ULONGLONG awayMs = 5000;
+    ULONGLONG awaySince = 0;  // с какого момента впереди не игра; 0 - игра впереди
+    bool back = false;        // игра в фоне: перехват и эффекты вернули
+
+    // own - впереди своё окно. Возвращает, в фоне ли игра.
+    bool Want(ULONGLONG now, bool front, bool own) {
+        if (own) return back;
+        if (front) {
+            awaySince = 0;
+            return back = false;
+        }
+        if (!awaySince) awaySince = now;
+        if (now - awaySince >= awayMs) back = true;
+        return back;
+    }
+    void Reset() {
+        awaySince = 0;
+        back = false;
+    }
+};
+
+// Редактор, который считается работой, только пока занят (Р4: Blender рендерит): нагрузка на процессор выше
+// порога - занят, и ещё holdMs после (между кадрами рендера процессор на миг отпускает).
+struct BusyHold {
+    ULONGLONG holdMs = 60000;
+    ULONGLONG busyAt = 0;
+    bool Want(ULONGLONG now, double cpuShare, double threshold = 0.25) {
+        if (cpuShare >= threshold) busyAt = now;
+        return busyAt && now - busyAt < holdMs;
+    }
+};
+
 struct ModeSwitch {
     ULONGLONG leaveMs = 10000;
     bool on = false, manual = false, suppress = false;

@@ -143,7 +143,8 @@ void Studio::AidsPage(const RectF& r) {
             }
             cols.Note(b, (y + ui.S(48) - b.Y) / cols.RowH(),
                       L"Условия: app:имя.exe, ac, battery, battery<30, time:23:00-07:00, weekend, idle>15 (минут "
-                      L"простоя), net:имя сети, «!» перед условием - «не» (вместе - через &). "
+                      L"простоя), net:имя сети, mode:game|dev|focus|share (идёт режим), «!» перед условием - «не» "
+                      L"(вместе - через &). "
                       L"Действия: power:eco|balanced|perf, volume:30, mute, theme:<тема>, run:<действие угла>. Правило "
                       L"кончилось - режим, громкость и тема возвращаются. Первое подходящее главнее.",
                       c.faint);

@@ -11,6 +11,7 @@
 #include "core/config.h"
 #include "core/text.h"
 #include "desk/corners.h"
+#include "desk/share.h"
 #include "desk/volume.h"
 #include "tools/guard.h"
 #include "tools/tools.h"
@@ -25,6 +26,7 @@ tools::PowerMode g_power = tools::POWER_UNKNOWN;
 float g_volume = -1;
 bool g_themeSet = false;
 ULONGLONG g_at = 0;
+bool g_modes[4] = {};  // игра, разработка, фокус, показ экрана
 
 // Имена подключённых сетей (Network List Manager, без местоположения): раз в 30 с - список меняется редко
 std::vector<std::wstring> Networks() {
@@ -71,6 +73,7 @@ Facts Gather(const std::vector<Rule>& list) {
     GetLocalTime(&t);
     f.minutes = t.wHour * 60 + t.wMinute;
     f.weekend = t.wDayOfWeek == 0 || t.wDayOfWeek == 6;
+    f.game = g_modes[0], f.dev = g_modes[1], f.focus = g_modes[2], f.share = g_modes[3];
     LASTINPUTINFO li{sizeof(li)};
     if (GetLastInputInfo(&li)) f.idleMin = (int)((GetTickCount() - li.dwTime) / 60000);
     // сети - только если о них спрашивает хоть одно правило (COM раз в 30 с незачем без нужды)
@@ -98,10 +101,26 @@ void Release() {
     g_active.clear();
 }
 
+void SetModes(bool game, bool dev, bool focus, bool share) {
+    g_modes[0] = game, g_modes[1] = dev, g_modes[2] = focus, g_modes[3] = share;
+}
+
 void Tick(const Config& cfg, void (*onTheme)(const std::wstring&)) {
     ULONGLONG now = GetTickCount64();
     if (now - g_at < 3000) return;
     g_at = now;
+    // показ экрана прячет имена сетей: «Home_5G» - Windows дописывает номер, прячем и имя без него
+    if (share::Masking()) {
+        std::vector<std::wstring> words;
+        for (const std::wstring& n : Networks()) {
+            words.push_back(n);
+            size_t sp = n.find_last_of(L' ');
+            if (sp != std::wstring::npos && sp + 1 < n.size() &&
+                std::all_of(n.begin() + sp + 1, n.end(), [](wchar_t c) { return iswdigit(c); }))
+                words.push_back(n.substr(0, sp));
+        }
+        share::HideWords(words);
+    }
     std::vector<Rule> list = Parse(cfg.rules);
     const Rule* hit = nullptr;
     if (!list.empty()) {

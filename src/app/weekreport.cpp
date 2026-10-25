@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "app/modestats.h"
 #include "app/toolsui.h"
 #include "core/crash.h"
 #include "core/themes.h"
@@ -147,6 +148,7 @@ Data Collect() {
     }
     tools::BatteryInfo bat = tools::Battery();
     if (bat.present && bat.designed) d.batteryWear = (int)(100 - bat.full * 100 / bat.designed);
+    d.modes = modestats::Line(modestats::Now());
     return d;
 }
 
@@ -167,6 +169,7 @@ Data DemoData(bool previous) {
     d.bestExit = L"Швеция";
     d.crashes = 0;
     d.batteryWear = 11;
+    d.modes = modestats::Line(modestats::Demo());
     return d;
 }
 
@@ -258,6 +261,8 @@ bool Render(const Data& d, const Data* prev, const UiColors& c, const std::wstri
          cw - 40, 15, d.crashes ? c.warn : c.text, true);
     text(d.batteryWear >= 0 ? L"износ батареи " + std::to_wstring(d.batteryWear) + L"%" : std::wstring(L"батареи нет"),
          60, top3 + 86, cw - 40, 14, c.text);
+    text(d.modes.empty() ? std::wstring(L"режимы не включались") : L"в режимах: " + d.modes, 60, top3 + 112, cw - 40, 14,
+         c.muted);
     card(40 + cw + 20, top3, cw, 170, L"К прошлой неделе");
     std::vector<std::wstring> deltas = prev ? Deltas(d, *prev) : std::vector<std::wstring>();
     y = top3 + 52;

@@ -2,6 +2,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
@@ -26,6 +27,9 @@ public:
     bool Manual() const { return sw_.manual; }
     bool On() const { return on_; }
     const std::wstring& Reason() const { return reason_; }  // имя редактора или «вручную»
+    bool Busy() const { return busy_; }  // включил редактор из dev_busy (рендер): память не предлагать
+    std::vector<DWORD> Pids() const;     // процессы редактора (пусто - вручную)
+    std::wstring ExePath() const;        // полный путь редактора (пусто - вручную или нет доступа)
     void Shutdown();
 
 private:
@@ -34,14 +38,21 @@ private:
     void Enter(const Config& cfg);
     void Leave();
 
-    bool on_ = false, detected_ = false;
+    bool on_ = false, detected_ = false, busy_ = false;
     ModeSwitch sw_;  // когда включаться и выключаться (с запасом, desk/modeswitch.h)
     std::wstring reason_;
     ULONGLONG lastCheck_ = 0;
     struct Seen {
         std::wstring exe, app;  // имя файла процесса и, если подошёл по маске, имя редактора
+        bool busyApp = false;   // из dev_busy: считается, только пока грузит процессор
     };
     std::map<DWORD, Seen> seen_;
     std::wstring masks_;
+    // dev_busy: процессор по процессам за прошлый промежуток и сколько ещё держать «занят»
+    struct Cpu {
+        ULONGLONG cpu = 0, at = 0;
+        BusyHold hold;
+    };
+    std::map<DWORD, Cpu> cpu_;
     std::wstring pausedWallpaper_;
 };

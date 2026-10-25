@@ -41,6 +41,13 @@ bool ValidWhen(const std::wstring& w) {
     if (l == L"ac" || l == L"battery" || l == L"weekend") return true;
     if (l.rfind(L"battery<", 0) == 0) return _wtoi(l.c_str() + 8) > 0;
     if (l.rfind(L"app:", 0) == 0) return l.size() > 4;
+    if (l.rfind(L"mode:", 0) == 0) {
+        std::wstring rest = l.substr(5);
+        if (rest.empty()) return false;
+        for (const std::wstring& m : SplitBy(rest, L'+'))
+            if (m != L"game" && m != L"dev" && m != L"focus" && m != L"share") return false;
+        return true;
+    }
     if (l.rfind(L"time:", 0) == 0) {
         size_t d = l.find(L'-', 5);
         return d != std::wstring::npos && Minutes(l.substr(5, d - 5)) >= 0 && Minutes(l.substr(d + 1)) >= 0;
@@ -98,6 +105,10 @@ bool Holds(const Rule& r, const Facts& f) {
             std::replace(masks.begin(), masks.end(), L'+', L'|');
             ok = std::any_of(f.networks.begin(), f.networks.end(),
                              [&](const std::wstring& n) { return guard::Match(n, masks); });
+        } else if (l.rfind(L"mode:", 0) == 0) {
+            for (const std::wstring& m : SplitBy(l.substr(5), L'+'))
+                ok = ok || (m == L"game" && f.game) || (m == L"dev" && f.dev) || (m == L"focus" && f.focus) ||
+                     (m == L"share" && f.share);
         } else if (l == L"ac")
             ok = f.ac;
         else if (l == L"battery")

@@ -7,6 +7,7 @@
 // 30 с - выключается. focus_logic.cpp - совпадение заголовков и строка отсчёта (под тестами).
 #include <windows.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -28,5 +29,6 @@ bool Auto();            // включился сам (шахматы)
 std::wstring Status();  // для кольца, трея и студии: «Фокус: ещё 23 мин», «Шахматы: тишина»; пусто - выключен
 void Tick();
 void Shutdown();
+extern std::function<void(bool on)> onChange;  // включился или выключился (анимация, время в режимах)
 
 }  // namespace focus

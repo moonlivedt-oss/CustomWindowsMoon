@@ -12,6 +12,7 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "desk/boostcard.h"
+#include "desk/share.h"
 #include "menu/menu.h"
 #include "net/net.h"
 #include "net/speed.h"
@@ -445,6 +446,7 @@ void Run(const std::wstring& key) {
                 res = L"Wi-Fi не подключён (или адаптера нет).";
                 return false;
             }
+            share::HideWords({w.now.ssid});
             res = L"«" + w.now.ssid + L"»: сигнал " + std::to_wstring(w.now.signal) + L"%" +
                   (w.now.rssi ? L" (" + std::to_wstring(w.now.rssi) + L" дБм)" : L"") +
                   (w.now.channel
@@ -456,6 +458,10 @@ void Run(const std::wstring& key) {
         });
     if (key == L"wifi-qr")
         return RunJob(L"QR для Wi-Fi", [](const net::Log&, std::wstring& res) {
+            if (share::Masking()) {  // пароль на экране увидели бы зрители
+                res = L"Во время показа экрана пароль Wi-Fi не показываю: закончите показ и нажмите ещё раз.";
+                return false;
+            }
             net::WifiInfo w = net::Wifi(false);
             if (!w.ok) w.now.ssid = net::WifiProfileNow();  // местоположение выключено - имя через список сетей
             if (w.now.ssid.empty()) {

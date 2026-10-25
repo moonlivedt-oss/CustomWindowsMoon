@@ -16,6 +16,8 @@
 
 namespace focus {
 
+std::function<void(bool on)> onChange;
+
 namespace {
 
 const Config* g_cfg = nullptr;
@@ -73,6 +75,7 @@ void Begin(bool automatic, int minutes) {
     if (!automatic) Soften();
     autos::Note(automatic ? L"Фокус сам: открыт " + g_autoWhat + L" - тишина, тяжёлое ждёт"
                           : L"Фокус на " + std::to_wstring(minutes) + L" мин: тишина, отвлекающее усыплено");
+    if (onChange) onChange(true);
 }
 
 void End(bool timeUp) {
@@ -85,6 +88,7 @@ void End(bool timeUp) {
     g_softened = false;
     autos::Note((g_auto ? L"Фокус сам закончился (" + g_autoWhat + L" закрыт)" : std::wstring(L"Фокус закончился")) +
                 L", " + std::to_wstring(mins) + L" мин");
+    if (onChange) onChange(false);
     if (!timeUp || !g_cfg) return;
     g_card.kind = L"-";
     g_card.yesLabel = L"Ещё 25 минут";

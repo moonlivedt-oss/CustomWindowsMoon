@@ -17,6 +17,7 @@
 #include "core/macro.h"
 #include "core/secrets.h"
 #include "core/text.h"
+#include "desk/share.h"
 #include "desk/snip.h"
 #include "menu/menu.h"
 
@@ -455,6 +456,23 @@ void ShowRing(RadialMenu& menu) {
         else if (!key.empty())
             Use(_wtoi(key.c_str()));
     };
+    // показ экрана: зрители видят кольцо пустыми записями - что скопировано, знаете только вы (вставляется как обычно)
+    if (share::Masking()) {
+        std::function<void(std::vector<Item>&)> hide = [&](std::vector<Item>& items) {
+            int n = 0;
+            for (Item& it : items) {
+                if (!it.children.empty()) {
+                    hide(it.children);
+                    continue;
+                }
+                if (it.path.empty()) continue;
+                it.name = L"Запись " + std::to_wstring(++n);
+                it.note = L"Скрыто на время показа экрана: 2 клика - вставить как обычно";
+                it.iconFull = ExeDir() + L"\\icons\\files.png";
+            }
+        };
+        hide(ring);
+    }
     menu.netStatus = [] { return L"История буфера   |   " + Status(); };
     POINT pt;
     GetCursorPos(&pt);

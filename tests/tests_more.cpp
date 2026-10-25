@@ -19,6 +19,8 @@
 #include "net/wifi.h"
 #include "desk/dropundo.h"
 #include "app/rules.h"
+#include "app/modestats.h"
+#include "desk/share.h"
 #include "app/settingsio.h"
 #include "tools/healthscore.h"
 #include "tools/important.h"
@@ -191,6 +193,87 @@ void TestRules() {
     CHECK(low.size() == 1 && rules::Holds(low[0], g));
     g.battery = 45;
     CHECK(low.size() == 1 && !rules::Holds(low[0], g));
+    // режимы: mode:game, несколько через +, «не»
+    bad.clear();
+    auto modes = rules::Parse({L"mode:dev & battery -> power:balanced", L"mode:game+share -> mute",
+                               L"!mode:focus -> volume:50", L"mode:sleep -> mute", L"mode: -> mute"},
+                              &bad);
+    CHECK(modes.size() == 3);
+    CHECK(bad == L"mode:sleep -> mute; mode: -> mute");
+    if (modes.size() == 3) {
+        rules::Facts m;
+        m.ac = false;
+        CHECK(!rules::Holds(modes[0], m));
+        m.dev = true;
+        CHECK(rules::Holds(modes[0], m));
+        CHECK(!rules::Holds(modes[1], m));
+        m.share = true;
+        CHECK(rules::Holds(modes[1], m));
+        CHECK(rules::Holds(modes[2], m));
+        m.focus = true;
+        CHECK(!rules::Holds(modes[2], m));
+    }
+}
+
+// Время в режимах (О3): даты, деление через полночь, итог за неделю, строка
+void TestModeStats() {
+    int day = modestats::ParseDay(L"2026-10-25");
+    CHECK(day > 0 && modestats::DayText(day) == L"2026-10-25");
+    CHECK(modestats::DayText(0) == L"1970-01-01");
+    CHECK(modestats::ParseDay(L"2026-13-01") < 0 && modestats::ParseDay(L"вчера") < 0);
+    CHECK(modestats::DayText(modestats::ParseDay(L"2024-02-29")) == L"2024-02-29");
+    // 23:30 - 01:15: полчаса в одном дне, час с четвертью в следующем
+    LONGLONG start = (LONGLONG)day * 86400 + 23 * 3600 + 1800;
+    auto rows = modestats::Split(start, start + 6300, modestats::GAME);
+    CHECK(rows.size() == 2);
+    if (rows.size() == 2) {
+        CHECK(rows[0].day == day && rows[0].sec == 1800);
+        CHECK(rows[1].day == day + 1 && rows[1].sec == 4500);
+    }
+    CHECK(modestats::Split(start, start, modestats::DEV).empty());
+    modestats::Row r;
+    CHECK(modestats::ParseRow(modestats::RowLine({day, modestats::FOCUS, 1500}), r));
+    CHECK(r.day == day && r.mode == modestats::FOCUS && r.sec == 1500);
+    CHECK(!modestats::ParseRow(L"2026-10-25\t9\t60", r) && !modestats::ParseRow(L"мусор", r));
+    std::vector<modestats::Row> all = {{day, modestats::GAME, 3600},  {day - 1, modestats::DEV, 7200},
+                                       {day - 6, modestats::GAME, 600}, {day - 7, modestats::GAME, 99999},
+                                       {day + 1, modestats::DEV, 60}};
+    modestats::Week w = modestats::Sum(all, day);
+    CHECK(w.total[modestats::GAME] == 4200 && w.total[modestats::DEV] == 7200);
+    CHECK(w.sec[6][modestats::GAME] == 3600 && w.sec[5][modestats::DEV] == 7200 && w.sec[0][modestats::GAME] == 600);
+    CHECK(modestats::Line(w) == L"игра 1 ч 10 мин, разработка 2 ч");
+    CHECK(modestats::Hours(30) == L"меньше минуты" && modestats::Hours(2400) == L"40 мин");
+    CHECK(modestats::Hours(11 * 3600 + 40 * 60) == L"12 ч");
+}
+
+// Показ экрана (П1, П2): что прячется в тексте, полоска показа по заголовку; свёрнутая игра (Г2) и рендер (Р4)
+void TestShareMask() {
+    std::vector<std::wstring> prof = {L"C:\\Users\\IvanPetrov", L"C:\\Users\\IVANPE~1"},
+                              words = {L"IvanPetrov", L"DESKTOP-7Q2", L"HomeNet_5G"};
+    CHECK(share::MaskText(L"c:\\users\\ivanpetrov\\Desktop\\shop", prof, words) ==
+          L"%USERPROFILE%\\Desktop\\shop");
+    CHECK(share::MaskText(L"C:\\Users\\IVANPE~1\\AppData", prof, words) == L"%USERPROFILE%\\AppData");
+    CHECK(share::MaskText(L"Сеть «HomeNet_5G 2», ПК DESKTOP-7Q2", prof, words) == L"Сеть «*** 2», ПК ***");
+    CHECK(share::MaskText(L"адрес 192.168.1.34, свой 127.0.0.1", prof, words) == L"адрес x.x.x.x, свой 127.0.0.1");
+    CHECK(share::MaskText(L"версия 1.2.3.4.5 и 300.1.1.1", prof, words) == L"версия 1.2.3.4.5 и 300.1.1.1");
+    CHECK(share::MaskText(L"почта me.box@gmail.com, ок", prof, words) == L"почта ***@***, ок");
+    CHECK(share::MaskText(L"@user без домена", prof, words) == L"@user без домена");
+    CHECK(share::TitleHit(L"meet.google.com is sharing your screen.", L"sharing your screen|доступ к окну"));
+    CHECK(share::TitleHit(L"Сайт предоставляет ДОСТУП К ОКНУ", L"sharing your screen|доступ к окну"));
+    CHECK(!share::TitleHit(L"YouTube - Google Chrome", L"sharing your screen|доступ к окну"));
+
+    GameFocus gf;
+    CHECK(!gf.Want(1000, true, false));
+    CHECK(!gf.Want(2000, false, false));  // Alt+Tab на миг
+    CHECK(!gf.Want(6000, false, true));   // своё окно (кольцо) - не считается
+    CHECK(gf.Want(7000, false, false));   // 5 с без игры - в фоне
+    CHECK(gf.Want(8000, false, true));    // открыли кольцо над столом - всё ещё в фоне
+    CHECK(!gf.Want(9000, true, false));   // вернулись в игру
+    BusyHold bh;
+    CHECK(!bh.Want(1000, 0.05));
+    CHECK(bh.Want(2000, 0.6));
+    CHECK(bh.Want(30000, 0.02));  // между кадрами рендера - ещё занят
+    CHECK(!bh.Want(70000, 0.02));
 }
 
 void TestSettingsPack() {
@@ -1138,6 +1221,8 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestSecurityHeuristics();
     TestSysItemOff();
     TestModeSwitch();
+    TestModeStats();
+    TestShareMask();
     TestSelRing();
     TestSnipName();
 }

@@ -24,6 +24,7 @@ ModeFx* g_self = nullptr;
 
 // длительности фиксированные: в игровом режиме общая скорость «мгновенно», а эта анимация и есть знак
 constexpr double kGameOn = 2900, kGameOff = 2300, kDevOn = 3000, kDevOff = 2300;
+constexpr double kFocusOn = 2600, kFocusOff = 1900, kShareOn = 2600, kShareOff = 1900;
 
 double Smooth(double t) {
     t = Clamp01(t);
@@ -76,12 +77,24 @@ LRESULT CALLBACK ModeFx::Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(h, msg, wp, lp);
 }
 
-double ModeFx::Total() const { return kind_ == GAME ? (on_ ? kGameOn : kGameOff) : (on_ ? kDevOn : kDevOff); }
+double ModeFx::Total() const {
+    switch (kind_) {
+        case GAME:
+            return on_ ? kGameOn : kGameOff;
+        case DEV:
+            return on_ ? kDevOn : kDevOff;
+        case FOCUS:
+            return on_ ? kFocusOn : kFocusOff;
+        default:
+            return on_ ? kShareOn : kShareOff;
+    }
+}
 
 void ModeFx::Play(Kind kind, bool on, const std::wstring& title, const std::vector<std::wstring>& chips,
                   const ThemeInfo& theme) {
     QUERY_USER_NOTIFICATION_STATE st{};
     if (SUCCEEDED(SHQueryUserNotificationState(&st)) && st == QUNS_RUNNING_D3D_FULL_SCREEN) return;
+    if (!wnd_) return;  // окна ещё нет или уже убрано (выход)
     Stop();
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
@@ -137,7 +150,10 @@ void ModeFx::Draw(void* bits, int W, int H, double k, double el) const {
         const Color steel = MixColor(ToColor(theme_.muted), ToColor(theme_.fg), 0.3);
         // чертёжный синий, чуть подкрашенный темой - чтобы Unreal отличался от игры с первого взгляда
         const Color blue = MixColor(Color(255, 86, 168, 255), accent, 0.18);
-        Color base = kind_ == DEV ? blue : on_ ? accent : steel;
+        // фокус - спокойная бирюза, показ - красный «в эфире»; оба чуть подкрашены темой
+        const Color calm = MixColor(Color(255, 110, 206, 196), accent, 0.22);
+        const Color onAir = MixColor(Color(255, 238, 84, 92), accent, 0.15);
+        Color base = kind_ == DEV ? blue : kind_ == FOCUS ? calm : kind_ == SHARE ? onAir : on_ ? accent : steel;
         Color rim = MixColor(base, white, 0.45);
 
         // ---------- плашка: где она и какая (нужна всем сценам) ----------
@@ -424,8 +440,81 @@ void ModeFx::Draw(void* bits, int W, int H, double k, double el) const {
             }
         }
 
-        // ---------- чипы над плашкой (для игры; у Unreal они - узлы) ----------
-        if (kind_ == GAME && !chips_.empty()) {
+        // ================= ФОКУС =================
+        if (kind_ == FOCUS) {
+            // края темнеют: включение - нарастает и держится, выключение - светлеет с самого начала
+            double dim = on_ ? Smooth(el / 700) * Clamp01((total - el) / 600) : 1 - Smooth(el / 900);
+            if (dim > 0.01) {
+                GraphicsPath vp;
+                double ex = W * 0.78, ey = H * 0.82;
+                vp.AddEllipse((REAL)(W / 2.0 - ex), (REAL)(H / 2.0 - ey), (REAL)(2 * ex), (REAL)(2 * ey));
+                PathGradientBrush vb(&vp);
+                vb.SetCenterColor(Color(0, 0, 0, 0));
+                Color edgeC((BYTE)(120 * dim * glowK), 6, 10, 14);
+                int cnt = 1;
+                vb.SetSurroundColors(&edgeC, &cnt);
+                REAL pos[3] = {0.0f, 0.55f, 1.0f};
+                Color cols[3] = {edgeC, Color((BYTE)(40 * dim * glowK), 6, 10, 14), Color(0, 0, 0, 0)};
+                vb.SetInterpolationColors(cols, pos, 3);
+                g.FillRectangle(&vb, 0, 0, W, H);
+            }
+            // кольца: включение - сходятся с краёв к плашке, выключение - расходятся от неё
+            const double reach = std::hypot(std::max(cx, W - cx), std::max(cy, H - cy)) + 40 * k;
+            for (int i = 0; i < 4; ++i) {
+                double t = on_ ? Smooth((el - i * 160) / 1100) : Smooth((el - i * 120) / 1000);
+                if (t <= 0 || t >= 1) continue;
+                double r = on_ ? reach + (ph * 0.9 - reach) * EaseOut(t) : ph * 0.9 + (reach - ph * 0.9) * EaseOut(t);
+                double a = std::sin(t * kPi) * (on_ ? 1.0 : 0.8);
+                Pen rp(WithAlpha(i == 0 ? rim : base, (BYTE)(200 * a * glowK)), (REAL)((2.6 - i * 0.4) * k));
+                g.DrawEllipse(&rp, (REAL)(cx - r), (REAL)(cy - r), (REAL)(2 * r), (REAL)(2 * r));
+                // мягкий свет вдоль кольца
+                Pen gp(WithAlpha(base, (BYTE)(40 * a * glowK)), (REAL)(9 * k));
+                g.DrawEllipse(&gp, (REAL)(cx - r), (REAL)(cy - r), (REAL)(2 * r), (REAL)(2 * r));
+            }
+        }
+
+        // ================= ПОКАЗ ЭКРАНА =================
+        if (kind_ == SHARE) {
+            // рамка «в эфире»: от четырёх углов вдоль краёв; выключение - втягивается обратно в углы
+            double grow = on_ ? Smooth(el / 900) : 1 - Smooth(el / 800);
+            double fade = on_ ? Clamp01((total - el) / 500) : 1;
+            if (grow > 0.01 && fade > 0.01) {
+                double m = 7 * k, hw = (W - 2 * m) / 2, hh = (H - 2 * m) / 2;
+                Pen glow(WithAlpha(base, (BYTE)(60 * fade * glowK)), (REAL)(10 * k));
+                Pen line(WithAlpha(rim, (BYTE)(230 * fade * glowK)), (REAL)(2.4 * k));
+                for (Pen* p : {&glow, &line}) {
+                    p->SetStartCap(LineCapRound);
+                    p->SetEndCap(LineCapRound);
+                }
+                double xs[2] = {m, W - m}, ys[2] = {m, H - m};
+                for (int i = 0; i < 2; ++i)
+                    for (int j = 0; j < 2; ++j) {
+                        double x = xs[i], y = ys[j], sx = i ? -1 : 1, sy = j ? -1 : 1;
+                        PointF pts[3] = {PointF((REAL)x, (REAL)(y + sy * hh * grow)), PointF((REAL)x, (REAL)y),
+                                         PointF((REAL)(x + sx * hw * grow), (REAL)y)};
+                        g.DrawLines(&glow, pts, 3);
+                        g.DrawLines(&line, pts, 3);
+                    }
+            }
+            // дуги сигнала по бокам плашки: бегут наружу волнами, пока режим включается; при выключении гаснут
+            double lx = cx - pw / 2 + ph / 2, rx = cx + pw / 2 - ph / 2;
+            for (int i = 0; i < 3; ++i) {
+                double ph2 = on_ ? std::fmod((el - 350) / 1100.0 + i / 3.0, 1.0) : (i + 1) / 3.0;
+                double a = on_ ? Clamp01((el - 350) / 200) * fadeOut * std::sin(ph2 * kPi)
+                               : (1 - Smooth(el / 700)) * (1 - i * 0.25);
+                if (on_ && el < 350) a = 0;
+                if (a <= 0.01) continue;
+                double r = ph / 2 + (10 + ph2 * 60) * k;
+                Pen ap(WithAlpha(rim, (BYTE)(220 * a * glowK)), (REAL)(2.4 * k));
+                ap.SetStartCap(LineCapRound);
+                ap.SetEndCap(LineCapRound);
+                g.DrawArc(&ap, (REAL)(lx - r), (REAL)(cy - r), (REAL)(2 * r), (REAL)(2 * r), 150.0f, 60.0f);
+                g.DrawArc(&ap, (REAL)(rx - r), (REAL)(cy - r), (REAL)(2 * r), (REAL)(2 * r), -30.0f, 60.0f);
+            }
+        }
+
+        // ---------- чипы над плашкой (у Unreal они - узлы) ----------
+        if (kind_ != DEV && !chips_.empty()) {
             Font cf(Family(), (REAL)(12 * k), FontStyleRegular, UnitPixel);
             std::vector<double> ws;
             double sum = 0, gap = 8 * k;

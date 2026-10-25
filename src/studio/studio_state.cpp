@@ -8,6 +8,7 @@
 
 #include "app/autos.h"
 #include "app/autostart.h"
+#include "app/modestats.h"
 #include "app/toolsui.h"
 #include "app/weekreport.h"
 #include "core/bg.h"
@@ -812,6 +813,66 @@ void Studio::StatePage(const RectF& r) {
                       L"Что программа делает сама  ->", Kind::Ghost))
             Defer([this] { GoPage(PAGE_AUTO); });
         y = std::max(gc.GetBottom(), sc.GetBottom()) + gap;
+    }
+
+    // ---- режимы за неделю (О3): сколько шли игра, разработка, фокус и показ экрана - столбиками по дням ----
+    {
+        static modestats::Week cached;
+        static ULONGLONG cachedAt = 0;
+        ULONGLONG nowMs = GetTickCount64();
+        if (!cachedAt || nowMs - cachedAt > 30000) {  // файл маленький, но кадр рисуется часто
+            cached = Demo() ? modestats::Demo() : modestats::Now();
+            cachedAt = nowMs;
+        }
+        const modestats::Week& mw = cached;
+        const Color cols4[modestats::COUNT] = {c.accent, c.accent2, c.gold, c.warn};
+        RectF mc(x, y, w, ui.S(236));
+        Card(mc);
+        ui.Text(L"Режимы за неделю", RectF(mc.X + ui.S(18), mc.Y + ui.S(14), mc.Width, ui.S(24)), c.text, 14, true);
+        std::wstring line = modestats::Line(mw);
+        ui.Text(line.empty() ? L"пока ни один режим не включался" : line,
+                RectF(mc.X + ui.S(200), mc.Y + ui.S(16), mc.Width - ui.S(218), ui.S(20)), c.muted, 11, false,
+                ui::Right);
+        // столбики: высота - время дня, слои - режимы
+        LONGLONG most = 3600;
+        for (int d = 0; d < 7; ++d) {
+            LONGLONG sum = 0;
+            for (int m = 0; m < modestats::COUNT; ++m) sum += mw.sec[d][m];
+            most = std::max(most, sum);
+        }
+        static const wchar_t* kDays[7] = {L"пн", L"вт", L"ср", L"чт", L"пт", L"сб", L"вс"};
+        RectF area(mc.X + ui.S(18), mc.Y + ui.S(52), mc.Width - ui.S(36), ui.S(130));
+        float colW = area.Width / 7, barW = std::min(colW * 0.5f, ui.S(46));
+        float a = (float)EaseOut(appear(true));
+        for (int d = 0; d < 7; ++d) {
+            float bx = area.X + d * colW + (colW - barW) / 2, by = area.GetBottom();
+            ui.Fill(RectF(bx, area.Y, barW, area.Height), WithAlpha(c.field, 160), ui.S(6));
+            LONGLONG sum = 0;
+            for (int m = 0; m < modestats::COUNT; ++m) {
+                if (mw.sec[d][m] <= 0) continue;
+                float h = (float)(area.Height * mw.sec[d][m] / most) * a;
+                ui.Fill(RectF(bx, by - h, barW, h), cols4[m], ui.S(3));
+                by -= h;
+                sum += mw.sec[d][m];
+            }
+            bool today = d == 6;
+            ui.Text(today ? L"сегодня" : kDays[(mw.firstDay + d + 3) % 7],
+                    RectF(area.X + d * colW, area.GetBottom() + ui.S(6), colW, ui.S(18)), today ? c.text : c.muted, 11,
+                    today, ui::Center);
+            if (sum >= 60)
+                ui.Text(modestats::Hours(sum), RectF(area.X + d * colW, by - ui.S(20) * a, colW, ui.S(18)), c.faint,
+                        10.5f, false, ui::Center);
+        }
+        // подписи цветов
+        float lx = mc.X + ui.S(18), ly = mc.GetBottom() - ui.S(30);
+        static const wchar_t* kNames[modestats::COUNT] = {L"Игра", L"Разработка", L"Фокус", L"Показ экрана"};
+        for (int m = 0; m < modestats::COUNT; ++m) {
+            ui.Fill(RectF(lx, ly + ui.S(5), ui.S(10), ui.S(10)), cols4[m], ui.S(3));
+            std::wstring t = std::wstring(kNames[m]) + (mw.total[m] >= 60 ? L" " + modestats::Hours(mw.total[m]) : L"");
+            ui.Text(t, RectF(lx + ui.S(16), ly, ui.S(200), ui.S(20)), c.muted, 11);
+            lx += ui.Measure(t, 11) + ui.S(40);
+        }
+        y += mc.Height + gap;
     }
 
     // ---- новое за неделю (Н3): что поставилось, пропало и обновилось - по снимкам раз в сутки ----

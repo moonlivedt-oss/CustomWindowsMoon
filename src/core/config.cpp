@@ -168,6 +168,20 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.games = val;
             else if (key == L"games_skip")
                 cfg.gamesSkip = val;
+            else if (key == L"games_light")
+                cfg.gamesLight = val;
+            else if (key == L"game_learn")
+                cfg.gameLearn = ParseBool(val);
+            else if (key == L"game_back")
+                cfg.gameBack = ParseBool(val);
+            else if (key == L"dev_busy")
+                cfg.devBusy = val;
+            else if (key == L"dev_mem")
+                cfg.devMem = ParseBool(val);
+            else if (key == L"share_titles")
+                cfg.shareTitles = val;
+            else if (key == L"share_mask")
+                cfg.shareMask = ParseBool(val);
             else if (key == L"game_win_anim")
                 cfg.gameWinAnim = ParseBool(val);
             else if (key == L"game_transparency")
@@ -502,17 +516,31 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"share_auto = " << (c.shareAuto ? 1 : 0) << L"\n";
     o << L"share_apps = " << c.shareApps << L"\n";
     o << L"share_hide = " << (c.shareHide ? 1 : 0) << L"\n";
+    o << L"# share_titles - окно-полоска показа из браузера и звонков (слова заголовка через |), share_mask - прятать\n"
+         L"# личное: буфер, адреса и сети, пути с именем пользователя\n";
+    o << L"share_titles = " << c.shareTitles << L"\n";
+    o << L"share_mask = " << (c.shareMask ? 1 : 0) << L"\n";
     o << L"games = " << c.games << L"\n";
     o << L"games_skip = " << c.gamesSkip << L"\n";
     o << L"game_win_anim = " << (c.gameWinAnim ? 1 : 0) << L"\n";
     o << L"game_transparency = " << (c.gameTransparency ? 1 : 0) << L"\n";
     o << L"game_wallpaper = " << (c.gameWallpaper ? 1 : 0) << L"\n";
+    o << L"# games_light - лёгкие игры: режим идёт, но обои, анимации и красота остаются; game_learn - игру,\n"
+         L"# узнанную по окну на весь экран, предложить запомнить; game_back - игру свернули - углы и кольца "
+         L"работают\n";
+    o << L"games_light = " << c.gamesLight << L"\n";
+    o << L"game_learn = " << (c.gameLearn ? 1 : 0) << L"\n";
+    o << L"game_back = " << (c.gameBack ? 1 : 0) << L"\n";
     o << L"# режим разработки: пока открыт редактор (dev_apps - маски через |), Wallpaper Engine на паузе\n"
          L"# (dev_wallpaper) и при запуске - карточка «освободить память» (dev_boost); углы и кольца работают\n";
     o << L"dev_auto = " << (c.devAuto ? 1 : 0) << L"\n";
     o << L"dev_apps = " << c.devApps << L"\n";
     o << L"dev_wallpaper = " << (c.devWallpaper ? 1 : 0) << L"\n";
     o << L"dev_boost = " << (c.devBoost ? 1 : 0) << L"\n";
+    o << L"# dev_busy - редакторы, которые считаются работой, только пока грузят процессор (рендер); dev_mem -\n"
+         L"# память почти кончилась - сказать, кто её занимает\n";
+    o << L"dev_busy = " << c.devBusy << L"\n";
+    o << L"dev_mem = " << (c.devMem ? 1 : 0) << L"\n";
     o << L"# «Защита» в кольце утилит: программы из этой папки (и её подпапок на уровень) - пунктами кольца\n";
     o << L"security_dir = " << c.securityDir << L"\n";
     o << L"# экран блокировки: lock_source - картинка (пусто - обои), lock_reveal - после входа картинка\n"

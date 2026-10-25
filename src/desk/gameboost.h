@@ -18,7 +18,7 @@ namespace gboost {
 inline constexpr UINT WM_GBOOST = WM_APP + 69;  // wParam - Event, lParam - Note* (удалить получателю)
 
 enum Event {
-    EV_GPU_WRONG = 1,  // игра на встроенной видеокарте: text - путь exe, sub - имена видеокарт
+    EV_GPU_WRONG = 1,  // игра (b = 1 - редактор) на встроенной видеокарте: text - путь exe, sub - имена видеокарт
     EV_VRAM_HIGH,      // видеопамять почти кончилась: a - занято МБ, b - всего МБ
     EV_SHADERS_START,  // a - рабочих
     EV_SHADERS_DONE,   // a - секунд, b - больше всего рабочих
@@ -90,7 +90,8 @@ void Start(HWND notify);  // поток слежки
 void Stop();
 // Режимы от главного окна: процессы игры, путь exe игры (для проверки видеокарты), имя для сессии.
 void SetGame(bool on, const std::vector<DWORD>& pids, const std::wstring& exe, const std::wstring& name, bool islc);
-void SetDev(bool on, const std::wstring& name);
+// pids и exe редактора - проверить, на какой он видеокарте (как у игры); пусто - не проверять
+void SetDev(bool on, const std::wstring& name, const std::vector<DWORD>& pids = {}, const std::wstring& exe = L"");
 Session TakeSession(bool game);      // закончить сессию и забрать итог
 void SaveSession(const Session& s);  // строка в boost_sessions.tsv
 std::vector<Session> History(size_t max);

@@ -291,20 +291,43 @@ bool Run(int& exitCode) {
             toolsui::SnapRing(menu, &cfg, dpi, root, out, demo);
         }
         TerminateProcess(GetCurrentProcess(), 0);  // как --ring-bench: разбирать окна и кэши GDI+ незачем
-    } else if (Has(args, L"--modefx-film")) {      // --modefx-film game|dev on|off out.png: кадры анимации режима
+    } else if (Has(args, L"--modefx-film")) {  // --modefx-film game|dev|focus|share on|off out.png: кадры анимации
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--modefx-film") - args.begin();
-        bool game = i + 1 >= args.size() || args[i + 1] != L"dev", on = i + 2 >= args.size() || args[i + 2] != L"off";
-        std::vector<std::wstring> chips =
-            game ? (on ? std::vector<std::wstring>{L"Красота выключена", L"Обои на паузе", L"Таймер 0.5 мс",
-                                                   L"Игре высокий приоритет", L"Фон в экономии: 4",
-                                                   L"Уведомления молчат"}
-                       : std::vector<std::wstring>{L"Красота вернулась", L"Обои снова идут", L"Приоритеты как были"})
-                 : (on ? std::vector<std::wstring>{L"Обои на паузе", L"Видеопамять", L"Шейдеры", L"Сборки UBT"}
-                       : std::vector<std::wstring>{L"Обои снова идут", L"Фон как был"});
-        std::wstring title = game ? (on ? L"Игровой режим: NFS14" : L"Игровой режим выключен")
-                                  : (on ? L"Режим разработки: Unreal Editor" : L"Режим разработки выключен");
-        exitCode = ModeFx::Film(game ? ModeFx::GAME : ModeFx::DEV, on, title, chips, CurrentTheme(LoadOwnConfig()),
+        std::wstring what = i + 1 < args.size() ? args[i + 1] : L"game";
+        bool on = i + 2 >= args.size() || args[i + 2] != L"off";
+        ModeFx::Kind kind = what == L"dev"     ? ModeFx::DEV
+                            : what == L"focus" ? ModeFx::FOCUS
+                            : what == L"share" ? ModeFx::SHARE
+                                               : ModeFx::GAME;
+        std::vector<std::wstring> chips;
+        std::wstring title;
+        switch (kind) {
+            case ModeFx::GAME:
+                chips = on ? std::vector<std::wstring>{L"Красота выключена", L"Обои на паузе", L"Таймер 0.5 мс",
+                                                       L"Игре высокий приоритет", L"Фон в экономии: 4",
+                                                       L"Уведомления молчат"}
+                           : std::vector<std::wstring>{L"Красота вернулась", L"Обои снова идут", L"Приоритеты как были"};
+                title = on ? L"Игровой режим: NFS14" : L"Игровой режим выключен";
+                break;
+            case ModeFx::DEV:
+                chips = on ? std::vector<std::wstring>{L"Обои на паузе", L"Видеопамять", L"Шейдеры", L"Сборки UBT"}
+                           : std::vector<std::wstring>{L"Обои снова идут", L"Фон как был"};
+                title = on ? L"Режим разработки: Unreal Editor" : L"Режим разработки выключен";
+                break;
+            case ModeFx::FOCUS:
+                chips = on ? std::vector<std::wstring>{L"Уведомления молчат", L"Telegram усыплён", L"Тяжёлое ждёт"}
+                           : std::vector<std::wstring>{L"Уведомления приходят", L"Программы проснулись"};
+                title = on ? L"Фокус на 25 минут" : L"Фокус закончился";
+                break;
+            case ModeFx::SHARE:
+                chips = on ? std::vector<std::wstring>{L"Окна RadialMenu не в записи", L"Уведомления молчат",
+                                                       L"Личное спрятано"}
+                           : std::vector<std::wstring>{L"Окна снова в захвате", L"Уведомления приходят"};
+                title = on ? L"Показ экрана: obs64.exe" : L"Показ экрана закончился";
+                break;
+        }
+        exitCode = ModeFx::Film(kind, on, title, chips, CurrentTheme(LoadOwnConfig()),
                                 i + 3 < args.size() ? args[i + 3] : ExeDir() + L"\\modefx_film.png");
     } else if (Has(args, L"--boost-diag")) {  // видеокарты, профили, история сессий -> boost_out.txt
         std::wstring o;

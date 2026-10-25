@@ -2,6 +2,8 @@
 
 #include <tlhelp32.h>
 
+#include <algorithm>
+
 #include "core/procsnap.h"
 #include "core/config.h"
 #include "core/text.h"
@@ -22,6 +24,7 @@ std::wstring StateFile() {
 std::wstring Pretty(std::wstring exe) {
     if (EndsWithI(exe, L".exe")) exe.resize(exe.size() - 4);
     if (!_wcsicmp(exe.c_str(), L"UnrealEditor") || !_wcsicmp(exe.c_str(), L"UE4Editor")) return L"Unreal Editor";
+    if (!exe.empty() && exe[0] >= L'a' && exe[0] <= L'z') exe[0] = (wchar_t)(exe[0] - L'a' + L'A');  // blender
     return exe;
 }
 
@@ -46,32 +49,81 @@ void DevMode::Recover() {
 
 bool DevMode::Detect(const Config& cfg, std::wstring& name) {
     auto procs = procsnap::Get();
-    if (cfg.devApps != masks_) {  // маски поменяли - открытые процессы проверяются заново
-        masks_ = cfg.devApps;
+    std::wstring masks = cfg.devApps + L"\x1" + cfg.devBusy;
+    if (masks != masks_) {  // маски поменяли - открытые процессы проверяются заново
+        masks_ = masks;
         seen_.clear();
     }
-    bool byPath = masks_.find(L'\\') != std::wstring::npos;  // путь спрашиваем, только если маска с папкой
+    // путь спрашиваем, только если маска с папкой
+    bool byPath = masks_.find(L'\\') != std::wstring::npos;
     std::map<DWORD, Seen> seen;
-    bool found = false;
+    bool found = false, foundBusy = false;
+    std::wstring busyName;
+    std::map<DWORD, ULONGLONG> cpuNow;  // процессор занятых редакторов - только если такие запущены
     for (const PROCESSENTRY32W& pe : *procs) {
         DWORD pid = pe.th32ProcessID;
         if (pid <= 4) continue;
         auto it = seen_.find(pid);
-        std::wstring app;
+        Seen s{pe.szExeFile, L"", false};
         if (it != seen_.end() && it->second.exe == pe.szExeFile) {
-            app = it->second.app;
+            s = it->second;
         } else {
             std::wstring path = byPath ? gm::ProcessPath(pid) : L"";
-            if (gm::MatchAny(path.empty() ? std::wstring(pe.szExeFile) : path, masks_)) app = Pretty(pe.szExeFile);
+            const std::wstring& subject = path.empty() ? std::wstring(pe.szExeFile) : path;
+            if (gm::MatchAny(subject, cfg.devApps))
+                s.app = Pretty(pe.szExeFile);
+            else if (gm::MatchAny(subject, cfg.devBusy))
+                s.app = Pretty(pe.szExeFile), s.busyApp = true;
         }
-        seen[pid] = {pe.szExeFile, app};
-        if (!app.empty() && !found) {
+        seen[pid] = s;
+        if (s.app.empty()) continue;
+        if (!s.busyApp) {
+            if (!found) name = s.app;
             found = true;
-            name = app;
+        } else {
+            cpuNow[pid] = 0;
         }
     }
     seen_.swap(seen);
-    return found;
+    // занятые редакторы (рендер Blender): доля всех ядер за прошлый промежуток
+    if (!cpuNow.empty()) {
+        for (const procsnap::Info& p : procsnap::Session())
+            if (cpuNow.count(p.pid)) cpuNow[p.pid] = p.cpu;
+        ULONGLONG now = GetTickCount64();
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        double cores = std::max<DWORD>(1, si.dwNumberOfProcessors);
+        std::map<DWORD, Cpu> next;
+        for (auto& [pid, cpu] : cpuNow) {
+            Cpu c = cpu_.count(pid) ? cpu_[pid] : Cpu{};
+            double share = c.at && now > c.at && cpu >= c.cpu ? (cpu - c.cpu) / 10000.0 / (now - c.at) / cores : 0;
+            c.cpu = cpu;
+            c.at = now;
+            if (c.hold.Want(now, share) && !foundBusy) {
+                foundBusy = true;
+                busyName = seen_[pid].app + L" (рендер)";
+            }
+            next[pid] = c;
+        }
+        cpu_.swap(next);
+    } else {
+        cpu_.clear();
+    }
+    if (!found && foundBusy) name = busyName;
+    if (!on_) busy_ = !found && foundBusy;
+    return found || foundBusy;
+}
+
+std::vector<DWORD> DevMode::Pids() const {
+    std::vector<DWORD> out;
+    for (const auto& [pid, s] : seen_)
+        if (!s.app.empty() && !s.busyApp) out.push_back(pid);
+    return out;
+}
+
+std::wstring DevMode::ExePath() const {
+    std::vector<DWORD> pids = Pids();
+    return pids.empty() ? L"" : gm::ProcessPath(pids[0]);
 }
 
 void DevMode::Tick(const Config& cfg) {
@@ -88,6 +140,7 @@ void DevMode::Tick(const Config& cfg) {
 void DevMode::SetManual(bool on, const Config& cfg) {
     sw_.SetManual(on, GetTickCount64(), detected_);
     if (on) reason_ = L"вручную";
+    if (on && !on_) busy_ = false;
     lastCheck_ = 0;
     Update(cfg, on);
 }

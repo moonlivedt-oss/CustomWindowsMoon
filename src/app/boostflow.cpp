@@ -384,7 +384,9 @@ void OnBoostNote(const gboost::Note& n) {
     ThemeInfo t = CurrentTheme(g_cfg);
     switch (n.ev) {
         case gboost::EV_GPU_WRONG: {
-            if (!g_cfg.boostGpu) return;
+            bool editor = n.b == 1;  // Р2: редактор, а не игра
+            if (editor ? !g_cfg.devWatch : !g_cfg.boostGpu) return;
+            if (editor && ModeAsked(L"gpu:" + Lower(n.text))) return;
             size_t bar = n.sub.find(L'|');
             // «NVIDIA GeForce RTX 5050 Laptop GPU» -> «RTX 5050»: в карточку влезает четыре строки
             auto shortName = [](std::wstring g) {
@@ -399,17 +401,25 @@ void OnBoostNote(const gboost::Note& n) {
             g_gbCard.yesLabel = L"Включить";
             g_gbCard.noLabel = L"Не нужно";
             g_gbCard.onNo = nullptr;
-            g_gbCard.onYes = [exe, dg] {
+            if (editor) g_gbCard.onNo = [exe] { ModeMarkAsked(L"gpu:" + Lower(exe)); };  // «Не нужно» - не спрашивать
+            g_gbCard.onYes = [exe, dg, editor] {
                 bool ok = gboost::PreferDiscrete(exe);
                 g_gbCard.Show(BoostCard::DONE, ok ? L"Готово" : L"Не получилось",
-                              ok ? L"При следующем запуске игра пойдёт на " + dg + L"."
+                              ok ? (editor ? L"После перезапуска редактор пойдёт на " : L"При следующем запуске игра пойдёт на ") + dg + L"."
                                  : L"Windows не дала записать настройку видеокарты.",
                               CurrentTheme(g_cfg));
             };
-            g_gbCard.Show(BoostCard::OFFER, L"Игра на встроенной видеокарте",
-                          L"«" + gm::FileName(exe) + L"» рисует на " + ig + L", а " + dg +
-                              L" простаивает. «Включить» - со следующего запуска игра пойдёт на " + dg + L".",
-                          t, 30000, Toast::G_WARN);
+            if (editor)
+                g_gbCard.Show(BoostCard::OFFER, L"Редактор на встроенной видеокарте",
+                              L"«" + gm::FileName(exe) + L"» рисует на " + ig + L", а " + dg +
+                                  L" простаивает: вьюпорт и шейдеры медленнее. «Включить» - после перезапуска "
+                                  L"редактора он пойдёт на " + dg + L".",
+                              t, 30000, Toast::G_WARN);
+            else
+                g_gbCard.Show(BoostCard::OFFER, L"Игра на встроенной видеокарте",
+                              L"«" + gm::FileName(exe) + L"» рисует на " + ig + L", а " + dg +
+                                  L" простаивает. «Включить» - со следующего запуска игра пойдёт на " + dg + L".",
+                              t, 30000, Toast::G_WARN);
             return;
         }
         case gboost::EV_VRAM_HIGH:

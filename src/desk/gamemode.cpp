@@ -165,13 +165,15 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
     std::map<DWORD, Seen> seen;
     DWORD self = GetCurrentProcessId();
     bool found = false;
+    gamePath_.clear();
     for (const PROCESSENTRY32W& pe : *procs) {
         DWORD pid = pe.th32ProcessID;
         if (pid == self || pid <= 4) continue;
         auto it = games_.find(pid);
-        std::wstring game;
+        std::wstring game, gamePath;
         if (it != games_.end() && it->second.exe == pe.szExeFile) {
             game = it->second.game;
+            gamePath = it->second.path;
         } else {
             // путь спрашиваем только у новых процессов: старые уже проверены
             std::wstring path = ProcessPath(pid);
@@ -180,11 +182,13 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
                 game = FileName(path);
             else if (!path.empty() && recognize && !MatchAny(path, cfg.gamesSkip))
                 game = recognize(pid, path);
+            if (!game.empty()) gamePath = path;
         }
-        seen[pid] = {pe.szExeFile, game};
+        seen[pid] = {pe.szExeFile, game, gamePath};
         if (!game.empty() && !found) {
             found = true;
             name = game;
+            gamePath_ = gamePath;
         }
     }
     games_.swap(seen);
@@ -195,8 +199,10 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
         auto it = games_.find(fsPid);
         if (it != games_.end()) {
             it->second.game = fsExe;
+            it->second.path = ProcessPath(fsPid);
             found = true;
             name = fsExe;
+            gamePath_ = guessPath_ = it->second.path;  // после игры - предложить запомнить (game_learn)
         }
     }
     return found;
@@ -251,6 +257,24 @@ bool GameMode::Draws3d(DWORD pid) {
     return yes;
 }
 
+bool GameMode::GameInFront() const {
+    DWORD fg = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &fg);
+    bool known = false;
+    for (const auto& [pid, s] : games_) {
+        if (s.game.empty()) continue;
+        if (pid == fg) return true;
+        known = true;
+    }
+    return !known || sw_.manual;
+}
+
+std::wstring GameMode::TakeGuessed() {
+    std::wstring out;
+    out.swap(guessPath_);
+    return out;
+}
+
 std::vector<DWORD> GameMode::GamePids() const {
     std::vector<DWORD> out;
     for (const auto& [pid, s] : games_)
@@ -271,12 +295,15 @@ void GameMode::Tick(const Config& cfg) {
     bool game = cfg.gameAuto && Detect(cfg, name);
     detected_ = game;
     if (game && !sw_.manual) reason_ = name;
+    // лёгкая игра решается при включении режима; вручную - всегда полный режим
+    if (!on_) light_ = game && !sw_.manual && !gamePath_.empty() && MatchAny(gamePath_, cfg.gamesLight);
     Update(cfg, sw_.Want(now, game));
 }
 
 void GameMode::SetManual(bool on, const Config& cfg) {
     sw_.SetManual(on, GetTickCount64(), detected_);
     if (on) reason_ = L"вручную";
+    if (on && !on_) light_ = false;
     lastCheck_ = 0;
     Update(cfg, on);
 }
@@ -292,9 +319,10 @@ void GameMode::Update(const Config& cfg, bool want) {
 }
 
 void GameMode::Enter(const Config& cfg) {
-    changedAnim_ = cfg.gameWinAnim && WindowsAnimationsOn();
-    changedTransp_ = cfg.gameTransparency && ReadTransparency() != 0;
-    pausedWallpaper_ = cfg.gameWallpaper ? WallpaperEngine() : L"";
+    // лёгкая игра: Windows и обои не трогаем
+    changedAnim_ = !light_ && cfg.gameWinAnim && WindowsAnimationsOn();
+    changedTransp_ = !light_ && cfg.gameTransparency && ReadTransparency() != 0;
+    pausedWallpaper_ = !light_ && cfg.gameWallpaper ? WallpaperEngine() : L"";
     // сначала записать, что меняем: если программа упадёт, при запуске всё вернётся
     SaveState(changedAnim_, changedTransp_, pausedWallpaper_);
     if (changedAnim_) SetWindowsAnimations(false);

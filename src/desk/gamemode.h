@@ -38,6 +38,12 @@ public:
     bool Manual() const { return sw_.manual; }
     bool On() const { return on_; }
     const std::wstring& Reason() const { return reason_; }  // что включило режим: имя игры или «вручную»
+    // лёгкая игра (games_light): режим идёт, но обои, анимации, прозрачность, красота и перехват мыши остаются
+    bool Light() const { return on_ && light_; }
+    // игра впереди; не знаем, какой процесс игра (вручную, эксклюзивный полный экран), - считаем, что впереди
+    bool GameInFront() const;
+    // игра, узнанная по окну на весь экран (не по маске), - полный путь; пусто - такой не было. Забирается один раз.
+    std::wstring TakeGuessed();
     std::vector<DWORD> GamePids() const;  // процессы игр; для полноэкранной без маски - процесс активного окна
     void Shutdown();                                        // при выходе: вернуть систему как была
 
@@ -52,13 +58,16 @@ private:
     void Enter(const Config& cfg);
     void Leave();
 
-    bool on_ = false, detected_ = false;
+    bool on_ = false, detected_ = false, light_ = false;
     ModeSwitch sw_;  // когда включаться и выключаться (с запасом, desk/modeswitch.h)
     std::wstring reason_;
+    std::wstring gamePath_;   // путь найденной игры (для games_light)
+    std::wstring guessPath_;  // игра без маски, узнанная по окну на весь экран
     ULONGLONG lastCheck_ = 0;
     struct Seen {
         std::wstring exe;   // имя файла процесса: номер мог достаться новому процессу
         std::wstring game;  // имя файла игры или пусто (уже проверен, не игра)
+        std::wstring path;  // полный путь - только у игр
     };
     std::map<DWORD, Seen> games_;  // по pid
     std::wstring masks_;           // games и games_skip, по которым проверены процессы

@@ -104,17 +104,30 @@ struct Config {
     bool shareAuto = true;
     std::wstring shareApps = L"obs64.exe|obs32.exe|CptHost.exe|Streamlabs OBS.exe|XSplit.Core.exe";
     bool shareHide = true;
+    // показ из браузера и звонков: маленькое окно-полоска с такими словами в заголовке (через |)
+    std::wstring shareTitles =
+        L"sharing your screen|sharing a window|доступ к экрану|доступ к вашему экрану|"
+        L"доступ к окну|Индикатор общего доступа|Sharing Indicator|Sharing control bar";
+    bool shareMask = true;  // в показе прятать личное: буфер, адреса и сети, пути с именем пользователя
     // игры: маски путей через | (как исключения Windhawk); games_skip - что не считать игрой
     std::wstring games = L"*\\steamapps\\common\\*|*\\Epic Games\\*|*\\EA Games\\*|*\\Wuthering Waves*\\*|NFS14.exe";
     std::wstring gamesSkip = L"*\\wallpaper_engine\\*|*\\Steamworks Shared\\*";
     bool gameWinAnim = true;       // выключать анимации Windows
     bool gameTransparency = true;  // выключать прозрачность Windows
     bool gameWallpaper = true;     // ставить Wallpaper Engine на паузу
+    // лёгкие игры (маски, как games): режим идёт (тишина, приоритеты, итог), но обои, анимации, прозрачность,
+    // красота и перехват мыши остаются
+    std::wstring gamesLight;
+    bool gameLearn = true;  // игру, узнанную по окну на весь экран, после игры предложить запомнить в games
+    bool gameBack = true;   // игру свернули дольше 5 с - углам и кольцам вернуть перехват мыши и эффекты
     // режим разработки: пока открыт тяжёлый редактор, ему отдаются память и видеокарта (красота остаётся)
     bool devAuto = true;
     std::wstring devApps = L"UnrealEditor.exe|UE4Editor.exe";  // маски, как у games
     bool devWallpaper = true;                                  // ставить Wallpaper Engine на паузу
     bool devBoost = true;                                      // при запуске редактора предлагать освободить память
+    // редакторы, которые считаются работой, только пока заняты (нагрузка на процессор - рендер), маски через |
+    std::wstring devBusy = L"blender.exe";
+    bool devMem = true;  // в режиме разработки физическая память почти кончилась - сказать, кто её занимает
     // «Защита» в кольце утилит: программы из этой папки (System Informer, RecoveryKit...) - пунктами кольца
     std::wstring securityDir = L"D:\\tools\\security";
     // экран блокировки
