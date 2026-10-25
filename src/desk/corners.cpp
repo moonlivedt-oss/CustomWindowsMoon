@@ -65,6 +65,7 @@ const Action kActions[] = {
     {L"share", L"Показ экрана"},
     {L"game", L"Игровой режим"},
     {L"focus", L"Фокус"},
+    {L"phone", L"Телефон рядом"},
 };
 
 const Action kWheel[] = {

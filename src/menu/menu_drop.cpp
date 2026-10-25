@@ -99,6 +99,7 @@ void RadialMenu::LeaveShellTarget() {
     }
     targetKey_.clear();
     targetName_.clear();
+    dropAction_.clear();
     dragEffect_ = DROPEFFECT_NONE;
 }
 
@@ -106,6 +107,20 @@ DWORD RadialMenu::OnDragOver(DWORD keys, POINTL pt, DWORD allowed) {
     if (!open_ || closing_) return DROPEFFECT_NONE;
     UpdateHover(HitTest({pt.x, pt.y}), GetTickCount64());
     const Item* t = HoveredItem();
+    if (t && !t->special && t->path.rfind(L"action:", 0) == 0) {  // пункт-действие, которое берёт файлы
+        std::wstring a = t->path.substr(7);
+        if (dropAccepts && dropAccepts(a)) {
+            if (dropAction_ != a) {
+                LeaveShellTarget();
+                dropAction_ = a;
+                targetKey_ = L"action:" + a;
+                targetName_ = t->name;
+            }
+            dragEffect_ = DROPEFFECT_COPY & allowed;
+            return dragEffect_;
+        }
+    }
+    if (!dropAction_.empty()) LeaveShellTarget();
     if (t && (t->special || t->full.empty())) t = nullptr;
     std::wstring key = t ? t->full : L"";
     keys &= ~MK_ALT;  // Alt держат, чтобы открыть меню; для Проводника он значит «ярлык»
@@ -152,7 +167,32 @@ void RadialMenu::OnDragLeave() {
 
 DWORD RadialMenu::OnDrop(IDataObject* data, DWORD keys, POINTL pt, DWORD allowed) {
     DWORD e = DROPEFFECT_NONE;
-    if (shellTarget_) {
+    if (!dropAction_.empty() && onDropAction) {
+        std::vector<std::wstring> files;
+        FORMATETC fe{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        STGMEDIUM sm{};
+        if (data && SUCCEEDED(data->GetData(&fe, &sm))) {
+            if (auto* hd = (HDROP)GlobalLock(sm.hGlobal)) {
+                UINT n = DragQueryFileW(hd, 0xFFFFFFFF, nullptr, 0);
+                for (UINT i = 0; i < n && i < 500; ++i) {
+                    UINT len = DragQueryFileW(hd, i, nullptr, 0);
+                    std::wstring f(len + 1, L'\0');
+                    DragQueryFileW(hd, i, f.data(), len + 1);
+                    f.resize(len);
+                    files.push_back(f);
+                }
+                GlobalUnlock(sm.hGlobal);
+            }
+            ReleaseStgMedium(&sm);
+        }
+        std::wstring a = dropAction_;
+        dropAction_.clear();
+        if (!files.empty()) {
+            e = DROPEFFECT_COPY & allowed;
+            if (cfg_->sounds) Sound::Play(Sound::Drop);
+            onDropAction(a, std::move(files));
+        }
+    } else if (shellTarget_) {
         // что бросили - до Drop: после него Проводник может уже переносить файлы в фоне
         std::vector<std::wstring> files;
         FORMATETC fe{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};

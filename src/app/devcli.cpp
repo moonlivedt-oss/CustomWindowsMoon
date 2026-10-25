@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "phone/phone.h"
 #include "core/bg.h"
 #include "core/config.h"
 #include "core/crash.h"
@@ -291,7 +292,7 @@ bool Run(int& exitCode) {
             toolsui::SnapRing(menu, &cfg, dpi, root, out, demo);
         }
         TerminateProcess(GetCurrentProcess(), 0);  // как --ring-bench: разбирать окна и кэши GDI+ незачем
-    } else if (Has(args, L"--modefx-film")) {  // --modefx-film game|dev|focus|share on|off out.png: кадры анимации
+    } else if (Has(args, L"--modefx-film")) {      // --modefx-film game|dev|focus|share on|off out.png: кадры анимации
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--modefx-film") - args.begin();
         std::wstring what = i + 1 < args.size() ? args[i + 1] : L"game";
@@ -304,10 +305,11 @@ bool Run(int& exitCode) {
         std::wstring title;
         switch (kind) {
             case ModeFx::GAME:
-                chips = on ? std::vector<std::wstring>{L"Красота выключена", L"Обои на паузе", L"Таймер 0.5 мс",
-                                                       L"Игре высокий приоритет", L"Фон в экономии: 4",
-                                                       L"Уведомления молчат"}
-                           : std::vector<std::wstring>{L"Красота вернулась", L"Обои снова идут", L"Приоритеты как были"};
+                chips =
+                    on ? std::vector<std::wstring>{L"Красота выключена", L"Обои на паузе",
+                                                   L"Таймер 0.5 мс",     L"Игре высокий приоритет",
+                                                   L"Фон в экономии: 4", L"Уведомления молчат"}
+                       : std::vector<std::wstring>{L"Красота вернулась", L"Обои снова идут", L"Приоритеты как были"};
                 title = on ? L"Игровой режим: NFS14" : L"Игровой режим выключен";
                 break;
             case ModeFx::DEV:
@@ -459,6 +461,17 @@ bool Run(int& exitCode) {
         exitCode = SecDiag();
     } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
         exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--phone-diag")) {  // что видит «Телефон рядом» -> phone_out.txt
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        WriteOut(L"phone_out.txt", phone::Diag());
+        exitCode = 0;
+    } else if (Has(args, L"--phone-serve")) {  // --phone-serve <сек> <снимок.png|-> [файлы...]
+        size_t i = std::find(args.begin(), args.end(), L"--phone-serve") - args.begin();
+        if (i + 2 < args.size())
+            exitCode = PhoneServe(_wtoi(args[i + 1].c_str()), args[i + 2],
+                                  std::vector<std::wstring>(args.begin() + (long)i + 3, args.end()));
+        else
+            exitCode = 2;
     } else if (Has(args, L"--card-snap")) {  // --card-snap файл.png ask|pick [more]: карточка в картинку
         size_t i = std::find(args.begin(), args.end(), L"--card-snap") - args.begin();
         exitCode = i + 2 < args.size() ? CardSnap(args[i + 2], Has(args, L"more"), args[i + 1]) : 2;

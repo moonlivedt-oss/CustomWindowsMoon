@@ -46,6 +46,7 @@ int SnapSuite(const std::wstring& refDir, const std::wstring& outDir, bool updat
 int RingBench(int ms);
 // --card-snap файл.png ask|pick [more]: карточка справа внизу на секунду показывается по-настоящему и снимается с
 // экрана; more - с раскрытым «Подробнее»
+int PhoneServe(int seconds, const std::wstring& snap, const std::vector<std::wstring>& files);
 int CardSnap(const std::wstring& what, bool more, const std::wstring& out);
 
 }  // namespace devcli

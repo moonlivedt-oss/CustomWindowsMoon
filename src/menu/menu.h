@@ -38,6 +38,9 @@ public:
     // файлы бросили на папку кольца (Проводник переносит или копирует сам, иногда уже после Drop): что и куда -
     // для карточки «Вернуть»
     std::function<void(std::vector<std::wstring> files, std::wstring dir)> onDropped;
+    // файлы бросили на пункт action:<действие> (телефон, конвертер, полка): true - действие берёт файлы
+    std::function<bool(const std::wstring& action)> dropAccepts;
+    std::function<void(const std::wstring& action, std::vector<std::wstring> files)> onDropAction;
     // Командная палитра: целое кольцо у курсора, сразу ждёт ввода; ищет по кольцам краёв и по extra (действия
     // утилит и сети - special 3 с ключом, разделы студии, окна - special 2, команды программы).
     void ShowPalette(const Config* cfg, std::vector<Item> extra, POINT cursor, const RECT& work, UINT dpi);
@@ -352,6 +355,7 @@ private:
     IDataObject* dragData_ = nullptr;
     IDropTarget* shellTarget_ = nullptr;
     std::wstring targetKey_, targetName_;
+    std::wstring dropAction_;  // цель броска - пункт action:..., а не папка
     bool targetDir_ = false;
     DWORD dragEffect_ = 0;
     std::wstring dwellKey_;

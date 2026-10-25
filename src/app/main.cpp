@@ -21,6 +21,7 @@
 #include "app/modestats.h"
 #include "app/palette.h"
 #include "app/resume.h"
+#include "phone/phone.h"
 #include "app/worksets.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
@@ -258,6 +259,7 @@ void PollWork() {
     afterwork::Tick();
     focus::Tick();
     share::Tick();
+    phone::Tick();
     ModeFlowTick(nowMs);
     if (!alt) {
         g_armed = true;
@@ -471,9 +473,7 @@ void NoteFocus(bool on) {
         } else {
             chips = {L"Уведомления приходят", L"Программы проснулись"};
         }
-        g_modefx.Play(ModeFx::FOCUS, on,
-                      on ? focus::Status() : L"Фокус закончился", chips,
-                      CurrentTheme(g_cfg));
+        g_modefx.Play(ModeFx::FOCUS, on, on ? focus::Status() : L"Фокус закончился", chips, CurrentTheme(g_cfg));
     }
     if (!on) shown = false;
 }
@@ -496,7 +496,18 @@ bool RunExtra(const std::wstring& a) {
         focus::On() ? focus::Stop() : focus::Start(0);
         return true;
     }
+    if (a == L"phone") {
+        phone::OpenPage();
+        return true;
+    }
     return false;
+}
+
+// Файлы бросили на пункт action:<действие>: телефон берёт их на передачу
+bool DropAccepts(const std::wstring& a) { return a == L"phone"; }
+
+void OnDropAction(const std::wstring& a, std::vector<std::wstring> files) {
+    if (a == L"phone") phone::Offer(files);
 }
 
 // Режим разработки включился или выключился: обои и память, красота и перехват
@@ -853,6 +864,7 @@ void ShutdownAll() {
     afterwork::Shutdown();
     focus::Shutdown();
     share::Shutdown();
+    phone::Shutdown();
     selring::Stop();
     g_dropCard.Destroy();
     mc::StopWatch();
@@ -1042,6 +1054,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case resume::WM_RESUME:
             resume::OnMessage(wp, lp);
+            return 0;
+        case phone::WM_PHONE:
+            phone::OnMessage(wp, lp);
             return 0;
         case netui::WM_NET_EVENT:
             netui::OnEvent(lp);
@@ -1262,6 +1277,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_game.recognize = [](DWORD pid, const std::wstring& path) { return mc::GameName(pid, path); };
     corners::SetMinecraft(ShowMcRing);
     g_menu.onDropped = OnDropped;
+    g_menu.dropAccepts = DropAccepts;
+    g_menu.onDropAction = OnDropAction;
     g_menu.onAction = [](const std::wstring& a) {
         g_pendingAction = a;
         SetTimer(g_wnd, kActionTimer, 260, nullptr);  // кольцо успевает погаснуть
@@ -1305,6 +1322,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     focus::Init(inst, &g_cfg);          // Л8, Л34: фокус и шахматы без отвлечений
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
+    phone::Init(inst, g_wnd, &g_cfg);  // Ф1, Ф4-Ф6: телефон рядом
     share::onChange = OnShareMode;
     // фокус: время в режимах и анимация (только ручной: шахматы включают тишину сами и без представлений)
     focus::onChange = [](bool on) { NoteFocus(on); };
