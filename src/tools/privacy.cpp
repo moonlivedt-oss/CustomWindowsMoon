@@ -36,6 +36,8 @@ void ReadConsent(HKEY root, const std::wstring& base, const wchar_t* cap, bool p
         RegCloseKey(app);
         if (!u.start) continue;
         u.app = name;
+        u.key = name;
+        u.packaged = packaged;
         if (!packaged) {
             // обычная программа: путь записан с # вместо \ («C:#Program Files#X#x.exe»)
             std::replace(u.app.begin(), u.app.end(), L'#', L'\\');
@@ -57,7 +59,7 @@ void ReadConsent(HKEY root, const std::wstring& base, const wchar_t* cap, bool p
 
 // ---------------- камера, микрофон, геопозиция ----------------
 
-std::vector<PrivacyUse> PrivacyUses() {
+std::vector<PrivacyUse> PrivacyUses(bool signs) {
     std::vector<PrivacyUse> out;
     const wchar_t* base = L"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\";
     struct Cap {
@@ -72,7 +74,7 @@ std::vector<PrivacyUse> PrivacyUses() {
         return a.inUse != b.inUse ? a.inUse : a.start > b.start;
     });
     for (PrivacyUse& u : out)
-        if (!u.path.empty()) {
+        if (signs && !u.path.empty()) {
             SignState st = CheckSign(u.path, &u.signer);
             u.unsignedApp = st != SIGN_OK && st != SIGN_NOFILE;
         }

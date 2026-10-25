@@ -6,6 +6,7 @@
 
 #include "life/awake.h"
 #include "life/btbattery.h"
+#include "life/capwatch.h"
 #include "life/nightupd.h"
 #include "life/picker.h"
 #include "life/remind.h"
@@ -185,10 +186,25 @@ void TestBtBattery() {
     CHECK(btbattery::Line({{L"A", 64}, {L"B", 20}}) == L"A: 64%, B: 20%");
 }
 
+void TestCapWatch() {
+    using capwatch::Use;
+    Use discord{L"микрофон", L"Discord.exe", L"C:#Users#me#Discord.exe", L"C:\\Users\\me\\Discord.exe", true, false};
+    Use cam{L"камера", L"WindowsCamera", L"Microsoft.WindowsCamera_8wekyb3d8bbwe", L"", true, true};
+    Use old{L"микрофон", L"Zoom.exe", L"k", L"C:\\Zoom.exe", false, false};
+    CHECK(capwatch::SeenKey(discord) == L"микрофон|c:\\users\\me\\discord.exe");
+    CHECK(capwatch::SeenKey(cam) == L"камера|microsoft.windowscamera_8wekyb3d8bbwe");
+    std::set<std::wstring> seen = {capwatch::SeenKey(cam)};
+    std::vector<Use> f = capwatch::Fresh({discord, cam, old, discord}, seen);
+    CHECK(f.size() == 1 && f[0].app == L"Discord.exe");  // знакомая камера и выключенный Zoom - молчим, дубль - один
+    seen.insert(capwatch::SeenKey(discord));
+    CHECK(capwatch::Fresh({discord, cam}, seen).empty());
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestCapWatch();
     TestBtBattery();
     TestNightUpdate();
     TestRemind();

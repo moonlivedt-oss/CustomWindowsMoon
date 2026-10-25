@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/capwatch.h"
 #include "life/btbattery.h"
 #include "life/nightupd.h"
 #include "life/remind.h"
@@ -265,6 +266,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    capwatch::Tick();
     btbattery::Tick();
     nightupd::Tick();
     remind::Tick();
@@ -892,6 +894,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    capwatch::Shutdown();
     btbattery::Shutdown();
     nightupd::Shutdown();
     remind::Shutdown();
@@ -1355,6 +1358,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
+    capwatch::Init(inst, &g_cfg);  // Ж5, Б2
     btbattery::Init(inst, &g_cfg, UpdateTrayTip);                                    // Ж4
     nightupd::Init(inst, &g_cfg, [] { return g_game.On() || g_dev.On(); });          // Е1
     remind::Init(inst, &g_cfg, &g_menu, [] { return g_game.On() || share::On(); });  // Е2

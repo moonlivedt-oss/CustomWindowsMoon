@@ -551,8 +551,11 @@ struct PrivacyUse {
     std::wstring capability, app, path, signer;  // «камера», имя программы, путь (у обычных программ)
     ULONGLONG start = 0, stop = 0;               // FILETIME последнего начала и конца
     bool inUse = false, unsignedApp = false;
+    std::wstring key;       // имя ключа в ConsentStore (у приложений Магазина - для запрета)
+    bool packaged = false;  // приложение Магазина: его можно запретить отдельно (HKCU, без прав)
 };
-std::vector<PrivacyUse> PrivacyUses();              // камера, микрофон, геопозиция: кто и когда (сейчас - первыми)
+// камера, микрофон, геопозиция: кто и когда (сейчас - первыми); signs = false - без проверки подписей (быстро)
+std::vector<PrivacyUse> PrivacyUses(bool signs = true);
 void CheckCerts(std::vector<Suspect>& out);         // незнакомые корневые сертификаты (FIND_CERT)
 void CheckFirewall(std::vector<Suspect>& out);      // входящие разрешения для программ из папок пользователя
 std::wstring FileOrigin(const std::wstring& path);  // откуда скачан файл (метка Zone.Identifier), пусто - неизвестно
