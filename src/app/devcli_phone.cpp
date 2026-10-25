@@ -6,6 +6,8 @@
 #include "app/devcli_internal.h"
 #include "core/files.h"
 #include "core/themes.h"
+#include "core/config.h"
+#include "life/awake.h"
 #include "phone/phone.h"
 
 namespace devcli {
@@ -38,6 +40,11 @@ void SaveScreenPng(int x, int y, int w, int h, const std::wstring& out) {
 }
 
 }  // namespace
+
+std::vector<Item> LifeRing(const std::wstring& what) {
+    if (what == L"awake") return awake::RingItems();
+    return {};
+}
 
 // --phone-serve <сек> <снимок.png | -> [файлы...]: передача открыта на столько секунд (без файлов - страница
 // телефона), ссылка - в phone_out.txt рядом с exe; RADIAL_PHONE_LOCAL=1 - только 127.0.0.1 (без брандмауэра)

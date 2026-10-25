@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "life/awake.h"
 #include "phone/phone.h"
 
 namespace {
@@ -95,10 +96,30 @@ void TestPhoneRoute() {
     CHECK(w.size() == 2);
 }
 
+void TestAwake() {
+    CHECK(awake::PartialDownload(L"setup.exe.crdownload") && awake::PartialDownload(L"film.mkv.PART"));
+    CHECK(awake::PartialDownload(L"a.!ut") && !awake::PartialDownload(L"party.png") &&
+          !awake::PartialDownload(L"a.exe"));
+    awake::DoneWatch w;
+    const ULONGLONG m = 60000;
+    w.Start(1000);
+    CHECK(!w.Feed(1000 + 9 * m, false));  // ещё ждём, вдруг начнётся
+    CHECK(w.Feed(1000 + 10 * m, false));  // 10 минут ничего - разрешить сон
+    w.Start(0);
+    CHECK(!w.Feed(m, true) && !w.Feed(3 * m, false) && !w.Feed(5 * m, true));
+    CHECK(!w.Feed(9 * m, false));  // тихо 4 минуты
+    CHECK(w.Feed(10 * m, false) && w.SeenBusy());
+    CHECK(awake::Left(30000) == L"ещё меньше минуты");
+    CHECK(awake::Left(47 * m) == L"ещё 47 мин");
+    CHECK(awake::Left(65 * m) == L"ещё 1 ч 05 мин");
+    CHECK(awake::Left(59 * m + 1) == L"ещё 1 ч 00 мин");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestAwake();
     TestPhoneHttp();
     TestPhoneNames();
     TestPhoneRoute();

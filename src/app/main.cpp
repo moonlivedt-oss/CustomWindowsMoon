@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/awake.h"
 #include "app/worksets.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
@@ -260,6 +261,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    awake::Tick();
     ModeFlowTick(nowMs);
     if (!alt) {
         g_armed = true;
@@ -498,6 +500,10 @@ bool RunExtra(const std::wstring& a) {
     }
     if (a == L"phone") {
         phone::OpenPage();
+        return true;
+    }
+    if (a == L"awake") {
+        awake::ShowRing();
         return true;
     }
     return false;
@@ -865,6 +871,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    awake::Shutdown();
     selring::Stop();
     g_dropCard.Destroy();
     mc::StopWatch();
@@ -1322,7 +1329,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     focus::Init(inst, &g_cfg);          // Л8, Л34: фокус и шахматы без отвлечений
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
-    phone::Init(inst, g_wnd, &g_cfg);  // Ф1, Ф4-Ф6: телефон рядом
+    phone::Init(inst, g_wnd, &g_cfg);
+    awake::Init(inst, &g_cfg, &g_menu);  // Ж6: не спать на время  // Ф1, Ф4-Ф6: телефон рядом
     share::onChange = OnShareMode;
     // фокус: время в режимах и анимация (только ручной: шахматы включают тишину сами и без представлений)
     focus::onChange = [](bool on) { NoteFocus(on); };

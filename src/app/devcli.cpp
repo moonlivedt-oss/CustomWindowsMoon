@@ -461,6 +461,22 @@ bool Run(int& exitCode) {
         exitCode = SecDiag();
     } else if (Has(args, L"--watch-diag")) {  // слежка, батарея, память; --slow - ещё версии и дубли
         exitCode = WatchDiag(Has(args, L"--slow"));
+    } else if (Has(args, L"--life-snap")) {  // --life-snap <кольцо> <png> [сектор]: кольца серии Ф/Ж/Е в картинку
+        size_t i = std::find(args.begin(), args.end(), L"--life-snap") - args.begin();
+        std::wstring what = i + 1 < args.size() ? args[i + 1] : L"awake";
+        std::wstring out = i + 2 < args.size() ? args[i + 2] : ExeDir() + L"\\life_ring.png";
+        int root = i + 3 < args.size() ? _wtoi(args[i + 3].c_str()) : -1;
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Gdip gdip;
+        static Config cfg = LoadOwnConfig();
+        static RadialMenu menu;
+        if (menu.Create(GetModuleHandleW(nullptr))) {
+            UINT dpi = GetDpiForSystem();
+            while (!menu.Prewarm(&cfg, dpi, 1000)) {}
+            menu.SnapNet(&cfg, LifeRing(what), dpi, root, 900, out);
+        }
+        TerminateProcess(GetCurrentProcess(), 0);
     } else if (Has(args, L"--phone-diag")) {  // что видит «Телефон рядом» -> phone_out.txt
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         WriteOut(L"phone_out.txt", phone::Diag());

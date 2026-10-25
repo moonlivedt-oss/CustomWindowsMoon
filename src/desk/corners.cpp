@@ -66,6 +66,7 @@ const Action kActions[] = {
     {L"game", L"Игровой режим"},
     {L"focus", L"Фокус"},
     {L"phone", L"Телефон рядом"},
+    {L"awake", L"Не спать на время"},
 };
 
 const Action kWheel[] = {
