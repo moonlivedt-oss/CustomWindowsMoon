@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/nightupd.h"
 #include "life/remind.h"
 #include "life/picker.h"
 #include "life/awake.h"
@@ -263,6 +264,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    nightupd::Tick();
     remind::Tick();
     picker::Tick();
     awake::Tick();
@@ -883,6 +885,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    nightupd::Shutdown();
     remind::Shutdown();
     picker::Shutdown();
     awake::Shutdown();
@@ -1344,6 +1347,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
+    nightupd::Init(inst, &g_cfg, [] { return g_game.On() || g_dev.On(); });  // Е1
     remind::Init(inst, &g_cfg, &g_menu, [] { return g_game.On() || share::On(); });  // Е2
     picker::Init(inst, &g_cfg);          // Е3: пипетка и линейка
     awake::Init(inst, &g_cfg, &g_menu);  // Ж6: не спать на время  // Ф1, Ф4-Ф6: телефон рядом

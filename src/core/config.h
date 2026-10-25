@@ -166,6 +166,10 @@ struct Config {
     bool autoDownloads = true;
     int downloadsDays = 14;  // установщики и архивы старше стольких дней - кандидаты в корзину
     bool autoPower = true;
+    // Е1: обновлять программы через winget ночью (02:00-05:30, от сети, в простое); исключения - ИД или имена через |
+    bool wingetNight = false;
+    std::wstring wingetSkip;
+    bool wingetAccept = false;  // принимать соглашения пакетов за вас (по умолчанию - нет: такие - вручную)
     bool autoRepair = true;
     bool autoReport = true;     // раз в неделю сам собрать отчёт картинкой (app/weekreport), итог - в дайджест
     bool autoBackup = true;     // раз в сутки копия radial.cfg в backups, если он поменялся (правка не из студии)

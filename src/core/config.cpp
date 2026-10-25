@@ -246,6 +246,12 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.downloadsDays = std::clamp(_wtoi(val.c_str()), 3, 180);
             else if (key == L"auto_power")
                 cfg.autoPower = ParseBool(val);
+            else if (key == L"winget_night")
+                cfg.wingetNight = ParseBool(val);
+            else if (key == L"winget_skip")
+                cfg.wingetSkip = val;
+            else if (key == L"winget_night_accept")
+                cfg.wingetAccept = ParseBool(val);
             else if (key == L"auto_repair")
                 cfg.autoRepair = ParseBool(val);
             else if (key == L"auto_report")
@@ -586,6 +592,10 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"auto_downloads = " << (c.autoDownloads ? 1 : 0) << L"\n";
     o << L"downloads_days = " << c.downloadsDays << L"\n";
     o << L"auto_power = " << (c.autoPower ? 1 : 0) << L"\n";
+    o << L"# обновление программ ночью (winget): исключения - ИД или имена через |, маски *\n";
+    o << L"winget_night = " << (c.wingetNight ? 1 : 0) << L"\n";
+    o << L"winget_skip = " << c.wingetSkip << L"\n";
+    o << L"winget_night_accept = " << (c.wingetAccept ? 1 : 0) << L"\n";
     o << L"auto_repair = " << (c.autoRepair ? 1 : 0) << L"\n";
     o << L"# раз в неделю отчёт картинкой, раз в сутки копия radial.cfg, если он поменялся\n";
     o << L"auto_report = " << (c.autoReport ? 1 : 0) << L"\n";

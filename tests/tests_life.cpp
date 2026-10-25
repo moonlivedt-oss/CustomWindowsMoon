@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "life/awake.h"
+#include "life/nightupd.h"
 #include "life/picker.h"
 #include "life/remind.h"
 #include "phone/phone.h"
@@ -148,10 +149,32 @@ void TestRemind() {
     CHECK(h[0] == 1 && h[1] == 9);
 }
 
+void TestNightUpdate() {
+    CHECK(!nightupd::InWindow(1, 59) && nightupd::InWindow(2, 0) && nightupd::InWindow(5, 29));
+    CHECK(!nightupd::InWindow(5, 30) && !nightupd::InWindow(23, 0));
+    std::wstring skip = L"Discord.Discord | *Steam* |Мой редактор";
+    CHECK(nightupd::Skipped(L"discord.discord", L"Discord", skip));
+    CHECK(nightupd::Skipped(L"Valve.Steam", L"Steam", skip));
+    CHECK(nightupd::Skipped(L"X.Y", L"мой редактор", skip));
+    CHECK(!nightupd::Skipped(L"Mozilla.Firefox", L"Firefox", skip) && !nightupd::Skipped(L"A", L"B", L""));
+    CHECK(nightupd::Why(0, L"").empty());
+    CHECK(nightupd::Why((int)0x8A150101u, L"") == L"программа была запущена");
+    CHECK(nightupd::Why(1, L"The package requires license agreement") == L"нужно ваше согласие с условиями");
+    CHECK(nightupd::Why(-1, L"").find(L"15 минут") != std::wstring::npos);
+    CHECK(nightupd::Why(5, L"") == L"ошибка 0x00000005");
+    std::vector<nightupd::Result> r = {
+        {L"A", L"a", 0, L""}, {L"B", L"b", 0, L""}, {L"C", L"c", 1, L"нужна перезагрузка"}};
+    CHECK(nightupd::Summary(r) == L"обновлено 2: A, B; не вышло 1: C (нужна перезагрузка)");
+    CHECK(nightupd::Summary({}) == L"обновлять было нечего");
+    std::vector<nightupd::Result> many(6, {L"P", L"p", 0, L""});
+    CHECK(nightupd::Summary(many) == L"обновлено 6: P, P, P, P и ещё 2");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestNightUpdate();
     TestRemind();
     TestPicker();
     TestAwake();

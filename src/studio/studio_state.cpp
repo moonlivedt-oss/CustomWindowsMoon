@@ -7,6 +7,7 @@
 #include <cmath>
 
 #include "app/autos.h"
+#include "life/nightupd.h"
 #include "app/autostart.h"
 #include "app/modestats.h"
 #include "app/toolsui.h"
@@ -1044,6 +1045,20 @@ void Studio::AutoPage(const RectF& r) {
         cols.Note(b, 3.0f,
                   L"Старые установщики, архивы, которые уже распакованы рядом, копии «файл (1)», недокачанное. "
                   L"Ничего не удаляется без вопроса и всё уходит в Корзину.",
+                  c.faint);
+    });
+    cols.Card(L"Обновление программ ночью", 3.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Обновлять через winget ночью");
+        toggle(rr, ID_AUTO_WINGET, cfg.wingetNight);
+        rr = cols.Row(b, 1, nightupd::Status(), 0.95f);
+        if (cfg.wingetNight && ui.Button(ID_AUTO_WINGET_NOW, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4),
+                                                                   ui.S(150), ui.S(36)),
+                                         L"Сейчас", Kind::Secondary))
+            nightupd::RunNow();
+        cols.Note(b, 2.0f,
+                  L"С 02:00 до 05:30, только от сети, когда компьютер полчаса никто не трогает и нет игры; по одному "
+                  L"пакету, тихо. Соглашения за вас не принимаются - такие пакеты останутся «обновить вручную» "
+                  L"(Утилиты). Исключения - winget_skip в radial.cfg. Утром - карточка, что обновилось.",
                   c.faint);
     });
     cols.Card(L"Режим питания", 2.2f, [&](const RectF& b) {
