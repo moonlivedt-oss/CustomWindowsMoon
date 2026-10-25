@@ -6,6 +6,7 @@
 
 #include "life/awake.h"
 #include "life/picker.h"
+#include "life/remind.h"
 #include "phone/phone.h"
 
 namespace {
@@ -126,10 +127,32 @@ void TestPicker() {
     CHECK(h.x == 100 && h.y == 10 && v.x == 10 && v.y == -90);
 }
 
+void TestRemind() {
+    std::vector<remind::Note> l = {{1792929600, L"позвонить\tмаме"}, {1792933200, L"чай"}};
+    std::vector<remind::Note> back = remind::Parse(remind::Save(l));
+    CHECK(back.size() == 2 && back[0].text == L"позвонить маме" && back[1].when == 1792933200);
+    CHECK(remind::Parse(L"мусор\n\tбез времени\n0\tноль\n").empty());
+    CHECK(remind::Caption(L"  купить хлеб \r\nи молоко") == L"купить хлеб");
+    CHECK(remind::Caption(std::wstring(100, L'a')).size() == 80);
+    std::vector<int> h = remind::Hours(14, 10);
+    CHECK(h.size() == 2 && h[0] == 15 && h[1] == 18);
+    h = remind::Hours(14, 40);  // до 15:00 двадцать минут - сразу 16:00
+    CHECK(h[0] == 16 && h[1] == 18);
+    h = remind::Hours(17, 40);
+    CHECK(h[0] == 19 && h[1] == 21);
+    h = remind::Hours(22, 5);
+    CHECK(h[0] == 23 && h[1] == 9);
+    h = remind::Hours(19, 0);
+    CHECK(h[0] == 20 && h[1] == 21);
+    h = remind::Hours(23, 50);
+    CHECK(h[0] == 1 && h[1] == 9);
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestRemind();
     TestPicker();
     TestAwake();
     TestPhoneHttp();
