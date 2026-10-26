@@ -110,18 +110,10 @@ void ClipIn(Conn& cn, const Request& r) {
 }
 
 // ключ в пути: /<сессия> или /d/<запомненный телефон>; вернёт длину префикса, 0 - чужой
-size_t KeyPrefix(const std::string& path) {
+size_t KeyPrefix(const std::string& path, int* device) {
     Lock l;
     if (!S().on) return 0;
-    std::string base = "/" + S().token;
-    if (!S().token.empty() && path.compare(0, base.size(), base) == 0 &&
-        (path.size() == base.size() || path[base.size()] == '/'))
-        return base.size();
-    for (const std::string& d : S().devices) {
-        std::string b = "/d/" + d;
-        if (path.compare(0, b.size(), b) == 0 && (path.size() == b.size() || path[b.size()] == '/')) return b.size();
-    }
-    return 0;
+    return MatchKey(path, S().token, S().devices, device);
 }
 
 void Handle(Conn& cn, const Request& r) {
@@ -129,7 +121,8 @@ void Handle(Conn& cn, const Request& r) {
         Lock l;
         if (!S().on) return Text(cn, 404, "передача закончилась");
     }
-    size_t pre = KeyPrefix(r.path);
+    int device = -1;
+    size_t pre = KeyPrefix(r.path, &device);
     if (!pre) {
         if (r.path != "/favicon.ico") {
             Lock l;
@@ -139,6 +132,21 @@ void Handle(Conn& cn, const Request& r) {
         return Text(cn, 404, "нет");
     }
     std::string base = r.path.substr(0, pre), rest = r.path.substr(pre);
+    // Ключ запомненного телефона - постоянный: по http его видит любой в той же Wi-Fi. Когда https открыт, страница
+    // уходит туда, остальное по http отклоняется. Ключ сессии (QR) по http работает - это первое знакомство.
+    int tlsPort = 0;
+    {
+        Lock l;
+        tlsPort = S().tlsPort;
+    }
+    if (device >= 0 && !cn.tls && tlsPort) {
+        auto host = r.headers.find("host");
+        std::string to =
+            HttpsLocation(host == r.headers.end() ? "" : host->second, tlsPort, base + (rest.empty() ? "/" : rest));
+        if ((r.method == "GET" || r.method == "HEAD") && (rest.empty() || rest == "/") && !to.empty())
+            return Reply(cn, 301, "", "", "Location: " + to + "\r\n");
+        return Text(cn, 403, "запомненный телефон - только по https");
+    }
     if (rest.empty()) return Reply(cn, 301, "", "", "Location: " + base + "/\r\n");
     if (rest == "/" && (r.method == "GET" || r.method == "HEAD")) {
         Seen();

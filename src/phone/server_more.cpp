@@ -209,6 +209,15 @@ bool HandleMore(Conn& cn, const Request& r, const std::string& rest) {
     }
     if (rest == "/pair" && post) {  // запомнить этот телефон: постоянная ссылка без QR
         Seen();
+        bool tlsOn = false;
+        {
+            Lock l;
+            tlsOn = S().tlsPort != 0;
+        }
+        if (tlsOn && !cn.tls) {  // постоянный ключ по http увидел бы любой в этой Wi-Fi
+            Text(cn, 403, "запомнить можно только на защищённой странице (https)");
+            return true;
+        }
         std::string body;
         ReadAllBody(cn, r, body, 256);
         std::wstring name = Trim(Widen(body)).substr(0, 60);

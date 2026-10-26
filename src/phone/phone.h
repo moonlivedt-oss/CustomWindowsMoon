@@ -162,6 +162,14 @@ private:
     std::vector<std::pair<std::string, unsigned long long>> recent_;
 };
 
+// --- безопасность (phone_sec_logic.cpp, под тестами) ---
+// ключ в пути: /<сессия>/... или /d/<запомненный телефон>/...; длина префикса, 0 - чужой ключ; device - номер
+// запомненного телефона (-1 - ключ сессии)
+size_t MatchKey(const std::string& path, const std::string& token, const std::vector<std::string>& devices,
+                int* device);
+// та же страница по https: хост из Host (без порта), порт https; пусто - Host не имя и не IPv4
+std::string HttpsLocation(const std::string& host, int tlsPort, const std::string& path);
+
 // Пути, если телефон не в этой сети: по порядку - что предложить первым
 enum Way { WAY_PHONE_HOTSPOT, WAY_PC_HOTSPOT, WAY_BLUETOOTH };
 std::vector<Way> Ways(bool lan, bool bluetooth, long long bytes);

@@ -74,8 +74,8 @@ std::vector<std::wstring> g_roots;
 std::atomic<bool> g_input{true};
 std::atomic<bool> g_screen{false}, g_files{false}, g_screenStopped{false};
 HWND g_watchFrame[4] = {};  // рамка по краю экрана, пока телефон смотрит экран
-BoostCard g_alert;      // приложение на телефоне: уведомление, SMS, звонок
-bool g_callShown = false;  // на g_alert сейчас «Звонит» - убрать, когда взяли или сбросили
+BoostCard g_alert;          // приложение на телефоне: уведомление, SMS, звонок
+bool g_callShown = false;   // на g_alert сейчас «Звонит» - убрать, когда взяли или сбросили
 BoostCard g_watchCard;      // «Телефон смотрит экран - Стоп»
 bool g_watching = false;
 void Watching(bool on);  // ниже: рамка и карточка, пока телефон смотрит экран
@@ -255,6 +255,11 @@ PhoneCard::View MakeView();
 std::wstring DevicesFile() {
     PWSTR p = nullptr;
     std::wstring dir;
+    // проверка сервера (--phone-serve) без своих запомненных телефонов: папка из RADIAL_PHONE_DIR
+    wchar_t test[MAX_PATH];
+    if (GetEnvironmentVariableW(L"RADIAL_PHONE_LOCAL", nullptr, 0) > 0 &&
+        GetEnvironmentVariableW(L"RADIAL_PHONE_DIR", test, MAX_PATH) - 1u < MAX_PATH - 1u)
+        return std::wstring(test) + L"/phone-devices.tsv";
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p))) dir = p;
     CoTaskMemFree(p);
     return dir + L"\\MoonDesk\\phone-devices.tsv";
@@ -1210,7 +1215,7 @@ void ShowNotice(const Notice& n) {
             g_alert.Show(BoostCard::DONE, L"Пропущенный звонок: " + who, sub, Theme(), 30000, Toast::G_WARN);
         return;
     }
-    std::wstring title = n.kind == "sms" ? L"SMS: " + who
+    std::wstring title = n.kind == "sms"                       ? L"SMS: " + who
                          : n.title.empty() || n.title == n.app ? n.app
                          : n.app.empty()                       ? n.title
                                                                : n.app + L": " + n.title;
