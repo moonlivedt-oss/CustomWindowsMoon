@@ -136,7 +136,7 @@ void MediaStart();  // что играет на ПК (desk/media) - пока и�
 void MediaStop();
 std::wstring UniquePath(const std::wstring& dir, const std::wstring& name);  // «a (2).jpg», если занято
 void MarkFromInternet(const std::wstring& path);                             // Zone.Identifier
-const char* ServiceWorkerJs();                                               // page.cpp
+const char* ServiceWorkerJs();                                               // web/ (cmake/embed.cmake)
 const char* ManifestJson();
 // камера телефона (camera.cpp): кадр JPEG из потока сервера; false - окно камеры на ПК закрыли (start - открыть снова)
 bool CamFrame(std::string jpg, bool start);

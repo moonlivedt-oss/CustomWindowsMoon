@@ -13,7 +13,14 @@ file(GLOB_RECURSE RADIAL_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/act/")  # src/act - отдельный RadialTools.exe
 # src/shutup/main.cpp - окно отдельного RadialShutUp.exe; каталог (catalog.cpp) общий с вкладкой «Приватность»
 list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/shutup/main\\.cpp$")
-add_executable(RadialMenu WIN32 ${RADIAL_SOURCES} src/res/app.rc)
+# страница телефона (src/phone/web) встраивается в exe строками - cmake/embed.cmake
+file(GLOB PHONE_WEB CONFIGURE_DEPENDS src/phone/web/*)
+set(PHONE_WEB_CPP ${CMAKE_BINARY_DIR}/gen/phone_web.cpp)
+add_custom_command(OUTPUT ${PHONE_WEB_CPP}
+  COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/src/phone/web -DOUT=${PHONE_WEB_CPP} -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+  DEPENDS ${PHONE_WEB} ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+  COMMENT "Страница телефона -> phone_web.cpp")
+add_executable(RadialMenu WIN32 ${RADIAL_SOURCES} ${PHONE_WEB_CPP} src/res/app.rc)
 target_include_directories(RadialMenu PRIVATE src)
 target_compile_definitions(RadialMenu PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 target_link_libraries(RadialMenu PRIVATE gdiplus shcore shlwapi shell32 ole32 oleaut32 wtsapi32 user32 gdi32 comctl32 comdlg32 uxtheme windowscodecs winmm uuid dwmapi version propsys winhttp dxva2 wbemuuid oleacc taskschd iphlpapi ws2_32 wininet rstrtmgr wintrust crypt32 bcrypt ncrypt secur32 setupapi pdh userenv cfgmgr32 dxgi wlanapi)

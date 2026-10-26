@@ -1,13 +1,4 @@
-// Страница для телефона: скачать брошенное (по одному или архивом), отправить фото и файлы (по 3 сразу, кусками по
-// 8 МБ с докачкой), сканер, общий буфер (текст и картинки), папки ПК с просмотром видео и музыки, тачпад и клавиатура,
-// пульт, «открыть на ПК», запомнить телефон, камера телефона на ПК, защищённая страница (свой сертификат), приложение
-// с «Поделиться - на ПК». Одна страница без внешних файлов; запросы - относительные.
-#include <string>
-
-namespace phone::detail {
-
-const char* PageHtml() {
-    return R"PAGE(<!doctype html>
+<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0f0d12"><title>Компьютер рядом</title>
@@ -114,8 +105,25 @@ select{width:100%;min-height:48px;border-radius:14px;border:1px solid var(--line
 .stat .bar{margin-top:6px}label.sw{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--mut);margin-top:12px}
 label.sw input{width:22px;height:22px;accent-color:var(--ac)}
 .hide{display:none!important}
+/* удобство: планшет и ПК - колонка по центру; вырезы экрана сбоку; видимый фокус; без лишнего движения */
+body{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+header,.page,#pairhint{max-width:560px;margin-left:auto;margin-right:auto}#tabs>*{max-width:110px}
+#pad{height:calc(100dvh - 330px)}
+:focus-visible{outline:2px solid var(--ac2);outline-offset:2px}button:focus:not(:focus-visible){outline:none}
+.file{flex-wrap:wrap}.file .n{flex:1 1 150px}
+.crumbs a{display:inline-block;padding:6px 2px}
+#off{position:sticky;top:64px;z-index:6;margin:0 auto 12px;max-width:560px;padding:12px 14px;border-radius:14px;
+background:#3a1219;border:1px solid #e0414f66;color:#ffd5d9;font-size:14px;line-height:1.4}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* телефон боком (геймпад, слайды): шапка и вкладки ужимаются, кнопки - по высоте экрана */
+@media (orientation:landscape) and (max-height:520px){header{position:static;padding-top:6px;padding-bottom:6px}
+header small{display:none}#tabs button{min-height:44px;flex-direction:row;font-size:12px}#tabs svg{width:20px;height:20px}
+:root{--nav:52px}.dpad,.abxy{--c:min(17vh,72px)}#pad{height:calc(100dvh - 190px);min-height:160px}
+.slidenav button{min-height:44vh}.page{max-width:none}#gpad{max-width:760px;margin:0 auto}}
 </style></head><body>
-<header><div><b>Компьютер рядом</b><small id="sub">телефон как пульт и передача файлов</small></div><span id="st">на связи</span></header>
+<header><div><b>Компьютер рядом</b><small id="sub">телефон как пульт и передача файлов</small></div><span id="st" role="status">на связи</span></header>
+<p id="off" class="hide" role="alert">Нет связи с ПК. Проверьте, что телефон в той же Wi-Fi сети, а ноутбук не спит -
+страница переподключится сама.</p>
 
 <div data-p="remote" class="page hide">
 <section id="np" class="hide"><div class="np"><img id="npart" alt=""><div class="npt"><b id="npt"></b><small id="npa"></small></div></div>
@@ -252,7 +260,7 @@ var seq=-1,files=[],state={},q=[],active=0,CH=8<<20,upBytes=0,upT0=0,upTotal=0,u
 function $(i){return document.getElementById(i)}
 function size(n){if(n<1024)return n+' Б';if(n<1048576)return (n/1024).toFixed(0)+' КБ';
 if(n<1073741824)return (n/1048576).toFixed(1).replace('.',',')+' МБ';return (n/1073741824).toFixed(2).replace('.',',')+' ГБ'}
-function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 var tt;function toast(s){var e=$('vol');e.textContent=s;e.classList.add('show');clearTimeout(tt);tt=setTimeout(function(){e.classList.remove('show')},2500)}
 // значки (линии 24x24), вставляются в кнопки с data-i
@@ -293,7 +301,9 @@ document.querySelectorAll('[data-hold]').forEach(function(b){var t1,t2;function 
 b.addEventListener('pointerdown',function(e){e.preventDefault();cmd(b.dataset.hold);t1=setTimeout(function(){t2=setInterval(function(){cmd(b.dataset.hold)},160)},420)});
 ['pointerup','pointerleave','pointercancel'].forEach(function(ev){b.addEventListener(ev,stop)});b.addEventListener('contextmenu',function(e){e.preventDefault()})});
 function volShow(v){$('volfill').style.width=Math.round(v*100)+'%';$('voltxt').textContent='Громкость '+Math.round(v*100)+'%'}
-function stateTxt(ok){var s=$('st');s.textContent=ok?'на связи':'нет связи';s.className=ok?'':'off'}
+// баннер «нет связи» - только если связи нет дольше 4 с (короткий обрыв Wi-Fi не мигает)
+var offT=null;function stateTxt(ok){var s=$('st');s.textContent=ok?'на связи':'нет связи';s.className=ok?'':'off';
+if(ok){clearTimeout(offT);offT=null;$('off').classList.add('hide')}else if(!offT)offT=setTimeout(function(){$('off').classList.remove('hide')},4000)}
 function draw(){var h='';files.forEach(function(f,i){h+='<div class="file"><div class="n">'+esc(f.name)+
 '<small>'+size(f.size)+(f.done?' <span class="done">скачан</span>':'')+'</small></div><a class="btn" href="f/'+i+
 '" download>Скачать</a></div>'});$('files').innerHTML=h;$('get').hidden=!files.length;
@@ -327,7 +337,7 @@ function sendText(){var t=$('tx').value;if(!t)return;post('clip',t).then(functio
 if(r.ok){toast('В буфере ПК');$('tx').value=''}else toast('Не дошло')}).catch(function(){toast('Нет связи')})}
 function openPc(){var t=$('tx').value.trim();if(!/^https?:\/\//i.test(t)){toast('Нужна ссылка http(s)');return}
 post('open',t).then(function(r){toast(r.ok?'Открыто на ПК':'Не открылось')})}
-function cmd(c){post('cmd?c='+encodeURIComponent(c)).then(function(r){return r.json()})
+function cmd(c){post('cmd?c='+encodeURIComponent(c)).then(function(r){if(!r.ok)return r.text().then(function(t){toast(t||'Не вышло');return{}});return r.json()})
 .then(function(j){if(j.vol>=0)volShow(j.vol)}).catch(function(){toast('Нет связи')})}
 function sleepPc(){if(confirm('Усыпить компьютер?'))cmd('sleep')}
 function pick(k){$('f'+k).click()}
@@ -574,32 +584,3 @@ shareResult();
 autoClip();
 poll();
 </script></body></html>
-)PAGE";
-}
-
-// service worker приложения: без сети - страница «компьютер не отвечает» вместо ошибки Chrome
-const char* ServiceWorkerJs() {
-    return R"SW(var OFF='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
-'<title>ПК рядом</title><body style="margin:0;padding:24px;background:#16131a;color:#f1ecf4;font:16px/1.4 system-ui,sans-serif">'+
-'<h1 style="font-size:19px">Компьютер не отвечает</h1><p>Ноутбук выключен, спит или в другой сети, либо в RadialMenu не '+
-'включено «Ждать запомненный телефон». Поделитесь ещё раз, когда он будет рядом.</p>'+
-'<button onclick="location.reload()" style="border:0;border-radius:12px;background:#c8323f;color:#fff;font:inherit;padding:12px 16px">Повторить</button>';
-self.addEventListener('install',function(){self.skipWaiting()});
-self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim())});
-self.addEventListener('fetch',function(e){if(e.request.mode!='navigate')return;
-e.respondWith(fetch(e.request).catch(function(){return new Response(OFF,{headers:{'Content-Type':'text/html; charset=utf-8'}})}))});
-)SW";
-}
-
-// приложение: адреса относительно manifest.json (/d/<ключ>/); share_target - POST multipart на /share
-const char* ManifestJson() {
-    return R"MF({"name":"Компьютер рядом","short_name":"ПК рядом","start_url":"./","scope":"./","id":"./",
-"display":"standalone","background_color":"#16131a","theme_color":"#16131a",
-"icons":[{"src":"icon.png?s=192","sizes":"192x192","type":"image/png","purpose":"any maskable"},
-{"src":"icon.png?s=512","sizes":"512x512","type":"image/png","purpose":"any maskable"}],
-"share_target":{"action":"share","method":"POST","enctype":"multipart/form-data",
-"params":{"title":"title","text":"text","url":"url","files":[{"name":"f","accept":["*/*"]}]}}}
-)MF";
-}
-
-}  // namespace phone::detail

@@ -1,0 +1,23 @@
+# Страница «Телефона рядом» лежит обычными файлами (src/phone/web) - их можно открыть в браузере и править как веб;
+# при сборке они попадают в exe строками: cmake -DSRC=<папка web> -DOUT=<phone_web.cpp> -P embed.cmake
+set(PAIRS "page.html|PageHtml" "sw.js|ServiceWorkerJs" "manifest.json|ManifestJson")
+set(BODY "// Создано cmake/embed.cmake из src/phone/web - правьте те файлы, не этот\nnamespace phone::detail {\n")
+foreach(P ${PAIRS})
+  string(REPLACE "|" ";" P "${P}")
+  list(GET P 0 FILE)
+  list(GET P 1 FUNC)
+  file(READ "${SRC}/${FILE}" TEXT)
+  string(FIND "${TEXT}" ")MOONWEB\"" BAD)
+  if(NOT BAD EQUAL -1)
+    message(FATAL_ERROR "${FILE}: в тексте есть )MOONWEB\" - строку не встроить")
+  endif()
+  string(APPEND BODY "const char* ${FUNC}() {\n    return R\"MOONWEB(${TEXT})MOONWEB\";\n}\n")
+endforeach()
+string(APPEND BODY "}  // namespace phone::detail\n")
+# файл переписывается, только если текст поменялся - иначе пересборка без нужды
+if(EXISTS "${OUT}")
+  file(READ "${OUT}" OLD)
+endif()
+if(NOT "${OLD}" STREQUAL "${BODY}")
+  file(WRITE "${OUT}" "${BODY}")
+endif()
