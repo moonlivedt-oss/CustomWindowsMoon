@@ -6,6 +6,7 @@
 
 #include "life/appbright.h"
 #include "life/awake.h"
+#include "life/batcare.h"
 #include "life/btbattery.h"
 #include "life/capwatch.h"
 #include "life/nightupd.h"
@@ -223,10 +224,26 @@ void TestAppBright() {
     CHECK(!p.Learn(50));  // ни в какой программе с правилом - учить нечего
 }
 
+void TestBatCare() {
+    auto days = batcare::Parse(L"2026-10-20\t7.5\t0\n2026-10-21\t2\t1.25\nмусор\n2026-10-22\t9\n");
+    CHECK(days.size() == 3 && days[L"2026-10-21"].limitHours == 1.25 && days[L"2026-10-22"].fullHours == 9);
+    CHECK(!batcare::ShouldOffer(days));  // два тяжёлых дня из трёх
+    days[L"2026-10-23"] = {6, 0};
+    CHECK(batcare::ShouldOffer(days));
+    days[L"2026-10-24"] = {1, 0};
+    days[L"2026-10-25"] = {1, 0};
+    days[L"2026-10-26"] = {0, 0};  // последние пять: 9, 6, 1, 1, 0 - только два тяжёлых
+    CHECK(!batcare::ShouldOffer(days));
+    CHECK(batcare::SavedHours(days) == 1.25);
+    auto back = batcare::Parse(batcare::Save(days, 3));
+    CHECK(back.size() == 3 && back.begin()->first == L"2026-10-24");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestBatCare();
     TestAppBright();
     TestCapWatch();
     TestBtBattery();

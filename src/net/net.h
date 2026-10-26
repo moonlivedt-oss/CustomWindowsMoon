@@ -132,6 +132,7 @@ enum Job {
     JOB_NET_UNCUT,         // вернуть: убрать своё правило для программы из HKCU CutExe
     JOB_SYS_ITEM,          // новая служба или драйвер: выключить / вернуть (HKCU SysItem, tools::SysItemRefuse)
     JOB_PRIVACY,           // приватность для всего компьютера (HKCU PrivacyJob: on|id, off|id, off|*)
+    JOB_CHARGE_LIMIT,      // ноутбук ASUS: предел заряда (HKCU ChargeLimit: 40..100, через ATK WMI)
     kJobs
 };
 bool AdminReady();     // задача есть - без ожидания, последний известный ответ (для интерфейса)

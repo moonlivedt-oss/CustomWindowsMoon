@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "life/batcare.h"
 #include "life/btbattery.h"
 #include "life/picker.h"
 #include "phone/phone.h"
@@ -487,6 +488,10 @@ bool Run(int& exitCode) {
             while (!menu.Prewarm(&cfg, dpi, 1000)) {}
             menu.SnapNet(&cfg, LifeRing(what), dpi, root, 900, out);
         }
+        TerminateProcess(GetCurrentProcess(), 0);
+    } else if (Has(args, L"--batcare-diag")) {  // забота о батарее: часы на 100% и предел -> batcare_out.txt
+        batcare::Init(GetModuleHandleW(nullptr), nullptr);
+        WriteOut(L"batcare_out.txt", batcare::Status() + L"\n");
         TerminateProcess(GetCurrentProcess(), 0);
     } else if (Has(args, L"--bt-diag")) {  // заряд Bluetooth-устройств -> bt_out.txt
         WriteOut(L"bt_out.txt", btbattery::Diag() + L"\n");

@@ -26,7 +26,8 @@ const wchar_t* const kJobKeys[kJobs] = {
     L"smart",       L"winhttp",       L"routes",    L"ip",     L"vpn",         L"dns-cf",        L"dns-google",
     L"dns-auto",    L"fw-restore",    L"adapter",   L"deep",   L"disk-health", L"syspath-clean", L"net-top",
     L"power",       L"restore-point", L"path-acl",  L"repair", L"wu-reset",    L"unbreak",       L"defender-offline",
-    L"vhd-compact", L"sys-clean",     L"mft-sizes", L"giants",  L"net-cut", L"net-uncut", L"sys-item", L"privacy"};
+    L"vhd-compact", L"sys-clean",     L"mft-sizes", L"giants", L"net-cut",     L"net-uncut",     L"sys-item",
+    L"privacy",     L"charge-limit"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -530,11 +531,30 @@ bool Job_(Job j, const Log& log) {
                             L"advfirewall firewall add rule name=" + Q(name) + L" dir=out action=block program=" +
                                 Q(exe) + L" enable=yes profile=any",
                             &out);
-            log(Okish(code, out) ? L"Исходящие соединения программы закрыты." : L"Брандмауэр не принял правило: " + Trim(out));
+            log(Okish(code, out) ? L"Исходящие соединения программы закрыты."
+                                 : L"Брандмауэр не принял правило: " + Trim(out));
             return Okish(code, out);
         }
         case JOB_PRIVACY:
             return tools::PrivacyAdminMain(Trim(elevate::Take(L"PrivacyJob")), log);
+        case JOB_CHARGE_LIMIT: {
+            // число присылает обычный процесс: только целое 40..100, в команду идёт уже наше число
+            int limit = _wtoi(Trim(elevate::Take(L"ChargeLimit")).c_str());
+            if (limit < 40 || limit > 100) {
+                log(L"Не трогаю: предел заряда должен быть от 40 до 100.");
+                return false;
+            }
+            std::wstring ps =
+                L"-NoProfile -NonInteractive -Command \"$i = Get-CimInstance -Namespace root/wmi -ClassName "
+                L"AsusAtkWmi_WMNB; $r = Invoke-CimMethod -InputObject $i -MethodName DEVS -Arguments "
+                L"@{Device_ID=[uint32]0x00120057; Control_Status=[uint32]" +
+                std::to_wstring(limit) + L"}; 'devs=' + $r.result\"";
+            int code = Exec(L"WindowsPowerShell\\v1.0\\powershell.exe", ps, &out, 30000);
+            bool ok = code == 0 && out.find(L"devs=1") != std::wstring::npos;
+            log(ok ? L"Предел заряда: " + std::to_wstring(limit) + L"%."
+                   : L"Ноутбук не принял предел заряда: " + Trim(out));
+            return ok;
+        }
         case JOB_SYS_ITEM:
             return tools::SysItemAdminMain(Trim(elevate::Take(L"SysItem")), log);
         case JOB_GIANTS:
