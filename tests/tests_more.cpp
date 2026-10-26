@@ -172,13 +172,13 @@ void TestRules() {
     }
     // простой, сеть по имени, «не»
     auto more = rules::Parse(
-        {L"idle>15 & !net:Home_5G* -> power:eco", L"net:Office+Work -> mute", L"!! ac -> mute", L"idle>0 -> mute"},
+        {L"idle>15 & !net:Home* -> power:eco", L"net:Office+Work -> mute", L"!! ac -> mute", L"idle>0 -> mute"},
         &bad);
     CHECK(more.size() == 2);
     if (more.size() == 2) {
         rules::Facts g;
         g.idleMin = 20;
-        g.networks = {L"Home_5G"};
+        g.networks = {L"Home_5G 2"};
         CHECK(!rules::Holds(more[0], g));  // дома - нет
         g.networks = {L"Cafe"};
         CHECK(rules::Holds(more[0], g));

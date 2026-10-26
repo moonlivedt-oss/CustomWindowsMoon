@@ -212,7 +212,7 @@ SignState CatalogSign(const std::wstring& path, std::wstring* signer) {
 // похожие имена, двойное расширение, невидимые знаки и скрипты в строке запуска - в security_logic.cpp (под тестами)
 std::wstring LookAlike(const std::wstring& lowerLeaf) { return LookAlikeIn(lowerLeaf, SystemExeNames()); }
 
-// Длинная форма пути в нижнем регистре: %TEMP% бывает коротким (C:\Users\MOONLI~1\...), а путь процесса - длинным.
+// Длинная форма пути в нижнем регистре: %TEMP% бывает коротким (C:\Users\USERNA~1\...), а путь процесса - длинным.
 std::wstring LongLower(const std::wstring& p) {
     wchar_t buf[MAX_PATH * 2];
     DWORD n = GetLongPathNameW(p.c_str(), buf, MAX_PATH * 2);

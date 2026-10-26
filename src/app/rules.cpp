@@ -109,7 +109,7 @@ void Tick(const Config& cfg, void (*onTheme)(const std::wstring&)) {
     ULONGLONG now = GetTickCount64();
     if (now - g_at < 3000) return;
     g_at = now;
-    // показ экрана прячет имена сетей: «Home_5G» - Windows дописывает номер, прячем и имя без него
+    // показ экрана прячет имена сетей: «Home_5G 2» - Windows дописывает номер, прячем и имя без него
     if (share::Masking()) {
         std::vector<std::wstring> words;
         for (const std::wstring& n : Networks()) {
