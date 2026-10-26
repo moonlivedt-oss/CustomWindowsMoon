@@ -1,6 +1,7 @@
 // Страница для телефона: скачать брошенное (по одному или архивом), отправить фото и файлы (по 3 сразу, кусками по
 // 8 МБ с докачкой), сканер, общий буфер (текст и картинки), папки ПК с просмотром видео и музыки, тачпад и клавиатура,
-// пульт, «открыть на ПК», запомнить телефон. Одна страница без внешних файлов; запросы - относительные.
+// пульт, «открыть на ПК», запомнить телефон, камера телефона на ПК, защищённая страница (свой сертификат), приложение
+// с «Поделиться - на ПК». Одна страница без внешних файлов; запросы - относительные.
 #include <string>
 
 namespace phone::detail {
@@ -44,7 +45,7 @@ display:flex;align-items:center;justify-content:center;color:var(--mut);font-siz
 <h1>Компьютер рядом <span id="st">на связи</span></h1>
 <nav id="tabs"><button data-t="files" class="on">Файлы</button><button data-t="clip">Буфер</button>
 <button data-t="screen">Экран</button><button data-t="pc">Папки ПК</button><button data-t="wins">Окна</button>
-<button data-t="pad">Тачпад</button><button data-t="remote">Пульт</button></nav>
+<button data-t="pad">Тачпад</button><button data-t="remote">Пульт</button><button data-t="cam">Камера</button></nav>
 
 <div data-p="files">
 <section id="get" hidden><h2>С компьютера</h2><div id="files"></div>
@@ -56,6 +57,16 @@ display:flex;align-items:center;justify-content:center;color:var(--mut);font-siz
 <input type="file" id="fscan" accept="image/*" capture="environment">
 <div id="up"></div><p class="hint">Фото и видео - в «Изображения\Телефон\дата снимка», файлы - в Загрузки, скан -
 в «Изображения\Телефон\Сканы», а распознанный текст - в буфер ПК. Оборвался Wi-Fi - продолжит с места обрыва.</p></section>
+<section id="secbox" class="hide"><h2>Защищённая страница (https)</h2>
+<p class="hint" style="margin-top:0">Нужна для «Поделиться - на ПК», камеры и установки страницы как приложения. Один раз:</p>
+<ol class="hint" style="padding-left:20px"><li>Скачайте сертификат этого ПК:
+<a class="btn" href="ca.crt" download="MoonDesk-CA.crt" style="min-height:36px;padding:6px 12px">MoonDesk-CA.crt</a></li>
+<li>Настройки - Безопасность - Шифрование и учётные данные - Установить сертификат - Сертификат ЦС, выберите файл
+из Загрузок. На Samsung: Настройки - Безопасность и конфиденциальность - Другие параметры безопасности - Установить
+из памяти устройства - Сертификат ЦС.</li><li>Откройте защищённую страницу и уже там нажмите «Запомнить этот телефон».</li></ol>
+<div class="row"><a class="btn p" id="secgo">Открыть защищённую страницу</a></div></section>
+<section id="appbox" class="hide"><h2>Поделиться - на ПК</h2><p class="hint" id="apphint" style="margin-top:0"></p>
+<div class="row"><button class="p hide" id="install">Установить как приложение</button></div></section>
 <section id="pairbox"><h2>Без QR в следующий раз</h2><button id="pair">Запомнить этот телефон</button>
 <p class="hint" id="pairhint">Страница получит постоянный адрес - добавьте её в закладки или на главный экран.</p></section>
 </div>
@@ -106,6 +117,12 @@ display:flex;align-items:center;justify-content:center;color:var(--mut);font-siz
 <button onclick="cmd('prev')">Назад</button><button class="p" onclick="cmd('play')">Пауза</button><button onclick="cmd('next')">Дальше</button>
 <button onclick="cmd('screen')">Экран</button><button onclick="cmd('lock')">Блок</button><button onclick="sleepPc()">Сон</button>
 </div></section></div>
+<div data-p="cam" class="hide"><section><h2>Камера телефона - на ПК</h2>
+<video id="camv" playsinline muted style="width:100%;border-radius:12px;background:#000;display:block;min-height:120px"></video>
+<div class="row" style="margin-top:8px"><button class="p" id="camgo">Включить</button><button id="camflip">Задняя</button>
+<button id="camres">1280</button></div><p class="hint" id="cammsg">На ПК откроется окно «Камера телефона» - выберите его
+в OBS («Захват окна») или в Discord («Демонстрация экрана - окно»). Экран телефона не гасите: в фоне Chrome
+останавливает камеру.</p></section></div>
 <p class="hint" id="vol"></p>
 <div class="ov hide" id="sheet"><div id="sheetbox" style="width:100%;max-width:420px"></div></div>
 <div class="ov hide" id="ov"><div id="ovbox"></div><div class="row"><a class="btn" id="ovdl">Скачать</a><button class="p" onclick="closeOv()">Закрыть</button></div></div>
@@ -135,7 +152,7 @@ function poll(){fetch('poll?seq='+seq,{cache:'no-store'}).then(function(r){if(!r
 var p=$('pc');if(j.clip){p.textContent=j.clip;p.className=''}else{p.textContent='пока пусто';p.className='empty'}
 var im=$('pcimg'),sv=$('pcsave');if(j.img){var u='clipimg?n='+j.img;if(im.dataset.u!=u){im.src=u;im.dataset.u=u}
 im.classList.remove('hide');sv.href=u;sv.classList.remove('hide')}else{im.classList.add('hide');sv.classList.add('hide')}
-$('padoff').textContent=j.input?'':'Тачпад выключен в настройках RadialMenu (phone_input).';state.fs=j.fs;state.screen=j.screen;
+$('padoff').textContent=j.input?'':'Тачпад выключен в настройках RadialMenu (phone_input).';secure(j);state.fs=j.fs;state.screen=j.screen;
 $('fsrow').classList.toggle('hide',!(j.fs&&cur.r>=0));
 if(location.pathname.indexOf('/d/')==0){$('pair').classList.add('hide');$('pairhint').textContent=
 'Телефон запомнен - эта страница открывается из закладки, пока ноутбук в своей сети и в RadialMenu включено «ждать всегда».'}
@@ -254,13 +271,80 @@ if(Math.abs(dx)+Math.abs(dy)>2){moved=true;clearTimeout(lp)}
 if(e.touches.length>=2){acc.w+=-dy*6;return}var sp=Math.sqrt(dx*dx+dy*dy),k=1.4+Math.min(sp,40)*0.08;acc.x+=dx*k;acc.y+=dy*k},{passive:false});
 pad.addEventListener('touchend',function(e){e.preventDefault();clearTimeout(lp);if(e.touches.length)return;
 if(drag){drag=false;inp('up')}else if(!moved&&Date.now()-t0<300)inp('c&b='+(fingers>=2?'r':'l'));fingers=0},{passive:false});
+// защищённая страница и приложение
+var isSec=location.protocol=='https:',isDev=location.pathname.indexOf('/d/')==0,bip=null;
+if(isSec&&isDev){var ml=document.createElement('link');ml.rel='manifest';ml.href='manifest.json';document.head.appendChild(ml);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(function(){})}
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();bip=e;$('install').classList.remove('hide')});
+$('install').onclick=function(){if(bip){bip.prompt();bip=null;this.classList.add('hide')}};
+function secure(j){if(!isSec&&j.tls){$('secbox').classList.remove('hide');$('secgo').href='https://'+location.hostname+':'+j.tls+location.pathname}
+if(!isSec)return;$('appbox').classList.remove('hide');var app=matchMedia('(display-mode: standalone)').matches;
+$('apphint').textContent=!isDev?'Сначала «Запомнить этот телефон» ниже: у приложения должен быть постоянный адрес.':app?
+'Приложение установлено. В любом приложении: Поделиться - «ПК рядом»: фото и видео лягут в «Изображения\\Телефон», файлы - в Загрузки, текст - в буфер ПК, ссылку можно открыть на ПК.':
+'Установите страницу как приложение: кнопка ниже или меню Chrome - «Добавить на главный экран». Потом в любом приложении: Поделиться - «ПК рядом».'}
+function shareResult(){var m=/^#s=(.*)$/.exec(location.hash);if(!m)return;history.replaceState(null,'',location.pathname);
+var j;try{j=JSON.parse(decodeURIComponent(m[1]))}catch(e){return}state.share=j;
+var h='<p style="text-align:center">'+(j.n?'На ПК: '+j.n+(j.n==1?' файл':j.n<5?' файла':' файлов')+'<br>':'')+(j.t?'Текст - в буфере ПК':'')+'</p>';
+if(j.l){var act=null;try{act=localStorage.getItem('linkAct')}catch(e){}
+if(act){linkDo(act);h+='<p class="hint" style="text-align:center">Ссылка '+(act=='open'?'открыта на ПК':'в буфере ПК')+'. <a href="#" onclick="forgetAct();return false">Спрашивать снова</a></p>'}
+else h+='<p class="hint" style="word-break:break-all;text-align:center">'+esc(j.l)+'</p><button class="p" style="width:100%;margin:4px 0" onclick="linkPick(\'open\')">Открыть на ПК</button>'+
+'<button style="width:100%;margin:4px 0" onclick="linkPick(\'clip\')">В буфер ПК</button><label class="hint" style="display:block;text-align:center"><input type="checkbox" id="linkkeep"> запомнить выбор</label>'}
+h+='<button style="width:100%;margin:4px 0" onclick="closeSheet()">Готово</button>';$('sheetbox').innerHTML=h;$('sheet').classList.remove('hide')}
+function linkDo(a){var j=state.share;if(a=='open')post('open',j.l).then(function(r){toast(r.ok?'Открыто на ПК':'Не открылось')});
+else post('clip',j.x||j.l).then(function(r){toast(r.ok?'В буфере ПК':'Не дошло')})}
+function linkPick(a){var k=$('linkkeep');if(k&&k.checked)try{localStorage.setItem('linkAct',a)}catch(e){}closeSheet();linkDo(a)}
+function forgetAct(){try{localStorage.removeItem('linkAct')}catch(e){}toast('Буду спрашивать')}
+// камера телефона - на ПК (кадры JPEG)
+var cam={on:false,st:null,face:'environment',w:1280,n:0,t0:0};
+$('camflip').onclick=function(){cam.face=cam.face=='environment'?'user':'environment';this.textContent=cam.face=='user'?'Передняя':'Задняя';if(cam.on){camStop();camStart()}};
+$('camres').onclick=function(){cam.w=cam.w==640?1280:cam.w==1280?1920:640;this.textContent=cam.w;if(cam.on){camStop();camStart()}};
+$('camgo').onclick=function(){if(cam.on)camStop();else camStart()};
+async function camStart(){if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+$('cammsg').textContent='Камера работает только на защищённой странице (https): вкладка «Файлы» - «Защищённая страница».';return}
+try{cam.st=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:cam.face},width:{ideal:cam.w},
+height:{ideal:Math.round(cam.w*9/16)},frameRate:{ideal:30}}})}catch(e){$('cammsg').textContent='Камера не дана: '+e.name;return}
+var v=$('camv');v.srcObject=cam.st;try{await v.play()}catch(e){}cam.on=true;$('camgo').textContent='Выключить';camLoop()}
+function camStop(){cam.on=false;if(cam.st)cam.st.getTracks().forEach(function(t){t.stop()});cam.st=null;$('camv').srcObject=null;$('camgo').textContent='Включить'}
+async function camLoop(){var c=document.createElement('canvas'),x=c.getContext('2d'),first=true,v=$('camv');cam.n=0;cam.t0=Date.now();
+while(cam.on){if(!v.videoWidth){await sleep(100);continue}var t=Date.now();c.width=v.videoWidth;c.height=v.videoHeight;x.drawImage(v,0,0);
+var b=await new Promise(function(r){c.toBlob(r,'image/jpeg',0.7)});if(!b||!cam.on)continue;
+try{var r=await fetch('cam'+(first?'?start=1':''),{method:'PUT',body:b});first=false;
+if(r.status==410){camStop();$('cammsg').textContent='Окно камеры закрыли на ПК. «Включить» - открыть снова.';break}
+cam.n++;var s=(Date.now()-cam.t0)/1000;if(s>2){$('cammsg').textContent='Идёт на ПК: '+c.width+'x'+c.height+', '+Math.round(cam.n/s)+' кадр/с, кадр '+size(b.size);cam.n=0;cam.t0=Date.now()}}
+catch(e){$('cammsg').textContent='Нет связи с ПК';await sleep(1000)}var dt=Date.now()-t;if(dt<33)await sleep(33-dt)}}
 // запомнить телефон
 $('pair').onclick=function(){var n=(navigator.userAgentData&&navigator.userAgentData.platform)||'телефон';
 var m=/\(([^)]+)\)/.exec(navigator.userAgent);if(m)n=m[1].split(';').pop().trim()||n;
 post('pair',n).then(function(r){return r.json()}).then(function(j){if(j.url){toast('Запомнен');location.replace(j.url)}}).catch(function(){toast('Не вышло')})};
+shareResult();
 poll();
 </script></body></html>
 )PAGE";
+}
+
+// service worker приложения: без сети - страница «компьютер не отвечает» вместо ошибки Chrome
+const char* ServiceWorkerJs() {
+    return R"SW(var OFF='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
+'<title>ПК рядом</title><body style="margin:0;padding:24px;background:#16131a;color:#f1ecf4;font:16px/1.4 system-ui,sans-serif">'+
+'<h1 style="font-size:19px">Компьютер не отвечает</h1><p>Ноутбук выключен, спит или в другой сети, либо в RadialMenu не '+
+'включено «Ждать запомненный телефон». Поделитесь ещё раз, когда он будет рядом.</p>'+
+'<button onclick="location.reload()" style="border:0;border-radius:12px;background:#c8323f;color:#fff;font:inherit;padding:12px 16px">Повторить</button>';
+self.addEventListener('install',function(){self.skipWaiting()});
+self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim())});
+self.addEventListener('fetch',function(e){if(e.request.mode!='navigate')return;
+e.respondWith(fetch(e.request).catch(function(){return new Response(OFF,{headers:{'Content-Type':'text/html; charset=utf-8'}})}))});
+)SW";
+}
+
+// приложение: адреса относительно manifest.json (/d/<ключ>/); share_target - POST multipart на /share
+const char* ManifestJson() {
+    return R"MF({"name":"Компьютер рядом","short_name":"ПК рядом","start_url":"./","scope":"./","id":"./",
+"display":"standalone","background_color":"#16131a","theme_color":"#16131a",
+"icons":[{"src":"icon.png?s=192","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+{"src":"icon.png?s=512","sizes":"512x512","type":"image/png","purpose":"any maskable"}],
+"share_target":{"action":"share","method":"POST","enctype":"multipart/form-data",
+"params":{"title":"title","text":"text","url":"url","files":[{"name":"f","accept":["*/*"]}]}}}
+)MF";
 }
 
 }  // namespace phone::detail

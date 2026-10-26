@@ -12,6 +12,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -30,8 +31,9 @@ void Offer(const std::vector<std::wstring>& files);  // Ф1: эти файлы -
 void OpenPage();                                     // Ф4-Ф6: страница телефона без файлов (действие phone)
 void Stop();
 bool Active();
-std::wstring Status();  // «Телефон: на связи, принято 5» / пусто
-std::wstring Url();     // ссылка для телефона (пусто - нет сессии или общей сети)
+std::wstring Status();     // «Телефон: на связи, принято 5» / пусто
+std::wstring Url();        // ссылка для телефона (пусто - нет сессии или общей сети)
+std::wstring SecureUrl();  // та же страница по https (пусто - https не открылся)
 std::wstring Diag();
 int Devices();  // сколько телефонов запомнено
 void Forget();  // забыть все запомненные телефоны    // адаптеры, адрес для телефона, профиль сети, Bluetooth,
@@ -97,6 +99,30 @@ POINT TapPoint(double nx, double ny, const RECT& monitor);  // касание в
 SIZE FrameSize(int w, int h, int maxW);                     // кадр для телефона: не шире maxW (320..2560)
 std::vector<WORD> Combo(const std::string& name);           // «copy» -> Ctrl+C; пусто - нет такого
 bool FsOp(const std::string& op);                           // open, copy, move, rename, mkdir, delete
+
+// --- «Поделиться - на ПК» (phone_share_logic.cpp, под тестами) ---
+std::string Boundary(const std::string& contentType);  // из «multipart/form-data; boundary=...»; пусто - не то
+struct FormPart {
+    std::string name, filename, type;  // filename - как прислали (UTF-8), чистит SafeName; type - строчными
+    bool file = false;                 // у части было filename
+};
+// multipart/form-data потоком: тело кусками любого размера, данные части отдаются по мере прихода (большой файл не
+// держится в памяти). Обработчик вернул false - разбор прерван
+class Multipart {
+public:
+    explicit Multipart(const std::string& boundary);
+    std::function<bool(const FormPart&)> onBegin;
+    std::function<bool(const char*, size_t)> onData;
+    std::function<bool()> onEnd;
+    bool Feed(const char* p, size_t n);  // false - тело испорчено или прервали
+    bool Done() const { return state_ == DONE; }
+
+private:
+    enum State { PREAMBLE, AFTER, HEADERS, BODY, DONE, BAD } state_ = PREAMBLE;
+    std::string delim_, buf_;
+};
+// ссылка из «Поделиться»: поле url или первая http(s)-ссылка в тексте (без хвостовой точки и скобки); пусто - нет
+std::string ShareLink(const std::string& url, const std::string& text);
 
 // Пути, если телефон не в этой сети: по порядку - что предложить первым
 enum Way { WAY_PHONE_HOTSPOT, WAY_PC_HOTSPOT, WAY_BLUETOOTH };

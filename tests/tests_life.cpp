@@ -19,6 +19,7 @@
 #include "life/shelf.h"
 #include "life/tidy.h"
 #include "life/vpnexit.h"
+#include "phone/cert.h"
 #include "phone/phone.h"
 
 namespace {
@@ -357,6 +358,122 @@ void TestPhoneMore() {
     CHECK(phone::RateText(L"Принимаю", 100 * 1024, 100 * 1024 * 75) == L"Принимаю 100 КБ/с, ещё 1 мин 15 с");
 }
 
+// «Поделиться - на ПК»: multipart кусками любого размера (граница режется между кусками), имена, ссылки
+void TestPhoneShare() {
+    CHECK(phone::Boundary("multipart/form-data; boundary=----abc") == "----abc");
+    CHECK(phone::Boundary("Multipart/Form-Data; charset=utf-8; boundary=\"a b;c\"") == "a b;c");
+    CHECK(phone::Boundary("text/plain; boundary=x").empty() && phone::Boundary("multipart/form-data").empty());
+    CHECK(phone::Boundary("multipart/form-data; boundary=" + std::string(71, 'x')).empty());
+    std::string bin = std::string("\x00\r\n--b\r\n-", 9) + "\r\n--XY" + "tail\r\n-";  // похоже на границу, но не она
+    std::string body =
+        "preamble\r\n--XYZ\r\nContent-Disposition: form-data; name=\"text\"\r\n\r\nпривет https://ex.com/a?b=1.\r\n"
+        "--XYZ\r\nContent-Disposition: form-data; name=\"f\"; filename=\"a%22b.jpg\"\r\n"
+        "Content-Type: Image/JPEG\r\n\r\n" +
+        bin +
+        "\r\n"
+        "--XYZ\r\nContent-Disposition: form-data; name=\"f\"; filename=\"x.txt\"; "
+        "filename*=UTF-8''%D1%84.txt\r\n\r\n\r\n"
+        "--XYZ--\r\nepilogue";
+    for (size_t step : {(size_t)1, (size_t)2, (size_t)3, (size_t)7, (size_t)16, body.size()}) {
+        phone::Multipart mp("XYZ");
+        std::vector<phone::FormPart> parts;
+        std::vector<std::string> data;
+        int ends = 0;
+        mp.onBegin = [&](const phone::FormPart& p) {
+            parts.push_back(p);
+            data.emplace_back();
+            return true;
+        };
+        mp.onData = [&](const char* p, size_t n) {
+            data.back().append(p, n);
+            return true;
+        };
+        mp.onEnd = [&] { return ++ends, true; };
+        bool ok = true;
+        for (size_t i = 0; i < body.size(); i += step)
+            ok = ok && mp.Feed(body.data() + i, std::min(step, body.size() - i));
+        CHECK(ok && mp.Done() && ends == 3 && parts.size() == 3);
+        if (parts.size() != 3) continue;
+        CHECK(parts[0].name == "text" && !parts[0].file && data[0] == "привет https://ex.com/a?b=1.");
+        CHECK(parts[1].file && parts[1].filename == "a\"b.jpg" && parts[1].type == "image/jpeg" && data[1] == bin);
+        CHECK(parts[2].filename == "\xD1\x84.txt" && data[2].empty());  // filename* важнее filename
+    }
+    {
+        phone::Multipart mp("XYZ");  // за границей не \r\n и не -- - испорчено
+        CHECK(!mp.Feed("--XYZ\r\n\r\nabc\r\n--XYZxx", 21));
+        phone::Multipart stop("XYZ");  // обработчик прервал (мало места)
+        stop.onBegin = [](const phone::FormPart&) { return false; };
+        CHECK(!stop.Feed("--XYZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n", 51));
+        phone::Multipart cut("XYZ");  // тело кончилось без закрывающей границы
+        CHECK(cut.Feed("--XYZ\r\n\r\nabc", 12) && !cut.Done());
+    }
+    CHECK(phone::ShareLink("https://ex.com/x", "Смотри") == "https://ex.com/x");
+    CHECK(phone::ShareLink("", "Статья (https://ex.com/a_(b)), читай") == "https://ex.com/a_(b");
+    CHECK(phone::ShareLink("", "Смотри: HTTP://Ex.com/p.") == "HTTP://Ex.com/p");
+    CHECK(phone::ShareLink("ftp://x", "просто текст") == "" && phone::ShareLink("", "xhttps://ex.com") == "");
+    CHECK(phone::ShareLink("", "https://") == "" && phone::ShareLink(" https://a.b ", "") == "https://a.b");
+}
+
+// свой корневой сертификат и сертификат сервера: цепочка сходится до корня (только до него), адреса в SAN
+void TestPhoneCert() {
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    std::wstring dir = std::wstring(tmp) + L"radial_cert_test";
+    DeleteFileW((dir + L"\\phone-ca.cer").c_str());
+    DeleteFileW((dir + L"\\phone-ca.key").c_str());
+    std::string ca, again;
+    CHECK(phone::cert::LoadOrCreateCa(dir, ca) && ca.size() > 200);
+    CHECK(phone::cert::LoadOrCreateCa(dir, again) && again == ca);  // второй раз - тот же, не новый
+    const wchar_t* key = L"MoonDesk Phone TLS test";
+    PCCERT_CONTEXT srv = phone::cert::IssueServer(dir, {0xC0A80105, 0x7F000001}, key);
+    CHECK(srv != nullptr);
+    if (srv) {
+        PCCERT_CONTEXT root = CertCreateCertificateContext(X509_ASN_ENCODING, (const BYTE*)ca.data(), (DWORD)ca.size());
+        HCERTSTORE roots = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+        CertAddCertificateContextToStore(roots, root, CERT_STORE_ADD_ALWAYS, nullptr);
+        CERT_CHAIN_ENGINE_CONFIG ec{};
+        ec.cbSize = sizeof(ec);
+        ec.hExclusiveRoot = roots;  // доверять только своему корню, системные не при чём
+        HCERTCHAINENGINE eng = nullptr;
+        CHECK(CertCreateCertificateChainEngine(&ec, &eng));
+        CERT_CHAIN_PARA cp{};
+        cp.cbSize = sizeof(cp);
+        PCCERT_CHAIN_CONTEXT chain = nullptr;
+        CHECK(CertGetCertificateChain(eng, srv, nullptr, nullptr, &cp, CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY, nullptr,
+                                      &chain));
+        if (chain) {
+            DWORD err = chain->TrustStatus.dwErrorStatus & ~(DWORD)CERT_TRUST_REVOCATION_STATUS_UNKNOWN &
+                        ~(DWORD)CERT_TRUST_IS_OFFLINE_REVOCATION;
+            CHECK(err == 0 && chain->rgpChain[0]->cElement == 2);
+            SSL_EXTRA_CERT_CHAIN_POLICY_PARA ssl{};
+            ssl.cbSize = sizeof(ssl);
+            ssl.dwAuthType = AUTHTYPE_SERVER;
+            ssl.fdwChecks = 0x80;  // SECURITY_FLAG_IGNORE_REVOCATION (wininet.h): отзыв у своего корня не проверить
+            ssl.pwszServerName = (wchar_t*)L"192.168.1.5";
+            CERT_CHAIN_POLICY_PARA pp{};
+            pp.cbSize = sizeof(pp);
+            pp.dwFlags = CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS;
+            pp.pvExtraPolicyPara = &ssl;
+            CERT_CHAIN_POLICY_STATUS ps{};
+            ps.cbSize = sizeof(ps);
+            CHECK(CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain, &pp, &ps) && ps.dwError == 0);
+            ssl.pwszServerName = (wchar_t*)L"192.168.1.6";  // чужой адрес - не подходит
+            CHECK(CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain, &pp, &ps) && ps.dwError != 0);
+            CertFreeCertificateChain(chain);
+        }
+        DWORD n = 0;  // ключ сервера привязан (Schannel найдёт его по имени)
+        CHECK(CertGetCertificateContextProperty(srv, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &n) && n > 0);
+        CertFreeCertificateChainEngine(eng);
+        CertCloseStore(roots, 0);
+        CertFreeCertificateContext(root);
+        CertFreeCertificateContext(srv);
+    }
+    phone::cert::DeleteKey(key);
+    DeleteFileW((dir + L"\\phone-ca.cer").c_str());
+    DeleteFileW((dir + L"\\phone-ca.key").c_str());
+    RemoveDirectoryW(dir.c_str());
+}
+
 void TestPhoneRemote() {
     RECT m{1920, 0, 3840, 1080};  // второй монитор справа
     POINT p = phone::TapPoint(0.5, 0.5, m);
@@ -379,6 +496,8 @@ void TestPhoneRemote() {
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestPhoneShare();
+    TestPhoneCert();
     TestPhoneRemote();
     TestPhoneMore();
     TestShelf();

@@ -231,16 +231,7 @@ void Finish(Conn& cn, Incoming in, const std::string& kind) {
         return Text(cn, 500, "не записать");
     }
     SetFileAttributesW(final.c_str(), FILE_ATTRIBUTE_NORMAL);
-    if (!IsMedia(in.name)) {  // как браузер: файл пришёл извне - Windows спросит перед запуском
-        HANDLE z =
-            CreateFileW((final + L":Zone.Identifier").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
-        if (z != INVALID_HANDLE_VALUE) {
-            const char mark[] = "[ZoneTransfer]\r\nZoneId=3\r\n";
-            DWORD w = 0;
-            WriteFile(z, mark, sizeof(mark) - 1, &w, nullptr);
-            CloseHandle(z);
-        }
-    }
+    if (!IsMedia(in.name)) MarkFromInternet(final);
     {
         Lock l;
         ++S().received;
@@ -349,6 +340,18 @@ void Upload(Conn& cn, const Request& r) {
 }
 
 }  // namespace
+
+std::wstring UniquePath(const std::wstring& dir, const std::wstring& name) { return Unique(dir, name); }
+
+void MarkFromInternet(const std::wstring& path) {  // как браузер: файл пришёл извне - Windows спросит перед запуском
+    HANDLE z = CreateFileW((path + L":Zone.Identifier").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (z != INVALID_HANDLE_VALUE) {
+        const char mark[] = "[ZoneTransfer]\r\nZoneId=3\r\n";
+        DWORD w = 0;
+        WriteFile(z, mark, sizeof(mark) - 1, &w, nullptr);
+        CloseHandle(z);
+    }
+}
 
 std::wstring SharePathOf(const Request& r, const char* rk, const char* pk) {
     Request q = r;

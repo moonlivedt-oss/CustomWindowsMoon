@@ -40,6 +40,8 @@ struct Session {
     long long clipImg = 0;             // её номер (0 - картинки нет)
     bool standing = false;             // запомненный телефон: сервер ждёт постоянно, без карточки и QR
     std::vector<std::string> devices;  // ключи запомненных телефонов (/d/<ключ>/)
+    std::string caDer;                 // свой корневой сертификат (отдаётся телефону как MoonDesk-CA.crt)
+    int tlsPort = 0;                   // порт https (0 - только http)
 };
 Session& S();
 
@@ -62,7 +64,8 @@ enum Event {
     EV_PAIRED,
     EV_OCR,
     EV_NOTE,  // запись в журнал (что сделано с телефона)
-    EV_CALL   // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
+    EV_CALL,  // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
+    EV_CAM    // пришёл кадр камеры телефона
 };
 void Post(Event e, const std::wstring& text = L"");
 void PostBytes(Event e, std::string bytes);  // lp - new std::string (картинка)
@@ -74,7 +77,7 @@ bool CallMain(const std::string& op, std::string& out);
 // команда пульта (vol+, play, sleep...) в основном потоке; вернёт громкость 0..1 или -1
 float Command(const std::string& c);
 
-bool ServerStart(int& port, bool loopback);
+bool ServerStart(int& port, int& tlsPort, bool loopback);  // tlsPort 0 - https не открылся
 void ServerStop();
 bool ServerOn();
 const char* PageHtml();
@@ -93,9 +96,21 @@ struct Conn {
     std::string in;
     long long bodyLeft = 0;
     bool close = false;
+    bool tls = false;            // пришло на порт https
     int Read(char* buf, int n);  // тело текущего запроса: сначала из in, потом из сокета; 0 - всё, -1 - обрыв
 };
 bool SendAll(UINT_PTR c, const char* p, size_t n);
+int NetRecv(UINT_PTR c, char* buf, int n);  // recv или расшифровка, если соединение по https
+
+// HTTPS (tls.cpp): Schannel поверх сокета; сертификат - phone/cert
+struct Tls;
+bool TlsSetCert(PCCERT_CONTEXT c);  // новые учётные данные сервера (адрес поменялся)
+bool TlsReady();
+void TlsReset();
+Tls* TlsAccept(UINT_PTR s);  // рукопожатие; nullptr - не вышло
+int TlsRecv(Tls* t, char* buf, int n);
+bool TlsSend(Tls* t, const char* p, size_t n);
+void TlsClose(Tls* t);
 std::string Head(Conn& cn, int code, const std::string& type, long long length, const std::string& extra = "");
 void Reply(Conn& cn, int code, const std::string& type, const std::string& body, const std::string& extra = "");
 void Text(Conn& cn, int code, const std::string& body);
@@ -107,6 +122,15 @@ std::atomic<bool>& Stopping();
 bool HandleFiles(Conn& cn, const Request& r, const std::string& rest);
 bool HandleMore(Conn& cn, const Request& r, const std::string& rest);
 bool HandleRemote(Conn& cn, const Request& r, const std::string& rest);
+bool HandleShare(Conn& cn, const Request& r, const std::string& rest);       // server_share.cpp: https, PWA, камера
+std::wstring UniquePath(const std::wstring& dir, const std::wstring& name);  // «a (2).jpg», если занято
+void MarkFromInternet(const std::wstring& path);                             // Zone.Identifier
+const char* ServiceWorkerJs();                                               // page.cpp
+const char* ManifestJson();
+// камера телефона (camera.cpp): кадр JPEG из потока сервера; false - окно камеры на ПК закрыли (start - открыть снова)
+bool CamFrame(std::string jpg, bool start);
+void CamShow();  // в основном потоке (EV_CAM): окно «Камера телефона» и новый кадр в нём
+void CamStop();
 // путь в открытой папке ПК по параметрам rk (номер папки) и pk (путь внутри); пусто - нельзя
 std::wstring SharePathOf(const Request& r, const char* rk, const char* pk);
 bool ShareRootIs(const std::wstring& path);  // это сама открытая папка

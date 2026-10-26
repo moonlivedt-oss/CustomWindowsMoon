@@ -15,7 +15,8 @@ std::atomic<long long> g_sent{0}, g_recv{0}, g_sendLeft{0};
 
 namespace {
 
-SOCKET g_listen = INVALID_SOCKET;
+SOCKET g_listen = INVALID_SOCKET, g_listenTls = INVALID_SOCKET;
+thread_local Tls* t_tls = nullptr;  // соединение по https (каждое соединение - в своём потоке)
 HANDLE g_thread = nullptr;
 std::atomic<bool> g_stop{false};
 std::atomic<int> g_conns{0};
@@ -27,6 +28,8 @@ const char* Reason(int code) {
             return "OK";
         case 206:
             return "Partial Content";
+        case 303:
+            return "See Other";
         case 301:
             return "Moved Permanently";
         case 400:
@@ -86,7 +89,8 @@ void Poll(Conn& cn, const Request& r) {
             ",\"zip\":" + (z.size() > 1 && ZipFits(z) ? "true" : "false") +
             ",\"input\":" + (InputAllowed() ? "true" : "false") +
             ",\"screen\":" + (ScreenAllowed() ? "true" : "false") + ",\"fs\":" + (FilesAllowed() ? "true" : "false") +
-            ",\"paired\":" + (S().standing ? "true" : "false") + ",\"shares\":[";
+            ",\"paired\":" + (S().standing ? "true" : "false") + ",\"tls\":" + std::to_string(S().tlsPort) +
+            ",\"sec\":" + (cn.tls ? "true" : "false") + ",\"shares\":[";
         std::vector<std::wstring> roots = ShareRoots();
         for (size_t k = 0; k < roots.size(); ++k)
             j += (k ? "," : "") + phone::Json(roots[k].substr(roots[k].find_last_of(L'\\') + 1));
@@ -138,27 +142,31 @@ void Handle(Conn& cn, const Request& r) {
         Seen();
         return Reply(cn, 200, "text/html; charset=utf-8", PageHtml(),
                      "Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self'; "
+                     "worker-src 'self'; manifest-src 'self'; "
                      "style-src 'unsafe-inline'; script-src 'unsafe-inline'\r\n");
     }
     if (rest == "/poll") return Poll(cn, r);
     if (rest == "/clip" && r.method == "POST") return ClipIn(cn, r);
-    if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest) || HandleRemote(cn, r, rest)) return;
+    if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest) || HandleRemote(cn, r, rest) || HandleShare(cn, r, rest))
+        return;
     Text(cn, 404, "нет");
 }
 
 DWORD WINAPI ConnThread(void* p) {
     Conn cn;
-    cn.c = (SOCKET)(UINT_PTR)p;
+    cn.c = (SOCKET)((UINT_PTR)p & ~(UINT_PTR)1);
+    cn.tls = ((UINT_PTR)p & 1) != 0;
     DWORD to = 30000;
     setsockopt(cn.c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
     setsockopt(cn.c, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to, sizeof(to));
     BOOL nodelay = TRUE;  // тачпад: мелкие ответы - сразу
     setsockopt(cn.c, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
     char buf[8192];
+    if (cn.tls && !(t_tls = TlsAccept(cn.c))) cn.close = true;  // сертификат не принят или не TLS
     for (int requests = 0; !g_stop && !cn.close && requests < 10000; ++requests) {
         size_t end;
         while ((end = cn.in.find("\r\n\r\n")) == std::string::npos && cn.in.size() < 16384) {
-            int k = recv(cn.c, buf, sizeof(buf), 0);
+            int k = NetRecv(cn.c, buf, sizeof(buf));
             if (k <= 0) {
                 cn.close = true;
                 break;
@@ -180,6 +188,8 @@ DWORD WINAPI ConnThread(void* p) {
         Handle(cn, r);
         if (cn.bodyLeft > 0) cn.close = true;  // тело не дочитали - дальше в соединении не разобрать
     }
+    TlsClose(t_tls);
+    t_tls = nullptr;
     shutdown(cn.c, SD_SEND);
     closesocket(cn.c);
     --g_conns;
@@ -191,21 +201,27 @@ DWORD WINAPI AcceptLoop(void*) {
         fd_set fs;
         FD_ZERO(&fs);
         FD_SET(g_listen, &fs);
+        if (g_listenTls != INVALID_SOCKET) FD_SET(g_listenTls, &fs);
         timeval tv{0, 300000};
         if (select(0, &fs, nullptr, nullptr, &tv) <= 0) continue;
-        SOCKET c = accept(g_listen, nullptr, nullptr);
-        if (c == INVALID_SOCKET) continue;
-        if (g_conns >= 24) {
-            closesocket(c);
-            continue;
-        }
-        ++g_conns;
-        HANDLE t = CreateThread(nullptr, 0, ConnThread, (void*)(UINT_PTR)c, 0, nullptr);
-        if (t) {
-            CloseHandle(t);
-        } else {
-            closesocket(c);
-            --g_conns;
+        for (SOCKET l : {g_listen, g_listenTls}) {
+            if (l == INVALID_SOCKET || !FD_ISSET(l, &fs)) continue;
+            SOCKET c = accept(l, nullptr, nullptr);
+            if (c == INVALID_SOCKET) continue;
+            if (g_conns >= 24) {
+                closesocket(c);
+                continue;
+            }
+            ++g_conns;
+            // младший бит - https (номер сокета кратен 4)
+            HANDLE t =
+                CreateThread(nullptr, 0, ConnThread, (void*)((UINT_PTR)c | (l == g_listenTls ? 1 : 0)), 0, nullptr);
+            if (t) {
+                CloseHandle(t);
+            } else {
+                closesocket(c);
+                --g_conns;
+            }
         }
     }
     return 0;
@@ -215,6 +231,8 @@ DWORD WINAPI AcceptLoop(void*) {
 
 std::atomic<bool>& Stopping() { return g_stop; }
 
+int NetRecv(UINT_PTR c, char* buf, int n) { return t_tls ? TlsRecv(t_tls, buf, n) : recv(c, buf, n, 0); }
+
 int Conn::Read(char* buf, int n) {
     if (bodyLeft <= 0) return 0;
     int k = 0;
@@ -223,7 +241,7 @@ int Conn::Read(char* buf, int n) {
         memcpy(buf, in.data(), (size_t)k);
         in.erase(0, (size_t)k);
     } else {
-        k = recv(c, buf, (int)std::min<long long>(n, bodyLeft), 0);
+        k = NetRecv(c, buf, (int)std::min<long long>(n, bodyLeft));
         if (k <= 0) {
             close = true;
             return -1;
@@ -235,6 +253,15 @@ int Conn::Read(char* buf, int n) {
 }
 
 bool SendAll(UINT_PTR c, const char* p, size_t n) {
+    if (t_tls) {
+        for (size_t at = 0; at < n;) {  // кусками, чтобы скорость на карточке шла ровно
+            size_t len = std::min<size_t>(n - at, 1 << 20);
+            if (!TlsSend(t_tls, p + at, len)) return false;
+            at += len;
+            g_sent += (long long)len;
+        }
+        return true;
+    }
     while (n > 0) {
         int k = send(c, p, (int)std::min<size_t>(n, 1 << 20), 0);
         if (k <= 0) return false;
@@ -291,35 +318,45 @@ void Seen() {
 
 bool ServerOn() { return g_thread != nullptr; }
 
-bool ServerStart(int& port, bool loopback) {
+SOCKET Listen(sockaddr_in a, int from, int to, int& port) {
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return s;
+    BOOL one = TRUE;
+    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&one, sizeof(one));
+    for (int p = from; p < to; ++p) {
+        a.sin_port = htons((u_short)p);
+        if (bind(s, (sockaddr*)&a, sizeof(a)) == 0 && listen(s, 16) == 0) {
+            port = p;
+            return s;
+        }
+    }
+    closesocket(s);
+    return INVALID_SOCKET;
+}
+
+bool ServerStart(int& port, int& tlsPort, bool loopback) {
     if (g_thread) return true;
     if (!g_wsa) {
         WSADATA w;
         if (WSAStartup(MAKEWORD(2, 2), &w)) return false;
         g_wsa = true;
     }
-    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) return false;
-    BOOL one = TRUE;
-    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&one, sizeof(one));
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(loopback ? INADDR_LOOPBACK : INADDR_ANY);
-    bool bound = false;
-    for (int p = 8780; p < 8800 && !bound; ++p) {
-        a.sin_port = htons((u_short)p);
-        if (bind(s, (sockaddr*)&a, sizeof(a)) == 0) bound = true, port = p;
-    }
-    if (!bound || listen(s, 16) != 0) {
-        closesocket(s);
-        return false;
-    }
+    SOCKET s = Listen(a, 8780, 8800, port);
+    if (s == INVALID_SOCKET) return false;
+    // https - на 8800-8819 (тот же сдвиг, что у http, - адрес не меняется между запусками)
+    tlsPort = 0;
+    g_listenTls = Listen(a, 8800 + (port - 8780), 8820, tlsPort);
+    if (g_listenTls == INVALID_SOCKET) g_listenTls = Listen(a, 8800, 8820, tlsPort);
     g_listen = s;
     g_stop = false;
     g_thread = CreateThread(nullptr, 0, AcceptLoop, nullptr, 0, nullptr);
     if (!g_thread) {
         closesocket(s);
-        g_listen = INVALID_SOCKET;
+        if (g_listenTls != INVALID_SOCKET) closesocket(g_listenTls);
+        g_listen = g_listenTls = INVALID_SOCKET;
         return false;
     }
     return true;
@@ -332,8 +369,10 @@ void ServerStop() {
     CloseHandle(g_thread);
     g_thread = nullptr;
     closesocket(g_listen);
-    g_listen = INVALID_SOCKET;
+    if (g_listenTls != INVALID_SOCKET) closesocket(g_listenTls);
+    g_listen = g_listenTls = INVALID_SOCKET;
     for (int i = 0; i < 40 && g_conns > 0; ++i) Sleep(50);  // соединения видят g_stop и бросают передачу
+    if (g_conns == 0) TlsReset();
 }
 
 }  // namespace phone::detail

@@ -30,6 +30,7 @@
 #include "desk/corners.h"
 #include "desk/ocr.h"
 #include "desk/volume.h"
+#include "phone/cert.h"
 #include "phone/phone_internal.h"
 
 namespace phone {
@@ -41,7 +42,9 @@ namespace {
 HWND g_app = nullptr;
 const Config* g_cfg = nullptr;
 BoostCard g_note;  // итог: «Передано на телефон», «С телефона: 5 фото - показать»
-int g_port = 0;
+int g_port = 0, g_tlsPort = 0;
+std::vector<PCCERT_CONTEXT> g_certs;  // сертификаты сервера этой передачи (Schannel держит их до конца)
+uint32_t g_certIp = ~0u;
 uint32_t g_ip = 0;
 bool g_loopback = false;
 std::wstring g_hint;     // что делать на выбранном пути (раздача, Bluetooth)
@@ -451,6 +454,25 @@ void RefreshAddress(bool force) {
     }
 }
 
+// сертификат https на нынешний адрес (и 127.0.0.1); корневой создаётся при первой передаче
+void RefreshCert() {
+    if (!g_tlsPort || g_ip == g_certIp) return;
+    g_certIp = g_ip;
+    std::vector<uint32_t> ips;
+    if (g_ip && g_ip != 0x7F000001) ips.push_back(g_ip);
+    ips.push_back(0x7F000001);
+    PCCERT_CONTEXT c = cert::IssueServer(cert::DefaultDir(), ips, L"MoonDesk Phone TLS");
+    if (c && TlsSetCert(c)) {
+        g_certs.push_back(c);
+    } else {
+        if (c) CertFreeCertificateContext(c);
+        autos::Note(L"Телефон рядом: сертификат https не выпущен - страница только по http");
+    }
+    Lock l;
+    S().tlsPort = TlsReady() ? g_tlsPort : 0;
+    ++S().seq;
+}
+
 bool StartSession(bool oneTime, bool standing = false) {
     if (S().on) {
         Lock l;
@@ -458,9 +480,13 @@ bool StartSession(bool oneTime, bool standing = false) {
         return true;
     }
     g_loopback = GetEnvironmentVariableW(L"RADIAL_PHONE_LOCAL", nullptr, 0) > 0;  // проверка без сети и брандмауэра
-    int port = 0;
-    if (!ServerStart(port, g_loopback)) return false;
+    int port = 0, tlsPort = 0;
+    if (!ServerStart(port, tlsPort, g_loopback)) return false;
     g_port = port;
+    g_tlsPort = tlsPort;
+    g_certIp = ~0u;
+    std::string ca;
+    if (tlsPort && !cert::LoadOrCreateCa(cert::DefaultDir(), ca)) g_tlsPort = 0;
     {
         Lock l;
         Session& s = S();
@@ -477,6 +503,8 @@ bool StartSession(bool oneTime, bool standing = false) {
         s.devices = LoadDevices();
         s.clipPng.clear();
         s.clipImg = 0;
+        s.caDer = ca;
+        s.tlsPort = g_tlsPort;
         ++s.seq;
     }
     g_clipSeq = 0;
@@ -485,7 +513,9 @@ bool StartSession(bool oneTime, bool standing = false) {
     g_hint.clear();
     g_fwOk = g_loopback || FirewallAllows(port);
     RefreshAddress(true);
-    autos::Note(L"Телефон рядом: передача открыта (порт " + std::to_wstring(port) + L")");
+    RefreshCert();
+    autos::Note(L"Телефон рядом: передача открыта (порт " + std::to_wstring(port) +
+                (g_tlsPort ? L", https " + std::to_wstring(g_tlsPort) : std::wstring()) + L")");
     return true;
 }
 
@@ -644,6 +674,9 @@ void StopSession(const wchar_t* why) {
         S().on = false;
     }
     ServerStop();
+    for (PCCERT_CONTEXT c : g_certs) CertFreeCertificateContext(c);
+    g_certs.clear();
+    CamStop();
     int got = 0, done = 0, total = 0;
     {
         Lock l;
@@ -741,6 +774,13 @@ void Forget() {
 
 std::wstring Url() { return S().on ? MakeView().url : L""; }
 
+std::wstring SecureUrl() {
+    if (!S().on || !g_ip) return L"";
+    Lock l;
+    if (!S().tlsPort) return L"";
+    return L"https://" + IpText(g_ip) + L":" + std::to_wstring(S().tlsPort) + L"/" + Widen(S().token) + L"/";
+}
+
 std::vector<Adapter> LocalAdapters() { return Adapters(); }
 
 std::wstring Diag() {
@@ -758,6 +798,14 @@ std::wstring Diag() {
     out += L"профиль сети: " + (pub.empty() ? L"не общественная" : L"общественная («" + pub + L"»)") + L"\n";
     out += L"Bluetooth: " + std::wstring(HasBluetooth() ? L"есть" : L"нет") + L"\n";
     out += L"брандмауэр пускает на 8780: " + std::wstring(FirewallAllows(8780) ? L"да" : L"нет") + L"\n";
+    std::wstring ca = cert::DefaultDir() + L"\\phone-ca.cer";
+    out += L"корневой сертификат https: " +
+           std::wstring(GetFileAttributesW(ca.c_str()) != INVALID_FILE_ATTRIBUTES ? ca : L"ещё не создан") + L"\n";
+    // настоящая веб-камера Windows: функция есть с Windows 11, но ей нужен свой COM-источник кадров (см. README)
+    HMODULE sg = LoadLibraryExW(L"mfsensorgroup.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    bool vcam = sg && GetProcAddress(sg, "MFCreateVirtualCamera");
+    if (sg) FreeLibrary(sg);
+    out += L"MFCreateVirtualCamera: " + std::wstring(vcam ? L"есть" : L"нет") + L"\n";
     return out;
 }
 
@@ -802,6 +850,7 @@ void Tick() {
     ULONGLONG shot = g_screenAt, tick = GetTickCount64();  // кадр могли взять уже после `now` - сравниваем со свежим
     Watching(g_screen && !g_screenStopped && shot && tick >= shot && tick - shot < 4000);
     if (Card().Visible()) RefreshAddress(false);
+    RefreshCert();  // адрес поменялся - новый сертификат
     bool oneTime, allDone, tooBad;
     ULONGLONG last, seen;
     {
@@ -959,6 +1008,10 @@ void DoCall(CallReq& c) {
 }  // namespace
 
 void OnMessage(WPARAM wp, LPARAM lp) {
+    if (wp == EV_CAM) {  // кадр камеры телефона - в окно
+        CamShow();
+        return;
+    }
     if (wp == EV_CALL) {  // из потока сервера через SendMessage: lp - CallReq на его стеке
         DoCall(*(CallReq*)lp);
         return;
