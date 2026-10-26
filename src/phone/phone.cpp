@@ -9,8 +9,13 @@
 #include <setupapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
+
+#include <objidl.h>
+#include <gdiplus.h>
 
 #include <algorithm>
+#include <ctime>
 #include <memory>
 
 #include "app/autos.h"
@@ -22,6 +27,7 @@
 #include "core/themes.h"
 #include "desk/boostcard.h"
 #include "desk/corners.h"
+#include "desk/ocr.h"
 #include "desk/volume.h"
 #include "phone/phone_internal.h"
 
@@ -48,6 +54,13 @@ int g_batch = 0;
 std::wstring g_batchLast;
 ULONGLONG g_batchAt = 0;
 std::wstring g_status;
+SRWLOCK g_cfgLock = SRWLOCK_INIT;  // папки для телефона читают потоки сервера
+std::vector<std::wstring> g_roots;
+std::atomic<bool> g_input{true};
+ULONGLONG g_cfgAt = 0, g_rateAt = 0, g_standAt = 0;
+long long g_sentWas = 0, g_recvWas = 0;
+std::wstring g_rate;      // «Отдаю 38 МБ/с, ещё 20 с» - на карточке
+std::wstring g_lastScan;  // скан с телефона, который распознаётся
 
 struct Cmd {
     std::string c;
@@ -208,6 +221,158 @@ void PutText(const std::wstring& t) {
     CloseClipboard();
 }
 
+PhoneCard::View MakeView();
+
+std::wstring DevicesFile() {
+    PWSTR p = nullptr;
+    std::wstring dir;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p))) dir = p;
+    CoTaskMemFree(p);
+    return dir + L"\\MoonDesk\\phone-devices.tsv";
+}
+
+std::vector<std::string> LoadDevices() {
+    std::vector<std::string> out;
+    HANDLE f = CreateFileW(DevicesFile().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return out;
+    std::string u(std::min<DWORD>(GetFileSize(f, nullptr), 1 << 16), '\0');
+    DWORD got = 0;
+    ReadFile(f, u.data(), (DWORD)u.size(), &got, nullptr);
+    CloseHandle(f);
+    u.resize(got);
+    size_t at = 0;
+    while (at < u.size()) {
+        size_t e = u.find('\n', at);
+        std::string line = u.substr(at, e == std::string::npos ? std::string::npos : e - at);
+        at = e == std::string::npos ? u.size() : e + 1;
+        std::string key = line.substr(0, line.find('\t'));
+        if (UploadId(key)) out.push_back(key);
+    }
+    return out;
+}
+
+void RefreshCfg() {
+    ULONGLONG now = GetTickCount64();
+    if (!g_cfg || now - g_cfgAt < 3000) return;
+    g_cfgAt = now;
+    std::wstring spec = g_cfg->phoneShare.empty() ? L"{music}|{videos}|{downloads}|{pictures}" : g_cfg->phoneShare;
+    std::vector<std::wstring> roots;
+    for (const std::wstring& part : Split(spec, L'|')) {
+        std::wstring p = ExpandPath(part);
+        while (p.size() > 3 && (p.back() == L'\\' || p.back() == L'/')) p.pop_back();
+        DWORD a = p.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(p.c_str());
+        if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) roots.push_back(p);
+    }
+    AcquireSRWLockExclusive(&g_cfgLock);
+    g_roots = roots;
+    ReleaseSRWLockExclusive(&g_cfgLock);
+    g_input = g_cfg->phoneInput;
+}
+
+void Rate() {  // скорость за последнюю секунду - на карточку
+    ULONGLONG now = GetTickCount64();
+    if (now - g_rateAt < 1000) return;
+    double sec = g_rateAt ? (now - g_rateAt) / 1000.0 : 1;
+    g_rateAt = now;
+    long long sent = g_sent, recv = g_recv;
+    double up = (sent - g_sentWas) / sec, down = (recv - g_recvWas) / sec;
+    g_sentWas = sent, g_recvWas = recv;
+    long long inLeft = 0;
+    {
+        Lock l;
+        for (const auto& [id, in] : S().incoming) inLeft += in.total - in.have;
+    }
+    std::wstring r = up >= down ? RateText(L"Отдаю", up, g_sendLeft) : RateText(L"Принимаю", down, inLeft);
+    if (r != g_rate) {
+        g_rate = r;
+        if (Card().Visible()) Card().Update(MakeView());
+    }
+}
+
+// картинка из буфера ПК -> PNG (для телефона); пусто - картинки нет
+std::string ClipPng() {
+    std::string out;
+    if (!IsClipboardFormatAvailable(CF_BITMAP) || !OpenClipboard(g_app)) return out;
+    HBITMAP hb = (HBITMAP)GetClipboardData(CF_BITMAP);
+    if (hb) {
+        Gdiplus::Bitmap bmp(hb, nullptr);
+        if (bmp.GetLastStatus() == Gdiplus::Ok && bmp.GetWidth() * bmp.GetHeight() <= 40000000u) {
+            IStream* st = nullptr;
+            CLSID png = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+            if (SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, &st)) && bmp.Save(st, &png, nullptr) == Gdiplus::Ok) {
+                HGLOBAL g = nullptr;
+                GetHGlobalFromStream(st, &g);
+                STATSTG ss{};
+                st->Stat(&ss, STATFLAG_NONAME);
+                if (void* p = GlobalLock(g)) {
+                    out.assign((const char*)p, (size_t)ss.cbSize.QuadPart);
+                    GlobalUnlock(g);
+                }
+            }
+            if (st) st->Release();
+        }
+    }
+    CloseClipboard();
+    return out;
+}
+
+// картинка с телефона -> в буфер ПК (как рисунок и как PNG для программ, которые его понимают)
+bool PutImage(const std::string& bytes) {
+    IStream* st = SHCreateMemStream((const BYTE*)bytes.data(), (UINT)bytes.size());
+    if (!st) return false;
+    bool ok = false;
+    {
+        Gdiplus::Bitmap bmp(st);
+        HBITMAP hb = nullptr;
+        if (bmp.GetLastStatus() == Gdiplus::Ok &&
+            bmp.GetHBITMAP(Gdiplus::Color(255, 255, 255, 255), &hb) == Gdiplus::Ok) {
+            if (OpenClipboard(g_app)) {
+                EmptyClipboard();
+                ok = SetClipboardData(CF_BITMAP, hb) != nullptr;
+                if (!ok) DeleteObject(hb);
+                bool isPng = bytes.size() > 8 && bytes.compare(1, 3, "PNG") == 0;
+                if (isPng) {
+                    static UINT pngFmt = RegisterClipboardFormatW(L"PNG");
+                    HGLOBAL m = GlobalAlloc(GMEM_MOVEABLE, bytes.size());
+                    if (m) {
+                        memcpy(GlobalLock(m), bytes.data(), bytes.size());
+                        GlobalUnlock(m);
+                        if (!SetClipboardData(pngFmt, m)) GlobalFree(m);
+                    }
+                }
+                CloseClipboard();
+            } else {
+                DeleteObject(hb);
+            }
+        }
+    }
+    st->Release();
+    return ok;
+}
+
+// папка, брошенная на телефон: все файлы внутри (без скрытых и ссылок), имена - путь внутри папки
+void ExpandDir(const std::wstring& dir, const std::wstring& rel, std::vector<Offered>& out) {
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        std::wstring n = fd.cFileName;
+        if (n == L"." || n == L".." ||
+            (fd.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_REPARSE_POINT)))
+            continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            ExpandDir(dir + L"\\" + n, rel + L"\\" + n, out);
+        } else if (out.size() < 20000) {
+            Offered o;
+            o.path = dir + L"\\" + n;
+            o.name = rel + L"\\" + n;
+            o.size = ((long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+            out.push_back(o);
+        }
+    } while (out.size() < 20000 && FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
 PhoneCard::View MakeView() {
     PhoneCard::View v;
     Lock l;
@@ -239,6 +404,11 @@ PhoneCard::View MakeView() {
     else
         v.status = L"Телефон на связи. Карточку можно убрать - пульт работает";
     if (s.received) v.status += L"; принято " + std::to_wstring(s.received);
+    if (!g_rate.empty()) v.status += L". " + g_rate;
+    if (s.standing && s.files.empty()) {
+        v.title = L"Телефон рядом (запомнен)";
+        v.what = L"Запомненный телефон открывает страницу из закладки, без QR";
+    }
     v.hint = !g_hint.empty() ? g_hint : g_netHint;
     return v;
 }
@@ -268,7 +438,7 @@ void RefreshAddress(bool force) {
     }
 }
 
-bool StartSession(bool oneTime) {
+bool StartSession(bool oneTime, bool standing = false) {
     if (S().on) {
         Lock l;
         if (!oneTime) S().oneTime = false;  // страницу открыли поверх передачи файлов - уже не одноразовая
@@ -290,9 +460,14 @@ bool StartSession(bool oneTime) {
         s.seen = s.allDone = 0;
         s.bad = s.received = 0;
         s.receivedBytes = 0;
+        s.standing = standing;
+        s.devices = LoadDevices();
+        s.clipPng.clear();
+        s.clipImg = 0;
         ++s.seq;
     }
     g_clipSeq = 0;
+    g_rate.clear();
     g_bluetooth = HasBluetooth();
     g_hint.clear();
     g_fwOk = g_loopback || FirewallAllows(port);
@@ -326,9 +501,15 @@ void ReadClipboard() {
     }
     g_clipSeq = seq;
     if (!secrets::Kind(text).empty()) text.clear();  // токены и пароли на телефон не уходят
+    std::string png = skip ? std::string() : ClipPng();
     Lock l;
     if (text != S().clip) {
         S().clip = text;
+        ++S().seq;
+    }
+    if (png != S().clipPng) {
+        S().clipPng = std::move(png);
+        S().clipImg = S().clipPng.empty() ? 0 : S().clipImg + 1;
         ++S().seq;
     }
 }
@@ -344,6 +525,39 @@ Session& S() {
 
 void Post(Event e, const std::wstring& text) {
     if (g_app) PostMessageW(g_app, WM_PHONE, e, text.empty() ? 0 : (LPARAM) new std::wstring(text));
+}
+
+void PostBytes(Event e, std::string bytes) {
+    auto* p = new std::string(std::move(bytes));
+    if (!g_app || !PostMessageW(g_app, WM_PHONE, e, (LPARAM)p)) delete p;
+}
+
+std::vector<std::wstring> ShareRoots() {
+    AcquireSRWLockShared(&g_cfgLock);
+    std::vector<std::wstring> r = g_roots;
+    ReleaseSRWLockShared(&g_cfgLock);
+    return r;
+}
+
+bool InputAllowed() { return g_input; }
+
+std::string NewDevice(const std::wstring& name) {
+    unsigned char b[16];
+    BCryptGenRandom(nullptr, b, sizeof(b), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    std::string key = Token(b, sizeof(b));
+    std::wstring clean = name;
+    for (wchar_t& c : clean)
+        if (c == L'\t' || c == L'\n' || c == L'\r') c = L' ';
+    std::string line = key + "\t" + Narrow(clean) + "\t" + std::to_string((long long)time(nullptr)) + "\n";
+    HANDLE f = CreateFileW(DevicesFile().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return "";
+    DWORD put = 0;
+    bool ok = WriteFile(f, line.data(), (DWORD)line.size(), &put, nullptr) && put == line.size();
+    CloseHandle(f);
+    if (!ok) return "";
+    Lock l;
+    S().devices.push_back(key);
+    return key;
 }
 
 float Command(const std::string& c) {
@@ -413,6 +627,11 @@ void StopSession(const wchar_t* why) {
         S().files.clear();
         S().clip.clear();
         S().token.clear();
+        S().clipPng.clear();
+        S().standing = false;
+        for (const auto& [id, in] : S().incoming)  // недокачанное с телефона - прочь
+            if (!in.tmp.empty()) DeleteFileW(in.tmp.c_str());
+        S().incoming.clear();
     }
     Card().Hide();
     g_hint.clear();
@@ -433,12 +652,11 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg) {
 
 void Offer(const std::vector<std::wstring>& files) {
     std::vector<Offered> add;
-    int dirs = 0;
     for (const std::wstring& p : files) {
         WIN32_FILE_ATTRIBUTE_DATA a{};
         if (!GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &a)) continue;
-        if (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            ++dirs;
+        if (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {  // папка целиком: файлы внутри, имена с подпапками
+            ExpandDir(p, p.substr(p.find_last_of(L'\\') + 1), add);
             continue;
         }
         Offered o;
@@ -448,7 +666,7 @@ void Offer(const std::vector<std::wstring>& files) {
         add.push_back(o);
     }
     if (add.empty()) {
-        ShowNote(L"На телефон - только файлы", dirs ? L"Папку целиком не передать: бросьте файлы из неё" : L"");
+        ShowNote(L"На телефон нечего передать", L"Папки пустые или файлы скрыты");
         return;
     }
     if (!StartSession(true)) {
@@ -479,6 +697,18 @@ void OpenPage() {
 void Stop() { StopSession(L"остановлено"); }
 
 bool Active() { return S().on; }
+
+int Devices() { return (int)LoadDevices().size(); }
+
+void Forget() {
+    DeleteFileW(DevicesFile().c_str());
+    {
+        Lock l;
+        S().devices.clear();
+    }
+    autos::Note(L"Телефон рядом: запомненные телефоны забыты");
+    if (S().on && S().standing) StopSession(L"телефоны забыты");
+}
 
 std::wstring Url() { return S().on ? MakeView().url : L""; }
 
@@ -511,10 +741,34 @@ std::wstring Status() {
 void Tick() {
     Card().Tick();
     g_note.Tick();
-    if (!S().on) return;
+    RefreshCfg();
     ULONGLONG now = GetTickCount64();
-    if (Card().stopAsked.exchange(false)) return StopSession(L"карточку закрыли");
+    // запомненный телефон: сервер ждёт его всё время, пока ноутбук в своей (частной) сети
+    if (g_cfg && g_cfg->phoneAlways && now - g_standAt > 30000) {
+        g_standAt = now;
+        std::vector<Adapter> list = Adapters();
+        uint32_t ip = PickAddress(list);
+        std::wstring guid;
+        for (const Adapter& a : list)
+            if (a.ip == ip) guid = a.guid;
+        bool home = ip && PublicNetwork(guid).empty() && !LoadDevices().empty();
+        bool standing;
+        {
+            Lock l;
+            standing = S().on && S().standing;
+        }
+        if (home && !S().on) StartSession(false, true);
+        if (!home && standing) StopSession(L"не своя сеть");
+    }
+    if (!S().on) return;
+    bool standing;
+    {
+        Lock l;
+        standing = S().standing;
+    }
+    if (Card().stopAsked.exchange(false) && !standing) return StopSession(L"карточку закрыли");
     ReadClipboard();
+    Rate();
     if (Card().Visible()) RefreshAddress(false);
     bool oneTime, allDone, tooBad;
     ULONGLONG last, seen;
@@ -529,7 +783,8 @@ void Tick() {
     if (oneTime && allDone) return StopSession(L"всё скачано");
     if (tooBad) return StopSession(L"чужие запросы с неверным ключом");
     ULONGLONG idle = !seen ? 10 * 60000ull : oneTime ? 15 * 60000ull : 30 * 60000ull;
-    if (now - last > idle) return StopSession(seen ? L"телефон давно не заходил" : L"никто не подключился");
+    if (!standing && now - last > idle)
+        return StopSession(seen ? L"телефон давно не заходил" : L"никто не подключился");
     if (g_batch && now - g_batchAt > 4000) {
         std::wstring last1 = g_batchLast, dir = ParentDir(last1);
         int n = g_batch;
@@ -579,8 +834,70 @@ void OnMessage(WPARAM wp, LPARAM lp) {
         }
         return;
     }
+    if (wp == EV_CLIPIMG) {  // картинка с телефона: lp - std::string с байтами
+        std::unique_ptr<std::string> bytes((std::string*)lp);
+        if (bytes && PutImage(*bytes)) {
+            g_clipSeq = GetClipboardSequenceNumber();
+            ShowNote(L"Картинка с телефона - в буфере", L"Ctrl+V - вставить");
+        } else {
+            ShowNote(L"Картинка не прочиталась", L"Формат, который Windows не знает (HEIC?)");
+        }
+        return;
+    }
     std::unique_ptr<std::wstring> text((std::wstring*)lp);
+    if (wp == EV_OCR) {  // распознали скан
+        std::wstring scan = g_lastScan;
+        g_note.kind = L"-";
+        g_note.yesLabel = L"Показать скан";
+        g_note.noLabel = L"Закрыть";
+        g_note.onYes = [scan] {
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", (L"/select,\"" + scan + L"\"").c_str(), nullptr,
+                          SW_SHOWNORMAL);
+        };
+        g_note.onNo = nullptr;
+        if (text && !text->empty()) {
+            PutText(*text);
+            g_clipSeq = GetClipboardSequenceNumber();
+            std::wstring t = *text;
+            if (t.size() > 120) t = t.substr(0, 119) + L"…";
+            g_note.Show(BoostCard::OFFER, L"Текст скана - в буфере", t, Theme(), 15000, Toast::G_OK);
+        } else {
+            g_note.Show(BoostCard::OFFER, L"Скан сохранён, текста не нашлось", ParentDir(scan), Theme(), 12000,
+                        Toast::G_INFO);
+        }
+        return;
+    }
     if (!S().on) return;
+    if (wp == EV_OPEN && text) {  // ссылка с телефона
+        ShellExecuteW(nullptr, L"open", text->c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        autos::Note(L"Телефон рядом: открыта ссылка " + *text);
+        ShowNote(L"Открыто с телефона", *text);
+    } else if (wp == EV_SCAN && text) {  // фото документа - распознать текст в фоне
+        g_lastScan = *text;
+        autos::Note(L"Телефон рядом: скан " + *text);
+        std::wstring path = *text;
+        HWND app = g_app;
+        bg::Run([path, app] {
+            HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+            std::vector<uint8_t> bytes;
+            if (f != INVALID_HANDLE_VALUE) {
+                bytes.resize(std::min<DWORD>(GetFileSize(f, nullptr), 60u << 20));
+                DWORD got = 0;
+                ReadFile(f, bytes.data(), (DWORD)bytes.size(), &got, nullptr);
+                bytes.resize(got);
+                CloseHandle(f);
+            }
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            std::wstring t = bytes.empty() ? L"" : ocr::Recognize(bytes);
+            CoUninitialize();
+            PostMessageW(app, WM_PHONE, EV_OCR, t.empty() ? 0 : (LPARAM) new std::wstring(t));
+        });
+    } else if (wp == EV_PAIRED) {
+        autos::Note(L"Телефон рядом: запомнен телефон " + (text ? *text : std::wstring()));
+        ShowNote(L"Телефон запомнен", g_cfg && g_cfg->phoneAlways
+                                          ? L"Страница из закладки откроется, пока ноутбук в своей сети"
+                                          : L"Чтобы открывать без QR, включите «Ждать запомненный телефон» в студии");
+    }
     if (wp == EV_CLIP && text) {
         PutText(*text);
         g_clipSeq = GetClipboardSequenceNumber();

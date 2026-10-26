@@ -32,7 +32,10 @@ void Stop();
 bool Active();
 std::wstring Status();  // «Телефон: на связи, принято 5» / пусто
 std::wstring Url();     // ссылка для телефона (пусто - нет сессии или общей сети)
-std::wstring Diag();    // адаптеры, адрес для телефона, профиль сети, Bluetooth, брандмауэр (--phone-diag)
+std::wstring Diag();
+int Devices();  // сколько телефонов запомнено
+void Forget();  // забыть все запомненные телефоны    // адаптеры, адрес для телефона, профиль сети, Bluetooth,
+                // брандмауэр (--phone-diag)
 void OnMessage(WPARAM wp, LPARAM lp);
 
 // --- без сокетов и окон (под тестами) ---
@@ -68,6 +71,26 @@ bool HotspotIp(uint32_t ip);  // 192.168.137.x - «Мобильный хот-с�
 uint32_t PickAddress(const std::vector<Adapter>& list);
 std::vector<Adapter> LocalAdapters();  // включённые адаптеры с IPv4 (phone.cpp)
 std::wstring IpText(uint32_t ip);
+
+// --- второй заход (phone_more_logic.cpp, под тестами) ---
+uint32_t Crc32(uint32_t crc, const void* data, size_t n);  // продолжить crc (начало - 0)
+struct ZipEntry {
+    std::string name;  // UTF-8, через /
+    uint32_t size = 0, crc = 0, offset = 0;
+    uint16_t dosTime = 0, dosDate = 0;
+};
+std::string ZipLocal(const std::string& name, uint32_t size, uint16_t dosTime, uint16_t dosDate);
+std::string ZipDescriptor(uint32_t crc, uint32_t size);
+std::string ZipCentral(const ZipEntry& e);
+std::string ZipEnd(size_t count, uint32_t dirSize, uint32_t dirOffset);
+long long ZipSize(const std::vector<std::pair<std::string, long long>>& files);  // точная длина архива
+bool ZipFits(const std::vector<std::pair<std::string, long long>>& files);       // без ZIP64: до 4 ГБ и 65535 файлов
+std::string ZipName(const std::wstring& rel);                                    // «Папка\a.jpg» -> «Папка/a.jpg»
+// путь внутри папки ПК из адреса: «Фильмы/2026/a.mkv» -> «Фильмы\2026\a.mkv»; «?» - нельзя (.., :, \, управляющие)
+std::wstring SafeRel(const std::string& utf8);
+bool UploadId(const std::string& id);  // 8-40 знаков [A-Za-z0-9_-]
+// «Отдаю 38,2 МБ/с, ещё 20 с»; пусто - стоим
+std::wstring RateText(const wchar_t* verb, double bytesPerSec, long long left);
 
 // Пути, если телефон не в этой сети: по порядку - что предложить первым
 enum Way { WAY_PHONE_HOTSPOT, WAY_PC_HOTSPOT, WAY_BLUETOOTH };

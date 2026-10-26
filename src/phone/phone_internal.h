@@ -1,6 +1,7 @@
 #pragma once
 // Общее для частей «Телефона рядом»: сессия (под замком - сервер живёт в своих потоках), сервер, карточка с QR.
 #include <atomic>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -10,9 +11,16 @@
 namespace phone::detail {
 
 struct Offered {
-    std::wstring path, name;
+    std::wstring path, name;  // name - путь внутри брошенной папки («Отпуск\a.jpg») или имя файла
     long long size = 0;
     bool done = false;  // скачан целиком хотя бы раз
+};
+
+// Загрузка с телефона кусками (докачка): id придумывает страница, кусок - PUT /up?id=&off=&total=
+struct Incoming {
+    std::wstring tmp, dir, name;
+    long long total = 0, have = 0, mt = 0;
+    bool busy = false;  // кусок пишется сейчас (параллельные куски одного файла не принимаем)
 };
 
 struct Session {
@@ -27,6 +35,11 @@ struct Session {
     int bad = 0;       // запросы с чужим ключом
     int received = 0;  // принято файлов с телефона
     long long receivedBytes = 0;
+    std::map<std::string, Incoming> incoming;
+    std::string clipPng;               // картинка из буфера ПК (PNG) для телефона
+    long long clipImg = 0;             // её номер (0 - картинки нет)
+    bool standing = false;             // запомненный телефон: сервер ждёт постоянно, без карточки и QR
+    std::vector<std::string> devices;  // ключи запомненных телефонов (/d/<ключ>/)
 };
 Session& S();
 
@@ -36,8 +49,23 @@ struct Lock {
 };
 
 // события сервера окну программы (WM_PHONE): wp - что, lp - new std::wstring или 0
-enum Event { EV_SEEN = 1, EV_FILE_DONE, EV_RECEIVED, EV_CLIP, EV_BAD, EV_CMD };
+enum Event {
+    EV_SEEN = 1,
+    EV_FILE_DONE,
+    EV_RECEIVED,
+    EV_CLIP,
+    EV_BAD,
+    EV_CMD,
+    EV_OPEN,
+    EV_SCAN,
+    EV_CLIPIMG,
+    EV_PAIRED,
+    EV_OCR
+};
 void Post(Event e, const std::wstring& text = L"");
+void PostBytes(Event e, std::string bytes);  // lp - new std::string (картинка)
+// счётчики для скорости на карточке
+extern std::atomic<long long> g_sent, g_recv, g_sendLeft;
 // команда пульта (vol+, play, sleep...) в основном потоке; вернёт громкость 0..1 или -1
 float Command(const std::string& c);
 
@@ -46,8 +74,34 @@ void ServerStop();
 bool ServerOn();
 const char* PageHtml();
 
-std::wstring PhotosDir();     // Изображения\Телефон
-std::wstring DownloadsDir();  // Загрузки
+std::wstring PhotosDir();                         // Изображения\Телефон
+std::wstring DownloadsDir();                      // Загрузки
+std::vector<std::wstring> ShareRoots();           // папки ПК, открытые телефону (phone_share)
+bool InputAllowed();                              // phone_input: тачпад и клавиатура с телефона
+std::string NewDevice(const std::wstring& name);  // запомнить телефон: ключ (пусто - не вышло)
+
+// Соединение (сервер держит его открытым между запросами): что уже пришло и не разобрано, сколько тела осталось
+struct Conn {
+    UINT_PTR c = ~(UINT_PTR)0;  // SOCKET (winsock2.h сюда не тянем: его надо включать раньше windows.h)
+    std::string in;
+    long long bodyLeft = 0;
+    bool close = false;
+    int Read(char* buf, int n);  // тело текущего запроса: сначала из in, потом из сокета; 0 - всё, -1 - обрыв
+};
+bool SendAll(UINT_PTR c, const char* p, size_t n);
+std::string Head(Conn& cn, int code, const std::string& type, long long length, const std::string& extra = "");
+void Reply(Conn& cn, int code, const std::string& type, const std::string& body, const std::string& extra = "");
+void Text(Conn& cn, int code, const std::string& body);
+void JsonReply(Conn& cn, const std::string& body);
+bool ReadAllBody(Conn& cn, const Request& r, std::string& out, long long max);
+void Seen();
+std::atomic<bool>& Stopping();
+// обработчики (server_files.cpp, server_more.cpp); rest - путь после ключа
+bool HandleFiles(Conn& cn, const Request& r, const std::string& rest);
+bool HandleMore(Conn& cn, const Request& r, const std::string& rest);
+// отдать файл с Range; inline - смотреть в браузере (видео, музыка), а не скачивать
+bool SendFile(Conn& cn, const Request& r, const std::wstring& path, const std::wstring& name, bool inlineView,
+              bool* complete = nullptr);
 
 // Карточка справа снизу: QR со ссылкой, что передаётся и что с телефоном; «Другая сеть» - пути без общей сети
 class PhoneCard : public Toast {

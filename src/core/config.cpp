@@ -246,6 +246,12 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.downloadsDays = std::clamp(_wtoi(val.c_str()), 3, 180);
             else if (key == L"auto_power")
                 cfg.autoPower = ParseBool(val);
+            else if (key == L"phone_share")
+                cfg.phoneShare = val;
+            else if (key == L"phone_input")
+                cfg.phoneInput = ParseBool(val);
+            else if (key == L"phone_always")
+                cfg.phoneAlways = ParseBool(val);
             else if (key == L"bright_by_app")
                 cfg.brightByApp = ParseBool(val);
             else if (key == L"bright_apps")
@@ -597,6 +603,11 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"downloads_days = " << c.downloadsDays << L"\n";
     o << L"auto_power = " << (c.autoPower ? 1 : 0) << L"\n";
     o << L"# обновление программ ночью (winget): исключения - ИД или имена через |, маски *\n";
+    o << L"# телефон рядом: папки ПК для телефона (через |, пусто - Музыка, Видео, Загрузки, Изображения),\n";
+    o << L"# тачпад и клавиатура с телефона, ждать запомненный телефон постоянно\n";
+    o << L"phone_share = " << c.phoneShare << L"\n";
+    o << L"phone_input = " << (c.phoneInput ? 1 : 0) << L"\n";
+    o << L"phone_always = " << (c.phoneAlways ? 1 : 0) << L"\n";
     o << L"# яркость по программе: exe=+N/-N (от нынешней) или exe=N, через |\n";
     o << L"bright_by_app = " << (c.brightByApp ? 1 : 0) << L"\n";
     o << L"bright_apps = " << c.brightApps << L"\n";

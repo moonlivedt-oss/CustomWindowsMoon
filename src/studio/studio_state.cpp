@@ -8,6 +8,7 @@
 
 #include "app/autos.h"
 #include "life/nightupd.h"
+#include "phone/phone.h"
 #include "app/autostart.h"
 #include "app/modestats.h"
 #include "app/toolsui.h"
@@ -1045,6 +1046,23 @@ void Studio::AutoPage(const RectF& r) {
         cols.Note(b, 3.0f,
                   L"Старые установщики, архивы, которые уже распакованы рядом, копии «файл (1)», недокачанное. "
                   L"Ничего не удаляется без вопроса и всё уходит в Корзину.",
+                  c.faint);
+    });
+    cols.Card(L"Телефон рядом", 4.2f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Ждать запомненный телефон всегда");
+        toggle(rr, ID_PHONE_ALWAYS, cfg.phoneAlways);
+        rr = cols.Row(b, 1, L"Тачпад и клавиатура с телефона");
+        toggle(rr, ID_PHONE_INPUT, cfg.phoneInput);
+        int n = phone::Devices();
+        rr = cols.Row(b, 2, n ? L"Запомнено телефонов: " + std::to_wstring(n) : std::wstring(L"Запомненных телефонов нет"),
+                      0.95f);
+        if (n && ui.Button(ID_PHONE_FORGET, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
+                           L"Забыть", Kind::Secondary))
+            phone::Forget();
+        cols.Note(b, 3.0f,
+                  L"Запомнить телефон - кнопка на его странице (после QR). Когда «ждать всегда» включено, страница из "
+                  L"закладки открывается без QR, пока ноутбук в своей (частной) сети; сервер пускает только "
+                  L"запомненные телефоны. Папки ПК для телефона - phone_share в radial.cfg.",
                   c.faint);
     });
     cols.Card(L"Обновление программ ночью", 3.2f, [&](const RectF& b) {

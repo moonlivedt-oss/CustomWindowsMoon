@@ -332,10 +332,36 @@ void TestShelf() {
     CHECK(shelf::Title(s) == L"Полка: 3 файла" && shelf::Title({}) == L"Полка пуста");
 }
 
+void TestPhoneMore() {
+    CHECK(phone::Crc32(0, "123456789", 9) == 0xCBF43926u);  // эталон CRC-32
+    uint32_t c = phone::Crc32(0, "1234", 4);
+    CHECK(phone::Crc32(c, "56789", 5) == 0xCBF43926u);  // по кускам - то же
+    std::string l = phone::ZipLocal("a/b.txt", 5, 0, 0);
+    CHECK(l.size() == 30 + 7 && l.compare(0, 4, "PK\x03\x04") == 0 && (unsigned char)l[7] == 0x08);  // бит 11 - UTF-8
+    CHECK(phone::ZipDescriptor(1, 5).size() == 16 && phone::ZipEnd(2, 100, 200).size() == 22);
+    phone::ZipEntry e;
+    e.name = "x";
+    CHECK(phone::ZipCentral(e).size() == 47);
+    CHECK(phone::ZipSize({{"ab", 10}, {"c", 0}}) == 22 + (30 + 2 + 10 + 16 + 46 + 2) + (30 + 1 + 0 + 16 + 46 + 1));
+    CHECK(phone::ZipFits({{"a", 100}}) && !phone::ZipFits({{"a", 5000000000ll}}));
+    CHECK(phone::ZipName(L"\\Отпуск\\день 1\\a.jpg") ==
+          "\xD0\x9E\xD1\x82\xD0\xBF\xD1\x83\xD1\x81\xD0\xBA/"
+          "\xD0\xB4\xD0\xB5\xD0\xBD\xD1\x8C 1/a.jpg");
+    CHECK(phone::SafeRel("Films/2026/a.mkv") == L"Films\\2026\\a.mkv" && phone::SafeRel("") == L"");
+    CHECK(phone::SafeRel("a//b/") == L"a\\b");
+    CHECK(phone::SafeRel("..") == L"?" && phone::SafeRel("a/../b") == L"?" && phone::SafeRel("C:/Windows") == L"?");
+    CHECK(phone::SafeRel("a\\b") == L"?" && phone::SafeRel("a/./b") == L"?");
+    CHECK(phone::UploadId("abcdef0123456789") && !phone::UploadId("short") && !phone::UploadId("abc/def0123456"));
+    CHECK(phone::RateText(L"Отдаю", 500, 0).empty());
+    CHECK(phone::RateText(L"Отдаю", 2.5 * 1048576, 5 * 1048576) == L"Отдаю 2,5 МБ/с, ещё 2 с");
+    CHECK(phone::RateText(L"Принимаю", 100 * 1024, 100 * 1024 * 75) == L"Принимаю 100 КБ/с, ещё 1 мин 15 с");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestPhoneMore();
     TestShelf();
     TestPreview();
     TestTidy();

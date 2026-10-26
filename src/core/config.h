@@ -166,6 +166,11 @@ struct Config {
     bool autoDownloads = true;
     int downloadsDays = 14;  // установщики и архивы старше стольких дней - кандидаты в корзину
     bool autoPower = true;
+    // телефон рядом: папки ПК, открытые телефону (через |, {music} и т.п.; пусто - Музыка, Видео, Загрузки,
+    // Изображения), тачпад и клавиатура с телефона, ждать запомненный телефон постоянно (в своей сети)
+    std::wstring phoneShare;
+    bool phoneInput = true;
+    bool phoneAlways = false;
     // Ж7: яркость по программе (life/appbright): exe=+N/-N от нынешней яркости или exe=N, через |
     bool brightByApp = true;
     std::wstring brightApps =
