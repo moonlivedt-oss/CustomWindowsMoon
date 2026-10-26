@@ -270,6 +270,17 @@ bool Run(int& exitCode) {
             toolsui::PrimeForSnapshot(&cfg);  // рост и неделя - как у работающей программы
             exitCode = weekreport::Render(weekreport::Collect(), nullptr, UiPalette(cfg), out) ? 0 : 1;
         }
+    } else if (Has(args, L"--own-check")) {  // сверка своих exe, как перед запуском (tools/ownexe) -> own_out.txt
+        std::wstring out;
+        exitCode = 0;
+        for (const wchar_t* name : {L"RadialTools.exe", L"RadialShutUp.exe"}) {
+            std::wstring why;
+            HANDLE h = tools::OwnExeOpen(name, &why);
+            if (h) CloseHandle(h);
+            out += std::wstring(name) + L": " + (h ? L"сверен" : why) + L"\r\n";
+            if (!h) exitCode = 1;
+        }
+        WriteOut(L"own_out.txt", out);
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
         exitCode = net::AdminMain();
     } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку

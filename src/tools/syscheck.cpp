@@ -358,39 +358,8 @@ void CheckWmi(std::vector<Suspect>& out) {
 
 // ---------------- целостность своих exe ----------------
 
-namespace {
-
-std::wstring Sha256Text(const std::string& data) {
-    BCRYPT_ALG_HANDLE alg = nullptr;
-    BCRYPT_HASH_HANDLE h = nullptr;
-    std::wstring out;
-    BYTE hash[32];
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
-        BCryptCreateHash(alg, &h, nullptr, 0, nullptr, 0, 0) == 0 &&
-        BCryptHashData(h, (PUCHAR)data.data(), (ULONG)data.size(), 0) == 0 && BCryptFinishHash(h, hash, 32, 0) == 0) {
-        wchar_t hx[3];
-        for (BYTE b : hash) swprintf(hx, 3, L"%02x", b), out += hx;
-    }
-    if (h) BCryptDestroyHash(h);
-    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
-    return out;
-}
-
-}  // namespace
-
-// Файл-отметка, которую пишет сборка (cmake/integrity.cmake): %APPDATA%\MoonDesk\integrity\<sha256 пути>.txt,
-// внутри - SHA-256 exe сразу после сборки. Путь в нижнем регистре только по латинице - так же считает CMake.
-std::wstring IntegrityRecord(const std::wstring& exePath) {
-    std::wstring p = exePath;
-    for (wchar_t& c : p)
-        if (c >= L'A' && c <= L'Z') c = (wchar_t)(c - L'A' + L'a');
-    wchar_t ad[MAX_PATH];
-    ExpandEnvironmentStringsW(L"%APPDATA%\\MoonDesk\\integrity", ad, MAX_PATH);
-    return std::wstring(ad) + L"\\" + Sha256Text(Narrow(p)) + L".txt";
-}
-
 void CheckSelf(std::vector<Suspect>& out) {
-    for (const wchar_t* exe : {L"RadialMenu.exe", L"RadialTools.exe"}) {
+    for (const wchar_t* exe : {L"RadialMenu.exe", L"RadialTools.exe", L"RadialShutUp.exe"}) {
         std::wstring path = ExeDir() + L"\\" + exe;
         HANDLE f = CreateFileW(IntegrityRecord(path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0,
                                nullptr);

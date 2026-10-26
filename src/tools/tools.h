@@ -515,7 +515,18 @@ void CheckPathAcl(std::vector<Suspect>& out);
 void CheckServices(std::vector<Suspect>& out);  // службы: путь без кавычек, файл или папка открыты на запись
 void CheckWmi(std::vector<Suspect>& out);       // подписки WMI, запускающие команды и скрипты
 void CheckSelf(std::vector<Suspect>& out);      // свои exe изменились после сборки
-std::wstring IntegrityRecord(const std::wstring& exePath);  // файл-отметка сборки для exe
+std::wstring IntegrityRecord(const std::wstring& exePath);  // файл-отметка сборки для exe (ownexe.cpp)
+
+// Свои exe рядом (ownexe.cpp): RadialTools.exe и RadialShutUp.exe запускаются только сверенными. Эталон - SHA-256,
+// вшитый в RadialMenu.exe при сборке (OwnHash, cmake/ownhash.cmake), без него - отметка целостности сборки.
+enum OwnExe { OWN_OK, OWN_CHANGED, OWN_UNREADABLE };
+OwnExe OwnExeVerdict(const std::wstring& have, const std::wstring& built, const std::wstring& record);  // под тестами
+const wchar_t* OwnHash(const wchar_t* name);  // вшитый хэш («» - нет); создаёт сборка
+// Открыть сверенный exe и держать (без общего доступа на запись и удаление), пока его запускают: закрыть после
+// CreateProcess. nullptr - не сверился (why - почему; подмена - ещё и SetTamperHook)
+HANDLE OwnExeOpen(const std::wstring& name, std::wstring* why);
+bool OwnExeShell(const std::wstring& name, const std::wstring& args = L"");  // ShellExecute после сверки
+void SetTamperHook(void (*hook)(const std::wstring& name));                  // подмена найдена: карточка
 int FixPathAclAdminMain(const Log& log);  // в процессе с правами: закрыть запись в папки системного PATH
 // ---------------- восстановление (recovery.cpp) ----------------
 enum BrokenKind {

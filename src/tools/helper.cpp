@@ -29,10 +29,20 @@ int RunTools(const std::wstring& args, const Log& log, std::map<std::wstring, st
         if (log) log(L"Нет RadialTools.exe рядом с RadialMenu.exe - пересобери проект (build.cmd).");
         return -1;
     }
+    // сверить и держать открытым до запуска: удаляет и завершает процессы именно он
+    std::wstring why;
+    HANDLE lock = OwnExeOpen(L"RadialTools.exe", &why);
+    if (!lock) {
+        if (log) log(why + L".");
+        return -1;
+    }
     std::wstring cmd = Quote(exe) + L" " + args;
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE rd = nullptr, wr = nullptr;
-    if (!CreatePipe(&rd, &wr, &sa, 0)) return -1;
+    if (!CreatePipe(&rd, &wr, &sa, 0)) {
+        CloseHandle(lock);
+        return -1;
+    }
     SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
     STARTUPINFOW si{sizeof(si)};
     si.dwFlags = STARTF_USESTDHANDLES;
@@ -43,6 +53,7 @@ int RunTools(const std::wstring& args, const Log& log, std::map<std::wstring, st
     line.push_back(0);
     BOOL ok = CreateProcessW(exe.c_str(), line.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
                              ExeDir().c_str(), &si, &pi);
+    CloseHandle(lock);
     CloseHandle(wr);
     if (!ok) {
         CloseHandle(rd);

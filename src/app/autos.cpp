@@ -65,7 +65,7 @@ void Put(const wchar_t* key, const std::wstring& v) {
 
 // сообщения из рабочих потоков
 struct Msg {
-    enum Kind { CLEAN_LOG, CLEAN_DONE, DOWNLOADS, RECYCLED, REPORT, UNDONE } kind;
+    enum Kind { CLEAN_LOG, CLEAN_DONE, DOWNLOADS, RECYCLED, REPORT, UNDONE, TAMPER } kind;
     std::wstring text;
     ULONGLONG bytes = 0;
     int count = 0;
@@ -566,9 +566,17 @@ void OpenState() {
     if (g_openStudio) g_openStudio(-1, L"");
 }
 
+// свой exe не сверился (tools/ownexe): из любого потока - карточка в основном
+void Tampered(const std::wstring& name) {
+    Msg* m = new Msg{Msg::TAMPER};
+    m->text = name;
+    Post(m);
+}
+
 void Init(HINSTANCE inst, HWND app, const Config* cfg, const std::wstring& cfgPath, std::function<void()> reload,
           std::function<void(int, const std::wstring&)> openStudio) {
     g_app = app;
+    tools::SetTamperHook(Tampered);
     g_cfg = cfg;
     g_cfgPath = cfgPath;
     g_reload = std::move(reload);
@@ -649,6 +657,17 @@ void OnJob(WPARAM, LPARAM lp) {
     switch (m->kind) {
         case Msg::CLEAN_LOG:  // ход показывает сцена
             return;
+        case Msg::TAMPER: {  // про каждый файл - один раз за запуск
+            static std::vector<std::wstring> told;
+            if (std::find(told.begin(), told.end(), m->text) != told.end()) return;
+            told.push_back(m->text);
+            Note(m->text + L" изменён после сборки - не запущен (подменили или испортили)");
+            g_card.Show(BoostCard::DONE, m->text + L" подменён",
+                        L"Файл рядом с программой не совпал с тем, что собран вместе с ней, - запускать его не стал. "
+                        L"Пересоберите проект (build.cmd) и проверьте компьютер антивирусом.",
+                        Theme(), 30000, Toast::G_FAIL);
+            return;
+        }
         case Msg::CLEAN_DONE:
             Put(L"clean_day", std::to_wstring(Today()));
             Put(L"clean_freed", std::to_wstring(m->bytes));

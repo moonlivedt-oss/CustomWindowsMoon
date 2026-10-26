@@ -174,20 +174,20 @@ void OnWeekly(WeeklyMsg* m) {
                         adminOk = net::RunAdmin(net::JOB_PRIVACY, log);
                         if (adminOk) done += admin;
                     } else if (admin) {
-                        ShellExecuteW(nullptr, L"open", (ExeDir() + L"\\RadialShutUp.exe").c_str(), nullptr, nullptr,
-                                      SW_SHOWNORMAL);
+                        bool opened = tools::OwnExeShell(L"RadialShutUp.exe");
                         adminOk = false;
+                        if (!opened) {
+                            res = L"Снова включено: " + std::to_wstring(done) +
+                                  L". RadialShutUp не открыт: файл не сверился (журнал).";
+                            return false;
+                        }
                     }
                     res = L"Снова включено: " + std::to_wstring(done) +
                           (adminOk ? L"." : L". Для компьютера нужны права - открыт RadialShutUp.");
                     return adminOk;
                 });
             },
-            [] {
-                ShellExecuteW(nullptr, L"open", (ExeDir() + L"\\RadialShutUp.exe").c_str(), nullptr, nullptr,
-                              SW_SHOWNORMAL);
-            },
-            30000, Toast::G_WARN);
+            [] { tools::OwnExeShell(L"RadialShutUp.exe"); }, 30000, Toast::G_WARN);
         return;
     }
     // по одной карточке за раз: важнее здоровье диска, потом драйвер, потом рост

@@ -5,6 +5,7 @@
 
 #include "core/elevate.h"
 #include "phone/phone.h"
+#include "tools/tools.h"
 
 namespace {
 
@@ -129,6 +130,19 @@ void TestPhoneBadGate() {
     CHECK(g.Bad(b, t + phone::BadGate::kForgetMs + 10, &ban) == 0);
 }
 
+void TestOwnExe() {
+    std::wstring a(64, L'a'), b(64, L'b');
+    CHECK(tools::OwnExeVerdict(a, a, L"") == tools::OWN_OK);
+    CHECK(tools::OwnExeVerdict(a, b, L"") == tools::OWN_CHANGED);
+    CHECK(tools::OwnExeVerdict(a, b, a) == tools::OWN_CHANGED);  // вшитое важнее отметки: её может переписать любой
+    CHECK(tools::OwnExeVerdict(a, std::wstring(64, L'A'), L"") == tools::OWN_OK);  // регистр hex не важен
+    CHECK(tools::OwnExeVerdict(a, L"", a) == tools::OWN_OK);                       // без вшитого - по отметке
+    CHECK(tools::OwnExeVerdict(a, L"", b) == tools::OWN_CHANGED);
+    CHECK(tools::OwnExeVerdict(a, L"", L"") == tools::OWN_OK);  // сверять не с чем
+    CHECK(tools::OwnExeVerdict(L"", a, a) == tools::OWN_UNREADABLE);
+    CHECK(std::wstring(tools::OwnHash(L"RadialTools.exe")).empty());  // в тестах вшитого нет
+}
+
 }  // namespace
 
 void TestSec(void (*check)(bool, const char*, int)) {
@@ -137,4 +151,5 @@ void TestSec(void (*check)(bool, const char*, int)) {
     TestPhoneHttpsOnly();
     TestPhoneDevices();
     TestPhoneBadGate();
+    TestOwnExe();
 }
