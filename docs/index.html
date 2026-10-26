@@ -10,10 +10,15 @@
 <meta property="og:description" content="Зажмите Alt, доведите мышь до края экрана - и оттуда раскроется кольцо с вашими папками и программами.">
 <meta property="og:image" content="https://moonlivedt-oss.github.io/CustomWindowsMoon/img/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="preload" href="fonts/neutral-face-bold.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/golos-regular.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+/* шрифты лежат рядом (fonts/, только латиница и кириллица) - сайт не ходит на сторонние серверы; лицензии - fonts/LICENSES.md */
+@font-face{font-family:"Neutral Face";src:url(fonts/neutral-face-bold.woff2) format("woff2");font-weight:400 900;font-display:swap}
+@font-face{font-family:"Oldtimer";src:url(fonts/oldtimer.woff2) format("woff2");font-weight:400 900;font-display:swap}
+@font-face{font-family:"Golos Text";src:url(fonts/golos-regular.woff2) format("woff2");font-weight:400 500;font-display:swap}
+@font-face{font-family:"Golos Text";src:url(fonts/golos-demibold.woff2) format("woff2");font-weight:600 700;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url(fonts/jetbrains-mono.woff2) format("woff2");font-weight:100 800;font-display:swap}
 :root{
   --wine:#140b0f;      /* фон: обои темы «Багровое поле» в темноте */
   --glass:#2a161ccc;   /* стекло кольца */
@@ -22,7 +27,8 @@
   --bone:#f6ece8;      /* текст */
   --ash:#b3a2a8;       /* второстепенный текст */
   --line:#ffffff1a;
-  --display:"Unbounded",system-ui,sans-serif;
+  --display:"Neutral Face",system-ui,sans-serif;  /* широкие прописные - заголовки */
+  --label:"Oldtimer","Arial Narrow",sans-serif;  /* узкий технический - подписи и цифры */
   --body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
 }
@@ -58,8 +64,9 @@ kbd{display:inline-block;padding:2px 8px;border-radius:7px;border:1px solid var(
   overflow:visible;pointer-events:none}
 #ring .sec{pointer-events:auto;cursor:pointer}
 .copy{position:relative;margin-left:auto;width:min(560px,100%);padding:110px 0 80px}
-.eyebrow{font:500 13px/1 var(--mono);letter-spacing:.08em;color:var(--ash);text-transform:uppercase;margin:0 0 22px}
-h1{font:700 clamp(44px,8.4vw,96px)/.95 var(--display);letter-spacing:-.02em;margin:0 0 26px}
+.eyebrow{font:400 17px/1 var(--label);letter-spacing:.12em;color:var(--ash);text-transform:uppercase;margin:0 0 22px}
+h1{font:700 clamp(40px,7.2vw,88px)/1 var(--display);letter-spacing:.005em;margin:0 0 28px}
+h1 .l2{display:block}
 h1 .plus{color:var(--crimson)}
 .lead{font-size:19px;color:var(--ash);max-width:30em;margin:0 0 30px}
 .lead b{color:var(--bone);font-weight:600}
@@ -77,7 +84,7 @@ h1 .plus{color:var(--crimson)}
 
 /* ---------- разделы ---------- */
 section{padding:96px 0;border-top:1px solid var(--line)}
-h2{font:700 clamp(30px,4.6vw,48px)/1.05 var(--display);letter-spacing:-.015em;margin:0 0 14px}
+h2{font:700 clamp(26px,4vw,42px)/1.1 var(--display);letter-spacing:.01em;margin:0 0 14px}
 .sub{color:var(--ash);max-width:36em;margin:0 0 48px}
 
 /* что умеет: каждая карточка - сектор кольца; значок показывает, какой по счёту */
@@ -104,7 +111,7 @@ h2{font:700 clamp(30px,4.6vw,48px)/1.05 var(--display);letter-spacing:-.015em;ma
 .more>div{overflow:hidden}
 .inner{padding:2px 20px 22px 88px;display:grid;grid-template-columns:1fr minmax(0,300px);gap:28px}
 .inner.noimg{grid-template-columns:1fr}
-.inner h4{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ember);margin:18px 0 10px}
+.inner h4{font:400 15px/1 var(--label);letter-spacing:.12em;text-transform:uppercase;color:var(--ember);margin:18px 0 10px}
 .inner h4:first-child{margin-top:6px}
 .inner ul{margin:0;padding:0;list-style:none;display:grid;gap:8px}
 .inner li{position:relative;padding-left:18px;color:var(--bone);font-size:15.5px;line-height:1.5}
@@ -124,7 +131,7 @@ h2{font:700 clamp(30px,4.6vw,48px)/1.05 var(--display);letter-spacing:-.015em;ma
 /* цифры */
 .specs{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:20px;overflow:hidden}
 .spec{background:var(--wine);padding:26px 22px}
-.spec b{display:block;font:500 30px/1.1 var(--mono);color:var(--bone);margin-bottom:8px}
+.spec b{display:block;font:400 clamp(28px,2.9vw,40px)/1 var(--label);letter-spacing:.02em;white-space:nowrap;color:var(--bone);margin-bottom:8px}
 .spec span{color:var(--ash);font-size:15px}
 .pros{margin:40px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:14px 48px}
 .pros li{padding-left:22px;position:relative;color:var(--ash)}
@@ -136,13 +143,13 @@ h2{font:700 clamp(30px,4.6vw,48px)/1.05 var(--display);letter-spacing:-.015em;ma
 .steps{counter-reset:s;display:grid;gap:14px;margin:0;padding:0;list-style:none}
 .steps li{counter-increment:s;display:grid;grid-template-columns:56px 1fr;gap:18px;align-items:start;
   background:#ffffff08;border:1px solid var(--line);border-radius:18px;padding:20px}
-.steps li:before{content:counter(s);font:700 26px/1 var(--display);color:var(--crimson);padding-top:4px}
+.steps li:before{content:counter(s);font:400 40px/.9 var(--label);color:var(--crimson);padding-top:4px}
 .steps h3{font:600 18px/1.35 var(--body);margin:0 0 6px}
 .steps p{margin:0;color:var(--ash)}
 pre{margin:12px 0 0;padding:14px 16px;border-radius:12px;background:#00000040;border:1px solid var(--line);overflow-x:auto;
   font:500 14px/1.5 var(--mono);color:var(--bone)}
 
-.cheat{font:700 24px/1.2 var(--display);margin:56px 0 0}
+.cheat{font:700 20px/1.2 var(--display);letter-spacing:.02em;margin:56px 0 0}
 details.dev{margin-top:14px;color:var(--ash);font-size:15px}
 details.dev summary{cursor:pointer;color:var(--ash);list-style:none;display:inline-flex;align-items:center;gap:8px;padding:6px 0}
 details.dev summary::-webkit-details-marker{display:none}
@@ -186,7 +193,10 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
   body{font-size:16px}
   .hero{align-items:end}
   #ring{width:min(20svh,46vw);top:20%}
-  .eyebrow{font-size:11px;letter-spacing:.04em}
+  .eyebrow{font-size:14px;letter-spacing:.08em}
+  .specs{grid-template-columns:1fr}
+  .spec{padding:18px 20px}
+  .spec b{font-size:34px}
   /* картинка: её кольцо - там же, где живое (верх экрана) */
   .photo{background-size:auto 46svh;background-position:-4svh 0;-webkit-mask:linear-gradient(#000 40%,transparent 56%);mask:linear-gradient(#000 40%,transparent 56%)}
   .copy{padding:0 0 48px}
@@ -210,16 +220,16 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
   <div id="cap" aria-live="polite"><b></b><small></small></div>
   <div class="wrap">
     <div class="copy">
-      <p class="eyebrow">Бесплатная программа для Windows 10 и 11</p>
-      <h1>Alt <span class="plus">+</span> край экрана</h1>
-      <p class="lead">Ваши папки, программы и файлы - <b>в одном движении мыши</b>. Зажмите Alt, доведите мышь
-        до края экрана, и оттуда раскроется кольцо со всем нужным. Не надо открывать Проводник и искать.</p>
+      <p class="eyebrow">Бесплатно / Windows 10 и 11</p>
+      <h1>Alt <span class="plus">+</span> <span class="l2">край экрана</span></h1>
+      <p class="lead">Зажмите Alt и ведите мышь к краю экрана - оттуда раскроется кольцо с вашими папками и
+        программами. <b>Всё нужное - одним движением</b>, без поиска по Проводнику.</p>
       <div class="cta">
         <a class="btn p" href="#start">Как установить</a>
-        <a class="btn" href="https://github.com/moonlivedt-oss/CustomWindowsMoon">Исходники на GitHub</a>
+        <a class="btn" href="https://github.com/moonlivedt-oss/CustomWindowsMoon">Код на GitHub</a>
         <button class="btn" id="touch" type="button">Показать кольцо</button>
       </div>
-      <p class="try desk">Попробуйте прямо здесь: зажмите <kbd>Alt</kbd> и подведите мышь к левому краю окна.</p>
+      <p class="try desk">Попробуйте прямо на этой странице: зажмите <kbd>Alt</kbd> и ведите мышь к левому краю.</p>
     </div>
   </div>
 </header>
@@ -241,7 +251,7 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
     <p class="sub">Программа работает всё время, поэтому сделана так, чтобы её не было заметно - ни по скорости, ни
       по памяти.</p>
     <div class="specs">
-      <div class="spec"><b>2-4 МБ</b><span>памяти, пока вы ей не пользуетесь, - меньше, чем одна вкладка браузера</span></div>
+      <div class="spec"><b>2-4 МБ</b><span>памяти, пока программа не нужна: меньше одной вкладки браузера</span></div>
       <div class="spec"><b>&lt;1%</b><span>нагрузки на процессор в покое: компьютер не тормозит и не греется</span></div>
       <div class="spec"><b>Без облака</b><span>файлы с телефона и буфер обмена идут напрямую по вашему Wi-Fi</span></div>
       <div class="spec"><b>Бесплатно</b><span>открытый код: можно посмотреть, как всё устроено</span></div>
