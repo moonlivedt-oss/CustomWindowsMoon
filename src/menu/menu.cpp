@@ -215,9 +215,14 @@ void RadialMenu::ShowWindows(const Config* cfg, POINT cursor, const RECT& work, 
     Start();
 }
 
-void RadialMenu::ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi) {
+void RadialMenu::ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi,
+                         std::vector<Item> alt, const std::wstring& altName) {
     PERF_SCOPE("menu.ShowNet");
     if (items.empty()) return;
+    netMain_ = items;
+    netAlt_ = std::move(alt);
+    netAltName_ = altName;
+    netAltOn_ = false;
     netRing_ = std::move(items);
     demo_ = false;
     cfg_ = cfg;
@@ -479,7 +484,7 @@ void RadialMenu::Start(bool live) {
         in[1].ki.dwFlags = KEYEVENTF_KEYUP;
         SendInput(2, in, sizeof(INPUT));
     }
-    tOpen_ = tLast_ = GetTickCount64();
+    tOpen_ = tLast_ = tPage_ = GetTickCount64();
     subSlide_ = 0;
     flick_ = false;
     {
@@ -677,7 +682,7 @@ void RadialMenu::Tick() {
         moved = 1;
     }
     bool anim = closing_ || now - hoverT_ < 1100 || (glassT_ && now - glassT_ < fx::Dur(kGlassMs) + 30) ||
-                now - tOpen_ < fx::Dur(kOpenMs + kStaggerMs * hlRoot_.size() + 200) ||
+                now - tPage_ < fx::Dur(kOpenMs + kStaggerMs * hlRoot_.size() + 200) ||
                 (mode_ != Mode::None && now - tSub_ < fx::Dur(kSubMs + kSubWaveMs * subItems_.size()) + 30);
     static std::wstring lastHint;
     double ha = 0;

@@ -23,6 +23,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below, s
 void Apply(const Config& cfg);      // настройки сторожа после перечитывания radial.cfg
 void ShowRing(RadialMenu& menu);    // кольцо «Сеть» у курсора (обычно - в углу)
 std::vector<Item> RingItems();      // пункты кольца «Сеть» без показа (для командной палитры)
+std::vector<Item> PhoneItems();     // вторая страница кольца «Сеть» (щелчок по центру): телефон
 void Run(const std::wstring& key);  // действие по ключу: smart, proxy, vpn, ip, dns-cf, kill:123, ping:1.1.1.1...
 void OnEvent(LPARAM lp);
 void OnJob(LPARAM lp);

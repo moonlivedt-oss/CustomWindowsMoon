@@ -12,6 +12,7 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "desk/boostcard.h"
+#include "desk/corners.h"
 #include "desk/share.h"
 #include "menu/menu.h"
 #include "net/net.h"
@@ -221,6 +222,14 @@ std::vector<Item> RingItems() {
     return ring;
 }
 
+std::vector<Item> PhoneItems() {
+    return {Act(L"Телефон рядом", L"phone.png", L"phone",
+                L"QR для телефона: буфер, фото, пульт; там же - запомнить телефон и подключить приложение"),
+            Act(L"Найти телефон", L"phone-find.png", L"phone_find", L"Телефон зазвонит, если на нём открыта страница"),
+            Act(L"На телефон", L"phone-send.png", L"phone_send",
+                L"Что в буфере ПК - на телефон: файлы из Проводника, ссылку или текст")};
+}
+
 void ShowRing(RadialMenu& menu) {
     HWND fg = GetForegroundWindow();
     DWORD pid = 0;
@@ -249,7 +258,13 @@ void ShowRing(RadialMenu& menu) {
             if (Exists(want)) c.iconFull = want;
     }
     ring.insert(ring.empty() ? ring.end() : ring.end() - 1, top);  // перед последним («Студия»)
-    menu.onNet = [](const std::wstring& key) { Run(key); };
+    std::vector<Item> phonePage = PhoneItems();
+    menu.onNet = [](const std::wstring& key) {
+        if (key.rfind(L"phone", 0) == 0)
+            corners::Run(key);
+        else
+            Run(key);
+    };
     menu.netStatus = [] { return Status(); };
     POINT pt;
     GetCursorPos(&pt);
@@ -258,7 +273,7 @@ void ShowRing(RadialMenu& menu) {
     GetMonitorInfoW(mon, &mi);
     UINT dpi = GetDpiForWindow(g_app);
     if (!dpi) dpi = 96;
-    menu.ShowNet(g_cfg, std::move(ring), pt, mi.rcWork, dpi);
+    menu.ShowNet(g_cfg, std::move(ring), pt, mi.rcWork, dpi, std::move(phonePage), L"Телефон");
     g_watch.Kick(0);  // строка состояния освежится к тому, как кольцо раскроется
 }
 

@@ -313,7 +313,7 @@ void RadialMenu::OnClick(POINT p) {
     Hit hit = HitTest(p);
     UpdateHover(hit, now);
     if (hit.sub < 0 && hit.root < 0) {
-        if (hit.dist < geo_.r1 && !Back()) Close();  // клик по ступице: назад или закрыть
+        if (hit.dist < geo_.r1 && !Back() && !FlipNet()) Close();  // клик по ступице: назад, другая страница, закрыть
         return;
     }
     if (winMode_) {  // кольцо окон - как Alt+Tab: хватает одного клика

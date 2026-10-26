@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "app/devcli_internal.h"
+#include "app/netui.h"
 #include "core/files.h"
 #include "core/themes.h"
 #include "core/config.h"
@@ -47,6 +48,7 @@ std::vector<Item> LifeRing(const std::wstring& what) {
     if (what == L"awake") return awake::RingItems();
     if (what == L"remind") return remind::RingItems();
     if (what == L"convert") return convert::RingItems({L"a.webp", L"b.mov", L"c.pdf", L"d.pdf"});
+    if (what == L"phone") return netui::PhoneItems();
     return {};
 }
 

@@ -29,7 +29,9 @@ public:
     // Кольцо открытых окон вокруг курсора (Alt + ` или угол): в середине живая миниатюра наведённого окна.
     void ShowWindows(const Config* cfg, POINT cursor, const RECT& work, UINT dpi);
     // Кольцо «Сеть» (действие угла): пункты - действия (special 3, ключ в path), сверху строка состояния.
-    void ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi);
+    // alt - вторая страница (щелчок по центру меняет страницы местами), altName - её имя в подсказке внизу
+    void ShowNet(const Config* cfg, std::vector<Item> items, POINT cursor, const RECT& work, UINT dpi,
+                 std::vector<Item> alt = {}, const std::wstring& altName = L"");
     std::function<void(const std::wstring& key)> onNet;  // выбрали действие сети
     // пункт кольца с path = action:<действие> (как у горячих углов: minecraft, net, tools...)
     std::function<void(const std::wstring& action)> onAction;
@@ -130,6 +132,7 @@ private:
     void RebuildSub();
     void Drill(Item folder);
     bool Back();
+    bool FlipNet();  // центр кольца-действия со второй страницей: другая страница; false - страницы нет
     void TurnPage(int dir);  // прокрутить второе кольцо на почти целый экран пунктов
 
     // вращение: первое кольцо поворачивается по кругу, второе прокручивается, если пункты не влезли
@@ -297,12 +300,16 @@ private:
     bool netMode_ = false;  // кольцо сети
     bool reached_ = false;  // курсор уже был внутри кольца (до этого далёкий курсор меню не закрывает)
     std::vector<Item> netRing_;
+    std::vector<Item> netMain_, netAlt_;  // страницы кольца-действия (netRing_ - показанная)
+    std::wstring netAltName_;
+    bool netAltOn_ = false;
     HTHUMBNAIL thumb_ = nullptr;  // миниатюра DWM наведённого окна
     HWND thumbWin_ = nullptr;
     HWND dialog_ = nullptr;  // диалог «Открыть/Сохранить», который был впереди, когда открылось меню
     POINT origin_{};         // левый верхний угол окна на экране
     POINT center_{};         // центр колец в координатах окна
     ULONGLONG tOpen_ = 0, tSub_ = 0, tClose_ = 0, tLast_ = 0;
+    ULONGLONG tPage_ = 0;  // секторы въезжают от этого мига: открытие или смена страницы (FlipNet)
     bool altWasDown_ = false;
     stroke::Tracker stroke_;  // росчерк: путь курсора с открытия, пока держат Alt
     bool flick_ = false;      // махнули - отпускание Alt над пунктом его открывает

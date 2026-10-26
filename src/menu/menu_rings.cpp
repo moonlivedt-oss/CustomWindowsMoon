@@ -192,6 +192,28 @@ void RadialMenu::Drill(Item folder) {
     if (cfg_->sounds) Sound::Play(Sound::Select);
 }
 
+// «Сеть» - «Телефон»: страницы кольца-действия меняются местами, секторы въезжают заново (окно не гаснет)
+bool RadialMenu::FlipNet() {
+    if (!netMode_ || netAlt_.empty()) return false;
+    netAltOn_ = !netAltOn_;
+    netRing_ = netAltOn_ ? netAlt_ : netMain_;
+    ring_ = &netRing_;
+    mode_ = Mode::None;
+    hoverRoot_ = hoverSub_ = subParent_ = pendingRoot_ = -1;
+    hlRoot_.assign(netRing_.size(), 0.0);
+    hlSub_.clear();
+    subItems_.clear();
+    subOwned_.clear();
+    navStack_.clear();
+    rootRot_ = rootRotTo_ = subScroll_ = subScrollTo_ = 0;
+    clickKey_.clear();
+    hoverKey_.clear();
+    lastHoverKey_.clear();
+    tPage_ = GetTickCount64();
+    if (cfg_->sounds) Sound::Play(Sound::Select);
+    return true;
+}
+
 bool RadialMenu::Back() {
     if (mode_ == Mode::Search) {
         query_.clear();

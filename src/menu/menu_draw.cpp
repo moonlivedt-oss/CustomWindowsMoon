@@ -486,7 +486,10 @@ std::wstring RadialMenu::BottomHint(double& alpha) const {
         alpha = 0.55;
         if (!it) {  // ни на что не наведено - внизу состояние сети
             alpha = 1;
-            return netStatus ? netStatus() : L"";
+            if (netAltOn_) return L"Центр - назад";
+            std::wstring s = netStatus ? netStatus() : L"";
+            if (!netAlt_.empty()) s += (s.empty() ? L"" : L"   |   ") + (L"центр - " + netAltName_);
+            return s;
         }
         return it->path.empty() ? L"Наведите на действие" : L"2 клика: выполнить";
     }
@@ -623,7 +626,7 @@ void RadialMenu::Render() {
     Ring root{geo_.r1 * grow, geo_.r2 * grow, 0, 0, geo_.iconRoot, false};
     root.rIcon = root.rIn + (root.rOut - root.rIn) * 0.42;
     root.rLabel = root.rIn + (root.rOut - root.rIn) * 0.84;
-    double elapsed = (double)(now - tOpen_);
+    double elapsed = (double)(now - tPage_);
     // кольцо повёрнуто не на целый сектор: у края полукруга один сектор виден двумя половинками
     bool wrap = !full_ && std::fabs(rootRot_ - std::round(rootRot_)) > 1e-3;
     GraphicsState rootClip = g.Save();
@@ -858,7 +861,7 @@ void RadialMenu::Render() {
         }
 
         // при открытии от ступицы расходится световое кольцо и гаснет у края первого яруса
-        double pt = (now - tOpen_) / fx::Dur(480);
+        double pt = (now - tPage_) / fx::Dur(480);
         if (pt < 1 && !closing_ && !fx::Game()) {
             double e = EaseOut(pt), pr = rh + (geo_.r2 * grow - rh) * e;
             Pen pulse(WithAlpha(pal.rim, (BYTE)(150 * (1 - pt) * (1 - pt))), (REAL)((3.2 - 2.2 * e) * geo_.k));
