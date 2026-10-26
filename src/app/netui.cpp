@@ -571,7 +571,10 @@ void OnEvent(LPARAM lp) {
                 g_card.Show(BoostCard::DONE, L"Выход сменился", e->text, t, 7000, Toast::G_NET);
             return;
         case net::Event::GAME:
-            if (e->worth && !g_busy) g_card.Show(BoostCard::DONE, L"Сеть в игре", e->text, t, 15000, Toast::G_NET);
+            if (e->worth && !g_busy) {
+                g_card.more = e->more;
+                g_card.Show(BoostCard::DONE, L"Сеть в игре", e->text, t, 15000, Toast::G_NET);
+            }
             return;
     }
 }

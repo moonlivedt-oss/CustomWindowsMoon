@@ -2,6 +2,7 @@
 #include "net/net_internal.h"
 
 #include "net/watch.h"
+#include "life/vpnexit.h"
 
 #include <algorithm>
 #include <map>
@@ -196,8 +197,28 @@ void GameWork(const GameJob* job) {
                    (ms >= 0 ? (exitOnly ? L", до выхода туннеля " : L", ") + std::to_wstring(ms) + L" мс" : L"") +
                    (tunnel ? L", идёт через туннель " + route : L", напрямую");
         ev->worth = tunnel || ms > 100;
-        if (tunnel)
+        if (tunnel) {
             ev->text += L". Для игры лучше правило «мимо туннеля» в клиенте или выход ближе.";
+            // Ж3: напрямую через Wi-Fi, страна выхода получше, что уже идёт мимо VPN
+            int direct = vpnexit::DirectRtt(ip, best->first.second, 2000);
+            Exit ex = ExitNode(4000);
+            std::wstring better = ex.ok && ms > 0 ? vpnexit::Note(job->name, ex.country, ms) : L"";
+            if (!better.empty()) ev->text = job->name + L": " + std::to_wstring(ms) + L" мс через выход «" +
+                                             CountryName(ex.country) + L"». " + better;
+            std::wstring more;
+            if (ex.ok) more += L"Выход сейчас: " + CountryName(ex.country) + L". ";
+            if (direct > 0)
+                more += L"Напрямую через Wi-Fi до сервера " + std::to_wstring(direct) + L" мс, через туннель " +
+                        std::to_wstring(ms) + L" мс. ";
+            std::vector<std::wstring> by = vpnexit::Bypass();
+            std::wstring list;
+            for (const std::wstring& b : by) list += (list.empty() ? L"" : L", ") + b;
+            more += by.empty() ? L"Мимо VPN в Happ сейчас ничего не идёт. "
+                               : L"Мимо VPN в Happ сейчас идут: " + list + L". ";
+            more += L"Пустить игру мимо VPN: Happ - Маршрутизация - правило «напрямую» для её exe. Пинг по "
+                    L"странам выхода копится от игры к игре - когда другая страна окажется быстрее, скажу.";
+            ev->more = more;
+        }
         else if (ms > 100)
             ev->text += L". Пинг высокий: сервер далеко или канал занят.";
     } else {

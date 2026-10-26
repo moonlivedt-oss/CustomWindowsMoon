@@ -66,6 +66,7 @@ bool PrivateIp(uint32_t ip);
 bool HotspotIp(uint32_t ip);  // 192.168.137.x - «Мобильный хот-спот» Windows раздаёт этот адрес себе
 // лучший адрес для телефона: раздача с ноутбука, потом Wi-Fi, потом провод; 0 - общей сети нет
 uint32_t PickAddress(const std::vector<Adapter>& list);
+std::vector<Adapter> LocalAdapters();  // включённые адаптеры с IPv4 (phone.cpp)
 std::wstring IpText(uint32_t ip);
 
 // Пути, если телефон не в этой сети: по порядку - что предложить первым

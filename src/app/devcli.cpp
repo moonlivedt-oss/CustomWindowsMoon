@@ -17,6 +17,7 @@
 
 #include "life/batcare.h"
 #include "life/btbattery.h"
+#include "life/vpnexit.h"
 #include "life/picker.h"
 #include "phone/phone.h"
 #include "core/bg.h"
@@ -493,6 +494,14 @@ bool Run(int& exitCode) {
         batcare::Init(GetModuleHandleW(nullptr), nullptr);
         WriteOut(L"batcare_out.txt", batcare::Status() + L"\n");
         TerminateProcess(GetCurrentProcess(), 0);
+    } else if (Has(args, L"--vpn-diag")) {  // Ж3: мимо VPN в Happ, TCP до 1.1.1.1:443 напрямую и как обычно
+        std::wstring o, list;
+        for (const std::wstring& b : vpnexit::Bypass()) list += (list.empty() ? L"" : L", ") + b;
+        o += L"мимо VPN в Happ: " + (list.empty() ? L"ничего" : list) + L"\n";
+        o += L"напрямую через Wi-Fi: " + std::to_wstring(vpnexit::DirectRtt(L"1.1.1.1", 443, 3000)) + L" мс\n";
+        o += L"как обычно (маршрут системы): " + std::to_wstring(net::TcpRtt(L"1.1.1.1", 443, 3000)) + L" мс\n";
+        WriteOut(L"vpn_out.txt", o);
+        exitCode = 0;
     } else if (Has(args, L"--bt-diag")) {  // заряд Bluetooth-устройств -> bt_out.txt
         WriteOut(L"bt_out.txt", btbattery::Diag() + L"\n");
         exitCode = 0;

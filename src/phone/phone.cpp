@@ -482,6 +482,8 @@ bool Active() { return S().on; }
 
 std::wstring Url() { return S().on ? MakeView().url : L""; }
 
+std::vector<Adapter> LocalAdapters() { return Adapters(); }
+
 std::wstring Diag() {
     std::wstring out;
     std::vector<Adapter> list = Adapters();

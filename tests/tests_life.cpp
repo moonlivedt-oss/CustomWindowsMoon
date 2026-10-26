@@ -13,6 +13,7 @@
 #include "life/nightupd.h"
 #include "life/picker.h"
 #include "life/remind.h"
+#include "life/vpnexit.h"
 #include "phone/phone.h"
 
 namespace {
@@ -253,10 +254,30 @@ void TestGameHot() {
     CHECK(!w.Feed(4 * m, 70, true) && !w.Feed(8 * m, 70, true) && w.Feed(9 * m, 75, true));  // упор в перегрев
 }
 
+void TestVpnExit() {
+    std::string cfg = R"({"route":{"rules":[{"outbound":"direct","process_name":["xray.exe","Steam.exe"]},
+        {"action":"sniff"},{"outbound":"proxy","process_name":["chrome.exe"]}],"final":"proxy"}})";
+    std::vector<std::wstring> by = vpnexit::ParseBypass(cfg);
+    CHECK(by.size() == 2 && by[0] == L"xray" && by[1] == L"steam");
+    CHECK(vpnexit::ParseBypass("{}").empty());
+    const long long now = 1792929600, day = 86400;
+    std::vector<vpnexit::Sample> l = {{L"CS2", L"DE", 60, now - day},      {L"CS2", L"DE", 64, now - 2 * day},
+                                      {L"CS2", L"DE", 300, now - 3 * day}, {L"CS2", L"FI", 110, now - day},
+                                      {L"CS2", L"US", 50, now - 40 * day}, {L"Dota", L"SE", 20, now}};
+    int ms = 0;
+    CHECK(vpnexit::Better(l, L"CS2", L"FI", 115, now, &ms) == L"DE" && ms == 64);  // медиана 60/64/300
+    CHECK(vpnexit::Better(l, L"CS2", L"FI", 75, now).empty());            // 64 против 75 - не стоит переключать
+    CHECK(vpnexit::Better(l, L"CS2", L"DE", 200, now).empty() == false);  // FI 110 лучше 200
+    CHECK(vpnexit::Better(l, L"Minecraft", L"FI", 300, now).empty());
+    auto back = vpnexit::Parse(vpnexit::Save(l, 3));
+    CHECK(back.size() == 3 && back[0].country == L"FI" && back[2].game == L"Dota");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestVpnExit();
     TestGameHot();
     TestBatCare();
     TestAppBright();
