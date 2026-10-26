@@ -400,3 +400,9 @@ std::wstring RunSync(const std::wstring& key, const std::vector<std::wstring>& f
 }
 
 }  // namespace convert
+
+namespace convert {
+
+std::wstring FfmpegPath(const wchar_t* exe) { return Ffmpeg(exe); }
+
+}  // namespace convert

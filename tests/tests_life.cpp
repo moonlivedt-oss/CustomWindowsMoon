@@ -13,6 +13,7 @@
 #include "life/gamehot.h"
 #include "life/nightupd.h"
 #include "life/picker.h"
+#include "life/record.h"
 #include "life/remind.h"
 #include "life/vpnexit.h"
 #include "phone/phone.h"
@@ -287,10 +288,22 @@ void TestConvert() {
     CHECK(convert::FfmpegArgs(L"gif", L"i", L"o.gif", 0).find(L"palettegen") != std::wstring::npos);
 }
 
+void TestRecord() {
+    RECT r = record::Normalize({500, 400}, {101, 99});
+    CHECK(r.left == 101 && r.top == 99 && r.right - r.left == 398 && r.bottom - r.top == 300);  // чётные
+    r = record::Normalize({10, 10}, {12, 13});
+    CHECK(r.right - r.left == 16 && r.bottom - r.top == 16);
+    std::wstring a = record::GrabArgs({100, 100, 600, 400}, L"o.mp4", 600);
+    CHECK(a.find(L"-offset_x 100 -offset_y 100 -video_size 500x300") != std::wstring::npos);
+    CHECK(a.find(L"-t 600") != std::wstring::npos && a.find(L"\"o.mp4\"") != std::wstring::npos);
+    CHECK(record::Clock(7) == L"0:07" && record::Clock(83) == L"1:23");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestRecord();
     TestConvert();
     TestVpnExit();
     TestGameHot();

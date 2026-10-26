@@ -22,6 +22,7 @@ void Tick();
 void Shutdown();
 std::vector<Item> RingItems(const std::vector<std::wstring>& files);
 std::wstring RunSync(const std::wstring& key, const std::vector<std::wstring>& files);  // --convert
+std::wstring FfmpegPath(const wchar_t* exe);  // ffmpeg.exe / ffprobe.exe: PATH или пакет winget; пусто - нет
 
 // --- чистое ---
 enum Kind { OTHER, IMAGE, VIDEO, PDF };

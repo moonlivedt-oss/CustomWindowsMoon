@@ -18,6 +18,7 @@
 #include "life/batcare.h"
 #include "life/btbattery.h"
 #include "life/convert.h"
+#include "life/record.h"
 #include "life/vpnexit.h"
 #include "life/picker.h"
 #include "phone/phone.h"
@@ -501,6 +502,25 @@ bool Run(int& exitCode) {
             WriteOut(L"convert_out.txt",
                      convert::RunSync(args[i + 1], std::vector<std::wstring>(args.begin() + (long)i + 2, args.end())));
         exitCode = 0;
+    } else if (Has(args, L"--record-live")) {  // --record-live <снимок.png>: 3 с записи 100,100 500x300 со «Стоп»
+        size_t i = std::find(args.begin(), args.end(), L"--record-live") - args.begin();
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Gdip gdip;
+        static Config cfg = LoadOwnConfig();
+        record::Init(GetModuleHandleW(nullptr), &cfg);
+        std::wstring out = record::TestRun({100, 100, 600, 400}, 3000, i + 1 < args.size() ? args[i + 1] : L"");
+        WriteOut(L"record_out.txt", out + L"\n");
+        TerminateProcess(GetCurrentProcess(), 0);
+    } else if (Has(args,
+                   L"--record-test")) {  // --record-test <файл.mp4>: 3 с области 100,100 500x300 -> record_out.txt
+        size_t i = std::find(args.begin(), args.end(), L"--record-test") - args.begin();
+        std::wstring out = i + 1 < args.size() ? args[i + 1] : ExeDir() + L"\\record_test.mp4", log;
+        std::wstring ff = convert::FfmpegPath(L"ffmpeg.exe");
+        int code = ff.empty() ? -1
+                              : tools::RunCapture(L"\"" + ff + L"\" " + record::GrabArgs({100, 100, 600, 400}, out, 3),
+                                                  log, 30000);
+        WriteOut(L"record_out.txt", L"код " + std::to_wstring(code) + L"\n" + log);
+        exitCode = code == 0 ? 0 : 1;
     } else if (Has(args, L"--vpn-diag")) {  // Ж3: мимо VPN в Happ, TCP до 1.1.1.1:443 напрямую и как обычно
         std::wstring o, list;
         for (const std::wstring& b : vpnexit::Bypass()) list += (list.empty() ? L"" : L", ") + b;
