@@ -171,6 +171,9 @@ struct Config {
     std::wstring phoneShare;
     bool phoneInput = true;
     bool phoneAlways = false;
+    // пульт: экран ПК на телефоне (касание - щелчок в точку) и операции с файлами в открытых папках - по умолчанию нет
+    bool phoneScreen = false;
+    bool phoneFiles = false;
     // Ж7: яркость по программе (life/appbright): exe=+N/-N от нынешней яркости или exe=N, через |
     bool brightByApp = true;
     std::wstring brightApps =

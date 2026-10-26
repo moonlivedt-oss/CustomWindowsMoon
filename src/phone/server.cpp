@@ -84,8 +84,9 @@ void Poll(Conn& cn, const Request& r) {
         j = "{\"seq\":" + std::to_string(S().seq) + ",\"clip\":" + phone::Json(S().clip) +
             ",\"img\":" + std::to_string(S().clipImg) + ",\"files\":" + FilesJson() +
             ",\"zip\":" + (z.size() > 1 && ZipFits(z) ? "true" : "false") +
-            ",\"input\":" + (InputAllowed() ? "true" : "false") + ",\"paired\":" + (S().standing ? "true" : "false") +
-            ",\"shares\":[";
+            ",\"input\":" + (InputAllowed() ? "true" : "false") +
+            ",\"screen\":" + (ScreenAllowed() ? "true" : "false") + ",\"fs\":" + (FilesAllowed() ? "true" : "false") +
+            ",\"paired\":" + (S().standing ? "true" : "false") + ",\"shares\":[";
         std::vector<std::wstring> roots = ShareRoots();
         for (size_t k = 0; k < roots.size(); ++k)
             j += (k ? "," : "") + phone::Json(roots[k].substr(roots[k].find_last_of(L'\\') + 1));
@@ -141,7 +142,7 @@ void Handle(Conn& cn, const Request& r) {
     }
     if (rest == "/poll") return Poll(cn, r);
     if (rest == "/clip" && r.method == "POST") return ClipIn(cn, r);
-    if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest)) return;
+    if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest) || HandleRemote(cn, r, rest)) return;
     Text(cn, 404, "нет");
 }
 

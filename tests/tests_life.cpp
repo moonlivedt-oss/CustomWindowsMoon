@@ -357,10 +357,29 @@ void TestPhoneMore() {
     CHECK(phone::RateText(L"Принимаю", 100 * 1024, 100 * 1024 * 75) == L"Принимаю 100 КБ/с, ещё 1 мин 15 с");
 }
 
+void TestPhoneRemote() {
+    RECT m{1920, 0, 3840, 1080};  // второй монитор справа
+    POINT p = phone::TapPoint(0.5, 0.5, m);
+    CHECK(p.x == 2880 && p.y == 540);
+    p = phone::TapPoint(1.0, 1.0, m);
+    CHECK(p.x == 3839 && p.y == 1079);  // край - последний пиксель, а не за монитором
+    p = phone::TapPoint(-3, 7, m);
+    CHECK(p.x == 1920 && p.y == 1079);
+    SIZE s = phone::FrameSize(1920, 1200, 800);
+    CHECK(s.cx == 800 && s.cy == 500);
+    s = phone::FrameSize(1280, 720, 4000);  // шире 2560 не просим, а мельче экрана - как есть
+    CHECK(s.cx == 1280 && s.cy == 720);
+    s = phone::FrameSize(1920, 1080, 10);
+    CHECK(s.cx == 320 && s.cy == 180);
+    CHECK(phone::Combo("copy") == std::vector<WORD>({VK_CONTROL, 'C'}) && phone::Combo("rm -rf").empty());
+    CHECK(phone::FsOp("move") && phone::FsOp("delete") && !phone::FsOp("format") && !phone::FsOp(""));
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestPhoneRemote();
     TestPhoneMore();
     TestShelf();
     TestPreview();

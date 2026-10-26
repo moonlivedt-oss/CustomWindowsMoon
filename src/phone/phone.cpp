@@ -26,6 +26,7 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "desk/boostcard.h"
+#include "core/winlist.h"
 #include "desk/corners.h"
 #include "desk/ocr.h"
 #include "desk/volume.h"
@@ -57,6 +58,16 @@ std::wstring g_status;
 SRWLOCK g_cfgLock = SRWLOCK_INIT;  // папки для телефона читают потоки сервера
 std::vector<std::wstring> g_roots;
 std::atomic<bool> g_input{true};
+std::atomic<bool> g_screen{false}, g_files{false}, g_screenStopped{false};
+HWND g_watchFrame[4] = {};  // рамка по краю экрана, пока телефон смотрит экран
+BoostCard g_watchCard;      // «Телефон смотрит экран - Стоп»
+bool g_watching = false;
+void Watching(bool on);  // ниже: рамка и карточка, пока телефон смотрит экран
+
+struct CallReq {
+    std::string op, out;
+    bool ok = false;
+};
 ULONGLONG g_cfgAt = 0, g_rateAt = 0, g_standAt = 0;
 long long g_sentWas = 0, g_recvWas = 0;
 std::wstring g_rate;      // «Отдаю 38 МБ/с, ещё 20 с» - на карточке
@@ -267,6 +278,8 @@ void RefreshCfg() {
     g_roots = roots;
     ReleaseSRWLockExclusive(&g_cfgLock);
     g_input = g_cfg->phoneInput;
+    g_screen = g_cfg->phoneScreen;
+    g_files = g_cfg->phoneFiles;
 }
 
 void Rate() {  // скорость за последнюю секунду - на карточку
@@ -541,6 +554,19 @@ std::vector<std::wstring> ShareRoots() {
 
 bool InputAllowed() { return g_input; }
 
+bool ScreenAllowed() { return g_screen && !g_screenStopped; }
+
+bool FilesAllowed() { return g_files; }
+
+bool CallMain(const std::string& op, std::string& out) {
+    if (!g_app) return false;
+    CallReq req{op, "", false};
+    DWORD_PTR res = 0;
+    SendMessageTimeoutW(g_app, WM_PHONE, EV_CALL, (LPARAM)&req, SMTO_BLOCK | SMTO_ABORTIFHUNG, 5000, &res);
+    out = req.out;
+    return req.ok;
+}
+
 std::string NewDevice(const std::wstring& name) {
     unsigned char b[16];
     BCryptGenRandom(nullptr, b, sizeof(b), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
@@ -633,6 +659,8 @@ void StopSession(const wchar_t* why) {
             if (!in.tmp.empty()) DeleteFileW(in.tmp.c_str());
         S().incoming.clear();
     }
+    g_screenStopped = false;
+    Watching(false);
     Card().Hide();
     g_hint.clear();
     std::wstring sum =
@@ -648,6 +676,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg) {
     g_cfg = cfg;
     Card().Create(inst);
     g_note.Create(inst);
+    g_watchCard.Create(inst);
 }
 
 void Offer(const std::vector<std::wstring>& files) {
@@ -741,6 +770,7 @@ std::wstring Status() {
 void Tick() {
     Card().Tick();
     g_note.Tick();
+    g_watchCard.Tick();
     RefreshCfg();
     ULONGLONG now = GetTickCount64();
     // запомненный телефон: сервер ждёт его всё время, пока ноутбук в своей (частной) сети
@@ -769,6 +799,8 @@ void Tick() {
     if (Card().stopAsked.exchange(false) && !standing) return StopSession(L"карточку закрыли");
     ReadClipboard();
     Rate();
+    ULONGLONG shot = g_screenAt, tick = GetTickCount64();  // кадр могли взять уже после `now` - сравниваем со свежим
+    Watching(g_screen && !g_screenStopped && shot && tick >= shot && tick - shot < 4000);
     if (Card().Visible()) RefreshAddress(false);
     bool oneTime, allDone, tooBad;
     ULONGLONG last, seen;
@@ -802,7 +834,135 @@ void Tick() {
     }
 }
 
+namespace {
+
+LRESULT CALLBACK FrameProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND) {
+        RECT rc;
+        GetClientRect(h, &rc);
+        HBRUSH b = CreateSolidBrush(RGB(220, 50, 60));
+        FillRect((HDC)wp, &rc, b);
+        DeleteObject(b);
+        return 1;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+// рамка по краям основного монитора: видно, что экран смотрят с телефона
+void WatchFrame(bool on) {
+    if (on == (g_watchFrame[0] != nullptr)) return;
+    if (!on) {
+        for (HWND& w : g_watchFrame) {
+            if (w) DestroyWindow(w);
+            w = nullptr;
+        }
+        return;
+    }
+    static bool reg = false;
+    if (!reg) {
+        WNDCLASSEXW wc{sizeof(wc)};
+        wc.lpfnWndProc = FrameProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"MoonRadialPhoneWatch";
+        RegisterClassExW(&wc);
+        reg = true;
+    }
+    RECT m{0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    int t = 4;
+    RECT f[4] = {{m.left, m.top, m.right, m.top + t},
+                 {m.left, m.bottom - t, m.right, m.bottom},
+                 {m.left, m.top, m.left + t, m.bottom},
+                 {m.right - t, m.top, m.right, m.bottom}};
+    for (int i = 0; i < 4; ++i) {
+        g_watchFrame[i] =
+            CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
+                            L"MoonRadialPhoneWatch", L"", WS_POPUP, f[i].left, f[i].top, f[i].right - f[i].left,
+                            f[i].bottom - f[i].top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ShowWindow(g_watchFrame[i], SW_SHOWNOACTIVATE);
+    }
+}
+
+void Watching(bool on) {  // телефон смотрит экран: рамка и карточка со «Стоп», в журнал - начало и конец
+    if (on == g_watching) return;
+    g_watching = on;
+    WatchFrame(on);
+    autos::Note(on ? L"Телефон рядом: телефон смотрит экран ПК" : L"Телефон рядом: экран больше не смотрят");
+    if (on) {
+        g_watchCard.kind = L"-";
+        g_watchCard.yesLabel = L"Стоп";
+        g_watchCard.noLabel = L"Скрыть";
+        g_watchCard.onYes = [] {
+            g_screenStopped = true;  // до конца этой передачи
+            Watching(false);
+            autos::Note(L"Телефон рядом: показ экрана остановлен на ПК");
+        };
+        g_watchCard.onNo = nullptr;
+        g_watchCard.Show(BoostCard::OFFER, L"Телефон смотрит экран",
+                         L"Красная рамка - пока смотрит. Стоп - выключить "
+                         L"до конца этой передачи.",
+                         Theme(), 0, Toast::G_WARN);
+    } else {
+        g_watchCard.Hide();
+    }
+}
+
+std::string WinsJson() {
+    std::string j = "[";
+    bool first = true;
+    auto add = [&](const Item& it, const std::wstring& app) {
+        if (!it.win || !IsWindow(it.win)) return;
+        std::wstring t = winlist::Title(it.win);
+        j += std::string(first ? "" : ",") + "{\"h\":\"" + std::to_string((unsigned long long)(UINT_PTR)it.win) +
+             "\",\"t\":" + Json(t.empty() ? it.name : t) + ",\"a\":" + Json(app) +
+             ",\"min\":" + (IsIconic(it.win) ? "true" : "false") + "}";
+        first = false;
+    };
+    for (const Item& root : winlist::Build(40)) {
+        if (root.children.empty())
+            add(root, root.name);
+        else
+            for (const Item& c : root.children) add(c, root.name);
+    }
+    return j + "]";
+}
+
+void DoCall(CallReq& c) {
+    if (c.op == "wins") {
+        c.out = WinsJson();
+        c.ok = true;
+    } else if (c.op.rfind("win:", 0) == 0) {
+        size_t a = c.op.find(':', 4);
+        std::string what = c.op.substr(4, a - 4);
+        HWND w = (HWND)(UINT_PTR)strtoull(c.op.c_str() + a + 1, nullptr, 10);
+        // только видимые окна верхнего уровня из списка Alt+Tab - не служебные и не чужие внутренние
+        if (!IsWindow(w) || !IsWindowVisible(w) || GetAncestor(w, GA_ROOT) != w) return;
+        if (what == "front") {
+            INPUT in[2]{};  // фоновая программа выводит окно вперёд только после «нажатия» клавиши
+            in[0].type = in[1].type = INPUT_KEYBOARD;
+            in[0].ki.wVk = in[1].ki.wVk = VK_MENU;
+            in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(2, in, sizeof(INPUT));
+            winlist::Activate(w);
+        } else if (what == "min") {
+            ShowWindowAsync(w, SW_MINIMIZE);
+        } else if (what == "close") {
+            winlist::Close(w);
+        }
+        autos::Note(L"Телефон рядом: окно «" + winlist::Title(w) + L"» - " + Widen(what));
+        c.ok = true;
+    } else if (c.op.rfind("open:", 0) == 0) {
+        std::wstring p = Widen(c.op.substr(5));
+        c.ok = (INT_PTR)ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, ParentDir(p).c_str(), SW_SHOWNORMAL) > 32;
+    }
+}
+
+}  // namespace
+
 void OnMessage(WPARAM wp, LPARAM lp) {
+    if (wp == EV_CALL) {  // из потока сервера через SendMessage: lp - CallReq на его стеке
+        DoCall(*(CallReq*)lp);
+        return;
+    }
     if (wp == EV_CMD) {  // из потока сервера через SendMessage: lp - Cmd на его стеке
         Cmd& c = *(Cmd*)lp;
         autos::Note(L"Телефон рядом: пульт - " + Widen(c.c));
@@ -868,7 +1028,9 @@ void OnMessage(WPARAM wp, LPARAM lp) {
         return;
     }
     if (!S().on) return;
-    if (wp == EV_OPEN && text) {  // ссылка с телефона
+    if (wp == EV_NOTE && text) {
+        autos::Note(L"Телефон рядом: " + *text);
+    } else if (wp == EV_OPEN && text) {  // ссылка с телефона
         ShellExecuteW(nullptr, L"open", text->c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         autos::Note(L"Телефон рядом: открыта ссылка " + *text);
         ShowNote(L"Открыто с телефона", *text);

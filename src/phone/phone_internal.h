@@ -60,12 +60,17 @@ enum Event {
     EV_SCAN,
     EV_CLIPIMG,
     EV_PAIRED,
-    EV_OCR
+    EV_OCR,
+    EV_NOTE,  // запись в журнал (что сделано с телефона)
+    EV_CALL   // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
 };
 void Post(Event e, const std::wstring& text = L"");
 void PostBytes(Event e, std::string bytes);  // lp - new std::string (картинка)
 // счётчики для скорости на карточке
 extern std::atomic<long long> g_sent, g_recv, g_sendLeft;
+extern std::atomic<ULONGLONG> g_screenAt;  // когда телефон последний раз брал кадр экрана
+// вызов в основном потоке (окна, открыть файл): op - «wins», «win:front:<окно>», «open:<путь UTF-8>»
+bool CallMain(const std::string& op, std::string& out);
 // команда пульта (vol+, play, sleep...) в основном потоке; вернёт громкость 0..1 или -1
 float Command(const std::string& c);
 
@@ -78,6 +83,8 @@ std::wstring PhotosDir();                         // Изображения\Те
 std::wstring DownloadsDir();                      // Загрузки
 std::vector<std::wstring> ShareRoots();           // папки ПК, открытые телефону (phone_share)
 bool InputAllowed();                              // phone_input: тачпад и клавиатура с телефона
+bool ScreenAllowed();                             // phone_screen и не остановлено на ПК
+bool FilesAllowed();                              // phone_files: открыть, копировать, переместить, в Корзину
 std::string NewDevice(const std::wstring& name);  // запомнить телефон: ключ (пусто - не вышло)
 
 // Соединение (сервер держит его открытым между запросами): что уже пришло и не разобрано, сколько тела осталось
@@ -99,6 +106,10 @@ std::atomic<bool>& Stopping();
 // обработчики (server_files.cpp, server_more.cpp); rest - путь после ключа
 bool HandleFiles(Conn& cn, const Request& r, const std::string& rest);
 bool HandleMore(Conn& cn, const Request& r, const std::string& rest);
+bool HandleRemote(Conn& cn, const Request& r, const std::string& rest);
+// путь в открытой папке ПК по параметрам rk (номер папки) и pk (путь внутри); пусто - нельзя
+std::wstring SharePathOf(const Request& r, const char* rk, const char* pk);
+bool ShareRootIs(const std::wstring& path);  // это сама открытая папка
 // отдать файл с Range; inline - смотреть в браузере (видео, музыка), а не скачивать
 bool SendFile(Conn& cn, const Request& r, const std::wstring& path, const std::wstring& name, bool inlineView,
               bool* complete = nullptr);

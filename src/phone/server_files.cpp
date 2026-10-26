@@ -205,7 +205,12 @@ void ShareList(Conn& cn, const Request& r) {
 
 // ---------------- загрузка с телефона ----------------
 
-std::wstring TargetDir(const std::string& kind, long long mt) {
+std::wstring TargetDir(const Request& r, const std::string& kind, long long mt) {
+    if (kind == "to") {  // в открытую папку ПК, которую выбрали на телефоне
+        std::wstring d = FilesAllowed() ? ShareFile(r) : L"";
+        DWORD a = d.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(d.c_str());
+        return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) ? d : L"";
+    }
     if (kind == "photo") return DatedDir(PhotosDir(), mt);
     if (kind == "scan") return DatedDir(PhotosDir() + L"\\Сканы", 0);
     return DownloadsDir();
@@ -268,7 +273,7 @@ void Upload(Conn& cn, const Request& r) {
             n.name = SafeName(Widen(Q(r, "name")));
             n.mt = atoll(Q(r, "mt").c_str());
             n.total = total;
-            n.dir = TargetDir(kind, n.mt);
+            n.dir = TargetDir(r, kind, n.mt);
             it = S().incoming.emplace(id, n).first;
         }
         if (it->second.busy) return Text(cn, 409, "кусок уже пишется");
@@ -344,6 +349,20 @@ void Upload(Conn& cn, const Request& r) {
 }
 
 }  // namespace
+
+std::wstring SharePathOf(const Request& r, const char* rk, const char* pk) {
+    Request q = r;
+    q.query["r"] = Q(r, rk);
+    q.query["p"] = Q(r, pk);
+    return ShareFile(q);
+}
+
+bool ShareRootIs(const std::wstring& path) {
+    std::wstring f = FinalPath(path);
+    for (const std::wstring& root : ShareRoots())
+        if (!f.empty() && FinalPath(root) == f) return true;
+    return false;
+}
 
 bool SendFile(Conn& cn, const Request& r, const std::wstring& path, const std::wstring& name, bool inlineView,
               bool* complete) {

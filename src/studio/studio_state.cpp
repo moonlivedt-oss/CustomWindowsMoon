@@ -1048,18 +1048,23 @@ void Studio::AutoPage(const RectF& r) {
                   L"Ничего не удаляется без вопроса и всё уходит в Корзину.",
                   c.faint);
     });
-    cols.Card(L"Телефон рядом", 4.2f, [&](const RectF& b) {
+    cols.Card(L"Телефон рядом", 6.4f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Ждать запомненный телефон всегда");
         toggle(rr, ID_PHONE_ALWAYS, cfg.phoneAlways);
         rr = cols.Row(b, 1, L"Тачпад и клавиатура с телефона");
         toggle(rr, ID_PHONE_INPUT, cfg.phoneInput);
+        rr = cols.Row(b, 2, L"Экран ПК на телефоне");
+        toggle(rr, ID_PHONE_SCREEN, cfg.phoneScreen);
+        rr = cols.Row(b, 3, L"Файлы: открыть, копировать, в Корзину");
+        toggle(rr, ID_PHONE_FILES, cfg.phoneFiles);
         int n = phone::Devices();
-        rr = cols.Row(b, 2, n ? L"Запомнено телефонов: " + std::to_wstring(n) : std::wstring(L"Запомненных телефонов нет"),
+        rr = cols.Row(b, 4, n ? L"Запомнено телефонов: " + std::to_wstring(n) : std::wstring(L"Запомненных телефонов нет"),
                       0.95f);
         if (n && ui.Button(ID_PHONE_FORGET, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
                            L"Забыть", Kind::Secondary))
             phone::Forget();
-        cols.Note(b, 3.0f,
+        cols.Note(b, 5.0f,
+                  L"Пока телефон смотрит экран, по краю экрана красная рамка и карточка «Стоп». "
                   L"Запомнить телефон - кнопка на его странице (после QR). Когда «ждать всегда» включено, страница из "
                   L"закладки открывается без QR, пока ноутбук в своей (частной) сети; сервер пускает только "
                   L"запомненные телефоны. Папки ПК для телефона - phone_share в radial.cfg.",

@@ -252,6 +252,10 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.phoneInput = ParseBool(val);
             else if (key == L"phone_always")
                 cfg.phoneAlways = ParseBool(val);
+            else if (key == L"phone_screen")
+                cfg.phoneScreen = ParseBool(val);
+            else if (key == L"phone_files")
+                cfg.phoneFiles = ParseBool(val);
             else if (key == L"bright_by_app")
                 cfg.brightByApp = ParseBool(val);
             else if (key == L"bright_apps")
@@ -608,6 +612,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"phone_share = " << c.phoneShare << L"\n";
     o << L"phone_input = " << (c.phoneInput ? 1 : 0) << L"\n";
     o << L"phone_always = " << (c.phoneAlways ? 1 : 0) << L"\n";
+    o << L"phone_screen = " << (c.phoneScreen ? 1 : 0) << L"\n";
+    o << L"phone_files = " << (c.phoneFiles ? 1 : 0) << L"\n";
     o << L"# яркость по программе: exe=+N/-N (от нынешней) или exe=N, через |\n";
     o << L"bright_by_app = " << (c.brightByApp ? 1 : 0) << L"\n";
     o << L"bright_apps = " << c.brightApps << L"\n";

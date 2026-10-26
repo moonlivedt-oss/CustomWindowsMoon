@@ -92,6 +92,12 @@ bool UploadId(const std::string& id);  // 8-40 знаков [A-Za-z0-9_-]
 // «Отдаю 38,2 МБ/с, ещё 20 с»; пусто - стоим
 std::wstring RateText(const wchar_t* verb, double bytesPerSec, long long left);
 
+// --- пульт (phone_remote_logic.cpp, под тестами) ---
+POINT TapPoint(double nx, double ny, const RECT& monitor);  // касание в долях картинки -> точка экрана
+SIZE FrameSize(int w, int h, int maxW);                     // кадр для телефона: не шире maxW (320..2560)
+std::vector<WORD> Combo(const std::string& name);           // «copy» -> Ctrl+C; пусто - нет такого
+bool FsOp(const std::string& op);                           // open, copy, move, rename, mkdir, delete
+
 // Пути, если телефон не в этой сети: по порядку - что предложить первым
 enum Way { WAY_PHONE_HOTSPOT, WAY_PC_HOTSPOT, WAY_BLUETOOTH };
 std::vector<Way> Ways(bool lan, bool bluetooth, long long bytes);
