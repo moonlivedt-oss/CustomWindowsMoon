@@ -95,6 +95,15 @@ void TestPhoneBadGate() {
     for (const char* c : {"/poll", "/clip", "/cmd", "/up", "/", "/in/", "/innn", "/ring", "/pair"})
         CHECK(!phone::ControlPath(c));
 
+    // где слушать: только адрес для телефона; общественная сеть - нигде, пока не разрешили именно её
+    uint32_t lan = 0xC0A80105;
+    CHECK(phone::BindAddress(lan, false, L"", L"") == lan);
+    CHECK(phone::BindAddress(lan, false, L"Кафе", L"") == 0);
+    CHECK(phone::BindAddress(lan, false, L"Кафе", L"Кафе") == lan);
+    CHECK(phone::BindAddress(lan, false, L"Вокзал", L"Кафе") == 0);  // разрешение - только той сети
+    CHECK(phone::BindAddress(0, false, L"", L"") == 0);
+    CHECK(phone::BindAddress(0, true, L"", L"") == 0x7F000001);
+
     // отпечаток для сверки глазами - тот же, что у приложения (PureTest.fingerprint)
     CHECK(phone::CaFingerprint("abc") == L"BA78 16BF 8F01 CFEA 4141 40DE");
     CHECK(phone::CaFingerprint("").empty());

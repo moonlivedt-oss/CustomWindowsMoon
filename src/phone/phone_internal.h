@@ -88,7 +88,10 @@ bool CallMain(const std::string& op, std::string& out);
 // команда пульта (vol+, play, sleep...) в основном потоке; вернёт громкость 0..1 или -1
 float Command(const std::string& c);
 
-bool ServerStart(int& port, int& tlsPort, bool loopback);  // tlsPort 0 - https не открылся
+bool ServerStart();  // поток приёма; слушать пока нигде
+// слушать только на ip (порядок хоста; 0 - нигде): порты прежние, если свободны. port, tlsPort - на чём слушает
+// (0 - нигде, tlsPort 0 - https не открылся); false - порты 8780-8799 заняты
+bool ServerBind(uint32_t ip, int& port, int& tlsPort);
 void ServerStop();
 bool ServerOn();
 const char* PageHtml();
@@ -187,6 +190,10 @@ private:
     Gdiplus::Color Tone() const override;
     void DrawQr(Gdiplus::Graphics& g, const Gdiplus::RectF& box) const;
     std::vector<Way> Rows() const;
+    // без общей сети: почему (общественная сеть - hint) и что делать
+    std::wstring NoLanText() const {
+        return v_.hint.empty() ? L"Общей сети с телефоном нет - выберите путь:" : v_.hint + L" Или выберите путь:";
+    }
 
     View v_;
     bool ways_ = false;      // показан список путей вместо QR

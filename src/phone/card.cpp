@@ -85,8 +85,7 @@ float PhoneCard::BodyHeight(Graphics& g) {
     float h;
     if (ways_) {
         h = kPad + 24 + (float)Rows().size() * kRowH;
-        if (!v_.lan)
-            h += 4 + TextHeight(g, L"Общей сети с телефоном нет - выберите путь:", fS, (kW - 2 * kPad) * K) / K;
+        if (!v_.lan) h += 4 + TextHeight(g, NoLanText(), fS, (kW - 2 * kPad) * K) / K;
         for (size_t i = 0; i < 4; ++i) rows_[i] = RectF();
         float y = h - (float)Rows().size() * kRowH;
         for (size_t i = 0; i < Rows().size(); ++i)
@@ -154,7 +153,7 @@ void PhoneCard::Paint(Graphics& g, const RectF& body) {
         g.DrawString(L"Телефон не в этой сети?", -1, &fT, RectF(x, y - K, tw - 26 * K, 22 * K), &one, &tB);
         y += 24 * K;
         if (!v_.lan) {
-            std::wstring s = L"Общей сети с телефоном нет - выберите путь:";
+            std::wstring s = NoLanText();
             float th = TextHeight(g, s, fS, tw);
             g.DrawString(s.c_str(), -1, &fS, RectF(x, y, tw, th + 1), &wrap, &mB);
         }

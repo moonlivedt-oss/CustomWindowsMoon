@@ -207,6 +207,10 @@ std::wstring CaFingerprint(const std::string& der);
 // телефона - только после «Разрешить» на ПК.
 bool ControlPath(const std::string& rest);
 
+// Где слушать: только адрес для телефона (не все адреса - VPN и виртуальные адаптеры сервер не видят). Сеть
+// общественная (publicNet - её имя) - нигде, пока в ней открыть не разрешили (allowed); проверка - 127.0.0.1.
+uint32_t BindAddress(uint32_t ip, bool loopback, const std::wstring& publicNet, const std::wstring& allowed);
+
 // запомненный телефон: строка phone-devices.tsv (файл - под DPAPI, phone.cpp)
 struct DeviceRec {
     std::string key;       // /d/<ключ>/

@@ -56,7 +56,12 @@ BoostCard g_note;  // итог: «Передано на телефон», «С �
 int g_port = 0, g_tlsPort = 0;
 std::vector<PCCERT_CONTEXT> g_certs;  // сертификаты сервера этой передачи (Schannel держит их до конца)
 uint32_t g_certIp = ~0u;
-uint32_t g_ip = 0;
+uint32_t g_ip = 0;       // адрес для телефона (0 - нет общей сети или она общественная и не разрешена)
+uint32_t g_rawIp = ~0u;  // какой адрес выбран по адаптерам (смена - пересчитать всё)
+uint32_t g_bindIp = 0;   // где сервер слушает сейчас
+bool g_caOk = false;     // корневой сертификат есть - https можно
+std::wstring g_allowPublic, g_askedPublic;  // общественная сеть, в которой открыть разрешили / о которой спросили
+BoostCard g_pubCard;
 bool g_loopback = false;
 std::wstring g_hint;     // что делать на выбранном пути (раздача, Bluetooth)
 std::wstring g_netHint;  // общественная сеть, брандмауэр
@@ -258,8 +263,7 @@ std::wstring DevicesFile() {
     std::wstring dir;
     // проверка сервера (--phone-serve) без своих запомненных телефонов: папка из RADIAL_PHONE_DIR
     wchar_t test[MAX_PATH];
-    if (GetEnvironmentVariableW(L"RADIAL_PHONE_LOCAL", nullptr, 0) > 0 &&
-        GetEnvironmentVariableW(L"RADIAL_PHONE_DIR", test, MAX_PATH) - 1u < MAX_PATH - 1u)
+    if (GetEnvironmentVariableW(L"RADIAL_PHONE_DIR", test, MAX_PATH) - 1u < MAX_PATH - 1u)
         return std::wstring(test) + L"/phone-devices.tsv";
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p))) dir = p;
     CoTaskMemFree(p);
@@ -549,29 +553,88 @@ PhoneCard::View MakeView() {
     return v;
 }
 
-void RefreshAddress(bool force) {
+void AskPublic(const std::wstring& net);  // ниже
+void RefreshCert();
+
+// Слушать только на адресе для телефона: сменился адрес - те же порты на новом. Порты заняты - карточка скажет.
+void Bind(uint32_t ip) {
+    if (ip == g_bindIp) return;
+    int port = 0, tls = 0;
+    if (!ServerBind(ip, port, tls)) {
+        g_bindIp = 0;
+        g_netHint = L"Порты 8780-8799 заняты другой программой - телефону не к чему подключиться.";
+        ServerBind(0, port, tls);
+        port = tls = 0;
+    } else {
+        g_bindIp = ip;
+    }
+    if (port) g_port = port;
+    g_tlsPort = g_caOk ? tls : 0;
+    if (port && !g_loopback) g_fwOk = FirewallAllows(port);
+    g_certIp = ~0u;  // сертификат - заново на этот адрес
+    Lock l;
+    S().tlsPort = g_tlsPort && TlsReady() ? g_tlsPort : 0;
+    ++S().seq;
+}
+
+// Адрес для телефона и профиль его сети. Сеть общественная (кафе, гостиница) - сервер в ней не слушает: в такой
+// сети рядом чужие. Открыть всё равно - только по «Открыть» на карточке-вопросе, до конца этой передачи.
+void RefreshAddress(bool force, ULONGLONG every = 2000) {
     ULONGLONG now = GetTickCount64();
-    if (!force && now - g_addrAt < 2000) return;
+    if (!force && now - g_addrAt < every) return;
     g_addrAt = now;
     std::vector<Adapter> list = g_loopback ? std::vector<Adapter>() : Adapters();
     uint32_t ip = g_loopback ? 0x7F000001 : PickAddress(list);
     if (GetEnvironmentVariableW(L"RADIAL_PHONE_NOLAN", nullptr, 0) > 0) ip = 0;  // снимок «общей сети нет»
-    if (ip != g_ip || force) {
-        if (ip != g_ip) g_hint.clear();  // подсказка пути сделала своё
-        g_ip = ip;
-        g_netHint.clear();
-        std::wstring guid;
-        for (const Adapter& a : list)
-            if (a.ip == ip) guid = a.guid;
-        std::wstring pub = ip && !g_loopback ? PublicNetwork(guid) : L"";
-        if (!pub.empty())
-            g_netHint = L"Сеть «" + pub +
-                        L"» помечена общественной - брандмауэр не пустит телефон. Параметры - "
-                        L"Сеть - свойства - «Частная».";
-        else if (ip && !g_fwOk)
-            g_netHint = L"Windows спросит про доступ к сети: «Разрешить» для частных сетей, иначе телефон не дойдёт.";
-        if (Card().Visible()) Card().Update(MakeView());
+    if (ip == g_rawIp && !force) return;
+    if (ip != g_rawIp) g_hint.clear();  // подсказка пути сделала своё
+    g_rawIp = ip;
+    g_netHint.clear();
+    std::wstring guid;
+    for (const Adapter& a : list)
+        if (a.ip == ip) guid = a.guid;
+    std::wstring pub = ip && !g_loopback ? PublicNetwork(guid) : L"";
+    if (GetEnvironmentVariableW(L"RADIAL_PHONE_PUBLIC", nullptr, 0) > 0) pub = L"Проверка";  // снимок и проверка
+    uint32_t bind = BindAddress(ip, g_loopback, pub, g_allowPublic);
+    bool blocked = ip && !bind;
+    g_ip = bind;
+    Bind(bind);
+    if (blocked) {
+        g_netHint = L"Сеть «" + pub +
+                    L"» помечена общественной: в ней сервер для телефона не открыт. Сделайте её частной (Параметры - "
+                    L"Сеть - свойства - «Частная»).";
+        AskPublic(pub);
+    } else if (!pub.empty()) {
+        g_netHint =
+            L"Сеть «" + pub + L"» общественная, открыто по вашему «Открыть». Брандмауэр может не пустить телефон.";
+    } else if (ip && !g_fwOk) {
+        g_netHint = L"Windows спросит про доступ к сети: «Разрешить» для частных сетей, иначе телефон не дойдёт.";
     }
+    if (Card().Visible()) Card().Update(MakeView());
+}
+
+void AskPublic(const std::wstring& net) {
+    bool standing;
+    {
+        Lock l;
+        standing = S().standing;
+    }
+    if (g_askedPublic == net || standing) return;  // ждущий запомненный телефон в чужой сети не открывается вовсе
+    g_askedPublic = net;
+    g_pubCard.kind = L"-";
+    g_pubCard.yesLabel = L"Открыть";
+    g_pubCard.noLabel = L"Не открывать";
+    g_pubCard.onYes = [net] {
+        g_allowPublic = net;
+        autos::Note(L"Телефон рядом: открыто в общественной сети «" + net + L"» по разрешению");
+        RefreshAddress(true);
+        RefreshCert();
+    };
+    g_pubCard.onNo = nullptr;
+    g_pubCard.Show(BoostCard::OFFER, L"Общественная сеть «" + net + L"»",
+                   L"В такой сети рядом чужие, поэтому сервер для телефона в ней не открыт. Открыть всё равно - до "
+                   L"конца этой передачи?",
+                   Theme(), 30000, Toast::G_WARN);
 }
 
 // сертификат https на нынешний адрес (и 127.0.0.1); корневой создаётся при первой передаче
@@ -600,13 +663,15 @@ bool StartSession(bool oneTime, bool standing = false) {
         return true;
     }
     g_loopback = GetEnvironmentVariableW(L"RADIAL_PHONE_LOCAL", nullptr, 0) > 0;  // проверка без сети и брандмауэра
-    int port = 0, tlsPort = 0;
-    if (!ServerStart(port, tlsPort, g_loopback)) return false;
-    g_port = port;
-    g_tlsPort = tlsPort;
+    if (!ServerStart()) return false;
+    g_port = g_tlsPort = 0;
+    g_bindIp = 0;
+    g_rawIp = ~0u;
+    g_allowPublic.clear();
+    g_askedPublic.clear();
     g_certIp = ~0u;
     std::string ca;
-    if (tlsPort && !cert::LoadOrCreateCa(cert::DefaultDir(), ca)) g_tlsPort = 0;
+    g_caOk = cert::LoadOrCreateCa(cert::DefaultDir(), ca);
     {
         Lock l;
         Session& s = S();
@@ -639,11 +704,16 @@ bool StartSession(bool oneTime, bool standing = false) {
     g_rate.clear();
     g_bluetooth = HasBluetooth();
     g_hint.clear();
-    g_fwOk = g_loopback || FirewallAllows(port);
+    g_fwOk = true;
     RefreshAddress(true);
+    if (g_ip && !g_bindIp) {  // адрес есть, а порты заняты
+        StopSession(L"порты заняты");
+        return false;
+    }
     RefreshCert();
     MediaStart();
-    autos::Note(L"Телефон рядом: передача открыта (порт " + std::to_wstring(port) +
+    autos::Note(L"Телефон рядом: передача открыта (" +
+                (g_bindIp ? L"порт " + std::to_wstring(g_port) : std::wstring(L"пока без адреса для телефона")) +
                 (g_tlsPort ? L", https " + std::to_wstring(g_tlsPort) : std::wstring()) + L")");
     return true;
 }
@@ -862,6 +932,8 @@ void StopSession(const wchar_t* why) {
     g_ctlAt = 0;
     Watching(false, false);
     g_askCard.Hide();
+    g_pubCard.Hide();
+    g_bindIp = 0;
     Card().Hide();
     g_hint.clear();
     std::wstring sum =
@@ -879,6 +951,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg) {
     g_note.Create(inst);
     g_watchCard.Create(inst);
     g_askCard.Create(inst);
+    g_pubCard.Create(inst);
     g_alert.Create(inst);
 }
 
@@ -1113,6 +1186,7 @@ void Tick() {
     g_note.Tick();
     g_watchCard.Tick();
     g_askCard.Tick();
+    g_pubCard.Tick();
     g_alert.Tick();
     RefreshCfg();
     FlushSeen(false);
@@ -1147,8 +1221,8 @@ void Tick() {
     ULONGLONG ctl = g_ctlAt;
     Watching(g_screen && !g_screenStopped && shot && tick >= shot && tick - shot < 4000,
              g_input && !g_inputStopped && ctl && tick >= ctl && tick - ctl < 5000);
-    if (Card().Visible()) RefreshAddress(false);
-    RefreshCert();  // адрес поменялся - новый сертификат
+    RefreshAddress(false, Card().Visible() ? 2000 : 10000);  // без карточки - реже: адрес меняется редко
+    RefreshCert();                                           // адрес поменялся - новый сертификат
     bool oneTime, allDone;
     ULONGLONG last, seen;
     {
@@ -1638,6 +1712,7 @@ void Shutdown() {
     g_note.Destroy();
     g_alert.Destroy();
     g_askCard.Destroy();
+    g_pubCard.Destroy();
 }
 
 }  // namespace phone

@@ -82,6 +82,12 @@ bool ControlPath(const std::string& rest) {
     return false;
 }
 
+uint32_t BindAddress(uint32_t ip, bool loopback, const std::wstring& publicNet, const std::wstring& allowed) {
+    if (loopback) return 0x7F000001;
+    if (!ip || (!publicNet.empty() && publicNet != allowed)) return 0;
+    return ip;
+}
+
 // ---- запомненные телефоны ----
 
 std::vector<DeviceRec> ParseDevices(const std::string& text) {

@@ -18,7 +18,12 @@ std::atomic<ULONGLONG> g_ctlAt{0};
 
 namespace {
 
+// Слушаем не на всех адресах, а только на адресе для телефона (ServerBind): VPN, виртуальные адаптеры и сеть,
+// которую Windows считает общественной, сервер не видят. Сокеты меняет ServerBind под g_lsLock, поток приёма держит
+// его на время select (до 300 мс).
 SOCKET g_listen = INVALID_SOCKET, g_listenTls = INVALID_SOCKET;
+SRWLOCK g_lsLock = SRWLOCK_INIT;
+int g_lsPort = 0, g_lsTls = 0;      // порты последней привязки: при смене адреса - те же, если свободны
 thread_local Tls* t_tls = nullptr;  // соединение по https (каждое соединение - в своём потоке)
 HANDLE g_thread = nullptr;
 std::atomic<bool> g_stop{false};
@@ -243,13 +248,23 @@ DWORD WINAPI ConnThread(void* p) {
 
 DWORD WINAPI AcceptLoop(void*) {
     while (!g_stop) {
+        AcquireSRWLockShared(&g_lsLock);
+        SOCKET ls[2] = {g_listen, g_listenTls};
         fd_set fs;
         FD_ZERO(&fs);
-        FD_SET(g_listen, &fs);
-        if (g_listenTls != INVALID_SOCKET) FD_SET(g_listenTls, &fs);
+        for (SOCKET l : ls)
+            if (l != INVALID_SOCKET) FD_SET(l, &fs);
         timeval tv{0, 300000};
-        if (select(0, &fs, nullptr, nullptr, &tv) <= 0) continue;
-        for (SOCKET l : {g_listen, g_listenTls}) {
+        if (!fs.fd_count) {  // адреса для телефона нет (или сеть общественная) - не слушаем нигде
+            ReleaseSRWLockShared(&g_lsLock);
+            Sleep(300);
+            continue;
+        }
+        if (select(0, &fs, nullptr, nullptr, &tv) <= 0) {
+            ReleaseSRWLockShared(&g_lsLock);
+            continue;
+        }
+        for (SOCKET l : ls) {
             if (l == INVALID_SOCKET || !FD_ISSET(l, &fs)) continue;
             sockaddr_in from{};
             int fromLen = sizeof(from);
@@ -266,7 +281,7 @@ DWORD WINAPI AcceptLoop(void*) {
                 continue;
             }
             ++g_conns;
-            auto* acc = new Accepted{c, l == g_listenTls, ip};
+            auto* acc = new Accepted{c, l == ls[1], ip};
             HANDLE t = CreateThread(nullptr, 0, ConnThread, acc, 0, nullptr);
             if (t) {
                 CloseHandle(t);
@@ -279,6 +294,7 @@ DWORD WINAPI AcceptLoop(void*) {
                 --g_conns;
             }
         }
+        ReleaseSRWLockShared(&g_lsLock);
     }
     return 0;
 }
@@ -390,32 +406,51 @@ SOCKET Listen(sockaddr_in a, int from, int to, int& port) {
     return INVALID_SOCKET;
 }
 
-bool ServerStart(int& port, int& tlsPort, bool loopback) {
+// под g_lsLock исключительно: прежние сокеты прочь, новые на ip (0 - нигде)
+bool BindLocked(uint32_t ip) {
+    for (SOCKET* l : {&g_listen, &g_listenTls})
+        if (*l != INVALID_SOCKET) {
+            closesocket(*l);
+            *l = INVALID_SOCKET;
+        }
+    if (!ip) return true;
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(ip);
+    int port = 0, tls = 0;
+    SOCKET s = g_lsPort ? Listen(a, g_lsPort, g_lsPort + 1, port) : INVALID_SOCKET;
+    if (s == INVALID_SOCKET) s = Listen(a, 8780, 8800, port);
+    if (s == INVALID_SOCKET) return false;
+    // https - на 8800-8819 (тот же сдвиг, что у http, - адрес не меняется между запусками)
+    SOCKET t = Listen(a, 8800 + (port - 8780), 8800 + (port - 8780) + 1, tls);
+    if (t == INVALID_SOCKET) t = Listen(a, 8800, 8820, tls);
+    g_listen = s;
+    g_listenTls = t;
+    g_lsPort = port;
+    g_lsTls = t == INVALID_SOCKET ? 0 : tls;
+    return true;
+}
+
+bool ServerStart() {
     if (g_thread) return true;
     if (!g_wsa) {
         WSADATA w;
         if (WSAStartup(MAKEWORD(2, 2), &w)) return false;
         g_wsa = true;
     }
-    sockaddr_in a{};
-    a.sin_family = AF_INET;
-    a.sin_addr.s_addr = htonl(loopback ? INADDR_LOOPBACK : INADDR_ANY);
-    SOCKET s = Listen(a, 8780, 8800, port);
-    if (s == INVALID_SOCKET) return false;
-    // https - на 8800-8819 (тот же сдвиг, что у http, - адрес не меняется между запусками)
-    tlsPort = 0;
-    g_listenTls = Listen(a, 8800 + (port - 8780), 8820, tlsPort);
-    if (g_listenTls == INVALID_SOCKET) g_listenTls = Listen(a, 8800, 8820, tlsPort);
-    g_listen = s;
+    g_lsPort = g_lsTls = 0;
     g_stop = false;
     g_thread = CreateThread(nullptr, 0, AcceptLoop, nullptr, 0, nullptr);
-    if (!g_thread) {
-        closesocket(s);
-        if (g_listenTls != INVALID_SOCKET) closesocket(g_listenTls);
-        g_listen = g_listenTls = INVALID_SOCKET;
-        return false;
-    }
-    return true;
+    return g_thread != nullptr;
+}
+
+bool ServerBind(uint32_t ip, int& port, int& tlsPort) {
+    AcquireSRWLockExclusive(&g_lsLock);
+    bool ok = BindLocked(ip);
+    port = ok && ip ? g_lsPort : 0;
+    tlsPort = ok && ip ? g_lsTls : 0;
+    ReleaseSRWLockExclusive(&g_lsLock);
+    return ok;
 }
 
 void ServerStop() {
@@ -424,9 +459,9 @@ void ServerStop() {
     WaitForSingleObject(g_thread, 2000);
     CloseHandle(g_thread);
     g_thread = nullptr;
-    closesocket(g_listen);
-    if (g_listenTls != INVALID_SOCKET) closesocket(g_listenTls);
-    g_listen = g_listenTls = INVALID_SOCKET;
+    AcquireSRWLockExclusive(&g_lsLock);
+    BindLocked(0);
+    ReleaseSRWLockExclusive(&g_lsLock);
     for (int i = 0; i < 40 && g_conns > 0; ++i) Sleep(50);  // соединения видят g_stop и бросают передачу
     if (g_conns == 0) TlsReset();
 }
