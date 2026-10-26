@@ -29,3 +29,15 @@
 | `game.webp` | игровой режим | A gaming laptop with a game scene glowing on screen, a soft shockwave ring of hexagons expanding from the screen, background apps shown as small dimmed cards drifting to sleep at the side. |
 | `beauty.webp` | оформление | A row of six small desktop previews, each in a different colour theme (crimson, forest green, nord blue, sunset orange, mocha, violet), the middle one enlarged with a glowing crimson window border. |
 | `og.png` | превью ссылки в мессенджерах | Wide banner 1200x630: the crimson glass half-ring at the left edge, dark empty space on the right where the site title will be added later; keep the right two thirds calm and dark. |
+
+## Следующие (по желанию)
+
+Тот же общий стиль в начале промпта. Готовое - в `00 Входящие` библиотеки картинок.
+
+| файл | где | что на картинке |
+|---|---|---|
+| `divider-arc.webp` (2400x240, прозрачный фон) | между разделами сайта | A very wide thin horizontal strip: a single long arc of frosted crimson glass segments, like a slice of a giant radial ring seen edge-on, glowing softly in the middle and fading to nothing at both ends. |
+| `divider-hex.webp` (2400x240, прозрачный фон) | между разделами сайта | A very wide thin horizontal strip of small glowing crimson hexagons, dense in the centre and scattering into sparse sparks towards both ends, like a wave travelling sideways. |
+| `start-bg.webp` (1920x1080) | фон раздела «Как начать» | Calm dark desk scene from above, a laptop with a softly glowing crimson half-ring at the left edge of its screen, a coffee cup, lots of empty dark space; very low contrast so text on top stays readable. |
+| `app-icon.png` (1024x1024, прозрачный фон) | значок Android-приложения «Компьютер рядом» | App icon: a rounded smartphone outline and a small laptop outline joined by a short glowing crimson arc, centred, simple bold shapes that read at 48 px, no text. |
+| `app-empty.webp` (1024x1024, прозрачный фон) | приложение, пока ПК не подключён | A small sleeping laptop with a dim crimson half-ring at its edge and a phone beside it waiting, a dotted arc between them not yet connected, friendly calm mood, no text. |
