@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#140b0f">
 <meta property="og:title" content="Radial Menu - всё нужное у края экрана">
 <meta property="og:description" content="Зажмите Alt, доведите мышь до края экрана - и оттуда раскроется кольцо с вашими папками и программами.">
-<meta property="og:image" content="img/og.png">
+<meta property="og:image" content="https://moonlivedt-oss.github.io/CustomWindowsMoon/img/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -45,9 +45,11 @@ kbd{display:inline-block;padding:2px 8px;border-radius:7px;border:1px solid var(
     radial-gradient(60% 50% at 12% 45%,#c8323f55,transparent 70%),
     radial-gradient(45% 40% at 80% 20%,#ff7b5c26,transparent 70%),
     radial-gradient(70% 60% at 60% 110%,#5a101b88,transparent 70%),
-    linear-gradient(color-mix(in srgb,var(--wine) 72%,transparent),var(--wine) 96%),
-    url(img/hero.webp) center/cover no-repeat,
     var(--wine)}
+.photo{position:absolute;inset:0;z-index:-1;background:url(img/hero.webp) left center/cover no-repeat;
+  -webkit-mask:linear-gradient(90deg,#000 55%,transparent 92%);mask:linear-gradient(90deg,#000 55%,transparent 92%)}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .photo{display:none}}
+:root[data-theme="light"] .photo{display:none}
 .edge{position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(transparent,var(--crimson),transparent);
   opacity:.5;transition:opacity .3s,width .3s}
 .hero.near .edge{opacity:1;width:5px}
@@ -113,7 +115,7 @@ h2{font:700 clamp(30px,4.6vw,48px)/1.05 var(--display);letter-spacing:-.015em;ma
   border:1px solid var(--crimson);color:var(--ember);font:500 11px/18px var(--mono);text-align:center}
 .inner p{margin:0;color:var(--ash);font-size:15.5px}
 .inner figure{margin:6px 0 0;align-self:start}
-.inner figure img{display:block;width:100%;border-radius:14px;border:1px solid var(--line)}
+.inner figure img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:14px;border:1px solid var(--line)}
 .inner figcaption{font-size:13px;color:var(--ash);margin-top:8px}
 .tools{display:flex;gap:10px;margin:0 0 18px}
 .tools button{all:unset;cursor:pointer;font-size:14px;color:var(--ash);border-bottom:1px dashed currentColor;padding:2px 0}
@@ -183,7 +185,10 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
 @media (max-width:640px){
   body{font-size:16px}
   .hero{align-items:end}
-  #ring{width:min(30svh,62vw);top:30%}
+  #ring{width:min(20svh,46vw);top:20%}
+  .eyebrow{font-size:11px;letter-spacing:.04em}
+  /* картинка: её кольцо - там же, где живое (верх экрана) */
+  .photo{background-size:auto 46svh;background-position:-4svh 0;-webkit-mask:linear-gradient(#000 40%,transparent 56%);mask:linear-gradient(#000 40%,transparent 56%)}
   .copy{padding:0 0 48px}
   #touch{display:inline-flex}
   .try.desk{display:none}
@@ -199,6 +204,7 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
 
 <header class="hero" id="hero">
   <div class="field" aria-hidden="true"></div>
+  <div class="photo" id="photo" aria-hidden="true"></div>
   <div class="edge" aria-hidden="true"></div>
   <svg id="ring" viewBox="0 -310 310 620" role="img" aria-label="Кольцо Radial Menu у левого края экрана"></svg>
   <div id="cap" aria-live="polite"><b></b><small></small></div>
@@ -395,13 +401,15 @@ var SK=[
 function glyph(i,n){var a0=-90+i*180/n,a1=a0+180/n,R=22,r=11,c=[4,26];function p(a,rr){a=a*Math.PI/180;return(c[0]+rr*Math.cos(a)).toFixed(1)+' '+(c[1]+rr*Math.sin(a)).toFixed(1)}
   return '<svg class="g" viewBox="0 0 52 52" aria-hidden="true"><path d="M'+p(-90,R)+'A'+R+' '+R+' 0 0 1 '+p(90,R)+'L'+p(90,r)+'A'+r+' '+r+' 0 0 0 '+p(-90,r)+'Z" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-opacity=".2"/>'+
   '<path d="M'+p(a0,R+3)+'A'+(R+3)+' '+(R+3)+' 0 0 1 '+p(a1,R+3)+'L'+p(a1,r)+'A'+r+' '+r+' 0 0 0 '+p(a0,r)+'Z" fill="#c8323f"/></svg>'}
+// где на картинке сюжет (картинки 16:9, в карточке - 4:3)
+var POS={rings:'18%',corners:'8%',music:'50%',windows:'42%',phone:'48%',net:'50%',tools:'42%',guard:'34%',game:'34%',beauty:'50%'};
 var CHEV='<span class="chev" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>';
 function li(a){return '<ul>'+a.map(function(x){return '<li>'+x+'</li>'}).join('')+'</ul>'}
 document.getElementById('skills').innerHTML=SK.map(function(s,i){
   return '<div class="skill" id="f-'+s.id+'"><h3><button class="head" type="button" aria-expanded="false" aria-controls="m-'+s.id+'">'+
     glyph(i,SK.length)+'<span><span class="t">'+s.t+'</span><span class="s">'+s.s+'</span></span><span class="r"><span class="call">'+s.call+'</span>'+CHEV+'</span></button></h3>'+
     '<div class="more" id="m-'+s.id+'" role="region"><div><div class="inner"><div><h4>Что внутри</h4>'+li(s.what)+'<h4>Как пользоваться</h4><ol>'+s.how.map(function(x){return '<li>'+x+'</li>'}).join('')+'</ol>'+'</div>'+
-    '<figure><img src="img/'+s.id+'.webp" alt="'+s.t+'" loading="lazy" onerror="var f=this.parentNode;f.parentNode.classList.add(\'noimg\');f.remove()"></figure></div></div></div></div>'}).join('');
+    '<figure><img src="img/'+s.id+'.webp" alt="" style="object-position:'+(POS[s.id]||'50%')+' 50%" loading="lazy" onerror="var f=this.parentNode;f.parentNode.classList.add(\'noimg\');f.remove()"></figure></div></div></div></div>'}).join('');
 function setOpen(card,on){card.classList.toggle('open',on);card.querySelector('.head').setAttribute('aria-expanded',on)}
 document.querySelectorAll('.skill .head').forEach(function(b){b.addEventListener('click',function(){var c=b.closest('.skill');setOpen(c,!c.classList.contains('open'))})});
 document.getElementById('allopen').addEventListener('click',function(){var all=document.querySelectorAll('.skill'),any=[].some.call(all,function(c){return !c.classList.contains('open')});
@@ -417,7 +425,7 @@ var RING=[
   {n:'Музыка',c:['Плейлист','Подкасты','Альбомы'],k:'2,3 ГБ'},
   {n:'Учёба',c:['Конспекты','Курсы','Книги'],k:'9 папок'},
   {n:'Программы',c:['Браузер','Discord','OBS'],k:'7 ярлыков'}];
-var svg=document.getElementById('ring'),hero=document.getElementById('hero'),cap=document.getElementById('cap');
+var photo=document.getElementById('photo'),svg=document.getElementById('ring'),hero=document.getElementById('hero'),cap=document.getElementById('cap');
 var R0=78,R1=196,R2=206,R3=284,open=0,target=0,hot=-1,hotAnim=[];
 var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 function pt(a,r){a=a*Math.PI/180;return (r*Math.cos(a)).toFixed(2)+' '+(r*Math.sin(a)).toFixed(2)}
@@ -448,7 +456,7 @@ function draw(){
 var last=0;function tick(t){var dt=Math.min(.05,(t-(last||t))/1000);last=t;
   var sp=reduce?1:dt*3.2;open+=Math.sign(target-open)*Math.min(Math.abs(target-open),sp);
   for(var i=0;i<RING.length;i++){var want=i==hot?1:0,cur=hotAnim[i]||0;hotAnim[i]=cur+Math.sign(want-cur)*Math.min(Math.abs(want-cur),reduce?1:dt*5)}
-  draw();requestAnimationFrame(tick)}
+  photo.style.opacity=(1-Math.min(1,open*1.6)).toFixed(3);draw();requestAnimationFrame(tick)}
 requestAnimationFrame(tick);
 function setHot(i){hot=i;if(i<0){cap.classList.remove('show');return}
   cap.querySelector('b').textContent=RING[i].n;cap.querySelector('small').textContent=RING[i].k;cap.classList.add('show')}
