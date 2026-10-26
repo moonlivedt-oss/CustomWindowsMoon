@@ -168,9 +168,9 @@ object Link {
         }
     }
 
-    // Знакомство по ссылке со страницы: берём /ca.crt, сверяем, что сертификат сервера подписан им, запоминаем.
-    // Вернёт имя ПК; IOException - с понятным текстом
-    fun pair(ctx: Context, b: Pure.Base): String {
+    // Знакомство по ссылке со страницы, шаг 1: берём /ca.crt и сверяем, что сертификат сервера подписан им. Ничего не
+    // сохраняет: пользователь сначала сверяет отпечаток (Pure.fingerprint) с карточкой на ПК. IOException - с текстом
+    fun probe(b: Pure.Base): ByteArray {
         val pin = Pin(null)
         val c = open(b.url + "ca.crt", pin, 10000)
         val der = try {
@@ -186,6 +186,11 @@ object Link {
         } catch (e: Exception) {
             throw IOException("сертификат сервера не от этого ПК")
         }
+        return der
+    }
+
+    // Шаг 2, после «Совпадает»: запомнить ПК и спросить его имя и MAC. Вернёт имя ПК
+    fun pair(ctx: Context, b: Pure.Base, der: ByteArray): String {
         val prefs = Prefs(ctx)
         prefs.base = b.url
         prefs.ca = Base64.encodeToString(der, Base64.NO_WRAP)

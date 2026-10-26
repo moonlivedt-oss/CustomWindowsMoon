@@ -45,6 +45,18 @@ object Pure {
         return Base(m.groupValues[2], port, m.groupValues[4] + "/")
     }
 
+    // Отпечаток корневого сертификата ПК для сверки глазами: первые 12 байт SHA-256 DER - 6 групп по 4 знака hex,
+    // как на карточке ПК («BA78 16BF 8F01 CFEA 4141 40DE»)
+    fun fingerprint(der: ByteArray): String {
+        val h = java.security.MessageDigest.getInstance("SHA-256").digest(der)
+        val sb = StringBuilder()
+        for (i in 0 until 12) {
+            if (i > 0 && i % 2 == 0) sb.append(' ')
+            sb.append(String.format("%02X", h[i].toInt() and 0xFF))
+        }
+        return sb.toString()
+    }
+
     fun form(vararg kv: Pair<String, String?>): String =
         kv.filter { it.second != null }
             .joinToString("&") { URLEncoder.encode(it.first, "UTF-8") + "=" + URLEncoder.encode(it.second, "UTF-8") }

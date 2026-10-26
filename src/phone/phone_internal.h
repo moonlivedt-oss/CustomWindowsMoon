@@ -156,6 +156,7 @@ public:
     void Create(HINSTANCE inst);
     struct View {
         std::wstring title, what, status, url, hint;  // hint - брандмауэр, общественная сеть
+        std::wstring fp;  // отпечаток корневого сертификата: сверить с приложением или Android при знакомстве
         bool lan = false, bluetooth = false, pageMode = false, connected = false;
         long long bytes = 0;
     };

@@ -95,6 +95,7 @@ float PhoneCard::BodyHeight(Graphics& g) {
         float tw = (kW - kPad * 3 - kQr) * K;
         float text = 22 + 4 + TextHeight(g, v_.what, fS, tw) / K + 6 + TextHeight(g, v_.status, fS, tw) / K;
         if (!v_.hint.empty()) text += 6 + TextHeight(g, v_.hint, fS, tw) / K;
+        if (!v_.fp.empty()) text += 6 + TextHeight(g, v_.fp, fS, tw) / K;
         h = kPad + std::max(kQr, text);
     }
     float bh = 32, top = h + 12;
@@ -175,7 +176,7 @@ void PhoneCard::Paint(Graphics& g, const RectF& body) {
         float x = box.GetRight() + kPad * K, tw = body.GetRight() - kPad * K - x, y = body.Y + kPad * K;
         g.DrawString(v_.title.c_str(), -1, &fT, RectF(x, y - K, tw - 22 * K, 22 * K), &one, &tB);
         y += 26 * K;
-        for (const std::wstring* s : {&v_.what, &v_.status, &v_.hint}) {
+        for (const std::wstring* s : {&v_.what, &v_.status, &v_.hint, &v_.fp}) {
             if (s->empty()) continue;
             float th = TextHeight(g, *s, fS, tw);
             g.DrawString(s->c_str(), -1, &fS, RectF(x, y, tw, th + 1), &wrap, s == &v_.hint ? &hB : &mB);

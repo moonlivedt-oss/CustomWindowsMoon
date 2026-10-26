@@ -350,19 +350,44 @@ class MainActivity : Activity() {
         }
         status.text = "Подключаю..."
         Thread {
-            val msg = try {
-                val pc = Link.pair(this, b)
-                LinkService.start(this)
-                "Подключено: " + pc.ifEmpty { "ПК" }
+            try {
+                val der = Link.probe(b)
+                runOnUiThread { confirm(b, der, s) }
             } catch (e: Exception) {
-                "Не подключилось: " + (e.message ?: e.javaClass.simpleName)
-            }
-            runOnUiThread {
-                refresh()
-                status.text = msg
-                link.setText(prefs.base ?: s)
+                runOnUiThread { status.text = "Не подключилось: " + (e.message ?: e.javaClass.simpleName) }
             }
         }.start()
+    }
+
+    // Защита первого знакомства: тот, кто в одной сети, мог ответить вместо ПК. Отпечаток сертификата должен совпасть
+    // с карточкой «Телефон рядом» на экране ПК - только тогда приложение его запомнит
+    private fun confirm(b: Pure.Base, der: ByteArray, s: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Сверьте отпечаток")
+            .setMessage(
+                "Отпечаток ПК:\n\n" + Pure.fingerprint(der) + "\n\nНа экране компьютера, на карточке «Телефон рядом», " +
+                    "должно быть то же самое. Не совпадает - нажмите «Нет»: отвечает не ваш ПК.",
+            )
+            .setPositiveButton("Совпадает") { _, _ ->
+                status.text = "Подключаю..."
+                Thread {
+                    val msg = try {
+                        val pc = Link.pair(this, b, der)
+                        LinkService.start(this)
+                        "Подключено: " + pc.ifEmpty { "ПК" }
+                    } catch (e: Exception) {
+                        "Не подключилось: " + (e.message ?: e.javaClass.simpleName)
+                    }
+                    runOnUiThread {
+                        refresh()
+                        status.text = msg
+                        link.setText(prefs.base ?: s)
+                    }
+                }.start()
+            }
+            .setNegativeButton("Нет") { _, _ -> status.text = "Не подключено: отпечаток не совпал" }
+            .setCancelable(false)
+            .show()
     }
 
     @SuppressLint("BatteryLife")

@@ -544,6 +544,7 @@ PhoneCard::View MakeView() {
         v.what = L"Запомненный телефон открывает страницу из закладки, без QR";
     }
     v.hint = !g_hint.empty() ? g_hint : g_netHint;
+    if (!s.caDer.empty() && s.tlsPort) v.fp = L"Отпечаток ПК: " + CaFingerprint(s.caDer);
     return v;
 }
 
@@ -1502,9 +1503,17 @@ void OnMessage(WPARAM wp, LPARAM lp) {
         });
     } else if (wp == EV_PAIRED) {
         autos::Note(L"Телефон рядом: запомнен телефон " + (text ? *text : std::wstring()));
-        ShowNote(L"Телефон запомнен", g_cfg && g_cfg->phoneAlways
-                                          ? L"Страница из закладки откроется, пока ноутбук в своей сети"
-                                          : L"Чтобы открывать без QR, включите «Ждать запомненный телефон» в студии");
+        std::string ca;
+        {
+            Lock l;
+            ca = S().caDer;
+        }
+        std::wstring fp = CaFingerprint(ca);
+        ShowNote(L"Телефон запомнен",
+                 (g_cfg && g_cfg->phoneAlways
+                      ? std::wstring(L"Страница из закладки откроется, пока ноутбук в своей сети")
+                      : std::wstring(L"Чтобы открывать без QR, включите «Ждать запомненный телефон» в студии")) +
+                     (fp.empty() ? L"" : L". Приложение покажет отпечаток - он должен быть " + fp));
     }
     if (wp == EV_CLIP && text) {
         PutText(*text);

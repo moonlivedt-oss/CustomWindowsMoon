@@ -1,4 +1,7 @@
 // «Телефон рядом»: правила безопасности без сокетов и окон (под тестами) - ключи в пути, https для запомненных.
+#include <windows.h>
+#include <bcrypt.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <iterator>
@@ -52,6 +55,23 @@ std::string HttpsLocation(const std::string& host, int tlsPort, const std::strin
     for (char c : path)
         if ((unsigned char)c <= ' ' || c == 0x7F) return "";
     return "https://" + h + ":" + std::to_string(tlsPort) + path;
+}
+
+std::wstring CaFingerprint(const std::string& der) {
+    unsigned char hash[32];
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    if (der.empty() || BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return L"";
+    bool ok = BCryptHash(alg, nullptr, 0, (PUCHAR)der.data(), (ULONG)der.size(), hash, sizeof(hash)) == 0;
+    BCryptCloseAlgorithmProvider(alg, 0);
+    if (!ok) return L"";
+    static const wchar_t kHex[] = L"0123456789ABCDEF";
+    std::wstring out;
+    for (int i = 0; i < 12; ++i) {
+        if (i && i % 2 == 0) out += L' ';
+        out += kHex[hash[i] >> 4];
+        out += kHex[hash[i] & 15];
+    }
+    return out;
 }
 
 // ---- запомненные телефоны ----

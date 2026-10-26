@@ -89,6 +89,10 @@ void TestPhoneBadGate() {
     CHECK(!phone::SameKey("", ""));  // пустой ключ не открывает ничего
     CHECK(!phone::SameKey(std::string("abc\0", 4), "abc"));
 
+    // отпечаток для сверки глазами - тот же, что у приложения (PureTest.fingerprint)
+    CHECK(phone::CaFingerprint("abc") == L"BA78 16BF 8F01 CFEA 4141 40DE");
+    CHECK(phone::CaFingerprint("").empty());
+
     phone::BadGate g;
     uint32_t a = 0xC0A80105, b = 0xC0A80106;
     unsigned long long t = 1000000, ban = 1;

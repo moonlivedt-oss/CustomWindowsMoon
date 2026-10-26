@@ -198,6 +198,11 @@ private:
     std::map<uint32_t, Rec> m_;
 };
 
+// Отпечаток корневого сертификата для сверки глазами: первые 12 байт SHA-256 его DER - 6 групп по 4 знака hex
+// («BA78 16BF 8F01 CFEA 4141 40DE»). Тот же считает приложение на телефоне (Pure.fingerprint); у Android в сведениях
+// о сертификате SHA-256 начинается с тех же знаков. Пусто - не посчитать.
+std::wstring CaFingerprint(const std::string& der);
+
 // запомненный телефон: строка phone-devices.tsv (файл - под DPAPI, phone.cpp)
 struct DeviceRec {
     std::string key;       // /d/<ключ>/

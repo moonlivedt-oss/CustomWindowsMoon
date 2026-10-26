@@ -73,4 +73,10 @@ class PureTest {
         assertEquals(id, Pure.noticeId("org.telegram.messenger", 42, "привет"))
         assertTrue(Pure.noticeId("x".repeat(300), -1, "").length <= 120)
     }
+
+    @Test
+    fun fingerprint() {
+        // тот же отпечаток считает ПК (phone::CaFingerprint): SHA-256("abc") = ba7816bf8f01cfea414140de...
+        assertEquals("BA78 16BF 8F01 CFEA 4141 40DE", Pure.fingerprint("abc".toByteArray()))
+    }
 }
