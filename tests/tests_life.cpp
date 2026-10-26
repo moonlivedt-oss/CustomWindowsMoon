@@ -9,6 +9,7 @@
 #include "life/batcare.h"
 #include "life/btbattery.h"
 #include "life/capwatch.h"
+#include "life/gamehot.h"
 #include "life/nightupd.h"
 #include "life/picker.h"
 #include "life/remind.h"
@@ -239,10 +240,24 @@ void TestBatCare() {
     CHECK(back.size() == 3 && back.begin()->first == L"2026-10-24");
 }
 
+void TestGameHot() {
+    const uint64_t s = 10000, m = 60000;
+    gamehot::HotWatch w;
+    CHECK(!w.Feed(1 * s, 70, false));
+    CHECK(!w.Feed(2 * s, 86, false));          // горячо с 20 с
+    CHECK(!w.Feed(2 * s + 4 * m, 82, false));  // 80-84 - отсчёт идёт
+    CHECK(w.Feed(2 * s + 5 * m, 87, false));   // 5 минут - сказать
+    CHECK(!w.Feed(2 * s + 6 * m, 90, true));   // один раз за игру
+    w.Reset();
+    CHECK(!w.Feed(1 * s, 86, false) && !w.Feed(3 * m, 78, false));                           // остыло - заново
+    CHECK(!w.Feed(4 * m, 70, true) && !w.Feed(8 * m, 70, true) && w.Feed(9 * m, 75, true));  // упор в перегрев
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestGameHot();
     TestBatCare();
     TestAppBright();
     TestCapWatch();

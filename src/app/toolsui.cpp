@@ -3,6 +3,7 @@
 #include <map>
 
 #include "core/perf.h"
+#include "desk/corners.h"
 #include "tools/explain.h"
 #include "tools/important.h"
 
@@ -758,6 +759,21 @@ void OnJob(WPARAM wp, LPARAM lp) {
         return;
     }
     if (wp == kWatchTag) return TryProactive();
+    if (wp == kHotTag) {  // Ж2: в игре долго горячо
+        AcquireSRWLockShared(&g_watchLock);
+        int t = g_gpu.hotTemp;
+        ReleaseSRWLockShared(&g_watchLock);
+        if (!g_game) return;
+        autos::Note(L"Температура в игре: видеокарта " + std::to_wstring(t) + L" °C уже 5 минут");
+        g_askMore = L"Остудить: ограничьте FPS (в настройках игры или в приложении NVIDIA - «Макс. частота "
+                      L"кадров», например 60), включите режим вентиляторов «Турбо» (у ASUS TUF - Fn+F5 или Armoury "
+                      L"Crate), поставьте ноутбук на подставку, чтобы снизу шёл воздух. «Освободить» - Boost закроет "
+                      L"фоновое, процессор будет греть меньше.";
+        Ask(L"Видеокарта " + std::to_wstring(t) + L" °C уже 5 минут",
+            L"Горячо и, похоже, частота уже снижается. Освободить память и процессор от фонового?", L"Освободить",
+            L"Не сейчас", [] { corners::Run(L"boost"); }, nullptr, 20000, Toast::G_WARN);
+        return;
+    }
     if (wp == kSecTag) {
         if (!g_secAsked) return OnSecurity();
         g_secAsked = false;

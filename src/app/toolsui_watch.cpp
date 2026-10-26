@@ -260,7 +260,10 @@ DWORD WINAPI WatchLoop(void*) {
                 g_gpu.samples++;
                 g_gpu.thermal += g.thermal;
                 g_gpu.power += g.powerCap;
+                bool hot = g_gpu.hot.Feed(now, g.temp, g.thermal);
+                if (hot) g_gpu.hotTemp = g.temp;
                 ReleaseSRWLockExclusive(&g_watchLock);
+                if (hot) PostMessageW(g_app, WM_TOOLS_JOB, kHotTag, 0);
             }
         }
         now = GetTickCount64();

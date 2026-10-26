@@ -1,6 +1,7 @@
 #pragma once
 // Внутреннее устройство утилит, общее для toolsui.cpp (ядро: фоновые подсчёты, слежка, чистка, недельные
 // проверки), toolsui_ring.cpp (сборка кольца «Утилиты») и toolsui_run.cpp (что делает каждый пункт).
+#include "life/gamehot.h"
 #include "app/toolsui.h"
 
 #include <algorithm>
@@ -37,6 +38,7 @@ constexpr UINT kWatchTag = 0x5F;   // wParam у WM_TOOLS_JOB: новый сни�
 constexpr UINT kWeeklyTag = 0x57;  // wParam у WM_TOOLS_JOB: итог недельной проверки
 constexpr UINT kLeftTag = 0x5B;    // wParam у WM_TOOLS_JOB: задание, брошенное по «Стоп», доработало (LeftMsg)
 constexpr UINT kBuildTag = 0x5A;   // wParam у WM_TOOLS_JOB: повторная сборка CMake нашла ошибку (BuildMsg, Л31)
+constexpr UINT kHotTag = 0x58;    // wParam у WM_TOOLS_JOB: в игре долго горячо (Ж2, g_gpu.hotTemp)
 constexpr UINT kDrainTag = 0x59;   // wParam у WM_TOOLS_JOB: сеанс от батареи кончился (DrainMsg, Л38)
 constexpr UINT kSelfTag = 0x5C;    // wParam у WM_TOOLS_JOB: часовой снимок своей памяти (SelfMsg)
 constexpr UINT kDiskTag = 0x5D;    // wParam у WM_TOOLS_JOB: карточка «Мало места» собрана
@@ -171,6 +173,8 @@ struct WeeklyMsg {  // kWeeklyTag: итог недельной проверки
 // видеокарта за игру: собирает поток слежки, итог - карточкой после игры (toolsui_watch.cpp)
 struct GpuStats {
     int max = 0, samples = 0, thermal = 0, power = 0;
+    gamehot::HotWatch hot;  // Ж2: долго горячо - сказать во время игры
+    int hotTemp = 0;
 };
 extern GpuStats g_gpu;
 std::wstring JobTitle(net::Job j);
