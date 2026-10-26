@@ -17,8 +17,10 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -29,6 +31,7 @@ class MainActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var status: TextView
     private lateinit var link: EditText
+    private lateinit var waiting: ImageView  // ноутбук и телефон ещё не связаны - пока ПК не подключён
     private lateinit var col: LinearLayout  // куда добавляются строки: корень или текущая карточка
     private val switches = mutableMapOf<String, Switch>()
     private var asking: String? = null  // для какого переключателя спросили разрешения
@@ -140,6 +143,15 @@ class MainActivity : Activity() {
         }
 
         card("Компьютер", root)
+        waiting = ImageView(this).apply {
+            setImageResource(R.drawable.app_empty)
+            adjustViewBounds = true
+            contentDescription = "ПК ещё не подключён"
+        }
+        col.addView(waiting, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(4)
+            bottomMargin = dp(8)
+        })
         link = EditText(this).apply {
             hint = "https://адрес-ПК:8800/d/..."
             inputType = InputType.TYPE_TEXT_VARIATION_URI
@@ -245,6 +257,7 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         val pc = prefs.pc.ifEmpty { "ПК" }
+        waiting.visibility = if (Link.connected(this)) View.GONE else View.VISIBLE
         status.text = when {
             !Link.connected(this) -> "ПК не подключён"
             LinkService.online -> "Подключено: $pc на связи"
