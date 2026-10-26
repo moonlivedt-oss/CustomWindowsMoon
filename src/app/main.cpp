@@ -531,6 +531,14 @@ bool RunExtra(const std::wstring& a) {
         phone::OpenPage();
         return true;
     }
+    if (a == L"phone_find") {
+        phone::Find();
+        return true;
+    }
+    if (a == L"phone_send") {
+        phone::SendClipboard();
+        return true;
+    }
     if (a == L"shelf") {
         shelf::Toggle();
         return true;
@@ -1237,6 +1245,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) running = false;
     }
     if (running) {
+        // «Отправить - На телефон» в Проводнике: файлы - работающей копии
+        if (std::vector<std::wstring> send = devcli::ArgsAfter(L"--to-phone"); !send.empty())
+            if (HWND w = FindWindowW(kClass, nullptr)) phone::PostToRunning(w, send);
         // уже запущено: попросить работающую копию открыть редактор
         if (HWND w = FindWindowW(kClass, nullptr); w && wantEditor) {
             AllowSetForegroundWindow(ASFW_ANY);
@@ -1401,14 +1412,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
-    shelf::Init(inst, &g_cfg);  // Ф7
-    preview::Init(inst, &g_cfg);  // Ф8
-    tidy::Init(inst, &g_cfg);  // Ф3, Л40
-    record::Init(inst, &g_cfg);  // Ф9
-    convert::Init(inst, &g_cfg, &g_menu);  // Ф2
-    batcare::Init(inst, &g_cfg);  // Ж1, Л37
-    appbright::Init(&g_cfg, [] { return g_game.On(); });  // Ж7
-    capwatch::Init(inst, &g_cfg);  // Ж5, Б2
+    phone::SetRunner([](const std::wstring& a) {  // пункт кольца с телефона - как щелчок в кольце
+        g_pendingAction = a;
+        SetTimer(g_wnd, kActionTimer, 50, nullptr);
+    });
+    if (std::vector<std::wstring> send = devcli::ArgsAfter(L"--to-phone"); !send.empty()) phone::SendFiles(send);
+    phone::EnsureSendTo();
+    shelf::Init(inst, &g_cfg);                                                       // Ф7
+    preview::Init(inst, &g_cfg);                                                     // Ф8
+    tidy::Init(inst, &g_cfg);                                                        // Ф3, Л40
+    record::Init(inst, &g_cfg);                                                      // Ф9
+    convert::Init(inst, &g_cfg, &g_menu);                                            // Ф2
+    batcare::Init(inst, &g_cfg);                                                     // Ж1, Л37
+    appbright::Init(&g_cfg, [] { return g_game.On(); });                             // Ж7
+    capwatch::Init(inst, &g_cfg);                                                    // Ж5, Б2
     btbattery::Init(inst, &g_cfg, UpdateTrayTip);                                    // Ж4
     nightupd::Init(inst, &g_cfg, [] { return g_game.On() || g_dev.On(); });          // Е1
     remind::Init(inst, &g_cfg, &g_menu, [] { return g_game.On() || share::On(); });  // Е2

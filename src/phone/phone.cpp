@@ -22,6 +22,7 @@
 #include "core/bg.h"
 #include "core/config.h"
 #include "core/files.h"
+#include "core/macro.h"
 #include "core/secrets.h"
 #include "core/text.h"
 #include "core/themes.h"
@@ -40,6 +41,16 @@ using namespace detail;
 namespace {
 
 HWND g_app = nullptr;
+void (*g_runner)(const std::wstring&) = nullptr;  // main: действие из кольца (action:..., keys:, macro:)
+
+std::wstring OutboxFile() {
+    PWSTR p = nullptr;
+    std::wstring dir;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p))) dir = p;
+    CoTaskMemFree(p);
+    return dir + L"\\MoonDesk\\phone-outbox.txt";
+}
+
 const Config* g_cfg = nullptr;
 BoostCard g_note;  // итог: «Передано на телефон», «С телефона: 5 фото - показать»
 int g_port = 0, g_tlsPort = 0;
@@ -514,6 +525,7 @@ bool StartSession(bool oneTime, bool standing = false) {
     g_fwOk = g_loopback || FirewallAllows(port);
     RefreshAddress(true);
     RefreshCert();
+    MediaStart();
     autos::Note(L"Телефон рядом: передача открыта (порт " + std::to_wstring(port) +
                 (g_tlsPort ? L", https " + std::to_wstring(g_tlsPort) : std::wstring()) + L")");
     return true;
@@ -677,6 +689,7 @@ void StopSession(const wchar_t* why) {
     for (PCCERT_CONTEXT c : g_certs) CertFreeCertificateContext(c);
     g_certs.clear();
     CamStop();
+    MediaStop();
     int got = 0, done = 0, total = 0;
     {
         Lock l;
@@ -761,6 +774,96 @@ void Stop() { StopSession(L"остановлено"); }
 bool Active() { return S().on; }
 
 int Devices() { return (int)LoadDevices().size(); }
+
+void Find() {
+    if (!S().on) {
+        ShowNote(L"Телефон не на связи", L"Найти можно, пока на телефоне открыта страница «Компьютер рядом»");
+        return;
+    }
+    {
+        Lock l;
+        ++S().findSeq;
+        ++S().seq;
+    }
+    autos::Note(L"Телефон рядом: найти телефон");
+    ShowNote(L"Телефон звенит", L"Если страница на нём открыта");
+}
+
+void SendFiles(const std::vector<std::wstring>& files) { Offer(files); }
+
+void SendClipboard() {
+    std::vector<std::wstring> files;
+    std::wstring text;
+    if (OpenClipboard(g_app)) {
+        if (HANDLE d = GetClipboardData(CF_HDROP)) {  // скопированное в Проводнике
+            UINT n = DragQueryFileW((HDROP)d, 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < n; ++i) {
+                wchar_t p[MAX_PATH * 4];
+                if (DragQueryFileW((HDROP)d, i, p, MAX_PATH * 4)) files.push_back(p);
+            }
+        } else if (HANDLE t = GetClipboardData(CF_UNICODETEXT)) {
+            if (const wchar_t* w = (const wchar_t*)GlobalLock(t)) {
+                text = Trim(std::wstring(w).substr(0, 4096));
+                GlobalUnlock(t);
+            }
+        }
+        CloseClipboard();
+    }
+    if (!files.empty()) return SendFiles(files);
+    std::string link = ShareLink("", Narrow(text));
+    if (link.empty()) {
+        ShowNote(L"На телефон нечего отправить", text.empty() ? L"Скопируйте файлы в Проводнике или ссылку"
+                                                              : L"Текст и так виден на телефоне во вкладке «Буфер»");
+        return;
+    }
+    if (!S().on) OpenPage();
+    if (!S().on) return;
+    {
+        Lock l;
+        S().links.insert(S().links.begin(), Widen(link));
+        if (S().links.size() > 10) S().links.pop_back();
+        ++S().seq;
+    }
+    autos::Note(L"Телефон рядом: ссылка на телефон " + Widen(link));
+    ShowNote(L"Ссылка - на телефон", Widen(link));
+}
+
+void SetRunner(void (*run)(const std::wstring&)) { g_runner = run; }
+
+void EnsureSendTo() {
+    PWSTR p = nullptr;
+    std::wstring dir;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_SendTo, 0, nullptr, &p))) dir = p;
+    CoTaskMemFree(p);
+    std::wstring lnk = dir + L"\\Телефон (RadialMenu).lnk";
+    if (dir.empty() || GetFileAttributesW(lnk.c_str()) != INVALID_FILE_ATTRIBUTES) return;
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    IShellLinkW* sl = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&sl)))) return;
+    sl->SetPath(exe);
+    sl->SetArguments(L"--to-phone");
+    sl->SetIconLocation(exe, 0);
+    sl->SetDescription(L"Передать на телефон (RadialMenu, «Телефон рядом»)");
+    IPersistFile* pf = nullptr;
+    if (SUCCEEDED(sl->QueryInterface(IID_PPV_ARGS(&pf)))) {
+        pf->Save(lnk.c_str(), TRUE);
+        pf->Release();
+    }
+    sl->Release();
+}
+
+bool PostToRunning(HWND app, const std::vector<std::wstring>& files) {
+    std::string u;
+    for (const std::wstring& f : files) u += Narrow(f) + "\n";
+    std::wstring path = OutboxFile();
+    HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, 0, nullptr, OPEN_ALWAYS, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD put = 0;
+    bool ok = WriteFile(h, u.data(), (DWORD)u.size(), &put, nullptr) && put == u.size();
+    CloseHandle(h);
+    return ok && PostMessageW(app, WM_PHONE, EV_OUTBOX, 0);
+}
 
 void Forget() {
     DeleteFileW(DevicesFile().c_str());
@@ -975,6 +1078,51 @@ std::string WinsJson() {
     return j + "]";
 }
 
+bool IsAction(const Item& it) { return it.path.rfind(L"action:", 0) == 0 || macro::Is(it.path); }
+
+// пункт кольца по номеру: «r.3.1» - правое кольцо, пункт 3, в нём пункт 1 (l - левое)
+const Item* RingItem(const std::string& id) {
+    if (!g_cfg || id.size() < 3 || (id[0] != 'r' && id[0] != 'l') || id[1] != '.') return nullptr;
+    const std::vector<Item>* list = id[0] == 'r' ? &g_cfg->right : &g_cfg->left;
+    const Item* it = nullptr;
+    for (size_t at = 2; at <= id.size();) {
+        size_t e = id.find('.', at);
+        if (e == std::string::npos) e = id.size();
+        std::string num = id.substr(at, e - at);
+        if (num.empty() || num.size() > 4 || num.find_first_not_of("0123456789") != std::string::npos) return nullptr;
+        size_t n = (size_t)atoi(num.c_str());
+        if (n >= list->size()) return nullptr;
+        it = &(*list)[n];
+        list = &it->children;
+        at = e + 1;
+    }
+    return it;
+}
+
+// пункты для телефона: программы, папки, файлы, действия и группы (подкольца из radial.cfg); служебные - мимо
+std::string RingJson(const std::vector<Item>& list, const std::string& prefix, int depth) {
+    std::string j = "[";
+    bool first = true;
+    for (size_t i = 0; i < list.size(); ++i) {
+        const Item& it = list[i];
+        if (it.special || it.name.empty()) continue;
+        std::string id = prefix + "." + std::to_string(i);
+        bool act = IsAction(it), grp = !it.children.empty() && !it.dir && depth < 2;
+        if (!act && !grp && it.full.empty()) continue;
+        bool icon = !it.iconFull.empty() || (!act && !it.full.empty());
+        j += std::string(first ? "" : ",") + "{\"id\":\"" + id + "\",\"n\":" + phone::Json(it.name) + ",\"k\":\"" +
+             (grp      ? "grp"
+              : act    ? "act"
+              : it.dir ? "dir"
+                       : "app") +
+             "\",\"i\":" + (icon ? "true" : "false");
+        if (grp) j += ",\"c\":" + RingJson(it.children, id, depth + 1);
+        j += "}";
+        first = false;
+    }
+    return j + "]";
+}
+
 void DoCall(CallReq& c) {
     if (c.op == "wins") {
         c.out = WinsJson();
@@ -1002,6 +1150,31 @@ void DoCall(CallReq& c) {
     } else if (c.op.rfind("open:", 0) == 0) {
         std::wstring p = Widen(c.op.substr(5));
         c.ok = (INT_PTR)ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, ParentDir(p).c_str(), SW_SHOWNORMAL) > 32;
+    } else if (c.op == "ring") {
+        c.out = "{\"r\":" + RingJson(g_cfg ? g_cfg->right : std::vector<Item>(), "r", 0) +
+                ",\"l\":" + RingJson(g_cfg ? g_cfg->left : std::vector<Item>(), "l", 0) + "}";
+        c.ok = true;
+    } else if (c.op.rfind("ringicon:", 0) == 0) {
+        const Item* it = RingItem(c.op.substr(9));
+        if (!it) return;
+        // свой значок пункта, если файл на месте, иначе - значок самой программы или папки
+        bool own = !it->iconFull.empty() && GetFileAttributesW(it->iconFull.c_str()) != INVALID_FILE_ATTRIBUTES;
+        c.out = Narrow(own ? it->iconFull : IsAction(*it) ? std::wstring() : it->full);
+        c.ok = true;
+    } else if (c.op.rfind("ringrun:", 0) == 0) {  // тот же путь, что щелчок в кольце
+        const Item* it = RingItem(c.op.substr(8));
+        if (!it || it->special || (!it->children.empty() && !it->dir)) return;
+        if (IsAction(*it)) {
+            if (!g_runner) return;
+            g_runner(macro::Is(it->path) ? it->path : it->path.substr(7));
+        } else if (!it->full.empty()) {
+            AllowSetForegroundWindow(ASFW_ANY);
+            ShellExecuteW(nullptr, nullptr, it->full.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        } else {
+            return;
+        }
+        autos::Note(L"Телефон рядом: из кольца - " + it->name);
+        c.ok = true;
     }
 }
 
@@ -1010,6 +1183,24 @@ void DoCall(CallReq& c) {
 void OnMessage(WPARAM wp, LPARAM lp) {
     if (wp == EV_CAM) {  // кадр камеры телефона - в окно
         CamShow();
+        return;
+    }
+    if (wp == EV_OUTBOX) {  // «Отправить - На телефон»: файлы от второй копии
+        std::wstring f = OutboxFile();
+        HANDLE h = CreateFileW(f.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        std::string u;
+        if (h != INVALID_HANDLE_VALUE) {
+            u.resize(std::min<DWORD>(GetFileSize(h, nullptr), 1 << 20));
+            DWORD got = 0;
+            ReadFile(h, u.data(), (DWORD)u.size(), &got, nullptr);
+            u.resize(got);
+            CloseHandle(h);
+            DeleteFileW(f.c_str());
+        }
+        std::vector<std::wstring> files;
+        for (const std::wstring& line : Split(Widen(u), L'\n'))
+            if (!Trim(line).empty()) files.push_back(Trim(line));
+        if (!files.empty()) SendFiles(files);
         return;
     }
     if (wp == EV_CALL) {  // из потока сервера через SendMessage: lp - CallReq на его стеке

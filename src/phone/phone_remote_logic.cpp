@@ -2,6 +2,8 @@
 // файлами (под тестами).
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 
 #include "phone/phone.h"
 
@@ -48,6 +50,26 @@ std::vector<WORD> Combo(const std::string& name) {
     for (const auto& c : kCombos)
         if (name == c.name) return c.keys;
     return {};
+}
+
+WORD KeyVk(const std::string& name) {
+    static const struct {
+        const char* name;
+        WORD vk;
+    } kKeys[] = {{"enter", VK_RETURN}, {"back", VK_BACK},   {"esc", VK_ESCAPE},  {"tab", VK_TAB},
+                 {"left", VK_LEFT},    {"right", VK_RIGHT}, {"up", VK_UP},       {"down", VK_DOWN},
+                 {"space", VK_SPACE},  {"del", VK_DELETE},  {"home", VK_HOME},   {"end", VK_END},
+                 {"win", VK_LWIN},     {"pgup", VK_PRIOR},  {"pgdn", VK_NEXT},   {"shift", VK_SHIFT},
+                 {"ctrl", VK_CONTROL}, {"alt", VK_MENU},    {"caps", VK_CAPITAL}};
+    for (const auto& k : kKeys)
+        if (name == k.name) return k.vk;
+    if (name.size() == 1 && ((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= '0' && name[0] <= '9')))
+        return (WORD)toupper((unsigned char)name[0]);  // у букв и цифр код клавиши - сама заглавная буква
+    if (name.size() >= 2 && name.size() <= 3 && name[0] == 'f') {
+        int n = atoi(name.c_str() + 1);
+        if (n >= 1 && n <= 12 && std::to_string(n) == name.substr(1)) return (WORD)(VK_F1 + n - 1);
+    }
+    return 0;
 }
 
 bool FsOp(const std::string& op) {

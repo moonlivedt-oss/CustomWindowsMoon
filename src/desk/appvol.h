@@ -36,5 +36,6 @@ void Stop();
 std::map<std::wstring, float> Saved();  // для студии
 std::vector<SessionNow> Current();      // звуковые сеансы сейчас (--appvol-diag)
 void Forget(const std::wstring& exe);
+bool SetLevel(DWORD pid, float level);  // громкость звукового сеанса программы (0..1) - с телефона
 
 }  // namespace appvol

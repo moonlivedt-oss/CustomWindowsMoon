@@ -1,6 +1,8 @@
 // «Телефон рядом»: пульт, тачпад и клавиатура с телефона, «открыть на ПК», картинки буфера, запомнить телефон.
 #include <winsock2.h>
 
+#include <algorithm>
+
 #include "core/text.h"
 #include "phone/phone_internal.h"
 #include "tools/tools.h"
@@ -55,6 +57,47 @@ void Type(const std::wstring& t) {  // символами Юникода: не �
     if (!in.empty()) SendInput((UINT)in.size(), in.data(), sizeof(INPUT));
 }
 
+}  // namespace
+
+// клавиши геймпада: скан-кодами (игры на DirectInput не видят виртуальные коды); зажатые - помним, чтобы отпустить
+SRWLOCK g_heldLock = SRWLOCK_INIT;
+std::vector<WORD> g_held;
+
+void HoldKey(WORD vk, bool down) {
+    INPUT in{};
+    in.type = INPUT_KEYBOARD;
+    in.ki.wScan = (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    in.ki.dwFlags = KEYEVENTF_SCANCODE | (down ? 0 : KEYEVENTF_KEYUP);
+    switch (vk) {  // стрелки и их соседи - «расширенные» клавиши
+        case VK_LEFT:
+        case VK_RIGHT:
+        case VK_UP:
+        case VK_DOWN:
+        case VK_PRIOR:
+        case VK_NEXT:
+        case VK_HOME:
+        case VK_END:
+        case VK_INSERT:
+        case VK_DELETE:
+            in.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    }
+    AcquireSRWLockExclusive(&g_heldLock);
+    auto it = std::find(g_held.begin(), g_held.end(), vk);
+    if (down && it == g_held.end()) g_held.push_back(vk);
+    if (!down && it != g_held.end()) g_held.erase(it);
+    ReleaseSRWLockExclusive(&g_heldLock);
+    SendInput(1, &in, sizeof(in));
+}
+
+void ReleaseKeys() {
+    AcquireSRWLockExclusive(&g_heldLock);
+    std::vector<WORD> held = g_held;
+    ReleaseSRWLockExclusive(&g_heldLock);
+    for (WORD vk : held) HoldKey(vk, false);
+}
+
+namespace {
+
 bool Input(const Request& r) {
     std::string t = Q(r, "t");
     if (t == "m") {
@@ -80,17 +123,13 @@ bool Input(const Request& r) {
     } else if (t == "w" || t == "h") {
         Mouse(t == "w" ? MOUSEEVENTF_WHEEL : MOUSEEVENTF_HWHEEL, 0, 0, (DWORD)atoi(Q(r, "d").c_str()));
     } else if (t == "k") {
-        static const struct {
-            const char* name;
-            WORD vk;
-        } kKeys[] = {{"enter", VK_RETURN}, {"back", VK_BACK},   {"esc", VK_ESCAPE}, {"tab", VK_TAB},
-                     {"left", VK_LEFT},    {"right", VK_RIGHT}, {"up", VK_UP},      {"down", VK_DOWN},
-                     {"space", VK_SPACE},  {"del", VK_DELETE},  {"home", VK_HOME},  {"end", VK_END},
-                     {"win", VK_LWIN},     {"f5", VK_F5},       {"f11", VK_F11},    {"pgup", VK_PRIOR},
-                     {"pgdn", VK_NEXT}};
-        std::string k = Q(r, "k");
-        for (const auto& e : kKeys)
-            if (k == e.name) Key(e.vk);
+        if (WORD vk = KeyVk(Q(r, "k"))) Key(vk);
+    } else if (t == "kd" || t == "ku") {  // геймпад: держать клавишу, пока палец на кнопке
+        WORD vk = KeyVk(Q(r, "k"));
+        if (!vk) return false;
+        HoldKey(vk, t == "kd");
+    } else if (t == "ka") {  // отпустить всё (страница ушла в фон)
+        ReleaseKeys();
     } else {
         return false;
     }

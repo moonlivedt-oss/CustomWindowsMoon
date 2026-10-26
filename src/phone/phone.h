@@ -36,8 +36,18 @@ std::wstring Url();        // ссылка для телефона (пусто -
 std::wstring SecureUrl();  // та же страница по https (пусто - https не открылся)
 std::wstring Diag();
 int Devices();  // сколько телефонов запомнено
-void Forget();  // забыть все запомненные телефоны    // адаптеры, адрес для телефона, профиль сети, Bluetooth,
-                // брандмауэр (--phone-diag)
+void Forget();  // забыть все запомненные телефоны
+// действия для углов и кольца: найти телефон (страница звенит), на телефон - то, что в буфере ПК (файлы
+// Проводника, ссылка или текст)
+void Find();
+void SendClipboard();
+void SendFiles(const std::vector<std::wstring>& files);  // «Отправить - На телефон» в Проводнике
+// запуск пункта кольца с телефона: main делает его тем же путём, что и щелчок в кольце
+void SetRunner(void (*run)(const std::wstring& action));
+void EnsureSendTo();  // ярлык «Телефон (RadialMenu)» в меню «Отправить» Проводника, если его нет
+// вторая копия RadialMenu.exe --to-phone <файлы>: передать файлы работающей копии (её окно - app)
+bool PostToRunning(HWND app, const std::vector<std::wstring>& files);  // адаптеры, адрес для телефона, профиль сети,
+                                                                       // Bluetooth, брандмауэр (--phone-diag)
 void OnMessage(WPARAM wp, LPARAM lp);
 
 // --- без сокетов и окон (под тестами) ---
@@ -99,6 +109,7 @@ POINT TapPoint(double nx, double ny, const RECT& monitor);  // касание в
 SIZE FrameSize(int w, int h, int maxW);                     // кадр для телефона: не шире maxW (320..2560)
 std::vector<WORD> Combo(const std::string& name);           // «copy» -> Ctrl+C; пусто - нет такого
 bool FsOp(const std::string& op);                           // open, copy, move, rename, mkdir, delete
+WORD KeyVk(const std::string& name);  // «enter», «left», «a», «7», «f5», «shift» -> код клавиши; 0 - нет такой
 
 // --- «Поделиться - на ПК» (phone_share_logic.cpp, под тестами) ---
 std::string Boundary(const std::string& contentType);  // из «multipart/form-data; boundary=...»; пусто - не то

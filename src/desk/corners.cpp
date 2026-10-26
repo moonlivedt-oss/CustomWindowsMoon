@@ -74,6 +74,8 @@ const Action kActions[] = {
     {L"remind", L"Напоминание"},
     {L"picker", L"Пипетка и линейка"},
     {L"awake", L"Не спать на время"},
+    {L"phone_find", L"Найти телефон"},
+    {L"phone_send", L"На телефон - из буфера"},
 };
 
 const Action kWheel[] = {

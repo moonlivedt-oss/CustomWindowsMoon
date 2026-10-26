@@ -490,6 +490,9 @@ void TestPhoneRemote() {
     CHECK(s.cx == 320 && s.cy == 180);
     CHECK(phone::Combo("copy") == std::vector<WORD>({VK_CONTROL, 'C'}) && phone::Combo("rm -rf").empty());
     CHECK(phone::FsOp("move") && phone::FsOp("delete") && !phone::FsOp("format") && !phone::FsOp(""));
+    CHECK(phone::KeyVk("enter") == VK_RETURN && phone::KeyVk("pgdn") == VK_NEXT && phone::KeyVk("a") == 'A');
+    CHECK(phone::KeyVk("7") == '7' && phone::KeyVk("f5") == VK_F5 && phone::KeyVk("f12") == VK_F12);
+    CHECK(phone::KeyVk("f13") == 0 && phone::KeyVk("f05") == 0 && phone::KeyVk("A") == 0 && phone::KeyVk("") == 0);
 }
 
 }  // namespace

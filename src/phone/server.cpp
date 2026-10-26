@@ -90,7 +90,9 @@ void Poll(Conn& cn, const Request& r) {
             ",\"input\":" + (InputAllowed() ? "true" : "false") +
             ",\"screen\":" + (ScreenAllowed() ? "true" : "false") + ",\"fs\":" + (FilesAllowed() ? "true" : "false") +
             ",\"paired\":" + (S().standing ? "true" : "false") + ",\"tls\":" + std::to_string(S().tlsPort) +
-            ",\"sec\":" + (cn.tls ? "true" : "false") + ",\"shares\":[";
+            ",\"sec\":" + (cn.tls ? "true" : "false") + ",\"find\":" + std::to_string(S().findSeq) + ",\"links\":[";
+        for (size_t k = 0; k < S().links.size(); ++k) j += (k ? "," : "") + phone::Json(S().links[k]);
+        j += "],\"shares\":[";
         std::vector<std::wstring> roots = ShareRoots();
         for (size_t k = 0; k < roots.size(); ++k)
             j += (k ? "," : "") + phone::Json(roots[k].substr(roots[k].find_last_of(L'\\') + 1));
@@ -147,7 +149,8 @@ void Handle(Conn& cn, const Request& r) {
     }
     if (rest == "/poll") return Poll(cn, r);
     if (rest == "/clip" && r.method == "POST") return ClipIn(cn, r);
-    if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest) || HandleRemote(cn, r, rest) || HandleShare(cn, r, rest))
+    if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest) || HandleRemote(cn, r, rest) || HandleShare(cn, r, rest) ||
+        HandleExtra(cn, r, rest))
         return;
     Text(cn, 404, "нет");
 }

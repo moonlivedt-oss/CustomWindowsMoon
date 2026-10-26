@@ -208,6 +208,12 @@ int Clean() {
 
 bool HasFlag(const wchar_t* flag) { return Has(Args(), flag); }
 
+std::vector<std::wstring> ArgsAfter(const wchar_t* flag) {
+    std::vector<std::wstring> args = Args();
+    auto it = std::find(args.begin(), args.end(), std::wstring(flag));
+    return it == args.end() ? std::vector<std::wstring>() : std::vector<std::wstring>(it + 1, args.end());
+}
+
 bool Run(int& exitCode) {
     std::vector<std::wstring> args = Args();
     std::wstring v;

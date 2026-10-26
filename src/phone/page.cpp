@@ -84,11 +84,43 @@ background:#2b2432;border:1px solid var(--line);color:var(--fg);padding:10px 16p
 z-index:15;pointer-events:none;transition:opacity .2s,transform .2s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
 #vol.show{opacity:1;transform:translate(-50%,0)}
 .page{animation:in .18s ease-out}@keyframes in{from{transform:translateY(8px)}}
+/* что играет, громкость программ */
+.np{display:flex;gap:14px;align-items:center}#npart{width:72px;height:72px;border-radius:14px;object-fit:cover;background:#120f16;flex:0 0 auto}
+.npt{min-width:0;flex:1}.npt b{display:block;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.npt small{display:block;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nptime{display:flex;justify-content:space-between;font-size:12px;color:var(--mut)}
+input[type=range]{width:100%;height:36px;accent-color:var(--ac);margin:8px 0 0}
+.app{display:flex;align-items:center;gap:12px;padding:4px 0}.app span{flex:0 0 34%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.app input{margin:0}
+/* кольцо */
+.rgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.rgrid button{flex-direction:column;min-height:100px;font-size:13px;
+line-height:1.2;text-align:center;padding:10px 6px;gap:8px;overflow:hidden}.rgrid img,.rgrid .lt{width:44px;height:44px;border-radius:12px}
+.rgrid .lt{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#e0414f55,#ff7b5c55);font-size:20px;font-weight:600}
+.rgrid .nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+/* слайды, мышь в воздухе, геймпад, ПК */
+.slidenav{display:flex;gap:10px}.slidenav button{flex:1;min-height:200px;border-radius:24px}.slidenav svg{width:48px;height:48px}
+#air,#gpad{touch-action:none;user-select:none;-webkit-user-select:none}
+#air{height:200px;border-radius:22px;background:linear-gradient(160deg,#1d1824,#141118);border:1px solid var(--line);display:flex;
+align-items:center;justify-content:center;text-align:center;padding:18px;color:var(--mut);font-size:14px}#air.on{border-color:var(--ac);color:var(--fg)}
+#gpad{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.dpad,.abxy{--c:min(12.5vw,72px);display:grid;grid-template-columns:repeat(3,var(--c));grid-template-rows:repeat(3,var(--c));gap:4px}
+.dpad button,.abxy button{min-height:0;padding:0;border-radius:16px}.dpad svg{width:30px;height:30px}
+
+.abxy button{border-radius:50%;font-size:20px;font-weight:700}.abxy .a{background:#3fbf7a33}.abxy .b{background:#e0414f33}
+.abxy .x{background:#4f8cff33}.abxy .y{background:#f2c23d33}.held{filter:brightness(1.6);transform:scale(.94)}
+select{width:100%;min-height:48px;border-radius:14px;border:1px solid var(--line);background:#120f16;color:var(--fg);font:inherit;padding:0 10px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat{background:#120f16;border-radius:16px;padding:12px}
+.stat small{color:var(--mut);font-size:12px;display:block}.stat b{font-size:19px;font-weight:650;display:block;margin:2px 0}
+.stat .bar{margin-top:6px}label.sw{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--mut);margin-top:12px}
+label.sw input{width:22px;height:22px;accent-color:var(--ac)}
 .hide{display:none!important}
 </style></head><body>
 <header><div><b>Компьютер рядом</b><small id="sub">телефон как пульт и передача файлов</small></div><span id="st">на связи</span></header>
 
-<div data-p="remote" class="page hide"><section>
+<div data-p="remote" class="page hide">
+<section id="np" class="hide"><div class="np"><img id="npart" alt=""><div class="npt"><b id="npt"></b><small id="npa"></small></div></div>
+<input type="range" id="npseek" min="0" max="1000" value="0"><div class="nptime"><span id="nppos"></span><span id="npend"></span></div></section>
+<section>
 <div class="vol"><button class="round" data-hold="vol-" aria-label="Тише" data-i="minus"></button>
 <div class="meter"><i id="volfill"></i><span id="voltxt">Громкость</span></div>
 <button class="round" data-hold="vol+" aria-label="Громче" data-i="plus"></button></div>
@@ -96,6 +128,7 @@ z-index:15;pointer-events:none;transition:opacity .2s,transform .2s;white-space:
 <button class="round big p" onclick="cmd('play')" aria-label="Пауза" data-i="play"></button>
 <button class="round" onclick="cmd('next')" aria-label="Дальше" data-i="next"></button></div>
 <div class="row"><button onclick="cmd('mute')" data-i="mute">Без звука</button></div></section>
+<section id="appsbox" class="hide"><h2>Громкость программ</h2><div id="apps"></div></section>
 <section><h2>Компьютер</h2><div class="tiles">
 <button class="tile" onclick="cmd('screen')" data-i="screenoff">Погасить экран</button>
 <button class="tile" onclick="cmd('lock')" data-i="lock">Заблокировать</button>
@@ -106,6 +139,7 @@ z-index:15;pointer-events:none;transition:opacity .2s,transform .2s;white-space:
 <div class="mbtn"><button onclick="inp('c&b=l')">Левая</button><button onclick="inp('c&b=r')">Правая</button></div>
 <div class="row mt"><input id="kb" class="in" style="flex:3" placeholder="печатать на ПК" enterkeyhint="send" autocomplete="off">
 <button class="p" onclick="typeKb()" style="flex:1">Ввод</button></div>
+<label class="sw"><input type="checkbox" id="live" checked> Печатать сразу (буквы появляются на ПК по мере набора, голосовой ввод тоже)</label>
 <details><summary>Клавиши</summary><div class="grid">
 <button onclick="key('back')">Стереть</button><button onclick="key('enter')">Enter</button><button onclick="key('esc')">Esc</button>
 <button onclick="key('tab')">Tab</button><button onclick="key('up')">Вверх</button><button onclick="key('space')">Пробел</button>
@@ -142,6 +176,8 @@ z-index:15;pointer-events:none;transition:opacity .2s,transform .2s;white-space:
 <div class="row"><a class="btn p" id="secgo">Открыть защищённую страницу</a></div></section>
 <section id="appbox" class="hide"><h2>Поделиться - на ПК</h2><p class="hint" id="apphint" style="margin-top:0"></p>
 <div class="row"><button class="p hide" id="install">Установить как приложение</button></div></section>
+<section id="linkbox" class="hide"><h2>Ссылки с компьютера</h2><div id="links"></div>
+<div class="row mt"><button onclick="linksClear()">Убрать</button></div></section>
 <section id="pairbox"><h2>Без QR в следующий раз</h2><div class="row"><button id="pair">Запомнить этот телефон</button></div>
 <p class="hint" id="pairhint">Страница получит постоянный адрес - добавьте её в закладки или на главный экран.</p></section>
 </div>
@@ -154,7 +190,8 @@ z-index:15;pointer-events:none;transition:opacity .2s,transform .2s;white-space:
 <button class="p" onclick="sendText()">В буфер ПК</button></div>
 <div class="row mt"><button onclick="openPc()">Открыть ссылку на ПК</button>
 <button onclick="pick('clipimg')">Картинку в буфер</button></div>
-<input type="file" id="fclipimg" accept="image/*"></section></div>
+<input type="file" id="fclipimg" accept="image/*">
+<label class="sw"><input type="checkbox" id="autoclip"> Когда открываю страницу - скопированное на телефоне сразу в буфер ПК (только https)</label></section></div>
 
 <div data-p="pc" class="page hide"><section><h2>Папки компьютера</h2><div class="crumbs" id="crumbs"></div>
 <div class="row hide" id="pastebar" style="margin-bottom:8px"><button class="p" id="pastebtn">Вставить сюда</button><button onclick="clip=null;showPaste()">Отмена</button></div>
@@ -176,8 +213,36 @@ z-index:15;pointer-events:none;transition:opacity .2s,transform .2s;white-space:
 в OBS («Захват окна») или в Discord («Демонстрация экрана - окно»). Экран телефона не гасите: в фоне Chrome
 останавливает камеру.</p></section></div>
 
+<div data-p="ring" class="page hide"><section><div class="row hide" id="ringside" style="margin-bottom:10px">
+<button data-side="r">Правое кольцо</button><button data-side="l">Левое кольцо</button></div>
+<div id="ringgrid" class="rgrid"></div><p class="hint" id="ringhint">Те же пункты, что в кольце на ПК: нажали - открывается на компьютере.</p></section></div>
+
+<div data-p="slides" class="page hide"><section><div class="row"><button onclick="key('f5')">Начать</button><button onclick="key('esc')">Закончить</button>
+<button onclick="key('b')">Чёрный экран</button></div>
+<div class="slidenav mt"><button onclick="slide('pgup')" aria-label="Назад" data-i="left"></button><button class="p" onclick="slide('pgdn')" aria-label="Дальше" data-i="right"></button></div>
+<div class="row mt"><button id="timer" onclick="timerReset()">00:00</button></div></section>
+<section><h2>Мышь в воздухе</h2><div id="air">Держите палец здесь и ведите телефоном - курсор идёт следом. Коротко коснуться - щелчок.</div>
+<p class="hint" id="airmsg">Работает на защищённой странице (https). Держите телефон экраном вверх, верхним краем к экрану ПК.</p></section></div>
+
+<div data-p="game" class="page hide"><section><div id="gpad"><div class="dpad">
+<span></span><button data-g="up" data-i="up"></button><span></span><button data-g="left" data-i="left"></button><span></span>
+<button data-g="right" data-i="right"></button><span></span><button data-g="down" data-i="down"></button><span></span></div>
+<div class="abxy"><span></span><button data-g="Y" class="y">Y</button><span></span><button data-g="X" class="x">X</button><span></span>
+<button data-g="B" class="b">B</button><span></span><button data-g="A" class="a">A</button><span></span></div></div>
+<div class="row mt"><button data-g="esc">Esc</button><button data-g="enter">Enter</button><button data-g="space">Пробел</button><button data-g="shift">Shift</button></div>
+<div class="mt"><select id="gmap"><option value="arrows">Стрелки, A Z, B X, X A, Y S</option><option value="wasd">WASD, A J, B K, X U, Y I</option></select></div>
+<p class="hint">Кнопки нажимаются как клавиши клавиатуры (скан-коды: их видят и игры). Держите - клавиша зажата.
+Удобнее положить телефон боком.</p></section></div>
+
+<div data-p="stat" class="page hide"><section><h2 id="statpc">Компьютер</h2><div class="stats">
+<div class="stat"><small>Процессор</small><b id="scpu">-</b><div class="bar"><i id="bcpu"></i></div></div>
+<div class="stat"><small>Память</small><b id="sram">-</b><div class="bar"><i id="bram"></i></div></div>
+<div class="stat"><small>Диск, свободно</small><b id="sdisk">-</b><div class="bar"><i id="bdisk"></i></div></div>
+<div class="stat"><small>Батарея</small><b id="sbat">-</b><div class="bar"><i id="bbat"></i></div></div></div>
+<p class="hint" id="sup"></p></section></div>
+
 <nav id="tabs"><button data-t="remote" data-i="remote">Пульт</button><button data-t="pad" data-i="pad">Тачпад</button>
-<button data-t="screen" data-i="screen">Экран</button><button data-t="files" data-i="files">Файлы</button>
+<button data-t="ring" data-i="ring">Кольцо</button><button data-t="files" data-i="files">Файлы</button>
 <button data-t="more" data-i="more" id="morebtn">Ещё</button></nav>
 <p id="vol"></p>
 <div class="ov hide" id="sheet"><div id="sheetbox"></div></div>
@@ -193,6 +258,11 @@ var tt;function toast(s){var e=$('vol');e.textContent=s;e.classList.add('show');
 // значки (линии 24x24), вставляются в кнопки с data-i
 var I={remote:'<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5 3.5-5 3.5z"/>',pad:'<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 15h18M12 15v5"/>',
 screen:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',files:'<path d="M7 4v13m0 0-3-3m3 3 3-3M17 20V7m0 0-3 3m3-3 3 3"/>',
+ring:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/>',
+slides:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8M10 8l4 2-4 2z"/>',
+game:'<path d="M7 9h10a4 4 0 0 1 3.9 4.9l-.6 2.5a2.5 2.5 0 0 1-4.3 1L14.5 16h-5L8 17.4a2.5 2.5 0 0 1-4.3-1l-.6-2.5A4 4 0 0 1 7 9z"/><path d="M8 11.5v3M6.5 13h3M15.5 12.5h.01M17.5 14h.01"/>',
+stat:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',up:'<path d="m6 15 6-6 6 6"/>',down:'<path d="m6 9 6 6 6-6"/>',
+left:'<path d="m15 6-6 6 6 6"/>',right:'<path d="m9 6 6 6-6 6"/>',
 more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
 clip:'<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 3h6v3H9z"/>',pc:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
 wins:'<rect x="3" y="5" width="13" height="10" rx="2"/><path d="M8 19h11a2 2 0 0 0 2-2V9"/>',
@@ -206,14 +276,14 @@ function icons(root){(root||document).querySelectorAll('[data-i]').forEach(funct
 e.insertAdjacentHTML('afterbegin','<svg viewBox="0 0 24 24">'+I[e.dataset.i]+'</svg>')})}
 icons();
 // вкладки: пять снизу, остальные - в «Ещё»
-var MORE={clip:'Буфер',pc:'Папки ПК',wins:'Окна',cam:'Камера'};
+var MORE={screen:'Экран',clip:'Буфер',pc:'Папки ПК',wins:'Окна',cam:'Камера',slides:'Слайды',game:'Геймпад',stat:'Компьютер'};
 function tab(t){if(t=='more'){var h='<div class="more">';for(var k in MORE)h+='<button data-i="'+k+'" onclick="closeSheet();tab(\''+k+'\')">'+MORE[k]+'</button>';
 $('sheetbox').innerHTML=h+'</div><button onclick="closeSheet()">Закрыть</button>';icons($('sheetbox'));$('sheet').classList.remove('hide');return}
 document.querySelectorAll('#tabs button').forEach(function(x){x.classList.toggle('on',x.dataset.t==t||(x.dataset.t=='more'&&!!MORE[t]))});
 var mb=$('morebtn');mb.lastChild.textContent=MORE[t]||'Ещё';
 document.querySelectorAll('[data-p]').forEach(function(p){p.classList.toggle('hide',p.dataset.p!=t)});
 if(t=='pc'&&!state.lsInit){state.lsInit=1;roots()}if(t=='wins')wins();
-state.tab=t;try{localStorage.setItem('tab',t)}catch(e){}if(t=='screen')screenLoop();scrollTo(0,0)}
+state.tab=t;try{localStorage.setItem('tab',t)}catch(e){}if(t=='screen')screenLoop();if(t=='ring'&&!ring)ringLoad();loops();wake();scrollTo(0,0)}
 document.querySelectorAll('#tabs button').forEach(function(b){b.onclick=function(){tab(b.dataset.t)}});
 $('sheet').addEventListener('click',function(e){if(e.target==this)closeSheet()});
 // отклик под пальцем: короткая вибрация
@@ -234,6 +304,9 @@ a.download=f.name.split('\\').pop();document.body.appendChild(a);a.click();a.rem
 function poll(){fetch('poll?seq='+seq,{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.json()})
 .then(function(j){stateTxt(true);seq=j.seq;files=j.files||[];state.zip=j.zip;state.shares=j.shares;draw();
 if(files.length&&!state.filesShown){state.filesShown=1;tab('files')}
+if(files.length>(state.nfiles||0)&&state.nfiles!==undefined)buzz([60,60,60]);state.nfiles=files.length;
+if(state.find===undefined)state.find=j.find;else if(j.find>state.find){state.find=j.find;findMe()}
+links(j.links||[]);
 var p=$('pc');if(j.clip){p.textContent=j.clip;p.className=''}else{p.textContent='пока пусто';p.className='empty'}
 var im=$('pcimg'),sv=$('pcsave');if(j.img){var u='clipimg?n='+j.img;if(im.dataset.u!=u){im.src=u;im.dataset.u=u}
 im.classList.remove('hide');sv.href=u;sv.classList.remove('hide')}else{im.classList.add('hide');sv.classList.add('hide')}
@@ -342,9 +415,17 @@ function win(h,op){post('win?op='+op+'&h='+h).then(function(r){toast(r.ok?'Го�
 // тачпад
 var pad=$('pad'),acc={x:0,y:0,w:0},busy=false,lx=0,ly=0,moved=false,t0=0,fingers=0,drag=false,lp=null;
 function inp(q){return post('in?t='+q).then(function(r){if(r.status==403)toast('Тачпад выключен на ПК')})}
-function key(k){inp('k&k='+k)}
-function typeKb(){var t=$('kb').value;if(!t){key('enter');return}post('type',t).then(function(){$('kb').value=''})}
+function key(k){return inp('k&k='+k)}
+function typeKb(){var t=$('kb').value;if($('live').checked){tq(function(){return key('enter')});$('kb').value='';kbPrev='';return}
+if(!t){key('enter');return}post('type',t).then(function(){$('kb').value=''})}
 $('kb').addEventListener('keydown',function(e){if(e.key=='Enter'){e.preventDefault();typeKb()}});
+// печатать сразу: на ПК уходит разница с прошлым значением поля (стёртое - Backspace, новое - символами)
+var kbPrev='',typeQ=Promise.resolve();function tq(f){typeQ=typeQ.then(f,f);return typeQ}
+$('kb').addEventListener('input',function(){if(!$('live').checked)return;var v=this.value,o=kbPrev,i=0;
+while(i<v.length&&i<o.length&&v[i]==o[i])i++;var back=o.length-i,add=v.slice(i);kbPrev=v;
+for(var k=0;k<back;k++)tq(function(){return key('back')});if(add)tq(function(){return post('type',add)})});
+try{$('live').checked=localStorage.getItem('live')!='0'}catch(e){}
+$('live').onchange=function(){kbPrev=$('kb').value;try{localStorage.setItem('live',this.checked?'1':'0')}catch(e){}};
 function flush(){if(busy)return;var x=Math.round(acc.x),y=Math.round(acc.y),w=Math.round(acc.w);
 if(x||y){acc.x-=x;acc.y-=y;busy=true;inp('m&x='+x+'&y='+y).finally(function(){busy=false})}
 else if(w){acc.w-=w;busy=true;inp('w&d='+w).finally(function(){busy=false})}}
@@ -397,12 +478,99 @@ try{var r=await fetch('cam'+(first?'?start=1':''),{method:'PUT',body:b});first=f
 if(r.status==410){camStop();$('cammsg').textContent='Окно камеры закрыли на ПК. «Включить» - открыть снова.';break}
 cam.n++;var s=(Date.now()-cam.t0)/1000;if(s>2){$('cammsg').textContent='Идёт на ПК: '+c.width+'x'+c.height+', '+Math.round(cam.n/s)+' кадр/с, кадр '+size(b.size);cam.n=0;cam.t0=Date.now()}}
 catch(e){$('cammsg').textContent='Нет связи с ПК';await sleep(1000)}var dt=Date.now()-t;if(dt<33)await sleep(33-dt)}}
+// отклик и экран: вибрация, экран не гаснет на вкладках-пультах
+function buzz(p){if(navigator.vibrate)navigator.vibrate(p)}
+var wl=null;function wake(){var want=['remote','pad','slides','game','cam','screen','ring'].indexOf(state.tab)>=0&&!document.hidden;
+if(want&&!wl&&navigator.wakeLock)navigator.wakeLock.request('screen').then(function(l){wl=l;l.addEventListener('release',function(){wl=null})}).catch(function(){});
+if(!want&&wl){wl.release();wl=null}}
+document.addEventListener('visibilitychange',function(){wake();if(!document.hidden){autoClip();loops()}else inp('ka')});
+function loops(){if(state.tab=='remote')mediaLoop();if(state.tab=='stat')statLoop()}
+// что играет на ПК и громкость программ
+var npSeeking=false;function ms(t){t=Math.max(0,Math.round(t/1000));return Math.floor(t/60)+':'+('0'+t%60).slice(-2)}
+async function mediaLoop(){if(state.mLoop)return;state.mLoop=1;var n=0;
+while(state.tab=='remote'&&!document.hidden){try{var j=await (await fetch('media',{cache:'no-store'})).json();$('np').classList.toggle('hide',!j.has);
+if(j.has){$('npt').textContent=j.t||'Без названия';$('npa').textContent=(j.a?j.a+' - ':'')+(j.app||'');
+var im=$('npart');if(j.art){var u='mediaart?n='+j.art;if(im.dataset.u!=u){im.src=u;im.dataset.u=u}im.style.visibility=''}else im.style.visibility='hidden';
+$('nppos').textContent=ms(j.pos);$('npend').textContent=j.end?ms(j.end):'';var sk=$('npseek');sk.disabled=!j.seek||!j.end;
+if(!npSeeking&&j.end)sk.value=Math.round(1000*j.pos/j.end);state.npEnd=j.end}
+if(n++%4==0)apps()}catch(e){}await sleep(1500)}state.mLoop=0}
+$('npseek').addEventListener('input',function(){npSeeking=true});
+$('npseek').addEventListener('change',function(){npSeeking=false;if(state.npEnd)post('mediacmd?c=seek&t='+Math.round(this.value*state.npEnd/1000))});
+var appT={};function apps(){fetch('apps').then(function(r){return r.json()}).then(function(l){$('appsbox').classList.toggle('hide',!l.length);
+var box=$('apps'),keep={};l.forEach(function(a){keep[a.pid]=1;var row=box.querySelector('[data-pid="'+a.pid+'"]');
+if(!row){row=document.createElement('div');row.className='app';row.dataset.pid=a.pid;row.innerHTML='<span></span><input type="range" min="0" max="100">';
+row.querySelector('input').addEventListener('input',function(){var v=this.value,pid=a.pid;row.dataset.t=Date.now();clearTimeout(appT[pid]);
+appT[pid]=setTimeout(function(){post('appvol?pid='+pid+'&v='+(v/100))},80)});box.appendChild(row)}
+row.querySelector('span').textContent=a.n;if(!row.dataset.t||Date.now()-row.dataset.t>3000)row.querySelector('input').value=Math.round(a.v*100)});
+box.querySelectorAll('.app').forEach(function(r){if(!keep[r.dataset.pid])r.remove()})}).catch(function(){})}
+// кольцо RadialMenu
+var ring=null,ringSide='r',ringPath=[];
+function ringLoad(){fetch('ring').then(function(r){return r.json()}).then(function(j){ring=j;
+if(!(j[ringSide]||[]).length)ringSide=(j.r||[]).length?'r':'l';$('ringside').classList.toggle('hide',!((j.r||[]).length&&(j.l||[]).length));ringPath=[];ringDraw()}).catch(function(){})}
+document.querySelectorAll('#ringside button').forEach(function(b){b.onclick=function(){ringSide=b.dataset.side;ringPath=[];ringDraw()}});
+function ringDraw(){var list=ring?ring[ringSide]||[]:[];ringPath.forEach(function(i){list=list[i].c||[]});
+document.querySelectorAll('#ringside button').forEach(function(b){b.className=b.dataset.side==ringSide?'p':''});
+var h=ringPath.length?'<button onclick="ringPath.pop();ringDraw()"><span class="lt">&lt;</span><span class="nm">Назад</span></button>':'';
+list.forEach(function(it,i){var ic=it.i?'<img src="ringicon?id='+it.id+'" alt="" onerror="this.outerHTML=\'<span class=lt>'+esc(it.n.charAt(0))+'</span>\'">':'<span class="lt">'+esc(it.n.charAt(0))+'</span>';
+h+='<button onclick="ringTap('+i+')">'+ic+'<span class="nm">'+esc(it.n)+'</span></button>'});
+$('ringgrid').innerHTML=h||'<p class="hint">В кольце нет пунктов, которые можно открыть с телефона.</p>'}
+function ringTap(i){var list=ring[ringSide];ringPath.forEach(function(k){list=list[k].c});var it=list[i];
+if(it.k=='grp'){ringPath.push(i);ringDraw();return}
+post('ringrun?id='+it.id).then(function(r){if(r.ok){toast('Открыто на ПК: '+it.n);buzz(20)}else r.text().then(toast)}).catch(function(){toast('Нет связи')})}
+// слайды и мышь в воздухе
+var tStart=0,tTick=null;function slide(k){key(k);buzz(15);if(!tStart){tStart=Date.now();tTick=setInterval(function(){$('timer').textContent=ms(Date.now()-tStart)},1000)}}
+function timerReset(){tStart=0;clearInterval(tTick);$('timer').textContent='00:00'}
+var air={on:false,t0:0,moved:0,g:[0,0,9.8],last:0};
+window.addEventListener('devicemotion',function(e){var g=e.accelerationIncludingGravity;if(g&&g.x!=null)air.g=[g.x,g.y,g.z];
+if(!air.on||!e.rotationRate)return;var now=performance.now(),dt=air.last?Math.min(.05,(now-air.last)/1000):.016;air.last=now;
+var r=e.rotationRate,G=air.g,n=Math.hypot(G[0],G[1],G[2])||9.8;
+var yaw=((r.beta||0)*G[0]+(r.gamma||0)*G[1]+(r.alpha||0)*G[2])/n,pitch=r.beta||0;// поворот вокруг вертикали и наклон вверх-вниз
+var sp=Math.hypot(yaw,pitch),k=14+Math.min(sp,200)*0.12;acc.x+=-yaw*dt*k;acc.y+=-pitch*dt*k;air.moved+=sp*dt});
+$('air').addEventListener('pointerdown',function(e){e.preventDefault();if(!window.isSecureContext){$('airmsg').textContent='Нужна защищённая страница (https): вкладка «Файлы» - «Защищённая страница».';return}
+air.on=true;air.t0=Date.now();air.moved=0;air.last=0;this.classList.add('on')});
+['pointerup','pointercancel','pointerleave'].forEach(function(ev){$('air').addEventListener(ev,function(){if(!air.on)return;air.on=false;this.classList.remove('on');
+if(ev=='pointerup'&&Date.now()-air.t0<300&&air.moved<4)inp('c&b=l')})});
+// геймпад: держать - клавиша зажата (скан-коды)
+var GMAP={arrows:{up:'up',down:'down',left:'left',right:'right',A:'z',B:'x',X:'a',Y:'s'},wasd:{up:'w',down:'s',left:'a',right:'d',A:'j',B:'k',X:'u',Y:'i'}};
+try{$('gmap').value=localStorage.getItem('gmap')||'arrows'}catch(e){}$('gmap').onchange=function(){inp('ka');try{localStorage.setItem('gmap',this.value)}catch(e){}};
+function gkey(b){var g=b.dataset.g,m=GMAP[$('gmap').value]||GMAP.arrows;return m[g]||g}
+document.querySelectorAll('[data-g]').forEach(function(b){var down=false;
+b.addEventListener('pointerdown',function(e){e.preventDefault();if(down)return;down=true;b.classList.add('held');buzz(10);post('in?t=kd&k='+gkey(b))});
+['pointerup','pointercancel','pointerleave'].forEach(function(ev){b.addEventListener(ev,function(){if(!down)return;down=false;b.classList.remove('held');post('in?t=ku&k='+gkey(b))})});
+b.addEventListener('contextmenu',function(e){e.preventDefault()})});
+// состояние ПК
+function gb(n){return (n/1073741824).toFixed(1).replace('.',',')+' ГБ'}
+function bar(id,p){$(id).style.width=Math.max(0,Math.min(100,p))+'%'}
+async function statLoop(){if(state.sLoop)return;state.sLoop=1;while(state.tab=='stat'&&!document.hidden){try{var j=await (await fetch('stat',{cache:'no-store'})).json();
+$('statpc').textContent=j.pc;$('scpu').textContent=j.cpu+'%';bar('bcpu',j.cpu);$('sram').textContent=gb(j.ramUsed)+' из '+gb(j.ram);bar('bram',100*j.ramUsed/j.ram);
+$('sdisk').textContent=gb(j.diskFree);bar('bdisk',100*j.diskFree/j.disk);$('sbat').textContent=j.bat<0?'нет':j.bat+'%'+(j.ac?', от сети':'');bar('bbat',j.bat<0?0:j.bat);
+var u=j.up,d=Math.floor(u/86400),h=Math.floor(u%86400/3600);$('sup').textContent='Включён '+(d?d+' дн. ':'')+h+' ч '+Math.floor(u%3600/60)+' мин'}catch(e){}await sleep(2000)}state.sLoop=0}
+// найти телефон: звенит и вибрирует, пока не нажмут «Нашёлся»
+var alarm=null;function findMe(){if(alarm)return;var ctx=null;try{ctx=new (window.AudioContext||window.webkitAudioContext)();ctx.resume()}catch(e){}
+var n=0;alarm=setInterval(function(){buzz([300,100,300]);if(ctx){var o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=n++%2?1320:880;
+g.gain.value=.25;o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+.35)}},800);
+$('sheetbox').innerHTML='<p style="text-align:center;font-size:18px">Компьютер ищет этот телефон</p><button class="p" onclick="foundMe()">Нашёлся</button>';
+$('sheet').classList.remove('hide');state.alarmCtx=ctx;setTimeout(foundMe,60000)}
+function foundMe(){if(!alarm)return;clearInterval(alarm);alarm=null;buzz(0);try{state.alarmCtx&&state.alarmCtx.close()}catch(e){}closeSheet()}
+// ссылки с ПК
+function links(l){var lk=l.join('\n');$('linkbox').classList.toggle('hide',!l.length);
+$('links').innerHTML=l.map(function(u){return '<div class="file"><div class="n">'+esc(u)+'</div><a class="btn p" href="'+esc(u)+'" target="_blank" rel="noopener">Открыть</a></div>'}).join('');
+if(l.length&&lk!=state.linksKey&&state.linksKey!==undefined){buzz([60,60,60]);toast('Ссылка с ПК: вкладка «Файлы»')}state.linksKey=lk}
+function linksClear(){post('links').then(function(){$('linkbox').classList.add('hide')})}
+// буфер телефона - на ПК, как только страница открылась
+try{$('autoclip').checked=localStorage.getItem('autoclip')=='1'}catch(e){}
+$('autoclip').onchange=function(){try{localStorage.setItem('autoclip',this.checked?'1':'0')}catch(e){}if(this.checked)autoClip()};
+function autoClip(){if(!$('autoclip').checked||!window.isSecureContext||!navigator.clipboard||!navigator.clipboard.readText)return;
+navigator.clipboard.readText().then(function(t){var last=null;try{last=localStorage.getItem('clipLast')}catch(e){}
+if(!t||t==last||t==$('pc').textContent)return;try{localStorage.setItem('clipLast',t)}catch(e){}
+post('clip',t).then(function(r){if(r.ok)toast('Скопированное на телефоне - в буфере ПК')})}).catch(function(){})}
 // запомнить телефон
 $('pair').onclick=function(){var n=(navigator.userAgentData&&navigator.userAgentData.platform)||'телефон';
 var m=/\(([^)]+)\)/.exec(navigator.userAgent);if(m)n=m[1].split(';').pop().trim()||n;
 post('pair',n).then(function(r){return r.json()}).then(function(j){if(j.url){toast('Запомнен');location.replace(j.url)}}).catch(function(){toast('Не вышло')})};
 (function(){var t=null;try{t=localStorage.getItem('tab')}catch(e){}tab(t&&document.querySelector('[data-p="'+t+'"]')?t:'remote')})();
 shareResult();
+autoClip();
 poll();
 </script></body></html>
 )PAGE";

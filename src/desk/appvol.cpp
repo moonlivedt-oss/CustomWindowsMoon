@@ -3,6 +3,7 @@
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
 
+#include <algorithm>
 #include <atomic>
 
 #include "core/text.h"
@@ -184,6 +185,18 @@ std::vector<SessionNow> Current() {
     }
     if (SUCCEEDED(co)) CoUninitialize();
     return out;
+}
+
+bool SetLevel(DWORD pid, float level) {
+    HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    std::map<DWORD, std::wstring> cache;
+    bool ok = false;
+    for (Live& l : Sessions(cache)) {
+        if (l.s.pid == pid) ok = SUCCEEDED(l.v->SetMasterVolume(std::clamp(level, 0.0f, 1.0f), nullptr));
+        l.v->Release();
+    }
+    if (SUCCEEDED(co)) CoUninitialize();
+    return ok;
 }
 
 void Forget(const std::wstring& exe) {
