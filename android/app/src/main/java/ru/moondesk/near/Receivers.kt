@@ -70,7 +70,8 @@ class CallReceiver : BroadcastReceiver() {
     }
 }
 
-// Уведомления телефона на ПК. Свои, постоянные (музыка, навигация), ход загрузок, звонки и SMS (у них свой путь) - нет
+// Уведомления телефона на ПК. Свои, постоянные (музыка, навигация), ход загрузок, звонки и SMS (у них свой путь) - нет;
+// банки и коды подтверждения по умолчанию - тоже нет
 class NoticeService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val prefs = Prefs(this)
@@ -93,6 +94,10 @@ class NoticeService : NotificationListenerService() {
         } catch (_: Exception) {
             sbn.packageName
         }
+        // банки, кошельки, коды и пароли - не на ПК (список - на главном экране); коды из других приложений - только
+        // если пользователь их включил
+        if (Pure.skipApp(sbn.packageName, app, Pure.parseList(prefs.skip))) return
+        if (!prefs.codes && Pure.hasCode("$title $text")) return
         Link.notice(this, "note", app, title, text, null, Pure.noticeId(sbn.packageName, sbn.id, "$title|$text"))
     }
 }

@@ -20,12 +20,39 @@ import javax.net.ssl.X509TrustManager
 // Настройки приложения (что включено, адрес ПК, закреплённый сертификат, что уже отправлено)
 class Prefs(ctx: Context) {
     val p: SharedPreferences = ctx.applicationContext.getSharedPreferences("near", Context.MODE_PRIVATE)
-    var base: String?
-        get() = p.getString("base", null)
-        set(v) = p.edit().putString("base", v).apply()
-    var ca: String?  // корневой сертификат ПК (DER в base64): знакомство один раз, дальше - только он
-        get() = p.getString("ca", null)
-        set(v) = p.edit().putString("ca", v).apply()
+    var base: String?  // адрес ПК с ключом запомненного телефона - под Vault (Android Keystore)
+        get() = secret("base")
+        set(v) = putSecret("base", v)
+    var ca: String?  // корневой сертификат ПК (DER в base64): знакомство один раз, дальше - только он; под Vault
+        get() = secret("ca")
+        set(v) = putSecret("ca", v)
+    var codes: Boolean  // уведомления с кодами подтверждения - на ПК (по умолчанию нет)
+        get() = p.getBoolean("codes", false)
+        set(v) = p.edit().putBoolean("codes", v).apply()
+    var skip: String  // чьи уведомления не отправлять: часть имени пакета или названия, по строке
+        get() = p.getString("skip", null) ?: Pure.skipDefault.joinToString("\n")
+        set(v) = p.edit().putString("skip", v).apply()
+
+    // Старая запись открытым текстом переписывается зашифрованной при первом чтении
+    private fun secret(k: String): String? {
+        val raw = p.getString(k, null) ?: return null
+        if (Vault.sealed(raw)) return Vault.open(raw)
+        putSecret(k, raw)
+        return raw
+    }
+
+    private fun putSecret(k: String, v: String?) {
+        if (v == null) {
+            p.edit().remove(k).apply()
+            return
+        }
+        val sealed = try {
+            Vault.seal(v)
+        } catch (_: Exception) {
+            null  // Keystore не работает - не хранить вовсе, чем хранить открыто
+        }
+        if (sealed == null) p.edit().remove(k).apply() else p.edit().putString(k, sealed).apply()
+    }
     var pc: String
         get() = p.getString("pc", "") ?: ""
         set(v) = p.edit().putString("pc", v).apply()

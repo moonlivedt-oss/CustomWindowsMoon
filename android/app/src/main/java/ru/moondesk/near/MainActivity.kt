@@ -170,6 +170,32 @@ class MainActivity : Activity() {
 
         card("Что отправлять на ПК", root)
         switch("notes", "Уведомления", "Карточка справа внизу экрана ПК: от кого и что пришло")
+        switch(
+            "codes", "Уведомления с кодами",
+            "Коды подтверждения и пароли из уведомлений. По умолчанию не отправляются: код увидит любой, кто смотрит на экран ПК",
+        )
+        hint("Не отправлять уведомления этих приложений (часть имени пакета или названия, по строке):", 8)
+        val skip = EditText(this).apply {
+            setText(prefs.skip)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 3
+            maxLines = 8
+            textSize = 14f
+            setTextColor(C.FG)
+            background = round(Color.parseColor("#120F16"), 14, C.LINE)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+        }
+        col.addView(skip, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        button("Сохранить список") {
+            prefs.skip = Pure.parseList(skip.text.toString()).joinToString("\n")
+            skip.setText(prefs.skip)
+            ClipActivity.say(applicationContext, "Список сохранён")
+        }
+        button("Вернуть список по умолчанию") {
+            prefs.skip = Pure.skipDefault.joinToString("\n")
+            skip.setText(prefs.skip)
+        }
+        hint("Банки, кошельки, приложения кодов и паролей уже в списке.")
         switch("sms", "SMS", "Код подтверждения ПК предложит скопировать одной кнопкой")
         switch("calls", "Звонки", "Кто звонит и пропущенные")
         switch("photos", "Новые фото и видео", "Снятое камерой - в «Изображения\\Телефон\\дата», когда ПК на связи")
@@ -272,6 +298,7 @@ class MainActivity : Activity() {
         status.setCompoundDrawablesRelativeWithIntrinsicBounds(dot, null, null, null)
         if (Link.connected(this) && link.text.isEmpty()) link.setText(prefs.base)
         switches["notes"]?.isChecked = prefs.notes && listenerOn()
+        switches["codes"]?.isChecked = prefs.codes
         switches["sms"]?.isChecked = prefs.sms && granted(Manifest.permission.RECEIVE_SMS)
         switches["calls"]?.isChecked = prefs.calls && granted(Manifest.permission.READ_PHONE_STATE)
         switches["photos"]?.isChecked = prefs.photos && mediaGranted()
@@ -296,6 +323,7 @@ class MainActivity : Activity() {
     private fun set(key: String, on: Boolean) {
         when (key) {
             "notes" -> prefs.notes = on
+            "codes" -> prefs.codes = on
             "sms" -> prefs.sms = on
             "calls" -> prefs.calls = on
             "photos" -> {

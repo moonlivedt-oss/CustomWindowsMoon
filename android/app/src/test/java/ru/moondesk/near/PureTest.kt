@@ -75,6 +75,25 @@ class PureTest {
     }
 
     @Test
+    fun noticeFilter() {
+        val def = Pure.skipDefault
+        assertTrue(Pure.skipApp("ru.sberbankmobile", "СберБанк Онлайн", def))
+        assertTrue(Pure.skipApp("com.idamob.tinkoff.android", "Т-Банк", def))
+        assertTrue(Pure.skipApp("com.google.android.apps.authenticator2", "Authenticator", def))
+        assertTrue(Pure.skipApp("ru.example.app", "Мой Банк", def))  // по названию
+        assertTrue(!Pure.skipApp("org.telegram.messenger", "Telegram", def))
+        assertTrue(!Pure.skipApp("ru.sberbankmobile", "Сбер", listOf()))  // пользователь очистил список
+        assertEquals(listOf("sber", "vk.com", "telegram"), Pure.parseList(" Sber \nvk.com, ,telegram;sber\n"))
+        assertTrue(Pure.hasCode("Код для входа: 123456"))
+        assertTrue(Pure.hasCode("Your verification code is 482-913"))
+        assertTrue(Pure.hasCode("Пароль 4821 никому не говорите"))
+        assertTrue(!Pure.hasCode("Купил 2 билета за 1500"))     // нет слова «код»
+        assertTrue(!Pure.hasCode("Ваш код: 12"))                // слишком коротко
+        assertTrue(!Pure.hasCode("Код заказа 1234567890123"))   // длиннее 8 цифр - номер, не код
+        assertTrue(!Pure.hasCode(null))
+    }
+
+    @Test
     fun fingerprint() {
         // тот же отпечаток считает ПК (phone::CaFingerprint): SHA-256("abc") = ba7816bf8f01cfea414140de...
         assertEquals("BA78 16BF 8F01 CFEA 4141 40DE", Pure.fingerprint("abc".toByteArray()))

@@ -1526,8 +1526,9 @@ void ShowNotice(const Notice& n) {
                                                                : n.app + L": " + n.title;
     autos::Note(L"Телефон рядом: " + std::wstring(n.kind == "sms" ? L"SMS от " + who : L"уведомление " + n.app));
     std::wstring code = SmsCode(n.title + L" " + n.text);
-    if (!code.empty()) {  // код подтверждения - одной кнопкой в буфер
-        g_alert.yesLabel = L"Скопировать " + code;
+    if (!code.empty()) {                        // код подтверждения - одной кнопкой в буфер
+        g_alert.yesLabel = L"Скопировать код";  // сам код на кнопке был бы виден всем
+        g_alert.secret = code;                  // и в тексте - точки, пока мышь не над карточкой
         g_alert.noLabel = L"Закрыть";
         g_alert.onYes = [code] {
             PutText(code);

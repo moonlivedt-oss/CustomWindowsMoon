@@ -81,6 +81,13 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
     more_ = masked;
     title_ = share::Mask(title);  // в показе экрана - без путей с именем пользователя и адресов
     sub_ = share::Mask(Pretty(sub));
+    subHidden_.clear();
+    if (!secret.empty() && sub.find(secret) != std::wstring::npos) {
+        std::wstring h = sub;
+        for (size_t at; (at = h.find(secret)) != std::wstring::npos;) h.replace(at, secret.size(), L"••••••");
+        subHidden_ = share::Mask(Pretty(h));
+    }
+    secret.clear();
     theme_ = theme;
     if (glyph == G_NONE) {
         // знак по виду карточки и по словам заголовка
@@ -192,7 +199,8 @@ void BoostCard::Paint(Graphics& g, const RectF& body) {
     if (!sub_.empty()) {
         StringFormat wf;
         wf.SetTrimming(StringTrimmingEllipsisWord);
-        g.DrawString(sub_.c_str(), -1, &fS, RectF(x0, body.Y + (kPad + 25) * K, tw, subH_ + 1), &wf, &mB);
+        const std::wstring& shown = subHidden_.empty() || Hovered() ? sub_ : subHidden_;
+        g.DrawString(shown.c_str(), -1, &fS, RectF(x0, body.Y + (kPad + 25) * K, tw, subH_ + 1), &wf, &mB);
     }
     if (!more_.empty() && moreOpen_ && moreH_ > 0) {  // «Подробнее»: черта и объяснение под текстом
         float y = body.Y + (kPad + 25 + 8) * K + subH_;

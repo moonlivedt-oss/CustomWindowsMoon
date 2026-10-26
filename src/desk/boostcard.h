@@ -21,6 +21,9 @@ public:
     // «Подробнее» под текстом: что именно произойдёт и что можно потерять (tools/explain). Задаётся перед Show,
     // сбрасывается каждым Show - как kind.
     std::wstring more;
+    // Тайна в тексте (код из SMS): пока мышь не над карточкой, вместо неё точки - код не прочтёт тот, кто смотрит на
+    // экран или его запись. Задаётся перед Show, сбрасывается каждым Show.
+    std::wstring secret;
 
     void Create(HINSTANCE inst);
     enum Mode { OFFER, WORKING, DONE, RESTORE };
@@ -54,6 +57,7 @@ private:
     std::function<void()> askOnYes_, askOnNo_;
     Glyph glyph_ = G_NONE;
     std::wstring title_, sub_, more_;
+    std::wstring subHidden_;  // sub_ с тайной под точками (пусто - тайны нет)
     bool moreOpen_ = false;
     float subH_ = 0, moreH_ = 0;
     Gdiplus::RectF yes_, no_, link_;  // кнопки и ссылка «Подробнее» в координатах окна (считаются при раскладке)

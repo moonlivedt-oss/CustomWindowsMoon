@@ -38,9 +38,9 @@ protected:
     virtual void Paint(Gdiplus::Graphics& g, const Gdiplus::RectF& body) = 0;
     virtual int HitContent(const Gdiplus::PointF&) const { return H_NONE; }
     virtual void Click(int) {}
-    virtual void Closed() {}                     // ушла по таймеру, крестику, правому клику или броску
-    virtual bool Busy() const { return false; }  // идёт работа: не уходит, кадры рисуются
-    virtual Gdiplus::Color Tone() const;         // цвет полоски слева и знака
+    virtual void Closed() {}                                      // ушла по таймеру, крестику, правому клику или броску
+    virtual bool Busy() const { return false; }                   // идёт работа: не уходит, кадры рисуются
+    virtual Gdiplus::Color Tone() const;                          // цвет полоски слева и знака
     virtual bool Message(UINT, WPARAM, LPARAM) { return false; }  // свои сообщения окна; true - обработано
     HWND Wnd() const { return wnd_; }
 
@@ -48,6 +48,7 @@ protected:
     float k() const { return (float)k_; }
     float HoverOf(int id) const { return id >= 0 && id < kMaxHits ? hover_[id] : 0; }
     bool Pressed(int id) const { return down_ == id && hot_ == id; }
+    bool Hovered() const { return hot_ != H_NONE; }  // мышь над карточкой (над кнопкой - тоже)
     void DrawGlyph(Gdiplus::Graphics& g, float cx, float cy, Glyph glyph, Gdiplus::Color c) const;
     void DrawButton(Gdiplus::Graphics& g, const Gdiplus::RectF& r, const std::wstring& label, bool primary,
                     int id) const;

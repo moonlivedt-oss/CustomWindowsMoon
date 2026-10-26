@@ -57,6 +57,35 @@ object Pure {
         return sb.toString()
     }
 
+    // Уведомления, которые по умолчанию не уходят на ПК: банки, кошельки, приложения кодов и паролей. Часть имени
+    // пакета или названия приложения, без регистра; список правится на главном экране
+    val skipDefault = listOf(
+        "bank", "sber", "tinkoff", "tbank", "vtb", "alfa", "raiffeisen", "gazprombank", "pochtabank", "otpbank",
+        "sovcom", "openbank", "psbank", "rosbank", "uralsib", "mtsbank", "rshb", "qiwi", "yoomoney", "paypal",
+        "revolut", "wallet", "банк", "authenticator", "authy", "yandex.key", "bitwarden", "keepass", "1password",
+        "lastpass", "госуслуги", "gosuslugi",
+    )
+
+    // список из поля на главном экране: строки или через запятую, пустое - прочь
+    fun parseList(text: String): List<String> =
+        text.split('\n', ',', ';').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+
+    fun skipApp(pkg: String, label: String?, list: List<String>): Boolean {
+        val p = pkg.lowercase()
+        val l = label?.lowercase() ?: ""
+        return list.any { it.isNotEmpty() && (p.contains(it) || l.contains(it)) }
+    }
+
+    // Похоже на код подтверждения: слово «код», «code», «OTP», «пароль» и рядом 4-8 цифр (можно «123-456»). Такие
+    // уведомления по умолчанию не уходят на ПК - код увидел бы любой, кто смотрит на экран компьютера
+    private val codeWord = Regex("(код|code|otp|парол|password|pin|подтвержд|verif)", RegexOption.IGNORE_CASE)
+    private val codeDigits = Regex("(?<![0-9])[0-9]{2,4}[- ]?[0-9]{2,4}(?![0-9])")
+
+    fun hasCode(text: String?): Boolean {
+        if (text.isNullOrBlank() || !codeWord.containsMatchIn(text)) return false
+        return codeDigits.findAll(text).any { m -> m.value.count { it.isDigit() } in 4..8 }
+    }
+
     fun form(vararg kv: Pair<String, String?>): String =
         kv.filter { it.second != null }
             .joinToString("&") { URLEncoder.encode(it.first, "UTF-8") + "=" + URLEncoder.encode(it.second, "UTF-8") }
