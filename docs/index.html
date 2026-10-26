@@ -83,7 +83,18 @@ h1 .plus{color:var(--crimson)}
 #touch{display:none}
 
 /* ---------- разделы ---------- */
-section{padding:96px 0;border-top:1px solid var(--line)}
+section{padding:96px 0}
+/* разделители между разделами - светящиеся полосы (стекло кольца, соты); без картинки - тонкая линия */
+.sep{height:1px;background:var(--line);position:relative;z-index:2;display:flex;justify-content:center;align-items:center}
+.sep img{position:absolute;width:min(900px,92vw);height:auto;pointer-events:none;user-select:none}
+.sep:has(img){background:none}
+/* «Как начать» - на фоне стола с ноутбуком, сильно приглушённом */
+#start{position:relative;isolation:isolate}
+#start:before{content:"";position:absolute;inset:0;z-index:-1;
+  background:linear-gradient(var(--wine),color-mix(in srgb,var(--wine) 66%,transparent) 28%,color-mix(in srgb,var(--wine) 80%,transparent) 72%,var(--wine)),
+  url(img/start-bg.webp) center/cover no-repeat}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) #start:before{display:none}}
+:root[data-theme="light"] #start:before{display:none}
 h2{font:700 clamp(26px,4vw,42px)/1.1 var(--display);letter-spacing:.01em;margin:0 0 14px}
 .sub{color:var(--ash);max-width:36em;margin:0 0 48px}
 
@@ -238,6 +249,7 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
 </header>
 
 <main>
+<div class="sep" aria-hidden="true"><img src="img/divider-arc.webp" alt="" onerror="this.remove()"></div>
 <section id="what">
   <div class="wrap">
     <h2>Что умеет</h2>
@@ -248,6 +260,7 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
   </div>
 </section>
 
+<div class="sep" aria-hidden="true"><img src="img/divider-hex.webp" alt="" onerror="this.remove()"></div>
 <section id="why">
   <div class="wrap">
     <h2>Почему это удобно</h2>
@@ -272,6 +285,7 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
   </div>
 </section>
 
+<div class="sep" aria-hidden="true"><img src="img/divider-arc.webp" alt="" onerror="this.remove()"></div>
 <section id="start">
   <div class="wrap">
     <h2>Как начать</h2>
@@ -312,6 +326,7 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
   </div>
 </section>
 
+<div class="sep" aria-hidden="true"><img src="img/divider-hex.webp" alt="" onerror="this.remove()"></div>
 <section id="phone">
   <div class="wrap phone">
     <div>
