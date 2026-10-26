@@ -221,6 +221,34 @@ bool HandleMore(Conn& cn, const Request& r, const std::string& rest) {
         std::string body;
         ReadAllBody(cn, r, body, 256);
         std::wstring name = Trim(Widen(body)).substr(0, 60);
+        // Постоянный ключ - только после «Запомнить» на ПК: ключ сессии из QR ходит по http, и подсмотревший его в
+        // этой Wi-Fi иначе выдал бы себе вечный пропуск. Ответа ждём до минуты, пока карточка на экране
+        {
+            Lock l;
+            ULONGLONG now = GetTickCount64();
+            if (S().pairState == 1 && now - S().pairAt < 65000) {
+                Text(cn, 409, "на ПК уже спрашивают про другой телефон - ответьте там");
+                return true;
+            }
+            S().pairState = 1;
+            S().pairAt = now;
+        }
+        Post(EV_PAIR_ASK, name.empty() ? L"телефон" : name);
+        int st = 1;
+        for (int i = 0; i < 600 && st == 1 && !Stopping(); ++i) {
+            Sleep(100);
+            Lock l;
+            st = S().pairState;
+        }
+        {
+            Lock l;
+            S().pairState = 0;
+        }
+        if (st != 2) {
+            Text(cn, 403,
+                 st == 3 ? "на ПК запретили запоминать этот телефон" : "на ПК не ответили - попробуйте ещё раз");
+            return true;
+        }
         std::string key = NewDevice(name.empty() ? L"телефон" : name);
         if (key.empty()) {
             Text(cn, 500, "не записать");

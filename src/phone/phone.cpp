@@ -83,6 +83,7 @@ BoostCard g_alert;          // приложение на телефоне: ув�
 bool g_callShown = false;   // на g_alert сейчас «Звонит» - убрать, когда взяли или сбросили
 BoostCard g_watchCard;      // «Телефон управляет ПК - Остановить»
 BoostCard g_askCard;        // «Разрешить управление этому телефону?»
+BoostCard g_pairCard;       // «Запомнить телефон?»
 bool g_watching = false;
 void Watching(bool screen, bool input);  // ниже: рамка и плашка, пока телефон смотрит экран или управляет
 
@@ -694,6 +695,7 @@ bool StartSession(bool oneTime, bool standing = false) {
         s.tokenCtl = false;
         s.ctlDenied.clear();
         s.ctlAsk.clear();
+        s.pairState = 0;
         s.clipPng.clear();
         s.clipImg = 0;
         s.caDer = ca;
@@ -932,6 +934,7 @@ void StopSession(const wchar_t* why) {
     g_ctlAt = 0;
     Watching(false, false);
     g_askCard.Hide();
+    g_pairCard.Hide();
     g_pubCard.Hide();
     g_bindIp = 0;
     Card().Hide();
@@ -951,6 +954,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg) {
     g_note.Create(inst);
     g_watchCard.Create(inst);
     g_askCard.Create(inst);
+    g_pairCard.Create(inst);
     g_pubCard.Create(inst);
     g_alert.Create(inst);
 }
@@ -1186,6 +1190,7 @@ void Tick() {
     g_note.Tick();
     g_watchCard.Tick();
     g_askCard.Tick();
+    g_pairCard.Tick();
     g_pubCard.Tick();
     g_alert.Tick();
     RefreshCfg();
@@ -1548,6 +1553,31 @@ void OnMessage(WPARAM wp, LPARAM lp) {
         if (n && S().on) ShowNotice(*n);
         return;
     }
+    if (wp == EV_PAIR_ASK) {  // поток сервера ждёт ответа в S().pairState
+        std::unique_ptr<std::wstring> name((std::wstring*)lp);
+        if (!S().on) return;
+        std::wstring n = name ? *name : L"телефон";
+        g_pairCard.kind = L"-";
+        g_pairCard.yesLabel = L"Запомнить";
+        g_pairCard.noLabel = L"Нет";
+        g_pairCard.onYes = [] {
+            Lock l;
+            if (S().pairState == 1) S().pairState = 2;
+        };
+        g_pairCard.onNo = [n] {
+            {
+                Lock l;
+                if (S().pairState == 1) S().pairState = 3;
+            }
+            autos::Note(L"Телефон рядом: запомнить «" + n + L"» - отказано на ПК");
+        };
+        g_pairCard.Show(BoostCard::OFFER, L"Запомнить телефон?",
+                        L"«" + n +
+                            L"» просит постоянный адрес без QR: с ним он откроет буфер, файлы и пульт и потом. "
+                            L"Не вы - «Нет».",
+                        Theme(), 60000, Toast::G_ASK);
+        return;
+    }
     if (wp == EV_ASK) {
         std::unique_ptr<std::wstring> id((std::wstring*)lp);
         if (id && S().on) AskControl(Narrow(*id));
@@ -1713,6 +1743,7 @@ void Shutdown() {
     g_note.Destroy();
     g_alert.Destroy();
     g_askCard.Destroy();
+    g_pairCard.Destroy();
     g_pubCard.Destroy();
 }
 

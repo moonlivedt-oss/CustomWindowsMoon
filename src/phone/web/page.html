@@ -580,7 +580,7 @@ post('clip',t).then(function(r){if(r.ok)toast('Скопированное на �
 // запомнить телефон
 $('pair').onclick=function(){if(!isSec&&state.tls){toast('Сначала откройте защищённую страницу');$('secbox').scrollIntoView();return}var n=(navigator.userAgentData&&navigator.userAgentData.platform)||'телефон';
 var m=/\(([^)]+)\)/.exec(navigator.userAgent);if(m)n=m[1].split(';').pop().trim()||n;
-post('pair',n).then(function(r){if(!r.ok)return r.text().then(function(t){toast(t||'Не вышло');return{}});return r.json()}).then(function(j){if(j.url){toast('Запомнен');location.replace(j.url)}}).catch(function(){toast('Не вышло')})};
+toast('Подтвердите на экране ПК: «Запомнить»');post('pair',n).then(function(r){if(!r.ok)return r.text().then(function(t){toast(t||'Не вышло');return{}});return r.json()}).then(function(j){if(j.url){toast('Запомнен');location.replace(j.url)}}).catch(function(){toast('Не вышло')})};
 (function(){var t=null;try{t=localStorage.getItem('tab')}catch(e){}tab(t&&document.querySelector('[data-p="'+t+'"]')?t:'remote')})();
 shareResult();
 autoClip();
