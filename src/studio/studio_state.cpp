@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
 #include "app/autos.h"
 #include "life/nightupd.h"
@@ -1048,7 +1049,11 @@ void Studio::AutoPage(const RectF& r) {
                   L"Ничего не удаляется без вопроса и всё уходит в Корзину.",
                   c.faint);
     });
-    cols.Card(L"Телефон рядом", 6.4f, [&](const RectF& b) {
+    std::vector<phone::KnownPhone> phones = phone::KnownPhones();
+    size_t shown = std::min<size_t>(phones.size(), 5);
+    int phoneRows = (int)shown + (phones.size() > shown ? 1 : 0);  // строка «и ещё N» с «Забыть все»
+    float extra = phoneRows > 1 ? (float)(phoneRows - 1) : 0;
+    cols.Card(L"Телефон рядом", 6.4f + extra, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Ждать запомненный телефон всегда");
         toggle(rr, ID_PHONE_ALWAYS, cfg.phoneAlways);
         rr = cols.Row(b, 1, L"Тачпад и клавиатура с телефона");
@@ -1057,15 +1062,31 @@ void Studio::AutoPage(const RectF& r) {
         toggle(rr, ID_PHONE_SCREEN, cfg.phoneScreen);
         rr = cols.Row(b, 3, L"Файлы: открыть, копировать, в Корзину");
         toggle(rr, ID_PHONE_FILES, cfg.phoneFiles);
-        int n = phone::Devices();
-        rr = cols.Row(b, 4, n ? L"Запомнено телефонов: " + std::to_wstring(n) : std::wstring(L"Запомненных телефонов нет"),
-                      0.95f);
-        if (n && ui.Button(ID_PHONE_FORGET, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
-                           L"Забыть", Kind::Secondary))
-            phone::Forget();
-        cols.Note(b, 5.0f,
+        if (phones.empty()) cols.Row(b, 4, L"Запомненных телефонов нет", 0.95f);
+        long long now = (long long)time(nullptr);
+        for (size_t i = 0; i < shown; ++i) {
+            const phone::KnownPhone& p = phones[i];
+            long long days = p.seen > 0 ? (now - p.seen) / 86400 : -1;
+            std::wstring when = days < 0    ? L"ещё не заходил"
+                                : days == 0 ? L"заходил сегодня"
+                                            : L"заходил " + Plural((int)days, L"день", L"дня", L"дней") + L" назад";
+            rr = cols.Row(b, 4 + (int)i, (p.name.empty() ? L"Телефон" : p.name) + L", " + when, 0.7f);
+            if (ui.Button(ID_PHONE_DEV + (int)i, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
+                          L"Забыть", Kind::Secondary)) {
+                std::string key = p.key;
+                Defer([key] { phone::ForgetPhone(key); });
+            }
+        }
+        if (phones.size() > shown) {
+            rr = cols.Row(b, 4 + (int)shown, L"И ещё " + std::to_wstring(phones.size() - shown), 0.7f);
+            if (ui.Button(ID_PHONE_FORGET, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
+                          L"Забыть все", Kind::Secondary))
+                Defer([] { phone::Forget(); });
+        }
+        cols.Note(b, 5.0f + extra,
                   L"Пока телефон смотрит экран, по краю экрана красная рамка и карточка «Стоп». "
-                  L"Запомнить телефон - кнопка на его странице (после QR). Когда «ждать всегда» включено, страница из "
+                  L"Запомнить телефон - кнопка на его странице (после QR); не заходил 60 дней - забывается сам. Когда "
+                  L"«ждать всегда» включено, страница из "
                   L"закладки открывается без QR, пока ноутбук в своей (частной) сети; сервер пускает только "
                   L"запомненные телефоны. Папки ПК для телефона - phone_share в radial.cfg.",
                   c.faint);
@@ -1074,9 +1095,9 @@ void Studio::AutoPage(const RectF& r) {
         RectF rr = cols.Row(b, 0, L"Обновлять через winget ночью");
         toggle(rr, ID_AUTO_WINGET, cfg.wingetNight);
         rr = cols.Row(b, 1, nightupd::Status(), 0.95f);
-        if (cfg.wingetNight && ui.Button(ID_AUTO_WINGET_NOW, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4),
-                                                                   ui.S(150), ui.S(36)),
-                                         L"Сейчас", Kind::Secondary))
+        if (cfg.wingetNight &&
+            ui.Button(ID_AUTO_WINGET_NOW, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
+                      L"Сейчас", Kind::Secondary))
             nightupd::RunNow();
         cols.Note(b, 2.0f,
                   L"С 02:00 до 05:30, только от сети, когда компьютер полчаса никто не трогает и нет игры; по одному "

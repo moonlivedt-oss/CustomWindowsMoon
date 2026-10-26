@@ -265,24 +265,122 @@ std::wstring DevicesFile() {
     return dir + L"\\MoonDesk\\phone-devices.tsv";
 }
 
-std::vector<std::string> LoadDevices() {
-    std::vector<std::string> out;
+// Файл запомненных телефонов - под DPAPI (расшифрует только эта учётная запись Windows): ключ в нём - пропуск к
+// буферу, файлам и пульту. Старый файл открытым текстом переписывается при первом чтении. Пишут поток сервера
+// («Запомнить», «заходил») и основной («Забыть», забыть давних) - под своим замком.
+SRWLOCK g_devLock = SRWLOCK_INIT;
+std::vector<DeviceRec> g_devCache;
+ULONGLONG g_devAt = 0;               // когда читан файл (0 - перечитать)
+std::vector<std::string> g_devSeen;  // ключи, которые заходили после последней записи
+ULONGLONG g_devFlushAt = 0;
+constexpr char kDevMagic[] = "MoonDesk-DPAPI-1\n";
+
+std::string Dpapi(const std::string& data, bool protect) {
+    static const char kEntropy[] = "MoonDesk phone-devices";
+    DATA_BLOB in{(DWORD)data.size(), (BYTE*)data.data()}, out{}, ent{sizeof(kEntropy) - 1, (BYTE*)kEntropy};
+    BOOL ok = protect
+                  ? CryptProtectData(&in, L"MoonDesk phones", &ent, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)
+                  : CryptUnprotectData(&in, nullptr, &ent, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out);
+    std::string r;
+    if (ok && out.pbData) r.assign((const char*)out.pbData, out.cbData);
+    if (out.pbData) {
+        SecureZeroMemory(out.pbData, out.cbData);
+        LocalFree(out.pbData);
+    }
+    return r;
+}
+
+// под g_devLock; legacy - файл был открытым текстом
+std::vector<DeviceRec> ReadDevices(bool* legacy) {
+    if (legacy) *legacy = false;
     HANDLE f = CreateFileW(DevicesFile().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (f == INVALID_HANDLE_VALUE) return out;
-    std::string u(std::min<DWORD>(GetFileSize(f, nullptr), 1 << 16), '\0');
+    if (f == INVALID_HANDLE_VALUE) return {};
+    std::string u(std::min<DWORD>(GetFileSize(f, nullptr), 1 << 20), '\0');
     DWORD got = 0;
     ReadFile(f, u.data(), (DWORD)u.size(), &got, nullptr);
     CloseHandle(f);
     u.resize(got);
-    size_t at = 0;
-    while (at < u.size()) {
-        size_t e = u.find('\n', at);
-        std::string line = u.substr(at, e == std::string::npos ? std::string::npos : e - at);
-        at = e == std::string::npos ? u.size() : e + 1;
-        std::string key = line.substr(0, line.find('\t'));
-        if (UploadId(key)) out.push_back(key);
+    size_t m = sizeof(kDevMagic) - 1;
+    if (u.compare(0, m, kDevMagic) == 0) {
+        std::string plain = Dpapi(u.substr(m), false);
+        std::vector<DeviceRec> list = ParseDevices(plain);
+        SecureZeroMemory(plain.data(), plain.size());
+        return list;
     }
+    if (legacy) *legacy = !u.empty();
+    return ParseDevices(u);
+}
+
+// под g_devLock: целиком, через временный файл (оборванная запись не потеряет остальные телефоны)
+bool WriteDevices(const std::vector<DeviceRec>& list) {
+    std::wstring path = DevicesFile(), tmp = path + L".tmp";
+    g_devAt = 0;
+    if (list.empty()) return DeleteFileW(path.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND;
+    std::string plain = DevicesText(list), blob = Dpapi(plain, true);
+    SecureZeroMemory(plain.data(), plain.size());
+    if (blob.empty()) return false;
+    blob.insert(0, kDevMagic);
+    SHCreateDirectoryExW(nullptr, ParentDir(path).c_str(), nullptr);
+    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD put = 0;
+    bool ok = WriteFile(f, blob.data(), (DWORD)blob.size(), &put, nullptr) && put == blob.size();
+    CloseHandle(f);
+    ok = ok && MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    if (!ok) DeleteFileW(tmp.c_str());
+    return ok;
+}
+
+// Список из файла (не чаще раза в 2 с); в основном потоке: старый формат переписывается, давние забываются
+std::vector<DeviceRec> DeviceRecs() {
+    std::vector<std::wstring> gone;
+    bool migrated = false;
+    std::vector<DeviceRec> list;
+    AcquireSRWLockExclusive(&g_devLock);
+    ULONGLONG now = GetTickCount64();
+    if (!g_devAt || now - g_devAt > 2000) {
+        bool legacy = false;
+        g_devCache = ReadDevices(&legacy);
+        long long t = (long long)time(nullptr);
+        size_t was = g_devCache.size();
+        for (auto it = g_devCache.begin(); it != g_devCache.end();)
+            if (DeviceStale(*it, t)) {
+                gone.push_back(it->name.empty() ? L"телефон" : it->name);
+                it = g_devCache.erase(it);
+            } else {
+                ++it;
+            }
+        if (legacy || g_devCache.size() != was) migrated = WriteDevices(g_devCache) && legacy;
+        g_devAt = GetTickCount64();
+    }
+    list = g_devCache;
+    ReleaseSRWLockExclusive(&g_devLock);
+    if (migrated) autos::Note(L"Телефон рядом: ключи телефонов перенесены под защиту Windows (DPAPI)");
+    for (const std::wstring& n : gone)
+        autos::Note(L"Телефон рядом: забыт «" + n + L"» - не заходил " + std::to_wstring(kDeviceDays) + L" дней");
+    return list;
+}
+
+std::vector<std::string> LoadDevices() {
+    std::vector<std::string> out;
+    for (const DeviceRec& d : DeviceRecs()) out.push_back(d.key);
     return out;
+}
+
+// «заходил» - в файл раз в 10 минут, а не на каждый запрос
+void FlushSeen(bool now) {
+    ULONGLONG t = GetTickCount64();
+    if (!now && t - g_devFlushAt < 600000) return;
+    g_devFlushAt = t;
+    AcquireSRWLockExclusive(&g_devLock);
+    if (!g_devSeen.empty()) {
+        std::vector<DeviceRec> list = ReadDevices(nullptr);
+        long long unix = (long long)time(nullptr);
+        for (DeviceRec& d : list)
+            if (std::find(g_devSeen.begin(), g_devSeen.end(), d.key) != g_devSeen.end()) d.seen = unix;
+        if (WriteDevices(list)) g_devSeen.clear();
+    }
+    ReleaseSRWLockExclusive(&g_devLock);
 }
 
 void RefreshCfg() {
@@ -626,20 +724,31 @@ bool CallMain(const std::string& op, std::string& out) {
 std::string NewDevice(const std::wstring& name) {
     unsigned char b[16];
     BCryptGenRandom(nullptr, b, sizeof(b), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    std::string key = Token(b, sizeof(b));
-    std::wstring clean = name;
-    for (wchar_t& c : clean)
-        if (c == L'\t' || c == L'\n' || c == L'\r') c = L' ';
-    std::string line = key + "\t" + Narrow(clean) + "\t" + std::to_string((long long)time(nullptr)) + "\n";
-    HANDLE f = CreateFileW(DevicesFile().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
-    if (f == INVALID_HANDLE_VALUE) return "";
-    DWORD put = 0;
-    bool ok = WriteFile(f, line.data(), (DWORD)line.size(), &put, nullptr) && put == line.size();
-    CloseHandle(f);
+    DeviceRec d;
+    d.key = Token(b, sizeof(b));
+    d.name = CleanLine(name, 60);
+    d.added = d.seen = (long long)time(nullptr);
+    AcquireSRWLockExclusive(&g_devLock);
+    std::vector<DeviceRec> list = ReadDevices(nullptr);
+    list.push_back(d);
+    bool ok = WriteDevices(list);
+    ReleaseSRWLockExclusive(&g_devLock);
     if (!ok) return "";
     Lock l;
-    S().devices.push_back(key);
-    return key;
+    S().devices.push_back(d.key);
+    return d.key;
+}
+
+void DeviceSeen(int index) {
+    std::string key;
+    {
+        Lock l;
+        if (index < 0 || index >= (int)S().devices.size()) return;
+        key = S().devices[index];
+    }
+    AcquireSRWLockExclusive(&g_devLock);
+    if (std::find(g_devSeen.begin(), g_devSeen.end(), key) == g_devSeen.end()) g_devSeen.push_back(key);
+    ReleaseSRWLockExclusive(&g_devLock);
 }
 
 float Command(const std::string& c) {
@@ -788,7 +897,37 @@ void Stop() { StopSession(L"остановлено"); }
 
 bool Active() { return S().on; }
 
-int Devices() { return (int)LoadDevices().size(); }
+int Devices() { return (int)DeviceRecs().size(); }
+
+std::vector<KnownPhone> KnownPhones() {
+    std::vector<KnownPhone> out;
+    for (const DeviceRec& d : DeviceRecs()) out.push_back({d.key, d.name, d.added, d.seen});
+    return out;
+}
+
+void ForgetPhone(const std::string& key) {
+    std::wstring name;
+    bool left = false;
+    AcquireSRWLockExclusive(&g_devLock);
+    std::vector<DeviceRec> list = ReadDevices(nullptr);
+    for (auto it = list.begin(); it != list.end();)
+        if (it->key == key) {
+            name = it->name;
+            it = list.erase(it);
+        } else {
+            ++it;
+        }
+    WriteDevices(list);
+    left = !list.empty();
+    g_devSeen.erase(std::remove(g_devSeen.begin(), g_devSeen.end(), key), g_devSeen.end());
+    ReleaseSRWLockExclusive(&g_devLock);
+    {
+        Lock l;
+        S().devices.erase(std::remove(S().devices.begin(), S().devices.end(), key), S().devices.end());
+    }
+    autos::Note(L"Телефон рядом: забыт «" + (name.empty() ? std::wstring(L"телефон") : name) + L"»");
+    if (!left && S().on && S().standing) StopSession(L"телефоны забыты");
+}
 
 void Find() {
     if (!S().on) {
@@ -881,7 +1020,10 @@ bool PostToRunning(HWND app, const std::vector<std::wstring>& files) {
 }
 
 void Forget() {
-    DeleteFileW(DevicesFile().c_str());
+    AcquireSRWLockExclusive(&g_devLock);
+    WriteDevices({});
+    g_devSeen.clear();
+    ReleaseSRWLockExclusive(&g_devLock);
     {
         Lock l;
         S().devices.clear();
@@ -939,6 +1081,7 @@ void Tick() {
     g_watchCard.Tick();
     g_alert.Tick();
     RefreshCfg();
+    FlushSeen(false);
     ULONGLONG now = GetTickCount64();
     // запомненный телефон: сервер ждёт его всё время, пока ноутбук в своей (частной) сети
     if (g_cfg && g_cfg->phoneAlways && now - g_standAt > 30000) {
@@ -1389,6 +1532,7 @@ void OnMessage(WPARAM wp, LPARAM lp) {
 
 void Shutdown() {
     StopSession(L"выход");
+    FlushSeen(true);
     Card().Destroy();
     g_note.Destroy();
     g_alert.Destroy();

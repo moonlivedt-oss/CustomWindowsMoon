@@ -132,6 +132,7 @@ void Handle(Conn& cn, const Request& r) {
         return Text(cn, 404, "нет");
     }
     std::string base = r.path.substr(0, pre), rest = r.path.substr(pre);
+    if (device >= 0) DeviceSeen(device);
     // Ключ запомненного телефона - постоянный: по http его видит любой в той же Wi-Fi. Когда https открыт, страница
     // уходит туда, остальное по http отклоняется. Ключ сессии (QR) по http работает - это первое знакомство.
     int tlsPort = 0;

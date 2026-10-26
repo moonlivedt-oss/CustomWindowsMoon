@@ -53,10 +53,39 @@ void TestPhoneHttpsOnly() {
     CHECK(phone::HttpsLocation("192.168.1.5", 8800, std::string("/d/k\r\nX: 1")).empty());
 }
 
+void TestPhoneDevices() {
+    // старый файл: ключ, имя, когда запомнен
+    std::vector<phone::DeviceRec> v = phone::ParseDevices(
+        "abcdefgh12345678\tPixel 7\t1700000000\r\nbad key\tx\t1\n"
+        "abcdefgh12345678\tповтор\t1\nqwertyuiop123456\tSM-A525F\t1700000100\t1700500000\t1\n");
+    CHECK(v.size() == 2);
+    CHECK(v[0].key == "abcdefgh12345678" && v[0].name == L"Pixel 7" && v[0].added == 1700000000);
+    CHECK(v[0].seen == 1700000000 && !v[0].control);  // «заходил» нет - с момента знакомства
+    CHECK(v[1].seen == 1700500000 && v[1].control);
+    std::string text = phone::DevicesText(v);
+    std::vector<phone::DeviceRec> back = phone::ParseDevices(text);
+    CHECK(back.size() == 2 && back[1].name == L"SM-A525F" && back[1].added == 1700000100 && back[1].control);
+    phone::DeviceRec d;
+    d.key = "abcdefgh12345678";
+    d.name = L"имя\tс\nпереводом";
+    CHECK(phone::ParseDevices(phone::DevicesText({d}))[0].name == L"имя с переводом");  // табуляция не ломает файл
+    long long day = 86400;
+    d.added = 1000 * day;
+    d.seen = 1000 * day;
+    CHECK(!phone::DeviceStale(d, 1059 * day));
+    CHECK(phone::DeviceStale(d, 1061 * day));
+    d.seen = 1050 * day;  // заходил позже - считается от захода
+    CHECK(!phone::DeviceStale(d, 1100 * day));
+    d.added = d.seen = 0;  // время не записано - не забывать
+    CHECK(!phone::DeviceStale(d, 1100 * day));
+    CHECK(phone::ParseDevices("").empty());
+}
+
 }  // namespace
 
 void TestSec(void (*check)(bool, const char*, int)) {
     g_check = check;
     TestElevateHelper();
     TestPhoneHttpsOnly();
+    TestPhoneDevices();
 }

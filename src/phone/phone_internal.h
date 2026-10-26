@@ -65,9 +65,9 @@ enum Event {
     EV_CLIPIMG,
     EV_PAIRED,
     EV_OCR,
-    EV_NOTE,   // запись в журнал (что сделано с телефона)
-    EV_CALL,   // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
-    EV_CAM,    // пришёл кадр камеры телефона
+    EV_NOTE,    // запись в журнал (что сделано с телефона)
+    EV_CALL,    // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
+    EV_CAM,     // пришёл кадр камеры телефона
     EV_OUTBOX,  // вторая копия положила файлы в phone-outbox.txt («Отправить - На телефон»)
     EV_NOTICE   // приложение на телефоне: уведомление, SMS, звонок (lp - new Notice)
 };
@@ -94,6 +94,7 @@ bool InputAllowed();                              // phone_input: тачпад �
 bool ScreenAllowed();                             // phone_screen и не остановлено на ПК
 bool FilesAllowed();                              // phone_files: открыть, копировать, переместить, в Корзину
 std::string NewDevice(const std::wstring& name);  // запомнить телефон: ключ (пусто - не вышло)
+void DeviceSeen(int index);                       // запомненный телефон (номер в S().devices) заходил
 
 // Соединение (сервер держит его открытым между запросами): что уже пришло и не разобрано, сколько тела осталось
 struct Conn {

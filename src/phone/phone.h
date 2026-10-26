@@ -37,6 +37,14 @@ std::wstring SecureUrl();  // та же страница по https (пусто 
 std::wstring Diag();
 int Devices();  // сколько телефонов запомнено
 void Forget();  // забыть все запомненные телефоны
+// запомненные телефоны для студии (ключ - чтобы забыть один); список помнится, файл читается не чаще раза в 2 с
+struct KnownPhone {
+    std::string key;
+    std::wstring name;
+    long long added = 0, seen = 0;  // unix, с
+};
+std::vector<KnownPhone> KnownPhones();
+void ForgetPhone(const std::string& key);
 // действия для углов и кольца: найти телефон (страница звенит), на телефон - то, что в буфере ПК (файлы
 // Проводника, ссылка или текст)
 void Find();
@@ -169,6 +177,19 @@ size_t MatchKey(const std::string& path, const std::string& token, const std::ve
                 int* device);
 // та же страница по https: хост из Host (без порта), порт https; пусто - Host не имя и не IPv4
 std::string HttpsLocation(const std::string& host, int tlsPort, const std::string& path);
+// запомненный телефон: строка phone-devices.tsv (файл - под DPAPI, phone.cpp)
+struct DeviceRec {
+    std::string key;       // /d/<ключ>/
+    std::wstring name;     // как телефон себя назвал
+    long long added = 0;   // когда запомнен (unix, с)
+    long long seen = 0;    // когда заходил последний раз
+    bool control = false;  // управление (тачпад, клавиатура, экран) с него разрешено на ПК
+};
+inline constexpr long long kDeviceDays = 60;  // не заходил столько дней - ключ забывается сам
+// строки «ключ, имя, запомнен, заходил, управление» через табуляцию; чужие ключи и повторы - прочь
+std::vector<DeviceRec> ParseDevices(const std::string& text);
+std::string DevicesText(const std::vector<DeviceRec>& list);
+bool DeviceStale(const DeviceRec& d, long long now);
 
 // Пути, если телефон не в этой сети: по порядку - что предложить первым
 enum Way { WAY_PHONE_HOTSPOT, WAY_PC_HOTSPOT, WAY_BLUETOOTH };
