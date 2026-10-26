@@ -16,6 +16,7 @@
 #include "life/preview.h"
 #include "life/record.h"
 #include "life/remind.h"
+#include "life/shelf.h"
 #include "life/tidy.h"
 #include "life/vpnexit.h"
 #include "phone/phone.h"
@@ -324,10 +325,18 @@ void TestPreview() {
     CHECK(preview::Caption(L"b.txt", 5 << 20, 0, 0, 0, 1) == L"b.txt   5,0 МБ");
 }
 
+void TestShelf() {
+    std::vector<std::wstring> s = {L"C:\\a.txt"};
+    CHECK(shelf::Merge(s, {L"c:\\A.TXT", L"D:\\b.png", L"", L"D:\\b.png"}) == 1 && s.size() == 2);
+    CHECK(shelf::Merge(s, {L"x", L"y", L"z"}, 3) == 1 && s.size() == 3);  // не больше max
+    CHECK(shelf::Title(s) == L"Полка: 3 файла" && shelf::Title({}) == L"Полка пуста");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestShelf();
     TestPreview();
     TestTidy();
     TestRecord();

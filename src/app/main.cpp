@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/shelf.h"
 #include "life/preview.h"
 #include "life/tidy.h"
 #include "life/record.h"
@@ -272,6 +273,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    shelf::Tick();
     preview::Tick();
     tidy::Tick();
     record::Tick();
@@ -529,6 +531,10 @@ bool RunExtra(const std::wstring& a) {
         phone::OpenPage();
         return true;
     }
+    if (a == L"shelf") {
+        shelf::Toggle();
+        return true;
+    }
     if (a == L"preview") {
         preview::Show();
         return true;
@@ -561,11 +567,12 @@ bool RunExtra(const std::wstring& a) {
 }
 
 // Файлы бросили на пункт action:<действие>: телефон берёт их на передачу
-bool DropAccepts(const std::wstring& a) { return a == L"phone" || a == L"convert"; }
+bool DropAccepts(const std::wstring& a) { return a == L"phone" || a == L"convert" || a == L"shelf"; }
 
 void OnDropAction(const std::wstring& a, std::vector<std::wstring> files) {
     if (a == L"phone") phone::Offer(files);
     if (a == L"convert") convert::Drop(files);
+    if (a == L"shelf") shelf::Add(files);
 }
 
 // Режим разработки включился или выключился: обои и память, красота и перехват
@@ -923,6 +930,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    shelf::Shutdown();
     preview::Shutdown();
     tidy::Shutdown();
     record::Shutdown();
@@ -1393,6 +1401,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
+    shelf::Init(inst, &g_cfg);  // Ф7
     preview::Init(inst, &g_cfg);  // Ф8
     tidy::Init(inst, &g_cfg);  // Ф3, Л40
     record::Init(inst, &g_cfg);  // Ф9
