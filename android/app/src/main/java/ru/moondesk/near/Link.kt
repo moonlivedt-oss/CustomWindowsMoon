@@ -1,0 +1,235 @@
+package ru.moondesk.near
+
+import android.content.Context
+import android.content.SharedPreferences
+import android.util.Base64
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.net.URL
+import java.security.SecureRandom
+import java.security.cert.CertificateException
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
+import java.util.concurrent.Executors
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.X509TrustManager
+
+// Настройки приложения (что включено, адрес ПК, закреплённый сертификат, что уже отправлено)
+class Prefs(ctx: Context) {
+    val p: SharedPreferences = ctx.applicationContext.getSharedPreferences("near", Context.MODE_PRIVATE)
+    var base: String?
+        get() = p.getString("base", null)
+        set(v) = p.edit().putString("base", v).apply()
+    var ca: String?  // корневой сертификат ПК (DER в base64): знакомство один раз, дальше - только он
+        get() = p.getString("ca", null)
+        set(v) = p.edit().putString("ca", v).apply()
+    var pc: String
+        get() = p.getString("pc", "") ?: ""
+        set(v) = p.edit().putString("pc", v).apply()
+    var wol: String  // последний ответ /pcinfo: MAC и широковещательный адрес, чтобы будить ПК, когда он спит
+        get() = p.getString("wol", "") ?: ""
+        set(v) = p.edit().putString("wol", v).apply()
+    var notes: Boolean
+        get() = p.getBoolean("notes", false)
+        set(v) = p.edit().putBoolean("notes", v).apply()
+    var sms: Boolean
+        get() = p.getBoolean("sms", false)
+        set(v) = p.edit().putBoolean("sms", v).apply()
+    var calls: Boolean
+        get() = p.getBoolean("calls", false)
+        set(v) = p.edit().putBoolean("calls", v).apply()
+    var photos: Boolean
+        get() = p.getBoolean("photos", false)
+        set(v) = p.edit().putBoolean("photos", v).apply()
+    var clip: Boolean
+        get() = p.getBoolean("clip", false)
+        set(v) = p.edit().putBoolean("clip", v).apply()
+    var callState: String?
+        get() = p.getString("callState", "IDLE")
+        set(v) = p.edit().putString("callState", v).apply()
+    var callWho: String
+        get() = p.getString("callWho", "") ?: ""
+        set(v) = p.edit().putString("callWho", v).apply()
+    var callNum: String
+        get() = p.getString("callNum", "") ?: ""
+        set(v) = p.edit().putString("callNum", v).apply()
+
+    fun lastMedia(kind: String): Long = p.getLong("last_$kind", -1)
+    fun setLastMedia(kind: String, id: Long) = p.edit().putLong("last_$kind", id).apply()
+}
+
+class Resp(val code: Int, val body: ByteArray) {
+    val text: String get() = String(body, Charsets.UTF_8)
+}
+
+// Связь с сервером ПК: только https, только свой корневой сертификат ПК (его выдаёт /ca.crt при знакомстве)
+object Link {
+    private val pool = Executors.newSingleThreadExecutor()  // уведомления, SMS, звонки - по очереди, не в главном
+
+    private class Pin(val ca: X509Certificate?) : X509TrustManager {
+        var seen: X509Certificate? = null
+        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) =
+            throw CertificateException("нет")
+
+        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+            val leaf = chain?.firstOrNull() ?: throw CertificateException("пусто")
+            if (ca == null) {  // знакомство: запомним, кто ответил, и сверим с /ca.crt
+                seen = leaf
+                return
+            }
+            leaf.checkValidity()
+            try {
+                leaf.verify(ca.publicKey)
+            } catch (e: Exception) {
+                throw CertificateException("чужой сертификат: это не тот ПК")
+            }
+        }
+
+        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+    }
+
+    private fun factory(pin: Pin): SSLSocketFactory {
+        val c = SSLContext.getInstance("TLS")
+        c.init(null, arrayOf(pin), SecureRandom())
+        return c.socketFactory
+    }
+
+    private fun caOf(prefs: Prefs): X509Certificate? = prefs.ca?.let {
+        CertificateFactory.getInstance("X.509")
+            .generateCertificate(Base64.decode(it, Base64.NO_WRAP).inputStream()) as X509Certificate
+    }
+
+    private fun open(url: String, pin: Pin, timeout: Int): HttpsURLConnection {
+        val c = URL(url).openConnection() as HttpsURLConnection
+        c.sslSocketFactory = factory(pin)
+        c.setHostnameVerifier { _, _ -> true }  // адрес ПК меняется; подлинность - по корневому сертификату
+        c.connectTimeout = 5000
+        c.readTimeout = timeout
+        c.useCaches = false
+        return c
+    }
+
+    fun readAll(s: InputStream, max: Int = 32 shl 20): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(64 shl 10)
+        while (true) {
+            val k = s.read(buf)
+            if (k < 0) break
+            out.write(buf, 0, k)
+            if (out.size() > max) throw IOException("слишком много")
+        }
+        return out.toByteArray()
+    }
+
+    // запрос к ПК: path - после ключа («poll?seq=3»); IOException - ПК не на связи
+    fun call(
+        ctx: Context, method: String, path: String, body: ByteArray? = null,
+        type: String = "application/x-www-form-urlencoded; charset=utf-8", timeout: Int = 10000,
+    ): Resp {
+        val prefs = Prefs(ctx)
+        val base = prefs.base ?: throw IOException("ПК не подключён")
+        val ca = caOf(prefs) ?: throw IOException("ПК не подключён")
+        val c = open(base + path, Pin(ca), timeout)
+        try {
+            c.requestMethod = method
+            if (body != null) {
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", type)
+                c.setFixedLengthStreamingMode(body.size)
+                c.outputStream.use { it.write(body) }
+            }
+            val code = c.responseCode
+            val s = if (code < 400) c.inputStream else c.errorStream
+            return Resp(code, s?.use { readAll(it) } ?: ByteArray(0))
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    // кусок файла потоком (фото): не держим 4 МБ в памяти дважды
+    fun put(ctx: Context, path: String, data: ByteArray, len: Int): Resp {
+        val prefs = Prefs(ctx)
+        val c = open((prefs.base ?: throw IOException("нет ПК")) + path, Pin(caOf(prefs)
+            ?: throw IOException("нет ПК")), 60000)
+        try {
+            c.requestMethod = "PUT"
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/octet-stream")
+            c.setFixedLengthStreamingMode(len)
+            c.outputStream.use { it.write(data, 0, len) }
+            val code = c.responseCode
+            val s = if (code < 400) c.inputStream else c.errorStream
+            return Resp(code, s?.use { readAll(it, 1 shl 16) } ?: ByteArray(0))
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    // Знакомство по ссылке со страницы: берём /ca.crt, сверяем, что сертификат сервера подписан им, запоминаем.
+    // Вернёт имя ПК; IOException - с понятным текстом
+    fun pair(ctx: Context, b: Pure.Base): String {
+        val pin = Pin(null)
+        val c = open(b.url + "ca.crt", pin, 10000)
+        val der = try {
+            if (c.responseCode != 200) throw IOException("ПК не узнал ссылку (код ${c.responseCode})")
+            c.inputStream.use { readAll(it, 1 shl 16) }
+        } finally {
+            c.disconnect()
+        }
+        val ca = CertificateFactory.getInstance("X.509").generateCertificate(der.inputStream()) as X509Certificate
+        val leaf = pin.seen ?: throw IOException("ПК не показал сертификат")
+        try {
+            leaf.verify(ca.publicKey)
+        } catch (e: Exception) {
+            throw IOException("сертификат сервера не от этого ПК")
+        }
+        val prefs = Prefs(ctx)
+        prefs.base = b.url
+        prefs.ca = Base64.encodeToString(der, Base64.NO_WRAP)
+        val info = call(ctx, "GET", "pcinfo")
+        if (info.code != 200) throw IOException("RadialMenu на ПК старый: нет /pcinfo")
+        savePcInfo(ctx, info.text)
+        return prefs.pc
+    }
+
+    fun savePcInfo(ctx: Context, json: String) {
+        val prefs = Prefs(ctx)
+        try {
+            val o = org.json.JSONObject(json)
+            prefs.pc = o.optString("pc", "")
+            if ((o.optJSONArray("wol")?.length() ?: 0) > 0) prefs.wol = json  // ПК на USB-раздаче - не затирать
+        } catch (_: Exception) {
+        }
+    }
+
+    // уведомление, SMS или звонок - на ПК; done - в любом случае (BroadcastReceiver.goAsync)
+    fun notice(
+        ctx: Context, kind: String, app: String?, title: String?, text: String?, num: String?, id: String?,
+        done: (() -> Unit)? = null,
+    ) {
+        val app0 = ctx.applicationContext
+        pool.execute {
+            try {
+                val body = Pure.form(
+                    "kind" to kind, "app" to app, "title" to title, "text" to text, "num" to num, "id" to id,
+                ).toByteArray()
+                call(app0, "POST", "notice", body, timeout = 6000)
+            } catch (_: Exception) {  // ПК спит или не в этой сети - уведомление просто не дойдёт
+            } finally {
+                done?.invoke()
+            }
+        }
+    }
+
+    fun send(work: () -> Unit) = pool.execute {
+        try {
+            work()
+        } catch (_: Exception) {
+        }
+    }
+
+    fun connected(ctx: Context): Boolean = Prefs(ctx).base != null && Prefs(ctx).ca != null
+}

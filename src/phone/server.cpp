@@ -150,7 +150,7 @@ void Handle(Conn& cn, const Request& r) {
     if (rest == "/poll") return Poll(cn, r);
     if (rest == "/clip" && r.method == "POST") return ClipIn(cn, r);
     if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest) || HandleRemote(cn, r, rest) || HandleShare(cn, r, rest) ||
-        HandleExtra(cn, r, rest))
+        HandleExtra(cn, r, rest) || HandleApp(cn, r, rest))
         return;
     Text(cn, 404, "нет");
 }

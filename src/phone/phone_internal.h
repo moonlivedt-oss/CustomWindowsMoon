@@ -68,10 +68,12 @@ enum Event {
     EV_NOTE,   // запись в журнал (что сделано с телефона)
     EV_CALL,   // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
     EV_CAM,    // пришёл кадр камеры телефона
-    EV_OUTBOX  // вторая копия положила файлы в phone-outbox.txt («Отправить - На телефон»)
+    EV_OUTBOX,  // вторая копия положила файлы в phone-outbox.txt («Отправить - На телефон»)
+    EV_NOTICE   // приложение на телефоне: уведомление, SMS, звонок (lp - new Notice)
 };
 void Post(Event e, const std::wstring& text = L"");
 void PostBytes(Event e, std::string bytes);  // lp - new std::string (картинка)
+void PostNotice(const Notice& n);            // EV_NOTICE: карточка на ПК
 // счётчики для скорости на карточке
 extern std::atomic<long long> g_sent, g_recv, g_sendLeft;
 extern std::atomic<ULONGLONG> g_screenAt;  // когда телефон последний раз брал кадр экрана
@@ -127,6 +129,7 @@ bool HandleMore(Conn& cn, const Request& r, const std::string& rest);
 bool HandleRemote(Conn& cn, const Request& r, const std::string& rest);
 bool HandleShare(Conn& cn, const Request& r, const std::string& rest);  // server_share.cpp: https, PWA, камера
 bool HandleExtra(Conn& cn, const Request& r, const std::string& rest);  // server_extra.cpp: кольцо, музыка, ПК
+bool HandleApp(Conn& cn, const Request& r, const std::string& rest);    // server_app.cpp: приложение на телефоне
 void HoldKey(WORD vk, bool down);                                       // server_more.cpp: геймпад
 void ReleaseKeys();
 void MediaStart();  // что играет на ПК (desk/media) - пока идёт передача

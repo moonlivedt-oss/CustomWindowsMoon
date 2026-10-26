@@ -74,6 +74,8 @@ std::vector<std::wstring> g_roots;
 std::atomic<bool> g_input{true};
 std::atomic<bool> g_screen{false}, g_files{false}, g_screenStopped{false};
 HWND g_watchFrame[4] = {};  // рамка по краю экрана, пока телефон смотрит экран
+BoostCard g_alert;      // приложение на телефоне: уведомление, SMS, звонок
+bool g_callShown = false;  // на g_alert сейчас «Звонит» - убрать, когда взяли или сбросили
 BoostCard g_watchCard;      // «Телефон смотрит экран - Стоп»
 bool g_watching = false;
 void Watching(bool on);  // ниже: рамка и карточка, пока телефон смотрит экран
@@ -137,6 +139,8 @@ std::vector<Adapter> Adapters() {
             x.type = (int)a->IfType;
             x.virt = virt && !HotspotIp(ip);  // хот-спот Windows - «Wi-Fi Direct Virtual Adapter», но он нам и нужен
             x.guid = Widen(a->AdapterName ? a->AdapterName : "");
+            x.mac = MacText(a->PhysicalAddress, a->PhysicalAddressLength);
+            x.prefix = u->OnLinkPrefixLength;
             out.push_back(x);
         }
     }
@@ -582,6 +586,11 @@ void Post(Event e, const std::wstring& text) {
     if (g_app) PostMessageW(g_app, WM_PHONE, e, text.empty() ? 0 : (LPARAM) new std::wstring(text));
 }
 
+void PostNotice(const Notice& n) {
+    auto* p = new Notice(n);
+    if (!g_app || !PostMessageW(g_app, WM_PHONE, EV_NOTICE, (LPARAM)p)) delete p;
+}
+
 void PostBytes(Event e, std::string bytes) {
     auto* p = new std::string(std::move(bytes));
     if (!g_app || !PostMessageW(g_app, WM_PHONE, e, (LPARAM)p)) delete p;
@@ -723,6 +732,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg) {
     Card().Create(inst);
     g_note.Create(inst);
     g_watchCard.Create(inst);
+    g_alert.Create(inst);
 }
 
 void Offer(const std::vector<std::wstring>& files) {
@@ -922,6 +932,7 @@ void Tick() {
     Card().Tick();
     g_note.Tick();
     g_watchCard.Tick();
+    g_alert.Tick();
     RefreshCfg();
     ULONGLONG now = GetTickCount64();
     // запомненный телефон: сервер ждёт его всё время, пока ноутбук в своей (частной) сети
@@ -1178,9 +1189,54 @@ void DoCall(CallReq& c) {
     }
 }
 
+// уведомление с телефона: в журнал - только от кого (сам текст остаётся в карточке)
+void ShowNotice(const Notice& n) {
+    if (n.kind == "end") {
+        if (g_callShown && g_alert.Visible()) g_alert.Hide();
+        g_callShown = false;
+        return;
+    }
+    g_alert.yesLabel.clear(), g_alert.noLabel.clear();
+    g_alert.onYes = nullptr, g_alert.onNo = nullptr;
+    g_alert.kind = L"-";
+    g_callShown = n.kind == "call";
+    std::wstring who = n.title.empty() ? n.number : n.title;
+    if (n.kind == "call" || n.kind == "missed") {
+        std::wstring sub = who == n.number ? n.app : n.number;
+        autos::Note(L"Телефон рядом: " + std::wstring(n.kind == "call" ? L"звонок " : L"пропущенный ") + who);
+        if (n.kind == "call")
+            g_alert.Show(BoostCard::DONE, L"Звонит " + who, sub, Theme(), 45000, Toast::G_INFO);
+        else
+            g_alert.Show(BoostCard::DONE, L"Пропущенный звонок: " + who, sub, Theme(), 30000, Toast::G_WARN);
+        return;
+    }
+    std::wstring title = n.kind == "sms" ? L"SMS: " + who
+                         : n.title.empty() || n.title == n.app ? n.app
+                         : n.app.empty()                       ? n.title
+                                                               : n.app + L": " + n.title;
+    autos::Note(L"Телефон рядом: " + std::wstring(n.kind == "sms" ? L"SMS от " + who : L"уведомление " + n.app));
+    std::wstring code = SmsCode(n.title + L" " + n.text);
+    if (!code.empty()) {  // код подтверждения - одной кнопкой в буфер
+        g_alert.yesLabel = L"Скопировать " + code;
+        g_alert.noLabel = L"Закрыть";
+        g_alert.onYes = [code] {
+            PutText(code);
+            g_clipSeq = GetClipboardSequenceNumber();
+        };
+        g_alert.Show(BoostCard::OFFER, title, n.text, Theme(), 30000, Toast::G_INFO);
+        return;
+    }
+    g_alert.Show(BoostCard::DONE, title, n.text, Theme(), n.kind == "sms" ? 15000 : 8000, Toast::G_INFO);
+}
+
 }  // namespace
 
 void OnMessage(WPARAM wp, LPARAM lp) {
+    if (wp == EV_NOTICE) {
+        std::unique_ptr<Notice> n((Notice*)lp);
+        if (n && S().on) ShowNotice(*n);
+        return;
+    }
     if (wp == EV_CAM) {  // кадр камеры телефона - в окно
         CamShow();
         return;
@@ -1330,6 +1386,7 @@ void Shutdown() {
     StopSession(L"выход");
     Card().Destroy();
     g_note.Destroy();
+    g_alert.Destroy();
 }
 
 }  // namespace phone

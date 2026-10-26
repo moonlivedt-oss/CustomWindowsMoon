@@ -178,7 +178,7 @@ label.sw input{width:22px;height:22px;accent-color:var(--ac)}
 <div class="row"><button class="p hide" id="install">Установить как приложение</button></div></section>
 <section id="linkbox" class="hide"><h2>Ссылки с компьютера</h2><div id="links"></div>
 <div class="row mt"><button onclick="linksClear()">Убрать</button></div></section>
-<section id="pairbox"><h2>Без QR в следующий раз</h2><div class="row"><button id="pair">Запомнить этот телефон</button></div>
+<section id="pairbox"><h2>Без QR в следующий раз</h2><div class="row"><button id="pair">Запомнить этот телефон</button><a class="btn hide" id="appgo">Подключить приложение</a></div>
 <p class="hint" id="pairhint">Страница получит постоянный адрес - добавьте её в закладки или на главный экран.</p></section>
 </div>
 
@@ -312,7 +312,8 @@ var im=$('pcimg'),sv=$('pcsave');if(j.img){var u='clipimg?n='+j.img;if(im.datase
 im.classList.remove('hide');sv.href=u;sv.classList.remove('hide')}else{im.classList.add('hide');sv.classList.add('hide')}
 $('padoff').textContent=j.input?'':'Тачпад выключен в настройках RadialMenu (phone_input).';secure(j);state.fs=j.fs;state.screen=j.screen;
 $('fsrow').classList.toggle('hide',!(j.fs&&cur.r>=0));
-if(location.pathname.indexOf('/d/')==0){$('pair').classList.add('hide');$('pairhint').textContent=
+if(location.pathname.indexOf('/d/')==0){$('pair').classList.add('hide');$('appgo').href='moondesk://pair?u='+
+encodeURIComponent(location.origin+location.pathname);$('appgo').classList.remove('hide');$('pairhint').textContent=
 'Телефон запомнен - эта страница открывается из закладки, пока ноутбук в своей сети и в RadialMenu включено «ждать всегда».'}
 setTimeout(poll,50)}).catch(function(){stateTxt(false);setTimeout(poll,3000)})}
 function copyPc(){var t=$('pc').className?'':$('pc').textContent;if(!t)return;

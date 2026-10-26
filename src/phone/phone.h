@@ -76,6 +76,8 @@ struct Adapter {
     int type = 0;       // IF_TYPE_*: 71 - Wi-Fi, 6 - Ethernet
     bool virt = false;  // VPN, TUN, виртуальные машины, WSL - телефон через них не дойдёт
     std::wstring guid;  // {GUID} адаптера - найти его сеть и её профиль
+    std::string mac;    // AA:BB:... - разбудить ПК с телефона (Wake-on-LAN)
+    int prefix = 0;     // длина маски: 24 - 255.255.255.0
 };
 bool PrivateIp(uint32_t ip);
 bool HotspotIp(uint32_t ip);  // 192.168.137.x - «Мобильный хот-спот» Windows раздаёт этот адрес себе
@@ -134,6 +136,28 @@ private:
 };
 // ссылка из «Поделиться»: поле url или первая http(s)-ссылка в тексте (без хвостовой точки и скобки); пусто - нет
 std::string ShareLink(const std::string& url, const std::string& text);
+
+// --- приложение «Компьютер рядом» на телефоне (phone_app_logic.cpp, под тестами) ---
+// уведомление, SMS или звонок: тело POST /notice - форма a=b&c=d (UTF-8)
+struct Notice {
+    std::string kind;  // note - уведомление, sms, call - звонит, missed - пропущенный, end - взяли или сбросили
+    std::wstring app, title, text, number;  // уже чистые: одна строка, без управляющих, не длиннее нужного
+    std::string key;  // как телефон его зовёт; нет - из вида, заголовка и текста (повтор с тем же ключом не показываем)
+};
+std::map<std::string, std::string> ParseForm(const std::string& body);
+bool ParseNotice(const std::string& body, Notice& n);       // false - не понять или пусто
+std::wstring CleanLine(const std::wstring& s, size_t max);  // переводы строк и управляющие - пробел, длинное - «…»
+std::wstring SmsCode(const std::wstring& text);         // код подтверждения из SMS (4-8 цифр, «123-456»); пусто - нет
+std::string MacText(const unsigned char* b, size_t n);  // AA:BB:CC:DD:EE:FF; пусто - не MAC
+uint32_t BroadcastOf(uint32_t ip, int prefix);          // 192.168.1.5/24 -> 192.168.1.255
+// не завалить ПК карточками: тот же ключ в 5 с и больше 20 за минуту - не показывать
+class NoticeGate {
+public:
+    bool Pass(const std::string& key, unsigned long long nowMs);
+
+private:
+    std::vector<std::pair<std::string, unsigned long long>> recent_;
+};
 
 // Пути, если телефон не в этой сети: по порядку - что предложить первым
 enum Way { WAY_PHONE_HOTSPOT, WAY_PC_HOTSPOT, WAY_BLUETOOTH };
