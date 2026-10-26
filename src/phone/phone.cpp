@@ -72,13 +72,14 @@ std::wstring g_status;
 SRWLOCK g_cfgLock = SRWLOCK_INIT;  // папки для телефона читают потоки сервера
 std::vector<std::wstring> g_roots;
 std::atomic<bool> g_input{true};
-std::atomic<bool> g_screen{false}, g_files{false}, g_screenStopped{false};
+std::atomic<bool> g_screen{false}, g_files{false}, g_screenStopped{false}, g_inputStopped{false};
 HWND g_watchFrame[4] = {};  // рамка по краю экрана, пока телефон смотрит экран
 BoostCard g_alert;          // приложение на телефоне: уведомление, SMS, звонок
 bool g_callShown = false;   // на g_alert сейчас «Звонит» - убрать, когда взяли или сбросили
-BoostCard g_watchCard;      // «Телефон смотрит экран - Стоп»
+BoostCard g_watchCard;      // «Телефон управляет ПК - Остановить»
+BoostCard g_askCard;        // «Разрешить управление этому телефону?»
 bool g_watching = false;
-void Watching(bool on);  // ниже: рамка и карточка, пока телефон смотрит экран
+void Watching(bool screen, bool input);  // ниже: рамка и плашка, пока телефон смотрит экран или управляет
 
 struct CallReq {
     std::string op, out;
@@ -619,7 +620,15 @@ bool StartSession(bool oneTime, bool standing = false) {
         s.received = 0;
         s.receivedBytes = 0;
         s.standing = standing;
-        s.devices = LoadDevices();
+        s.devices.clear();
+        s.ctlKeys.clear();
+        for (const DeviceRec& d : DeviceRecs()) {
+            s.devices.push_back(d.key);
+            if (d.control) s.ctlKeys.push_back(d.key);
+        }
+        s.tokenCtl = false;
+        s.ctlDenied.clear();
+        s.ctlAsk.clear();
         s.clipPng.clear();
         s.clipImg = 0;
         s.caDer = ca;
@@ -707,7 +716,26 @@ std::vector<std::wstring> ShareRoots() {
     return r;
 }
 
-bool InputAllowed() { return g_input; }
+bool InputAllowed() { return g_input && !g_inputStopped; }
+
+int ControlCheck(int device) {
+    std::string id;
+    {
+        Lock l;
+        bool dev = device >= 0 && device < (int)S().devices.size();
+        id = dev ? "d:" + S().devices[device] : "s";
+        if (std::find(S().ctlDenied.begin(), S().ctlDenied.end(), id) != S().ctlDenied.end()) return -1;
+        if (dev ? std::find(S().ctlKeys.begin(), S().ctlKeys.end(), S().devices[device]) != S().ctlKeys.end()
+                : S().tokenCtl)
+            return 1;
+        ULONGLONG now = GetTickCount64();
+        if (S().ctlAsk == id && now - S().ctlAskAt < 30000) return 0;  // уже спрашиваем
+        S().ctlAsk = id;
+        S().ctlAskAt = now;
+    }
+    Post(EV_ASK, Widen(id));
+    return 0;
+}
 
 bool ScreenAllowed() { return g_screen && !g_screenStopped; }
 
@@ -830,7 +858,10 @@ void StopSession(const wchar_t* why) {
         S().incoming.clear();
     }
     g_screenStopped = false;
-    Watching(false);
+    g_inputStopped = false;
+    g_ctlAt = 0;
+    Watching(false, false);
+    g_askCard.Hide();
     Card().Hide();
     g_hint.clear();
     std::wstring sum =
@@ -847,6 +878,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg) {
     Card().Create(inst);
     g_note.Create(inst);
     g_watchCard.Create(inst);
+    g_askCard.Create(inst);
     g_alert.Create(inst);
 }
 
@@ -1080,6 +1112,7 @@ void Tick() {
     Card().Tick();
     g_note.Tick();
     g_watchCard.Tick();
+    g_askCard.Tick();
     g_alert.Tick();
     RefreshCfg();
     FlushSeen(false);
@@ -1111,7 +1144,9 @@ void Tick() {
     ReadClipboard();
     Rate();
     ULONGLONG shot = g_screenAt, tick = GetTickCount64();  // кадр могли взять уже после `now` - сравниваем со свежим
-    Watching(g_screen && !g_screenStopped && shot && tick >= shot && tick - shot < 4000);
+    ULONGLONG ctl = g_ctlAt;
+    Watching(g_screen && !g_screenStopped && shot && tick >= shot && tick - shot < 4000,
+             g_input && !g_inputStopped && ctl && tick >= ctl && tick - ctl < 5000);
     if (Card().Visible()) RefreshAddress(false);
     RefreshCert();  // адрес поменялся - новый сертификат
     bool oneTime, allDone;
@@ -1192,28 +1227,82 @@ void WatchFrame(bool on) {
     }
 }
 
-void Watching(bool on) {  // телефон смотрит экран: рамка и карточка со «Стоп», в журнал - начало и конец
-    if (on == g_watching) return;
-    g_watching = on;
-    WatchFrame(on);
-    autos::Note(on ? L"Телефон рядом: телефон смотрит экран ПК" : L"Телефон рядом: экран больше не смотрят");
-    if (on) {
-        g_watchCard.kind = L"-";
-        g_watchCard.yesLabel = L"Стоп";
-        g_watchCard.noLabel = L"Скрыть";
-        g_watchCard.onYes = [] {
-            g_screenStopped = true;  // до конца этой передачи
-            Watching(false);
-            autos::Note(L"Телефон рядом: показ экрана остановлен на ПК");
-        };
-        g_watchCard.onNo = nullptr;
-        g_watchCard.Show(BoostCard::OFFER, L"Телефон смотрит экран",
-                         L"Красная рамка - пока смотрит. Стоп - выключить "
-                         L"до конца этой передачи.",
-                         Theme(), 0, Toast::G_WARN);
-    } else {
-        g_watchCard.Hide();
+// Телефон смотрит экран или управляет (тачпад, клавиатура, кольцо): красная рамка по краю и плашка «Остановить», в
+// журнал - начало и конец. «Остановить» выключает и экран, и управление до конца этой передачи.
+void Watching(bool screen, bool input) {
+    bool on = screen || input;
+    std::wstring title = screen && input ? L"Телефон управляет ПК и видит экран"
+                         : screen        ? L"Телефон смотрит экран"
+                         : input         ? L"Телефон управляет ПК"
+                                         : L"";
+    static std::wstring shown;
+    if (on == g_watching && title == shown) return;
+    if (on != g_watching) {
+        WatchFrame(on);
+        autos::Note(on ? L"Телефон рядом: " + title : L"Телефон рядом: управление и показ экрана закончились");
     }
+    g_watching = on;
+    shown = title;
+    if (!on) {
+        g_watchCard.Hide();
+        return;
+    }
+    g_watchCard.kind = L"-";
+    g_watchCard.yesLabel = L"Остановить";
+    g_watchCard.noLabel = L"Скрыть";
+    g_watchCard.onYes = [] {
+        g_screenStopped = true;  // до конца этой передачи
+        g_inputStopped = true;
+        Watching(false, false);
+        autos::Note(L"Телефон рядом: управление и показ экрана остановлены на ПК");
+    };
+    g_watchCard.onNo = nullptr;
+    g_watchCard.Show(BoostCard::OFFER, title,
+                     L"Красная рамка - пока это идёт. «Остановить» выключит экран и управление с телефона до конца "
+                     L"этой передачи.",
+                     Theme(), 0, Toast::G_WARN);
+}
+
+// Телефон впервые берёт управление: карточка на ПК. Запомненному телефону «Разрешить» пишется в файл (больше не
+// спросит), телефону по QR - до конца сессии. «Запретить» - до конца сессии.
+void AskControl(const std::string& id) {
+    std::wstring name = L"Телефон по QR";
+    if (id.compare(0, 2, "d:") == 0) {
+        name = L"Запомненный телефон";
+        for (const DeviceRec& d : DeviceRecs())
+            if (d.key == id.substr(2) && !d.name.empty()) name += L" «" + d.name + L"»";
+    }
+    g_askCard.kind = L"-";
+    g_askCard.yesLabel = L"Разрешить";
+    g_askCard.noLabel = L"Запретить";
+    g_askCard.onYes = [id, name] {
+        {
+            Lock l;
+            if (id == "s")
+                S().tokenCtl = true;
+            else
+                S().ctlKeys.push_back(id.substr(2));
+            S().ctlAsk.clear();
+        }
+        if (id != "s") {
+            AcquireSRWLockExclusive(&g_devLock);
+            std::vector<DeviceRec> list = ReadDevices(nullptr);
+            for (DeviceRec& d : list)
+                if (d.key == id.substr(2)) d.control = true;
+            WriteDevices(list);
+            ReleaseSRWLockExclusive(&g_devLock);
+        }
+        autos::Note(L"Телефон рядом: управление разрешено - " + name);
+    };
+    g_askCard.onNo = [id, name] {
+        Lock l;
+        S().ctlDenied.push_back(id);
+        S().ctlAsk.clear();
+        autos::Note(L"Телефон рядом: управление запрещено - " + name);
+    };
+    g_askCard.Show(BoostCard::OFFER, L"Разрешить управление телефону?",
+                   name + L" хочет взять тачпад, клавиатуру или экран ПК. Не вы - «Запретить».", Theme(), 30000,
+                   Toast::G_ASK);
 }
 
 std::string WinsJson() {
@@ -1384,6 +1473,11 @@ void OnMessage(WPARAM wp, LPARAM lp) {
         if (n && S().on) ShowNotice(*n);
         return;
     }
+    if (wp == EV_ASK) {
+        std::unique_ptr<std::wstring> id((std::wstring*)lp);
+        if (id && S().on) AskControl(Narrow(*id));
+        return;
+    }
     if (wp == EV_CAM) {  // кадр камеры телефона - в окно
         CamShow();
         return;
@@ -1543,6 +1637,7 @@ void Shutdown() {
     Card().Destroy();
     g_note.Destroy();
     g_alert.Destroy();
+    g_askCard.Destroy();
 }
 
 }  // namespace phone

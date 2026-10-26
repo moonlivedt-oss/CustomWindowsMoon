@@ -412,10 +412,10 @@ var hh=r.headers.get('X-Frame');var b=await r.blob();if(hh!=String(scrHash)){scr
 if(scrUrl)URL.revokeObjectURL(scrUrl);scrUrl=u}}catch(e){$('scrmsg').textContent='Нет связи';await sleep(2000)}}scrOn=false}
 document.addEventListener('visibilitychange',function(){if(!document.hidden&&state.tab=='screen')screenLoop()});
 function tapAt(e,b){var im=$('scr'),r=im.getBoundingClientRect();var x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
-post('tap?m=0&x='+x.toFixed(4)+'&y='+y.toFixed(4)+'&b='+b).then(function(r){if(r.status==403)toast('Выключено на ПК')})}
+post('tap?m=0&x='+x.toFixed(4)+'&y='+y.toFixed(4)+'&b='+b).then(function(r){if(r.status==403)denied(r,'Выключено на ПК')})}
 $('scr').addEventListener('click',function(e){tapAt(e,tapMode)});
 $('scr').addEventListener('contextmenu',function(e){e.preventDefault();tapAt(e,'r')});
-function combo(k){post('combo?k='+k).then(function(r){if(!r.ok)toast(r.status==403?'Тачпад выключен на ПК':'Не вышло')})}
+function combo(k){post('combo?k='+k).then(function(r){if(r.status==403)denied(r,'Тачпад выключен на ПК');else if(!r.ok)toast('Не вышло')})}
 // окна
 function wins(){fetch('wins').then(function(r){if(r.status==403)throw 1;return r.json()}).then(function(l){var h='';
 l.forEach(function(w){h+='<div class="file"><div class="n">'+esc(w.t)+'<small>'+esc(w.a)+(w.min?', свёрнуто':'')+'</small></div>'+
@@ -425,7 +425,9 @@ $('wl').innerHTML=h||'<p class="hint">Окон нет</p>'}).catch(function(e){$
 function win(h,op){post('win?op='+op+'&h='+h).then(function(r){toast(r.ok?'Готово':'Окна уже нет');setTimeout(wins,400)})}
 // тачпад
 var pad=$('pad'),acc={x:0,y:0,w:0},busy=false,lx=0,ly=0,moved=false,t0=0,fingers=0,drag=false,lp=null;
-function inp(q){return post('in?t='+q).then(function(r){if(r.status==403)toast('Тачпад выключен на ПК')})}
+function inp(q){return post('in?t='+q).then(function(r){if(r.status==403)denied(r,'Тачпад выключен на ПК')})}
+// 403 управления: текст сервера (ждёт «Разрешить» на ПК, запрещено, выключено), не чаще раза в 3 с
+var deniedAt=0;function denied(r,def){r.text().then(function(t){if(Date.now()-deniedAt<3000)return;deniedAt=Date.now();toast(t||def)})}
 function key(k){return inp('k&k='+k)}
 function typeKb(){var t=$('kb').value;if($('live').checked){tq(function(){return key('enter')});$('kb').value='';kbPrev='';return}
 if(!t){key('enter');return}post('type',t).then(function(){$('kb').value=''})}

@@ -43,6 +43,12 @@ struct Session {
     int tlsPort = 0;                   // порт https (0 - только http)
     int findSeq = 0;                   // «найти телефон»: растёт - страница звенит
     std::vector<std::wstring> links;   // ссылки с ПК для телефона («На телефон»)
+    // управление с телефона (ControlPath): кому разрешено на ПК
+    std::vector<std::string> ctlKeys;    // запомненные телефоны с разрешением (из файла)
+    bool tokenCtl = false;               // телефону по QR этой сессии разрешили
+    std::vector<std::string> ctlDenied;  // «s» (по QR) или «d:<ключ>»: на ПК нажали «Запретить» - до конца сессии
+    std::string ctlAsk;                  // о ком сейчас спрашивает карточка
+    ULONGLONG ctlAskAt = 0;
 };
 Session& S();
 
@@ -68,7 +74,8 @@ enum Event {
     EV_CALL,    // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
     EV_CAM,     // пришёл кадр камеры телефона
     EV_OUTBOX,  // вторая копия положила файлы в phone-outbox.txt («Отправить - На телефон»)
-    EV_NOTICE   // приложение на телефоне: уведомление, SMS, звонок (lp - new Notice)
+    EV_NOTICE,  // приложение на телефоне: уведомление, SMS, звонок (lp - new Notice)
+    EV_ASK      // телефон впервые берёт управление: спросить на ПК (lp - new wstring: «s» или «d:<ключ>»)
 };
 void Post(Event e, const std::wstring& text = L"");
 void PostBytes(Event e, std::string bytes);  // lp - new std::string (картинка)
@@ -93,7 +100,11 @@ bool InputAllowed();                              // phone_input: тачпад �
 bool ScreenAllowed();                             // phone_screen и не остановлено на ПК
 bool FilesAllowed();                              // phone_files: открыть, копировать, переместить, в Корзину
 std::string NewDevice(const std::wstring& name);  // запомнить телефон: ключ (пусто - не вышло)
-void DeviceSeen(int index);                       // запомненный телефон (номер в S().devices) заходил
+void DeviceSeen(int index);
+// управление с телефона (номер запомненного или -1 - по QR): 1 - разрешено, 0 - спросили на ПК, ждём, -1 - запрещено
+int ControlCheck(int device);
+extern std::atomic<ULONGLONG> g_ctlAt;  // когда телефон последний раз управлял (тачпад, клавиатура, кольцо) //
+                                        // запомненный телефон (номер в S().devices) заходил
 
 // Соединение (сервер держит его открытым между запросами): что уже пришло и не разобрано, сколько тела осталось
 struct Conn {

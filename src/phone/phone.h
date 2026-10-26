@@ -203,6 +203,10 @@ private:
 // о сертификате SHA-256 начинается с тех же знаков. Пусто - не посчитать.
 std::wstring CaFingerprint(const std::string& der);
 
+// Управление ПК с телефона: тачпад, клавиатура, сочетания, окна, пункты кольца, экран. Первый раз с каждого
+// телефона - только после «Разрешить» на ПК.
+bool ControlPath(const std::string& rest);
+
 // запомненный телефон: строка phone-devices.tsv (файл - под DPAPI, phone.cpp)
 struct DeviceRec {
     std::string key;       // /d/<ключ>/

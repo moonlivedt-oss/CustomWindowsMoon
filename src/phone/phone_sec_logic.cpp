@@ -74,6 +74,14 @@ std::wstring CaFingerprint(const std::string& der) {
     return out;
 }
 
+bool ControlPath(const std::string& rest) {
+    static const char* const kControl[] = {"/in",   "/type", "/combo", "/tap",    "/screen",
+                                           "/mons", "/wins", "/win",   "/ringrun"};
+    for (const char* c : kControl)
+        if (rest == c) return true;
+    return false;
+}
+
 // ---- запомненные телефоны ----
 
 std::vector<DeviceRec> ParseDevices(const std::string& text) {

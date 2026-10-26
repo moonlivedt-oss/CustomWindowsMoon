@@ -89,6 +89,12 @@ void TestPhoneBadGate() {
     CHECK(!phone::SameKey("", ""));  // пустой ключ не открывает ничего
     CHECK(!phone::SameKey(std::string("abc\0", 4), "abc"));
 
+    // управление - только после «Разрешить» на ПК; буфер, файлы и пульт громкости - без вопроса
+    for (const char* c : {"/in", "/type", "/combo", "/tap", "/screen", "/mons", "/wins", "/win", "/ringrun"})
+        CHECK(phone::ControlPath(c));
+    for (const char* c : {"/poll", "/clip", "/cmd", "/up", "/", "/in/", "/innn", "/ring", "/pair"})
+        CHECK(!phone::ControlPath(c));
+
     // отпечаток для сверки глазами - тот же, что у приложения (PureTest.fingerprint)
     CHECK(phone::CaFingerprint("abc") == L"BA78 16BF 8F01 CFEA 4141 40DE");
     CHECK(phone::CaFingerprint("").empty());

@@ -14,6 +14,7 @@
 namespace phone::detail {
 
 std::atomic<long long> g_sent{0}, g_recv{0}, g_sendLeft{0};
+std::atomic<ULONGLONG> g_ctlAt{0};
 
 namespace {
 
@@ -166,6 +167,12 @@ void Handle(Conn& cn, const Request& r) {
         if ((r.method == "GET" || r.method == "HEAD") && (rest.empty() || rest == "/") && !to.empty())
             return Reply(cn, 301, "", "", "Location: " + to + "\r\n");
         return Text(cn, 403, "запомненный телефон - только по https");
+    }
+    if (ControlPath(rest)) {  // тачпад, клавиатура, экран: с нового телефона - только после «Разрешить» на ПК
+        int ok = ControlCheck(device);
+        if (ok < 0) return Text(cn, 403, "управление с этого телефона запрещено на ПК");
+        if (ok == 0) return Text(cn, 403, "разрешите управление на ПК: карточка справа внизу экрана");
+        if (rest != "/screen" && rest != "/mons") g_ctlAt = GetTickCount64();
     }
     if (rest.empty()) return Reply(cn, 301, "", "", "Location: " + base + "/\r\n");
     if (rest == "/" && (r.method == "GET" || r.method == "HEAD")) {
