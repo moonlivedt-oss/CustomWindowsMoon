@@ -21,6 +21,12 @@ class PureTest {
         assertNull(Pure.parseLink("https://10.0.0.2/d/AbCdEf_-12345678"))      // без порта
         assertNull(Pure.parseLink("moondesk://pair"))
         assertNull(Pure.parseLink("javascript:alert(1)"))
+        // только адреса домашней сети: чужой сервер не перехватит SMS и уведомления
+        assertNull(Pure.parseLink("https://evil.example:8800/d/AbCdEf_-12345678/"))
+        assertNull(Pure.parseLink("https://8.8.8.8:8800/d/AbCdEf_-12345678/"))
+        assertNull(Pure.parseLink("moondesk://pair?u=https%3A%2F%2F93.184.216.34%3A8800%2Fd%2Fkkkkkkkkkk%2F"))
+        assertTrue(Pure.lanHost("172.20.1.1") && Pure.lanHost("169.254.3.4") && Pure.lanHost("10.255.0.1"))
+        assertTrue(!Pure.lanHost("172.32.0.1") && !Pure.lanHost("192.169.0.1") && !Pure.lanHost("1.2.3.999"))
     }
 
     @Test

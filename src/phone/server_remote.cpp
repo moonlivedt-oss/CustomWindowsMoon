@@ -183,6 +183,7 @@ void Fs(Conn& cn, const Request& r) {
     std::wstring name = src.substr(src.find_last_of(L'\\') + 1), what;
     bool ok = false;
     if (op == "open") {
+        if (!OpenAllowed(src)) return Text(cn, 403, "программы и скрипты с телефона не запускаются - только файлы");
         std::string out;
         ok = CallMain("open:" + Narrow(src), out);
         what = L"открыто на ПК: " + src;

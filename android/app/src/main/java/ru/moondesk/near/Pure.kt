@@ -11,8 +11,18 @@ object Pure {
         val url: String get() = "https://$host:$port$path"
     }
 
+    // ПК отдаёт ссылку только с IPv4 своей сети: имя хоста или внешний адрес - чужой сервер (ссылка с сайта или
+    // из сообщения перепривязала бы приложение и уводила SMS с кодами)
     private val linkRe =
-        Regex("^(https?)://([0-9]{1,3}(?:\\.[0-9]{1,3}){3}|[A-Za-z0-9.-]+)(?::([0-9]{1,5}))?(/d/[A-Za-z0-9_-]{8,64})/?")
+        Regex("^(https?)://([0-9]{1,3}(?:\\.[0-9]{1,3}){3})(?::([0-9]{1,5}))?(/d/[A-Za-z0-9_-]{8,64})/?")
+
+    // 10/8, 172.16/12, 192.168/16, 169.254/16 (раздача без DHCP)
+    fun lanHost(host: String): Boolean {
+        val p = host.split('.').map { it.toIntOrNull() ?: return false }
+        if (p.size != 4 || p.any { it !in 0..255 }) return false
+        return p[0] == 10 || (p[0] == 172 && p[1] in 16..31) || (p[0] == 192 && p[1] == 168) ||
+            (p[0] == 169 && p[1] == 254)
+    }
 
     // Ссылка со страницы (или moondesk://pair?u=...). По http сервер ПК слушает 8780-8799, по https - тот же сдвиг
     // от 8800: приложение ходит только по https. null - не та ссылка
@@ -24,6 +34,7 @@ object Pure {
             t = URLDecoder.decode(q, "UTF-8")
         }
         val m = linkRe.find(t) ?: return null
+        if (!lanHost(m.groupValues[2])) return null
         val https = m.groupValues[1] == "https"
         var port = m.groupValues[3].toIntOrNull() ?: return null
         if (!https) {

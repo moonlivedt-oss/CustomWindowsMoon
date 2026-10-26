@@ -490,6 +490,10 @@ void TestPhoneRemote() {
     CHECK(s.cx == 320 && s.cy == 180);
     CHECK(phone::Combo("copy") == std::vector<WORD>({VK_CONTROL, 'C'}) && phone::Combo("rm -rf").empty());
     CHECK(phone::FsOp("move") && phone::FsOp("delete") && !phone::FsOp("format") && !phone::FsOp(""));
+    CHECK(phone::OpenAllowed(L"C:\\Users\\u\\Downloads\\отчёт.pdf") && phone::OpenAllowed(L"C:\\Music\\Альбом"));
+    CHECK(!phone::OpenAllowed(L"C:\\Downloads\\setup.EXE") && !phone::OpenAllowed(L"C:\\Downloads\\run.bat"));
+    CHECK(!phone::OpenAllowed(L"C:\\Downloads\\a.exe. .") && !phone::OpenAllowed(L"C:\\Downloads\\x.lnk"));
+    CHECK(!phone::OpenAllowed(L"C:\\Downloads\\doc.txt:evil.exe") && !phone::OpenAllowed(L"D:\\a\\b.ps1"));
     CHECK(phone::KeyVk("enter") == VK_RETURN && phone::KeyVk("pgdn") == VK_NEXT && phone::KeyVk("a") == 'A');
     CHECK(phone::KeyVk("7") == '7' && phone::KeyVk("f5") == VK_F5 && phone::KeyVk("f12") == VK_F12);
     CHECK(phone::KeyVk("f13") == 0 && phone::KeyVk("f05") == 0 && phone::KeyVk("A") == 0 && phone::KeyVk("") == 0);
@@ -500,11 +504,12 @@ void TestPhoneApp() {
     CHECK(f.size() == 3 && f["a"] == "1" && f["b"] == "код 2" && f["c"].empty());
     phone::Notice n;
     CHECK(phone::ParseNotice("kind=note&app=Telegram&title=%D0%9C%D0%B0%D0%BC%D0%B0&text=a%0Ab%09%09c&id=tg:42", n));
-    CHECK(n.kind == "note" && n.app == L"Telegram" && n.title == L"Мама" && n.text == L"a b c" && n.key == "note|tg:42");
+    CHECK(n.kind == "note" && n.app == L"Telegram" && n.title == L"Мама" && n.text == L"a b c" &&
+          n.key == "note|tg:42");
     CHECK(phone::ParseNotice("kind=sms&num=%2B79001234567&text=hi", n) && n.number == L"+79001234567");
-    CHECK(n.key == "sms|||hi|+79001234567");                        // без id - из полей
-    CHECK(!phone::ParseNotice("kind=note&app=X", n));                    // ни заголовка, ни текста
-    CHECK(!phone::ParseNotice("kind=rm&title=x", n));                    // неизвестный вид
+    CHECK(n.key == "sms|||hi|+79001234567");                              // без id - из полей
+    CHECK(!phone::ParseNotice("kind=note&app=X", n));                     // ни заголовка, ни текста
+    CHECK(!phone::ParseNotice("kind=rm&title=x", n));                     // неизвестный вид
     CHECK(phone::ParseNotice("kind=end&id=c1", n) && n.key == "end|c1");  // конец звонка - без текста
     CHECK(phone::ParseNotice("kind=call&num=1&id=%3Cscript%3E", n) && n.key == "call|script");
     CHECK(phone::CleanLine(std::wstring(L"  a") + wchar_t(0x202E) + L"b" + wchar_t(0x2028) + L" c  ", 0) == L"ab c");
@@ -521,15 +526,16 @@ void TestPhoneApp() {
     CHECK(phone::SmsCode(L"Встреча в 12:30, сумма 1500.00") == L"");
     CHECK(phone::SmsCode(L"ID12345") == L"" && phone::SmsCode(L"") == L"");
     unsigned char mac[6] = {0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0xff}, nul[6] = {};
-    CHECK(phone::MacText(mac, 6) == "0A:1B:2C:3D:4E:FF" && phone::MacText(nul, 6).empty() && phone::MacText(mac, 5).empty());
+    CHECK(phone::MacText(mac, 6) == "0A:1B:2C:3D:4E:FF" && phone::MacText(nul, 6).empty() &&
+          phone::MacText(mac, 5).empty());
     CHECK(phone::BroadcastOf(0xC0A80105, 24) == 0xC0A801FF && phone::BroadcastOf(0x0A000001, 8) == 0x0AFFFFFF);
     CHECK(phone::BroadcastOf(0xC0A80105, 32) == 0xC0A80105 && phone::BroadcastOf(1, 0) == 0xFFFFFFFF);
     phone::NoticeGate g;
     CHECK(g.Pass("a", 1000) && !g.Pass("a", 3000) && g.Pass("b", 3000) && g.Pass("a", 7000));
     int passed = 0;
     for (int i = 0; i < 30; ++i) passed += g.Pass("k" + std::to_string(i), 8000);
-    CHECK(passed == 17);                 // 20 за минуту: три места уже заняты
-    CHECK(g.Pass("k0", 70000));          // через минуту - снова можно
+    CHECK(passed == 17);         // 20 за минуту: три места уже заняты
+    CHECK(g.Pass("k0", 70000));  // через минуту - снова можно
 }
 
 }  // namespace

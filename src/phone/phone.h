@@ -7,8 +7,8 @@
 // карточка подскажет раздать Wi-Fi с телефона или ноутбука (QR обновится сам, как только появится адрес), мелкое -
 // Bluetooth (fsquirt). Ссылка - http://адрес:порт/<ключ>/: без ключа сервер ничего не отдаёт, после 20 неверных
 // ключей сессия закрывается. Секреты из буфера (core/secrets) на телефон не уходят.
-// phone_logic.cpp - разбор запросов, имена, адреса, выбор пути (под тестами); server.cpp - сокеты; page.cpp -
-// страница; phone.cpp - сессия, карточка и действия.
+// phone_logic.cpp - разбор запросов, имена, адреса, выбор пути (под тестами); server.cpp - сокеты; web/ - страница
+// (встраивается cmake/embed.cmake); phone.cpp - сессия, карточка и действия.
 #include <windows.h>
 
 #include <cstdint>
@@ -111,6 +111,9 @@ POINT TapPoint(double nx, double ny, const RECT& monitor);  // касание в
 SIZE FrameSize(int w, int h, int maxW);                     // кадр для телефона: не шире maxW (320..2560)
 std::vector<WORD> Combo(const std::string& name);           // «copy» -> Ctrl+C; пусто - нет такого
 bool FsOp(const std::string& op);                           // open, copy, move, rename, mkdir, delete
+// «Открыть на ПК» с телефона: документы, картинки, папки - да; то, что запускается (exe, скрипты, ярлыки) - нет,
+// иначе phone_files без phone_input давал бы запуск своего кода: загрузил в Загрузки - открыл
+bool OpenAllowed(const std::wstring& path);
 WORD KeyVk(const std::string& name);  // «enter», «left», «a», «7», «f5», «shift» -> код клавиши; 0 - нет такой
 
 // --- «Поделиться - на ПК» (phone_share_logic.cpp, под тестами) ---
