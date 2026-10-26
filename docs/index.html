@@ -165,6 +165,9 @@ details.dev p{margin:6px 0 0}
 
 /* телефон */
 .phone{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center}
+/* картинка телефона (прозрачный фон); нет файла - рисованный макет ниже */
+.phone-shot{justify-self:center;width:min(340px,80vw);height:auto;filter:drop-shadow(0 30px 50px #00000099)}
+.mock[hidden]{display:none}
 .mock{justify-self:center;width:250px;aspect-ratio:9/19;border-radius:38px;border:10px solid #000;background:#0f0d12;
   box-shadow:0 30px 70px #00000080,0 0 0 1px var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:10px;color:#f4eff7}
 .mock .bar{display:flex;justify-content:space-between;align-items:center;font-size:12px}
@@ -324,7 +327,9 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-bet
           На Android есть ещё и приложение: оно показывает на ПК уведомления и коды из SMS.</p></div></li>
       </ol>
     </div>
-    <div class="mock" aria-hidden="true">
+    <img class="phone-shot" src="img/phone-app.webp" alt="Страница «Компьютер рядом» на телефоне: пульт музыки, громкость и вкладки"
+      onerror="this.remove();document.getElementById('mock').hidden=false">
+    <div class="mock" id="mock" aria-hidden="true" hidden>
       <div class="bar"><b>Компьютер рядом</b><span class="chip">на связи</span></div>
       <div class="card"><div class="row"><i></i><i style="flex:2"></i><i></i></div><div class="play"></div><div class="row"><i></i></div></div>
       <div class="card"><div class="row"><i></i><i></i><i></i></div></div>
