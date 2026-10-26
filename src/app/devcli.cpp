@@ -19,6 +19,7 @@
 #include "life/btbattery.h"
 #include "life/convert.h"
 #include "life/record.h"
+#include "life/tidy.h"
 #include "life/vpnexit.h"
 #include "life/picker.h"
 #include "phone/phone.h"
@@ -521,6 +522,9 @@ bool Run(int& exitCode) {
                                                   log, 30000);
         WriteOut(L"record_out.txt", L"код " + std::to_wstring(code) + L"\n" + log);
         exitCode = code == 0 ? 0 : 1;
+    } else if (Has(args, L"--tidy-diag")) {  // Ф3: сколько старых файлов на столе и в снимках -> tidy_out.txt
+        WriteOut(L"tidy_out.txt", tidy::Diag());
+        exitCode = 0;
     } else if (Has(args, L"--vpn-diag")) {  // Ж3: мимо VPN в Happ, TCP до 1.1.1.1:443 напрямую и как обычно
         std::wstring o, list;
         for (const std::wstring& b : vpnexit::Bypass()) list += (list.empty() ? L"" : L", ") + b;

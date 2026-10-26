@@ -15,6 +15,7 @@
 #include "life/picker.h"
 #include "life/record.h"
 #include "life/remind.h"
+#include "life/tidy.h"
 #include "life/vpnexit.h"
 #include "phone/phone.h"
 
@@ -299,10 +300,23 @@ void TestRecord() {
     CHECK(record::Clock(7) == L"0:07" && record::Clock(83) == L"1:23");
 }
 
+void TestTidy() {
+    CHECK(tidy::Candidate(L"shot.png", FILE_ATTRIBUTE_ARCHIVE, 20));
+    CHECK(!tidy::Candidate(L"shot.png", FILE_ATTRIBUTE_ARCHIVE, 13));
+    CHECK(!tidy::Candidate(L"Discord.lnk", 0, 400) && !tidy::Candidate(L"desktop.ini", 0, 400));
+    CHECK(!tidy::Candidate(L"Архив", FILE_ATTRIBUTE_DIRECTORY, 400));
+    CHECK(!tidy::Candidate(L"x.txt", FILE_ATTRIBUTE_HIDDEN, 400));
+    SYSTEMTIME st{2026, 3, 0, 15, 12, 0, 0, 0};
+    FILETIME ft;
+    SystemTimeToFileTime(&st, &ft);  // середина месяца - в любом поясе тот же месяц
+    CHECK(tidy::MonthDir(L"C:\\D", ft) == L"C:\\D\\Архив\\2026-03");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestTidy();
     TestRecord();
     TestConvert();
     TestVpnExit();

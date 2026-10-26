@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/tidy.h"
 #include "life/record.h"
 #include "life/convert.h"
 #include "life/batcare.h"
@@ -270,6 +271,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    tidy::Tick();
     record::Tick();
     convert::Tick();
     batcare::Tick();
@@ -523,6 +525,10 @@ bool RunExtra(const std::wstring& a) {
     }
     if (a == L"phone") {
         phone::OpenPage();
+        return true;
+    }
+    if (a == L"tidy") {
+        tidy::Ask();
         return true;
     }
     if (a == L"record") {
@@ -911,6 +917,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    tidy::Shutdown();
     record::Shutdown();
     convert::Shutdown();
     batcare::Shutdown();
@@ -1379,6 +1386,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
+    tidy::Init(inst, &g_cfg);  // Ф3, Л40
     record::Init(inst, &g_cfg);  // Ф9
     convert::Init(inst, &g_cfg, &g_menu);  // Ф2
     batcare::Init(inst, &g_cfg);  // Ж1, Л37

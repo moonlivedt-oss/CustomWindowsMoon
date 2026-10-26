@@ -1,4 +1,5 @@
 #include "app/autos.h"
+#include "life/tidy.h"
 
 #include <algorithm>
 #include <atomic>
@@ -499,6 +500,9 @@ void UndoEntry(const Entry& e) {
                 Post(m);
             }))
             delete box;
+    } else if (u.kind == L"tidy" && u.args.size() == 1) {  // Ф3: из архива по месяцам - на место по описи
+        std::wstring r = tidy::Undo(u.args[0]);
+        done(r.find(L"вернулось 0 ") == std::wstring::npos, r);
     } else if (u.kind == L"sysitem" && u.args.size() == 2) {
         // вернуть службу или драйвер: задача с правами сама помнит, что выключала и как оно запускалось
         g_card.Show(BoostCard::WORKING, L"Возвращаю", u.args[1], Theme());
