@@ -12,7 +12,7 @@ namespace elevate {
 enum Task { TASK_NET, TASK_PURGE };  // задачи «Сети» (--net-job) и очистки памяти (--purge)
 
 std::wstring HelperDir();  // Program Files\MoonRadial - путь из реестра системы, не из переменных окружения
-std::wstring HelperExe();  // HelperDir()\RadialMenu-<хэш exe>.exe: у каждой сборки свой файл
+std::wstring HelperExe();  // HelperDir()\RadialMenu-<начало SHA-256 exe>.exe: у каждой сборки свой файл
 std::wstring DataDir();    // HelperDir()\data: журнал и бэкапы процесса с правами (он и создаёт папку)
 
 bool TaskExists(Task t);
@@ -33,6 +33,23 @@ bool RunOnce(Task t);
 // Setup снимает отметку.
 bool Blocked(Task t);
 void SetBlocked(Task t, bool on);
+
+// SHA-256 своего exe (hex строчными). Считается один раз, при первом вызове - main зовёт его сразу после старта,
+// пока файл рядом с работающей программой ещё тот, что запущен (переименовать работающий exe и положить на его место
+// другой может любая программа пользователя).
+std::wstring SelfHash();
+// Помощник в Program Files цел: его SHA-256 совпадает с SelfHash(). Перед каждым запуском задачи.
+bool HelperIntact();
+// Процесс с правами (--net-job, --purge) запущен из HelperDir() и его содержимое совпадает с именем
+// RadialMenu-<хэш>.exe. Нет - задание не выполняется: значит, задачу или exe подменили.
+bool SelfTrusted();
+
+// --- без системы (elevate_logic.cpp, под тестами) ---
+std::wstring HelperName(const std::wstring& sha256);  // RadialMenu-<первые 12 знаков>.exe
+// path - файл прямо в папке dir (без подпапок, «..», потоков NTFS и коротких имён 8.3); регистр не важен
+bool InsideDir(const std::wstring& path, const std::wstring& dir);
+// exePath - помощник этой сборки: лежит в helperDir и называется по своему SHA-256
+bool TrustedHelper(const std::wstring& exePath, const std::wstring& helperDir, const std::wstring& sha256);
 
 // Запрос для процесса с правами: строка в HKCU. Take читает и стирает (задание одноразовое).
 void Put(const wchar_t* name, const std::wstring& value);

@@ -692,11 +692,13 @@ void TestBackground() {
 void TestTop20(void (*check)(bool, const char*, int));  // tests_top20.cpp
 void TestMore(void (*check)(bool, const char*, int));   // tests_more.cpp
 void TestLife(void (*check)(bool, const char*, int));   // tests_life.cpp
+void TestSec(void (*check)(bool, const char*, int));    // tests_sec.cpp
 
 int wmain() {
     TestTop20(Check);
     TestMore(Check);
     TestLife(Check);
+    TestSec(Check);
     TestParseCleanLine();
     TestTempRemovable();
     TestWalk();

@@ -1262,6 +1262,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     Gdiplus::GdiplusStartup(&gdipToken, &gsi, nullptr);
 
     g_inst = inst;
+    // SHA-256 своего exe - сейчас, пока файл рядом тот, что запущен: с ним сверяется помощник с правами
+    bg::Run([] { elevate::SelfHash(); }, THREAD_PRIORITY_BELOW_NORMAL);
     g_game.Recover();  // если прошлый запуск упал в игровом режиме - вернуть анимации, прозрачность, обои
     g_dev.Recover();
     gboost::Recover();  // приоритеты, экономия и тишина, оставшиеся от упавшего прошлого раза

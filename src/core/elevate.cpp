@@ -5,6 +5,7 @@
 #include <sddl.h>
 #include <shlobj.h>
 #include <knownfolders.h>
+#include <bcrypt.h>
 
 #include <atomic>
 #include <cwchar>
@@ -102,29 +103,29 @@ int Sys(const wchar_t* exe, const std::wstring& args, std::wstring* out, DWORD t
     return (int)code;
 }
 
-// Файлы побайтно одинаковые (помощник - копия этого exe).
-bool SameFile(const std::wstring& a, const std::wstring& b) {
-    HANDLE fa =
-        CreateFileW(a.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
-    HANDLE fb =
-        CreateFileW(b.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
-    bool same = fa != INVALID_HANDLE_VALUE && fb != INVALID_HANDLE_VALUE;
-    LARGE_INTEGER sa{}, sb{};
-    same = same && GetFileSizeEx(fa, &sa) && GetFileSizeEx(fb, &sb) && sa.QuadPart == sb.QuadPart;
-    std::vector<char> ba(1 << 20), bb(1 << 20);
-    while (same) {
-        DWORD ga = 0, gb = 0;
-        if (!ReadFile(fa, ba.data(), (DWORD)ba.size(), &ga, nullptr) ||
-            !ReadFile(fb, bb.data(), (DWORD)bb.size(), &gb, nullptr) || ga != gb) {
-            same = false;
-            break;
-        }
-        if (!ga) break;
-        same = !memcmp(ba.data(), bb.data(), ga);
+// SHA-256 файла (hex строчными); пусто - не прочитать
+std::wstring FileHash(const std::wstring& path) {
+    std::wstring out;
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0,
+                           nullptr);
+    if (f == INVALID_HANDLE_VALUE) return out;
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    BCRYPT_HASH_HANDLE h = nullptr;
+    bool ok = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
+              BCryptCreateHash(alg, &h, nullptr, 0, nullptr, 0, 0) == 0;
+    std::vector<unsigned char> buf(1 << 20);
+    DWORD got = 0;
+    while (ok && ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got)
+        ok = BCryptHashData(h, buf.data(), got, 0) == 0;
+    unsigned char hash[32];
+    if (ok && BCryptFinishHash(h, hash, sizeof(hash), 0) == 0) {
+        wchar_t hx[3];
+        for (unsigned char b : hash) swprintf(hx, 3, L"%02x", b), out += hx;
     }
-    if (fa != INVALID_HANDLE_VALUE) CloseHandle(fa);
-    if (fb != INVALID_HANDLE_VALUE) CloseHandle(fb);
-    return same;
+    if (h) BCryptDestroyHash(h);
+    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+    CloseHandle(f);
+    return out;
 }
 
 // Что запускает задача: <Command> и <Arguments> из её описания.
@@ -167,6 +168,17 @@ std::wstring CreateCmd(const TaskInfo& t) {
            L"\" /SC ONCE /ST 00:00 /SD 01/01/2030 /RL HIGHEST /F >nul";
 }
 
+// Начало команды системного cmd с правами: папка помощника, копия exe и сверка её SHA-256 с хэшем, посчитанным при
+// старте программы. Между стартом и копированием файл рядом с программой могли подменить: тогда копия удаляется, и
+// cmd выходит, ничего не создав и не запустив.
+std::wstring InstallCmd() {
+    std::wstring dir = HelperDir(), data = DataDir(), helper = HelperExe();
+    return L"(if not exist \"" + dir + L"\" mkdir \"" + dir + L"\") & (if not exist \"" + data + L"\" mkdir \"" + data +
+           L"\") & (if not exist \"" + helper + L"\" copy /y \"" + ThisExe() + L"\" \"" + helper + L"\" >nul) & (\"" +
+           System32(L"certutil.exe") + L"\" -hashfile \"" + helper + L"\" SHA256 | \"" + System32(L"findstr.exe") +
+           L"\" /i /c:\"" + SelfHash() + L"\" >nul || (del /f /q \"" + helper + L"\" >nul 2>&1 & exit 1))";
+}
+
 }  // namespace
 
 std::wstring HelperDir() {
@@ -179,25 +191,19 @@ std::wstring HelperDir() {
 
 // У каждой сборки своё имя помощника - по содержимому exe. Заменить файл на месте удаётся не всегда (помощник
 // выполняет задание, или его держит антивирус), а новое имя ставится всегда; старые копии убираются, когда можно.
-std::wstring HelperExe() {
-    static std::wstring name;
-    if (name.empty()) {
-        unsigned long long h = 1469598103934665603ULL;  // FNV-1a по байтам exe
-        HANDLE f = CreateFileW(ThisExe().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
-                               OPEN_EXISTING, 0, nullptr);
-        if (f != INVALID_HANDLE_VALUE) {
-            std::vector<unsigned char> buf(1 << 20);
-            DWORD got = 0;
-            while (ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got)
-                for (DWORD i = 0; i < got; ++i) h = (h ^ buf[i]) * 1099511628211ULL;
-            CloseHandle(f);
-        }
-        wchar_t b[32];
-        swprintf(b, 32, L"RadialMenu-%012llx.exe", h & 0xFFFFFFFFFFFFULL);
-        name = b;
-    }
-    return HelperDir() + L"\\" + name;
+std::wstring HelperExe() { return HelperDir() + L"\\" + HelperName(SelfHash()); }
+
+std::wstring SelfHash() {
+    static const std::wstring hash = FileHash(ThisExe());
+    return hash;
 }
+
+bool HelperIntact() {
+    std::wstring self = SelfHash();
+    return !HelperDir().empty() && self.size() == 64 && FileHash(HelperExe()) == self;
+}
+
+bool SelfTrusted() { return TrustedHelper(ThisExe(), HelperDir(), SelfHash()); }
 
 std::wstring DataDir() { return HelperDir() + L"\\data"; }
 
@@ -215,7 +221,7 @@ std::atomic<bool> g_ready[2];
 bool TaskReady(Task t) {
     ULONGLONG now = GetTickCount64(), at = g_readyAt[t];
     if (at && now - at < 30000) return g_ready[t];
-    bool ok = !HelperDir().empty() && SameFile(ThisExe(), HelperExe()) && TaskRunsHelper(kTasks[t]);
+    bool ok = HelperIntact() && TaskRunsHelper(kTasks[t]);
     g_ready[t] = ok;
     g_readyAt[t] = GetTickCount64();
     return ok;
@@ -240,15 +246,13 @@ bool TaskReadyCached(Task t) {
 // свой exe в Program Files и тут же заводит на него задачу с наивысшими правами (так выглядит закрепление
 // вредоноса). Нужная задача - всегда, остальные - только если уже были; потом убрать прежние копии помощника.
 bool Setup(Task t) {
-    std::wstring dir = HelperDir(), data = DataDir(), helper = HelperExe();
-    if (dir.empty()) return false;
+    std::wstring dir = HelperDir(), helper = HelperExe();
+    if (dir.empty() || SelfHash().size() != 64) return false;
     std::wstring name = helper.substr(dir.size() + 1);
-    std::wstring cmd = L"/s /c \"(if not exist \"" + dir + L"\" mkdir \"" + dir + L"\") & (if not exist \"" + data +
-                       L"\" mkdir \"" + data + L"\") & (if not exist \"" + helper + L"\" copy /y \"" + ThisExe() +
-                       L"\" \"" + helper + L"\" >nul)";
+    std::wstring cmd = L"/s /c \"" + InstallCmd();
     for (int i = 0; i < (int)(sizeof(kTasks) / sizeof(kTasks[0])); ++i)
         if (i == t)
-            cmd += L" && " + CreateCmd(kTasks[i]);
+            cmd += L" & " + CreateCmd(kTasks[i]);
         else
             cmd += L" & (schtasks /Query /TN \"" + std::wstring(kTasks[i].name) + L"\" >nul 2>&1 && " +
                    CreateCmd(kTasks[i]) + L")";
@@ -308,19 +312,30 @@ void SetBlocked(Task t, bool on) {
         RegDeleteKeyValueW(HKEY_CURRENT_USER, kKey, BlockedName(t).c_str());
 }
 
+// Только помощник из Program Files: устарел - тот же cmd с правами сначала ставит и сверяет его, потом запускает.
+// Сам RadialMenu.exe из папки пользователя с правами не запускается никогда.
 bool RunOnce(Task t) {
-    // помощник, если он свежий; иначе сам exe - под UAC это решение пользователя, а не тихое повышение
-    std::wstring exe = SameFile(ThisExe(), HelperExe()) ? HelperExe() : ThisExe();
+    std::wstring helper = HelperExe(), file, args;
+    if (HelperDir().empty() || SelfHash().size() != 64) return false;
+    if (HelperIntact()) {
+        file = helper;
+        args = kTasks[t].arg;
+    } else {
+        file = System32(L"cmd.exe");
+        args = L"/s /c \"" + InstallCmd() + L" & \"" + helper + L"\" " + kTasks[t].arg + L"\"";
+    }
     SHELLEXECUTEINFOW sei{sizeof(sei)};
     sei.lpVerb = L"runas";
-    sei.lpFile = exe.c_str();
-    sei.lpParameters = kTasks[t].arg;
+    sei.lpFile = file.c_str();
+    sei.lpParameters = args.c_str();
     sei.nShow = SW_HIDE;
     return ShellExecuteExW(&sei) != FALSE;
 }
 
+// Перед запуском - сверка помощника: задачу создал администратор, но файл проверяем каждый раз.
 bool Run(Task t) {
-    return Sys(L"schtasks.exe", L"/Run /TN \"" + std::wstring(kTasks[t].name) + L"\"", nullptr, 15000) == 0;
+    return HelperIntact() &&
+           Sys(L"schtasks.exe", L"/Run /TN \"" + std::wstring(kTasks[t].name) + L"\"", nullptr, 15000) == 0;
 }
 
 void Put(const wchar_t* name, const std::wstring& value) {

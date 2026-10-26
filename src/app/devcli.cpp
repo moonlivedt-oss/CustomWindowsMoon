@@ -228,6 +228,10 @@ bool Run(int& exitCode) {
         Gdip gdip;
         std::wstring msg;
         exitCode = startbg::Apply(CurrentTheme(LoadOwnConfig()), msg) ? 0 : 1;
+    } else if ((Has(args, L"--purge") || Has(args, L"--net-job")) && !elevate::SelfTrusted()) {
+        // задания с правами выполняет только помощник из Program Files, чьё содержимое совпадает с его именем: копия
+        // из папки пользователя (её может подменить любая программа) с правами ничего не делает
+        exitCode = 2;
     } else if (Has(args, L"--purge")) {  // очистка памяти; запускает задача планировщика с правами
         // какие области чистить - из запроса в HKCU; PurgeMain знает только свои имена, прочее пропускает
         boost::Settings s;
