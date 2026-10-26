@@ -10,121 +10,177 @@ const char* PageHtml() {
     return R"PAGE(<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#16131a"><title>Компьютер рядом</title>
+<meta name="theme-color" content="#0f0d12"><title>Компьютер рядом</title>
 <style>
-:root{--bg:#16131a;--card:#221d27;--line:#342c3b;--fg:#f1ecf4;--mut:#a79caf;--ac:#c8323f;--ok:#3fae6a}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif;
-padding:14px 14px 40px}h1{font-size:19px;margin:4px 2px 12px;display:flex;justify-content:space-between;align-items:center}
-#st{font-size:13px;color:var(--mut);font-weight:400}#st.off{color:var(--ac)}
-nav{display:flex;gap:6px;overflow-x:auto;margin:0 0 12px;padding-bottom:2px}nav button{flex:0 0 auto;min-height:38px;padding:6px 12px;font-size:14px}
-nav button.on{background:var(--ac);color:#fff}
-section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:0 0 12px}
-h2{font-size:15px;margin:0 0 10px;color:var(--mut);font-weight:600}
-button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:12px;
-background:#2f2836;color:var(--fg);font:inherit;padding:12px 14px;min-height:46px;text-decoration:none;cursor:pointer}
-button.p,.btn.p{background:var(--ac);color:#fff}button:active,.btn:active{filter:brightness(1.25)}
-.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}
-.file{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+:root{--bg:#0f0d12;--card:#1a1620;--card2:#241e2b;--line:#2f2838;--fg:#f4eff7;--mut:#9e94a8;--ac:#e0414f;--ac2:#ff7b5c;
+--ok:#3fbf7a;--r:20px;--nav:68px;--safe:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg)}body{margin:0;background:radial-gradient(120% 60% at 50% -10%,#2a1620 0,var(--bg) 60%) fixed;
+color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+padding:0 14px calc(var(--nav) + var(--safe) + 24px);min-height:100vh}
+svg{width:24px;height:24px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:10px;
+padding:calc(env(safe-area-inset-top,0px) + 12px) 2px 12px;background:linear-gradient(var(--bg) 70%,transparent)}
+header b{font-size:18px;font-weight:650;letter-spacing:.2px}header small{display:block;color:var(--mut);font-size:12px;font-weight:400}
+#st{display:inline-flex;align-items:center;gap:7px;font-size:13px;padding:6px 12px;border-radius:99px;background:var(--card);
+border:1px solid var(--line);color:var(--fg)}#st:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok);
+box-shadow:0 0 0 4px #3fbf7a33}#st.off:before{background:var(--ac);box-shadow:0 0 0 4px #e0414f33}#st.off{color:#ffb3ba}
+section{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin:0 0 12px}
+h2{font-size:13px;margin:0 0 12px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.8px}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;
+background:var(--card2);color:var(--fg);font:inherit;font-weight:500;padding:12px 14px;min-height:52px;text-decoration:none;
+cursor:pointer;transition:transform .08s,filter .08s;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+button.p,.btn.p{background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;box-shadow:0 6px 18px #e0414f40}
+button:active,.btn:active{transform:scale(.96);filter:brightness(1.2)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}.mt{margin-top:10px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.grid button{min-height:58px;font-size:14px;padding:8px}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tile{flex-direction:column;gap:8px;min-height:96px;font-size:14px;border-radius:18px;text-align:center;line-height:1.2}
+.tile svg{width:28px;height:28px}.tile.p{grid-column:span 3;flex-direction:row;min-height:64px;font-size:16px}
+.file{display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line)}
 .file:first-child{border-top:0}.file .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.file small{color:var(--mut);display:block}.file .btn,.file button{flex:0 0 auto;min-height:40px;padding:8px 14px}
-.done{color:var(--ok)}textarea{width:100%;min-height:70px;border-radius:12px;border:1px solid var(--line);
-background:#1b171f;color:var(--fg);font:inherit;padding:10px;resize:vertical}
-#pc{white-space:pre-wrap;word-break:break-word;background:#1b171f;border-radius:12px;padding:10px;min-height:44px;
-max-height:180px;overflow:auto;margin:0 0 8px}#pc.empty{color:var(--mut)}#pcimg{max-width:100%;border-radius:12px;margin:0 0 8px}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.grid button{min-height:56px}
-.bar{height:6px;background:#1b171f;border-radius:3px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;
-width:0;background:var(--ac)}#up{margin-top:10px;font-size:14px;color:var(--mut)}input[type=file]{display:none}
-.hint{font-size:13px;color:var(--mut);margin:8px 2px 0}
-#pad{height:46vh;min-height:240px;border-radius:16px;background:#1b171f;border:1px solid var(--line);touch-action:none;
-display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:13px;text-align:center;padding:12px;user-select:none}
+.file small{color:var(--mut);display:block;font-size:12px}.file .btn,.file button{flex:0 0 auto;min-height:42px;padding:8px 12px;font-size:14px}
+.done{color:var(--ok)}textarea,input.in{width:100%;border-radius:14px;border:1px solid var(--line);background:#120f16;color:var(--fg);
+font:inherit;padding:12px}textarea{min-height:84px;resize:vertical}textarea:focus,input.in:focus{outline:2px solid #e0414f80;border-color:transparent}
+#pc{white-space:pre-wrap;word-break:break-word;background:#120f16;border-radius:14px;padding:12px;min-height:48px;
+max-height:200px;overflow:auto;margin:0 0 10px;font:15px/1.45 inherit}#pc.empty{color:var(--mut)}
+#pcimg{max-width:100%;border-radius:14px;margin:0 0 10px}
+.bar{height:6px;background:#120f16;border-radius:3px;overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;
+width:0;background:linear-gradient(90deg,var(--ac),var(--ac2));transition:width .3s}
+#up{margin-top:12px;font-size:14px;color:var(--mut)}input[type=file]{display:none}
+.hint{font-size:13px;color:var(--mut);margin:10px 2px 0;line-height:1.45}ol.hint{padding-left:20px}ol.hint li{margin:6px 0}
+/* пульт: крупно, чтобы попадать не глядя */
+.vol{display:flex;align-items:center;gap:12px}.round{width:64px;height:64px;min-height:0;border-radius:50%;padding:0;flex:0 0 auto}
+.round svg{width:28px;height:28px}.meter{flex:1;height:64px;border-radius:32px;background:#120f16;position:relative;overflow:hidden;
+display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--mut)}
+.meter i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#e0414f55,#ff7b5c55);transition:width .25s}
+.meter span{position:relative}.media{display:flex;align-items:center;justify-content:center;gap:22px;margin:22px 0 18px}
+.media .round{width:76px;height:76px}.media .big{width:112px;height:112px}.media .big svg{width:44px;height:44px}
+/* тачпад */
+#pad{height:calc(100vh - 330px);min-height:260px;border-radius:22px 22px 0 0;background:linear-gradient(160deg,#1d1824,#141118);
+border:1px solid var(--line);border-bottom:0;touch-action:none;display:flex;align-items:center;justify-content:center;
+color:var(--mut);font-size:13px;text-align:center;padding:18px;user-select:none;-webkit-user-select:none;transition:color .4s}
+#pad.used{color:transparent}.mbtn{display:flex;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:0 0 22px 22px;overflow:hidden}
+.mbtn button{flex:1;border-radius:0;min-height:58px;background:#1d1824}
+details{margin-top:10px}summary{list-style:none;cursor:pointer;color:var(--mut);font-size:14px;padding:10px 2px}
+summary::-webkit-details-marker{display:none}summary:before{content:"+ "}details[open] summary:before{content:"- "}
 .crumbs{font-size:14px;color:var(--mut);margin:0 0 8px;word-break:break-all}.crumbs a{color:var(--fg)}
-.ov{position:fixed;inset:0;background:#000d;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9;padding:12px}
-.ov video,.ov img,.ov audio{max-width:100%;max-height:80vh;border-radius:12px}.ov .row{width:100%;margin-top:10px}
-.hide{display:none}
+.ov{position:fixed;inset:0;background:#000c;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;
+flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:14px}
+.ov video,.ov img,.ov audio{max-width:100%;max-height:78vh;border-radius:14px}.ov .row{width:100%;max-width:520px;margin-top:12px}
+#sheet{justify-content:flex-end;padding:0}#sheetbox{width:100%;max-width:520px;background:var(--card);border:1px solid var(--line);
+border-bottom:0;border-radius:24px 24px 0 0;padding:16px 16px calc(16px + var(--safe))}
+#sheetbox button{width:100%;margin:5px 0}#sheetbox p{margin:4px 0 10px}
+.more{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.more button{margin:0!important;min-height:84px;flex-direction:column}
+/* вкладки снизу - под большой палец */
+#tabs{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:space-around;gap:2px;
+padding:6px 6px calc(6px + var(--safe));background:#16121bcc;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+border-top:1px solid var(--line)}
+#tabs button{flex:1;flex-direction:column;gap:3px;min-height:56px;padding:4px 2px;font-size:11px;font-weight:500;
+background:none;color:var(--mut);border-radius:14px;box-shadow:none}
+#tabs button.on{color:var(--fg);background:#e0414f22}#tabs button.on svg{color:var(--ac2)}
+#vol{position:fixed;left:50%;bottom:calc(var(--nav) + var(--safe) + 14px);transform:translate(-50%,10px);opacity:0;
+background:#2b2432;border:1px solid var(--line);color:var(--fg);padding:10px 16px;border-radius:99px;font-size:14px;
+z-index:15;pointer-events:none;transition:opacity .2s,transform .2s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+#vol.show{opacity:1;transform:translate(-50%,0)}
+.page{animation:in .18s ease-out}@keyframes in{from{transform:translateY(8px)}}
+.hide{display:none!important}
 </style></head><body>
-<h1>Компьютер рядом <span id="st">на связи</span></h1>
-<nav id="tabs"><button data-t="files" class="on">Файлы</button><button data-t="clip">Буфер</button>
-<button data-t="screen">Экран</button><button data-t="pc">Папки ПК</button><button data-t="wins">Окна</button>
-<button data-t="pad">Тачпад</button><button data-t="remote">Пульт</button><button data-t="cam">Камера</button></nav>
+<header><div><b>Компьютер рядом</b><small id="sub">телефон как пульт и передача файлов</small></div><span id="st">на связи</span></header>
 
-<div data-p="files">
+<div data-p="remote" class="page hide"><section>
+<div class="vol"><button class="round" data-hold="vol-" aria-label="Тише" data-i="minus"></button>
+<div class="meter"><i id="volfill"></i><span id="voltxt">Громкость</span></div>
+<button class="round" data-hold="vol+" aria-label="Громче" data-i="plus"></button></div>
+<div class="media"><button class="round" onclick="cmd('prev')" aria-label="Назад" data-i="prev"></button>
+<button class="round big p" onclick="cmd('play')" aria-label="Пауза" data-i="play"></button>
+<button class="round" onclick="cmd('next')" aria-label="Дальше" data-i="next"></button></div>
+<div class="row"><button onclick="cmd('mute')" data-i="mute">Без звука</button></div></section>
+<section><h2>Компьютер</h2><div class="tiles">
+<button class="tile" onclick="cmd('screen')" data-i="screenoff">Погасить экран</button>
+<button class="tile" onclick="cmd('lock')" data-i="lock">Заблокировать</button>
+<button class="tile" onclick="sleepPc()" data-i="moon">Усыпить</button></div></section></div>
+
+<div data-p="pad" class="page hide"><div id="pad">Палец - курсор. Касание - щелчок, двумя пальцами - правый щелчок,
+двумя пальцами вверх-вниз - прокрутка, задержать палец - перетаскивание.</div>
+<div class="mbtn"><button onclick="inp('c&b=l')">Левая</button><button onclick="inp('c&b=r')">Правая</button></div>
+<div class="row mt"><input id="kb" class="in" style="flex:3" placeholder="печатать на ПК" enterkeyhint="send" autocomplete="off">
+<button class="p" onclick="typeKb()" style="flex:1">Ввод</button></div>
+<details><summary>Клавиши</summary><div class="grid">
+<button onclick="key('back')">Стереть</button><button onclick="key('enter')">Enter</button><button onclick="key('esc')">Esc</button>
+<button onclick="key('tab')">Tab</button><button onclick="key('up')">Вверх</button><button onclick="key('space')">Пробел</button>
+<button onclick="key('left')">Влево</button><button onclick="key('down')">Вниз</button><button onclick="key('right')">Вправо</button></div></details>
+<p class="hint" id="padoff"></p></div>
+
+<div data-p="screen" class="page hide"><section style="padding:8px"><p class="hint" id="scrmsg" style="margin:4px 6px 8px"></p>
+<img id="scr" alt="" style="width:100%;border-radius:12px;display:block;-webkit-user-select:none;user-select:none">
+<div class="row mt"><button id="tapmode">Касание: щелчок</button><button onclick="scrQ()" id="qbtn">Чётче</button></div>
+<div class="grid mt"><button onclick="combo('copy')">Копировать</button><button onclick="combo('paste')">Вставить</button>
+<button onclick="combo('alttab')">Alt+Tab</button><button onclick="combo('back')">Назад</button><button onclick="combo('refresh')">Обновить</button>
+<button onclick="combo('win')">Пуск</button></div><p class="hint">Касание - щелчок в эту точку (режим меняется кнопкой),
+долгое касание - правый щелчок, двумя пальцами - увеличить. Печатать и прокручивать - вкладка «Тачпад».</p></section></div>
+
+<div data-p="files" class="page hide">
 <section id="get" hidden><h2>С компьютера</h2><div id="files"></div>
-<div class="row" style="margin-top:8px"><button class="p" id="all">Скачать всё</button></div></section>
-<section><h2>На компьютер</h2><div class="row">
-<button class="p" onclick="pick('photo')">Фото и видео</button><button onclick="pick('file')">Файлы</button></div>
-<div class="row" style="margin-top:8px"><button onclick="pick('scan')">Сканировать документ</button></div>
+<div class="row mt"><button class="p" id="all">Скачать всё</button></div></section>
+<section><h2>На компьютер</h2><div class="tiles">
+<button class="tile p" onclick="pick('photo')" data-i="photo">Фото и видео</button>
+<button class="tile" onclick="pick('file')" data-i="file">Файлы</button>
+<button class="tile" onclick="pick('scan')" data-i="scan">Скан документа</button>
+<button class="tile" onclick="tab('clip')" data-i="clip">Текст в буфер</button></div>
 <input type="file" id="fphoto" accept="image/*,video/*" multiple><input type="file" id="ffile" multiple>
 <input type="file" id="fscan" accept="image/*" capture="environment">
 <div id="up"></div><p class="hint">Фото и видео - в «Изображения\Телефон\дата снимка», файлы - в Загрузки, скан -
 в «Изображения\Телефон\Сканы», а распознанный текст - в буфер ПК. Оборвался Wi-Fi - продолжит с места обрыва.</p></section>
-<section id="secbox" class="hide"><h2>Защищённая страница (https)</h2>
+<section id="secbox" class="hide"><h2>Защищённая страница</h2>
 <p class="hint" style="margin-top:0">Нужна для «Поделиться - на ПК», камеры и установки страницы как приложения. Один раз:</p>
-<ol class="hint" style="padding-left:20px"><li>Скачайте сертификат этого ПК:
-<a class="btn" href="ca.crt" download="MoonDesk-CA.crt" style="min-height:36px;padding:6px 12px">MoonDesk-CA.crt</a></li>
+<ol class="hint"><li>Скачайте сертификат этого ПК:
+<a class="btn" href="ca.crt" download="MoonDesk-CA.crt" style="min-height:38px;padding:6px 12px">MoonDesk-CA.crt</a></li>
 <li>Настройки - Безопасность - Шифрование и учётные данные - Установить сертификат - Сертификат ЦС, выберите файл
 из Загрузок. На Samsung: Настройки - Безопасность и конфиденциальность - Другие параметры безопасности - Установить
 из памяти устройства - Сертификат ЦС.</li><li>Откройте защищённую страницу и уже там нажмите «Запомнить этот телефон».</li></ol>
 <div class="row"><a class="btn p" id="secgo">Открыть защищённую страницу</a></div></section>
 <section id="appbox" class="hide"><h2>Поделиться - на ПК</h2><p class="hint" id="apphint" style="margin-top:0"></p>
 <div class="row"><button class="p hide" id="install">Установить как приложение</button></div></section>
-<section id="pairbox"><h2>Без QR в следующий раз</h2><button id="pair">Запомнить этот телефон</button>
+<section id="pairbox"><h2>Без QR в следующий раз</h2><div class="row"><button id="pair">Запомнить этот телефон</button></div>
 <p class="hint" id="pairhint">Страница получит постоянный адрес - добавьте её в закладки или на главный экран.</p></section>
 </div>
 
-<div data-p="clip" class="hide"><section><h2>Буфер компьютера</h2><pre id="pc" class="empty">пока пусто</pre>
+<div data-p="clip" class="page hide"><section><h2>Буфер компьютера</h2><pre id="pc" class="empty">пока пусто</pre>
 <img id="pcimg" class="hide" alt=""><div class="row"><button onclick="copyPc()">Скопировать текст</button>
 <a class="btn hide" id="pcsave" download="Буфер ПК.png">Сохранить картинку</a></div></section>
 <section><h2>С телефона на ПК</h2><textarea id="tx" placeholder="текст или ссылка"></textarea>
-<div class="row" style="margin-top:8px"><button onclick="pasteHere()">Вставить сюда</button>
+<div class="row mt"><button onclick="pasteHere()">Вставить сюда</button>
 <button class="p" onclick="sendText()">В буфер ПК</button></div>
-<div class="row" style="margin-top:8px"><button onclick="openPc()">Открыть ссылку на ПК</button>
-<button onclick="pick('clipimg')">Картинку в буфер ПК</button></div>
+<div class="row mt"><button onclick="openPc()">Открыть ссылку на ПК</button>
+<button onclick="pick('clipimg')">Картинку в буфер</button></div>
 <input type="file" id="fclipimg" accept="image/*"></section></div>
 
-<div data-p="screen" class="hide"><section style="padding:8px"><p class="hint" id="scrmsg"></p>
-<img id="scr" alt="" style="width:100%;border-radius:8px;display:block;-webkit-user-select:none;user-select:none">
-<div class="row" style="margin-top:8px"><button id="tapmode">Касание: щелчок</button><button onclick="scrQ()" id="qbtn">Чётче</button></div>
-<div class="grid" style="margin-top:8px"><button onclick="combo('copy')">Копировать</button><button onclick="combo('paste')">Вставить</button>
-<button onclick="combo('alttab')">Alt+Tab</button><button onclick="combo('back')">Назад</button><button onclick="combo('refresh')">Обновить</button>
-<button onclick="combo('win')">Пуск</button></div><p class="hint">Касание - щелчок в эту точку (режим меняется кнопкой),
-долгое касание - правый щелчок, двумя пальцами - увеличить. Печатать и прокручивать - вкладка «Тачпад».</p></section></div>
-
-<div data-p="pc" class="hide"><section><h2>Папки компьютера</h2><div class="crumbs" id="crumbs"></div>
+<div data-p="pc" class="page hide"><section><h2>Папки компьютера</h2><div class="crumbs" id="crumbs"></div>
 <div class="row hide" id="pastebar" style="margin-bottom:8px"><button class="p" id="pastebtn">Вставить сюда</button><button onclick="clip=null;showPaste()">Отмена</button></div>
 <div id="ls"></div>
-<div class="row" style="margin-top:8px"><button id="zipdir" class="hide">Эту папку архивом</button></div>
-<div class="row hide" id="fsrow" style="margin-top:8px"><button onclick="mkdir()">Новая папка</button><button onclick="pick('to')">Загрузить сюда</button></div>
+<div class="row mt"><button id="zipdir" class="hide">Эту папку архивом</button></div>
+<div class="row hide mt" id="fsrow"><button onclick="mkdir()">Новая папка</button><button onclick="pick('to')">Загрузить сюда</button></div>
 <input type="file" id="fto" multiple></section></div>
 
-<div data-p="wins" class="hide"><section><h2>Окна на ПК</h2><div id="wl"></div>
-<div class="row" style="margin-top:8px"><button onclick="wins()">Обновить</button><button onclick="combo('desktop')">Рабочий стол</button></div>
-<div class="grid" style="margin-top:8px"><button onclick="combo('explorer')">Проводник</button><button onclick="combo('newtab')">Новая вкладка</button>
+<div data-p="wins" class="page hide"><section><h2>Окна на ПК</h2><div id="wl"></div>
+<div class="row mt"><button onclick="wins()">Обновить</button><button onclick="combo('desktop')">Рабочий стол</button></div></section>
+<section><h2>Быстрые действия</h2><div class="grid"><button onclick="combo('explorer')">Проводник</button><button onclick="combo('newtab')">Новая вкладка</button>
 <button onclick="combo('closetab')">Закрыть вкладку</button><button onclick="combo('undo')">Отменить</button><button onclick="combo('save')">Сохранить</button>
 <button onclick="combo('taskmgr')">Диспетчер</button></div></section></div>
 
-<div data-p="pad" class="hide"><section><div id="pad">Палец - курсор. Касание - щелчок, двумя пальцами - правый щелчок,
-двумя пальцами вверх-вниз - прокрутка, задержать палец - перетаскивание.</div>
-<div class="row" style="margin-top:8px"><button onclick="inp('c&b=l')">Левая</button><button onclick="inp('c&b=r')">Правая</button></div>
-<div class="row" style="margin-top:8px"><input id="kb" style="flex:3;min-height:46px;border-radius:12px;border:1px solid var(--line);background:#1b171f;color:var(--fg);font:inherit;padding:0 10px" placeholder="печатать на ПК">
-<button class="p" onclick="typeKb()">Ввод</button></div>
-<div class="grid" style="margin-top:8px"><button onclick="key('back')">Стереть</button><button onclick="key('enter')">Enter</button><button onclick="key('esc')">Esc</button>
-<button onclick="key('tab')">Tab</button><button onclick="key('up')">Вверх</button><button onclick="key('space')">Пробел</button>
-<button onclick="key('left')">Влево</button><button onclick="key('down')">Вниз</button><button onclick="key('right')">Вправо</button></div>
-<p class="hint" id="padoff"></p></section></div>
-
-<div data-p="remote" class="hide"><section><h2>Пульт</h2><div class="grid">
-<button onclick="cmd('vol-')">Тише</button><button onclick="cmd('mute')">Без звука</button><button onclick="cmd('vol+')">Громче</button>
-<button onclick="cmd('prev')">Назад</button><button class="p" onclick="cmd('play')">Пауза</button><button onclick="cmd('next')">Дальше</button>
-<button onclick="cmd('screen')">Экран</button><button onclick="cmd('lock')">Блок</button><button onclick="sleepPc()">Сон</button>
-</div></section></div>
-<div data-p="cam" class="hide"><section><h2>Камера телефона - на ПК</h2>
-<video id="camv" playsinline muted style="width:100%;border-radius:12px;background:#000;display:block;min-height:120px"></video>
-<div class="row" style="margin-top:8px"><button class="p" id="camgo">Включить</button><button id="camflip">Задняя</button>
+<div data-p="cam" class="page hide"><section><h2>Камера телефона - на ПК</h2>
+<video id="camv" playsinline muted style="width:100%;border-radius:14px;background:#000;display:block;min-height:140px"></video>
+<div class="row mt"><button class="p" id="camgo">Включить</button><button id="camflip">Задняя</button>
 <button id="camres">1280</button></div><p class="hint" id="cammsg">На ПК откроется окно «Камера телефона» - выберите его
 в OBS («Захват окна») или в Discord («Демонстрация экрана - окно»). Экран телефона не гасите: в фоне Chrome
 останавливает камеру.</p></section></div>
-<p class="hint" id="vol"></p>
-<div class="ov hide" id="sheet"><div id="sheetbox" style="width:100%;max-width:420px"></div></div>
+
+<nav id="tabs"><button data-t="remote" data-i="remote">Пульт</button><button data-t="pad" data-i="pad">Тачпад</button>
+<button data-t="screen" data-i="screen">Экран</button><button data-t="files" data-i="files">Файлы</button>
+<button data-t="more" data-i="more" id="morebtn">Ещё</button></nav>
+<p id="vol"></p>
+<div class="ov hide" id="sheet"><div id="sheetbox"></div></div>
 <div class="ov hide" id="ov"><div id="ovbox"></div><div class="row"><a class="btn" id="ovdl">Скачать</a><button class="p" onclick="closeOv()">Закрыть</button></div></div>
 <script>
 var seq=-1,files=[],state={},q=[],active=0,CH=8<<20,upBytes=0,upT0=0,upTotal=0,upDone=0;
@@ -133,12 +189,40 @@ function size(n){if(n<1024)return n+' Б';if(n<1048576)return (n/1024).toFixed(0
 if(n<1073741824)return (n/1048576).toFixed(1).replace('.',',')+' МБ';return (n/1073741824).toFixed(2).replace('.',',')+' ГБ'}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
-var tt;function toast(s){var e=$('vol');e.textContent=s;clearTimeout(tt);tt=setTimeout(function(){e.textContent=''},2500)}
-document.querySelectorAll('#tabs button').forEach(function(b){b.onclick=function(){
-document.querySelectorAll('#tabs button').forEach(function(x){x.className=x==b?'on':''});
-document.querySelectorAll('[data-p]').forEach(function(p){p.classList.toggle('hide',p.dataset.p!=b.dataset.t)});
-if(b.dataset.t=='pc'&&!state.lsInit){state.lsInit=1;roots()}if(b.dataset.t=='wins')wins();
-state.tab=b.dataset.t;if(b.dataset.t=='screen')screenLoop()}});
+var tt;function toast(s){var e=$('vol');e.textContent=s;e.classList.add('show');clearTimeout(tt);tt=setTimeout(function(){e.classList.remove('show')},2500)}
+// значки (линии 24x24), вставляются в кнопки с data-i
+var I={remote:'<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5 3.5-5 3.5z"/>',pad:'<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 15h18M12 15v5"/>',
+screen:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',files:'<path d="M7 4v13m0 0-3-3m3 3 3-3M17 20V7m0 0-3 3m3-3 3 3"/>',
+more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+clip:'<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 3h6v3H9z"/>',pc:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+wins:'<rect x="3" y="5" width="13" height="10" rx="2"/><path d="M8 19h11a2 2 0 0 0 2-2V9"/>',
+cam:'<path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.5"/>',
+prev:'<path d="M6 5v14M19 5 9 12l10 7z"/>',next:'<path d="M18 5v14M5 5l10 7-10 7z"/>',play:'<path d="M4 5l8 7-8 7z"/><path d="M16 5v14M20 5v14"/>',
+minus:'<path d="M5 12h14"/>',plus:'<path d="M5 12h14M12 5v14"/>',mute:'<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="m17 9 4 6m0-6-4 6"/>',
+screenoff:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M4 4l16 12"/>',lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+moon:'<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',photo:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>',
+file:'<path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/>',scan:'<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/>'};
+function icons(root){(root||document).querySelectorAll('[data-i]').forEach(function(e){if(e.firstChild&&e.firstChild.nodeName=='svg')return;
+e.insertAdjacentHTML('afterbegin','<svg viewBox="0 0 24 24">'+I[e.dataset.i]+'</svg>')})}
+icons();
+// вкладки: пять снизу, остальные - в «Ещё»
+var MORE={clip:'Буфер',pc:'Папки ПК',wins:'Окна',cam:'Камера'};
+function tab(t){if(t=='more'){var h='<div class="more">';for(var k in MORE)h+='<button data-i="'+k+'" onclick="closeSheet();tab(\''+k+'\')">'+MORE[k]+'</button>';
+$('sheetbox').innerHTML=h+'</div><button onclick="closeSheet()">Закрыть</button>';icons($('sheetbox'));$('sheet').classList.remove('hide');return}
+document.querySelectorAll('#tabs button').forEach(function(x){x.classList.toggle('on',x.dataset.t==t||(x.dataset.t=='more'&&!!MORE[t]))});
+var mb=$('morebtn');mb.lastChild.textContent=MORE[t]||'Ещё';
+document.querySelectorAll('[data-p]').forEach(function(p){p.classList.toggle('hide',p.dataset.p!=t)});
+if(t=='pc'&&!state.lsInit){state.lsInit=1;roots()}if(t=='wins')wins();
+state.tab=t;try{localStorage.setItem('tab',t)}catch(e){}if(t=='screen')screenLoop();scrollTo(0,0)}
+document.querySelectorAll('#tabs button').forEach(function(b){b.onclick=function(){tab(b.dataset.t)}});
+$('sheet').addEventListener('click',function(e){if(e.target==this)closeSheet()});
+// отклик под пальцем: короткая вибрация
+document.addEventListener('pointerdown',function(e){if(e.target.closest&&e.target.closest('button,.btn')&&navigator.vibrate)navigator.vibrate(8)},true);
+// громкость: удерживать - меняется дальше
+document.querySelectorAll('[data-hold]').forEach(function(b){var t1,t2;function stop(){clearTimeout(t1);clearInterval(t2)}
+b.addEventListener('pointerdown',function(e){e.preventDefault();cmd(b.dataset.hold);t1=setTimeout(function(){t2=setInterval(function(){cmd(b.dataset.hold)},160)},420)});
+['pointerup','pointerleave','pointercancel'].forEach(function(ev){b.addEventListener(ev,stop)});b.addEventListener('contextmenu',function(e){e.preventDefault()})});
+function volShow(v){$('volfill').style.width=Math.round(v*100)+'%';$('voltxt').textContent='Громкость '+Math.round(v*100)+'%'}
 function stateTxt(ok){var s=$('st');s.textContent=ok?'на связи':'нет связи';s.className=ok?'':'off'}
 function draw(){var h='';files.forEach(function(f,i){h+='<div class="file"><div class="n">'+esc(f.name)+
 '<small>'+size(f.size)+(f.done?' <span class="done">скачан</span>':'')+'</small></div><a class="btn" href="f/'+i+
@@ -149,6 +233,7 @@ files.forEach(function(f,i){setTimeout(function(){var a=document.createElement('
 a.download=f.name.split('\\').pop();document.body.appendChild(a);a.click();a.remove()},i*700)})};
 function poll(){fetch('poll?seq='+seq,{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.json()})
 .then(function(j){stateTxt(true);seq=j.seq;files=j.files||[];state.zip=j.zip;state.shares=j.shares;draw();
+if(files.length&&!state.filesShown){state.filesShown=1;tab('files')}
 var p=$('pc');if(j.clip){p.textContent=j.clip;p.className=''}else{p.textContent='пока пусто';p.className='empty'}
 var im=$('pcimg'),sv=$('pcsave');if(j.img){var u='clipimg?n='+j.img;if(im.dataset.u!=u){im.src=u;im.dataset.u=u}
 im.classList.remove('hide');sv.href=u;sv.classList.remove('hide')}else{im.classList.add('hide');sv.classList.add('hide')}
@@ -169,7 +254,7 @@ if(r.ok){toast('В буфере ПК');$('tx').value=''}else toast('Не дош�
 function openPc(){var t=$('tx').value.trim();if(!/^https?:\/\//i.test(t)){toast('Нужна ссылка http(s)');return}
 post('open',t).then(function(r){toast(r.ok?'Открыто на ПК':'Не открылось')})}
 function cmd(c){post('cmd?c='+encodeURIComponent(c)).then(function(r){return r.json()})
-.then(function(j){if(j.vol>=0)toast('Громкость: '+Math.round(j.vol*100)+'%')}).catch(function(){toast('Нет связи')})}
+.then(function(j){if(j.vol>=0)volShow(j.vol)}).catch(function(){toast('Нет связи')})}
 function sleepPc(){if(confirm('Усыпить компьютер?'))cmd('sleep')}
 function pick(k){$('f'+k).click()}
 function rid(){var a=new Uint8Array(12);crypto.getRandomValues(a);return Array.from(a,function(b){return('0'+b.toString(16)).slice(-2)}).join('')}
@@ -264,7 +349,7 @@ function flush(){if(busy)return;var x=Math.round(acc.x),y=Math.round(acc.y),w=Ma
 if(x||y){acc.x-=x;acc.y-=y;busy=true;inp('m&x='+x+'&y='+y).finally(function(){busy=false})}
 else if(w){acc.w-=w;busy=true;inp('w&d='+w).finally(function(){busy=false})}}
 setInterval(flush,20);
-pad.addEventListener('touchstart',function(e){e.preventDefault();fingers=Math.max(fingers,e.touches.length);var t=e.touches[0];lx=t.clientX;ly=t.clientY;
+pad.addEventListener('touchstart',function(e){e.preventDefault();pad.classList.add('used');fingers=Math.max(fingers,e.touches.length);var t=e.touches[0];lx=t.clientX;ly=t.clientY;
 if(e.touches.length==1){fingers=1;moved=false;t0=Date.now();lp=setTimeout(function(){if(!moved){drag=true;inp('dn');if(navigator.vibrate)navigator.vibrate(30)}},450)}},{passive:false});
 pad.addEventListener('touchmove',function(e){e.preventDefault();var t=e.touches[0],dx=t.clientX-lx,dy=t.clientY-ly;lx=t.clientX;ly=t.clientY;
 if(Math.abs(dx)+Math.abs(dy)>2){moved=true;clearTimeout(lp)}
@@ -316,6 +401,7 @@ catch(e){$('cammsg').textContent='Нет связи с ПК';await sleep(1000)}v
 $('pair').onclick=function(){var n=(navigator.userAgentData&&navigator.userAgentData.platform)||'телефон';
 var m=/\(([^)]+)\)/.exec(navigator.userAgent);if(m)n=m[1].split(';').pop().trim()||n;
 post('pair',n).then(function(r){return r.json()}).then(function(j){if(j.url){toast('Запомнен');location.replace(j.url)}}).catch(function(){toast('Не вышло')})};
+(function(){var t=null;try{t=localStorage.getItem('tab')}catch(e){}tab(t&&document.querySelector('[data-p="'+t+'"]')?t:'remote')})();
 shareResult();
 poll();
 </script></body></html>
