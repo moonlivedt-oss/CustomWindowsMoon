@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Radial Menu</title>
+<meta name="description" content="Radial Menu для Windows: Alt и курсор к краю экрана - и из края раскрывается кольцо с вашими папками и программами. Плюс горячие углы, «Сейчас играет», телефон рядом, сеть, утилиты и игровой режим.">
+<meta name="theme-color" content="#140b0f">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --wine:#140b0f;      /* фон: обои темы «Багровое поле» в темноте */
+  --glass:#2a161ccc;   /* стекло кольца */
+  --crimson:#c8323f;   /* акцент Windows у автора */
+  --ember:#ff7b5c;     /* второй цвет градиента, как на странице телефона */
+  --bone:#f6ece8;      /* текст */
+  --ash:#b3a2a8;       /* второстепенный текст */
+  --line:#ffffff1a;
+  --display:"Unbounded",system-ui,sans-serif;
+  --body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --wine:#fbf3f1;--glass:#fff6f3d9;--bone:#2a1117;--ash:#6f5960;--line:#2a11171a}}
+:root[data-theme="light"]{--wine:#fbf3f1;--glass:#fff6f3d9;--bone:#2a1117;--ash:#6f5960;--line:#2a11171a}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--wine);color:var(--bone);font:17px/1.6 var(--body);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--ember);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 max(20px,env(safe-area-inset-left)) 0 max(20px,env(safe-area-inset-right))}
+kbd,code{font-family:var(--mono);font-size:.82em}
+kbd{display:inline-block;padding:2px 8px;border-radius:7px;border:1px solid var(--line);border-bottom-width:3px;background:#ffffff0d;white-space:nowrap}
+
+/* ---------- первый экран: левый край окна - это край экрана ---------- */
+.hero{position:relative;min-height:100svh;display:grid;align-items:center;overflow:hidden;isolation:isolate}
+.field{position:absolute;inset:0;z-index:-1;
+  background:
+    radial-gradient(60% 50% at 12% 45%,#c8323f55,transparent 70%),
+    radial-gradient(45% 40% at 80% 20%,#ff7b5c26,transparent 70%),
+    radial-gradient(70% 60% at 60% 110%,#5a101b88,transparent 70%),
+    var(--wine)}
+.edge{position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(transparent,var(--crimson),transparent);
+  opacity:.5;transition:opacity .3s,width .3s}
+.hero.near .edge{opacity:1;width:5px}
+/* viewBox 310x620: высота вдвое больше ширины - кольцо целиком по высоте экрана */
+#ring{position:absolute;left:0;top:50%;width:min(46svh,44vw,520px);height:auto;aspect-ratio:1/2;transform:translateY(-50%);
+  overflow:visible;pointer-events:none}
+#ring .sec{pointer-events:auto;cursor:pointer}
+.copy{position:relative;margin-left:auto;width:min(560px,100%);padding:110px 0 80px}
+.eyebrow{font:500 13px/1 var(--mono);letter-spacing:.08em;color:var(--ash);text-transform:uppercase;margin:0 0 22px}
+h1{font:700 clamp(44px,8.4vw,96px)/.95 var(--display);letter-spacing:-.02em;margin:0 0 26px}
+h1 .plus{color:var(--crimson)}
+.lead{font-size:19px;color:var(--ash);max-width:30em;margin:0 0 30px}
+.lead b{color:var(--bone);font-weight:600}
+.cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:0 22px;border-radius:14px;
+  font:600 16px/1 var(--body);text-decoration:none;border:1px solid var(--line);background:#ffffff0a;color:var(--bone);cursor:pointer}
+.btn.p{border:0;color:#fff;background:linear-gradient(135deg,var(--crimson),var(--ember));box-shadow:0 10px 28px #c8323f55}
+.btn:active{transform:scale(.97)}
+.try{font-size:14px;color:var(--ash);margin-top:20px}
+#cap{position:absolute;left:clamp(16px,34vw,330px);top:50%;transform:translateY(-50%);pointer-events:none;
+  background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line);
+  border-radius:16px;padding:12px 16px;font-size:14px;min-width:190px;opacity:0;transition:opacity .2s}
+#cap.show{opacity:1}#cap b{display:block;font-size:16px}#cap small{color:var(--ash)}
+#touch{display:none}
+
+/* ---------- разделы ---------- */
+section{padding:96px 0;border-top:1px solid var(--line)}
+h2{font:700 clamp(30px,4.6vw,48px)/1.05 var(--display);letter-spacing:-.015em;margin:0 0 14px}
+.sub{color:var(--ash);max-width:36em;margin:0 0 48px}
+
+/* что умеет: каждая строка - сектор кольца */
+.skills{display:grid;grid-template-columns:repeat(2,1fr);gap:0 48px}
+.skill{display:grid;grid-template-columns:44px 1fr;gap:16px;padding:22px 0;border-top:1px solid var(--line)}
+.skill svg{width:44px;height:44px}
+.skill h3{font:600 19px/1.3 var(--body);margin:2px 0 4px}
+.skill p{margin:0;color:var(--ash);font-size:16px}
+
+/* цифры */
+.specs{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:20px;overflow:hidden}
+.spec{background:var(--wine);padding:26px 22px}
+.spec b{display:block;font:500 30px/1.1 var(--mono);color:var(--bone);margin-bottom:8px}
+.spec span{color:var(--ash);font-size:15px}
+.pros{margin:40px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:14px 48px}
+.pros li{padding-left:22px;position:relative;color:var(--ash)}
+.pros li b{color:var(--bone);font-weight:600}
+.pros li:before{content:"";position:absolute;left:0;top:.62em;width:9px;height:9px;border-radius:50%;
+  border:2px solid var(--crimson)}
+
+/* как начать: настоящая последовательность - шаги пронумерованы */
+.steps{counter-reset:s;display:grid;gap:14px;margin:0;padding:0;list-style:none}
+.steps li{counter-increment:s;display:grid;grid-template-columns:56px 1fr;gap:18px;align-items:start;
+  background:#ffffff08;border:1px solid var(--line);border-radius:18px;padding:20px}
+.steps li:before{content:counter(s);font:700 26px/1 var(--display);color:var(--crimson);padding-top:4px}
+.steps h3{font:600 18px/1.35 var(--body);margin:0 0 6px}
+.steps p{margin:0;color:var(--ash)}
+pre{margin:12px 0 0;padding:14px 16px;border-radius:12px;background:#00000040;border:1px solid var(--line);overflow-x:auto;
+  font:500 14px/1.5 var(--mono);color:var(--bone)}
+
+/* управление */
+.keys{width:100%;border-collapse:collapse;margin-top:28px}
+.keys td{padding:14px 0;border-top:1px solid var(--line);vertical-align:top}
+.keys td:first-child{width:42%;padding-right:20px}
+.keys td:last-child{color:var(--ash)}
+
+/* телефон */
+.phone{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center}
+.mock{justify-self:center;width:250px;aspect-ratio:9/19;border-radius:38px;border:10px solid #000;background:#0f0d12;
+  box-shadow:0 30px 70px #00000080,0 0 0 1px var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:10px;color:#f4eff7}
+.mock .bar{display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.mock .chip{font-size:10px;padding:3px 8px;border-radius:99px;background:#1a1620;border:1px solid #2f2838}
+.mock .chip:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#3fbf7a;margin-right:5px}
+.mock .card{background:#1a1620;border:1px solid #2f2838;border-radius:14px;padding:10px}
+.mock .play{width:58px;height:58px;border-radius:50%;margin:8px auto;background:linear-gradient(135deg,#e0414f,#ff7b5c)}
+.mock .row{display:flex;gap:6px}.mock .row i{flex:1;height:38px;border-radius:10px;background:#241e2b}
+.mock .tabs{margin-top:auto;display:flex;justify-content:space-around;font-size:9px;color:#9e94a8}
+.mock .tabs b{color:#f4eff7}
+
+footer{padding:48px 0 60px;border-top:1px solid var(--line);color:var(--ash);font-size:15px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-between}
+
+@media (max-width:860px){
+  .skills,.pros{grid-template-columns:1fr}
+  .specs{grid-template-columns:repeat(2,1fr)}
+  .phone{grid-template-columns:1fr}
+  .copy{padding:120px 0 60px}
+}
+@media (max-width:640px){
+  body{font-size:16px}
+  .hero{align-items:end}
+  #ring{width:min(30svh,62vw);top:30%}
+  .copy{padding:0 0 48px}
+  #touch{display:inline-flex}
+  .try.desk{display:none}
+  #cap{left:auto;right:16px;top:12%;transform:none}
+  .keys td{display:block;width:auto!important;padding:4px 0}.keys tr{display:block;border-top:1px solid var(--line);padding:10px 0}
+  .keys td{border:0}
+  section{padding:72px 0}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<header class="hero" id="hero">
+  <div class="field" aria-hidden="true"></div>
+  <div class="edge" aria-hidden="true"></div>
+  <svg id="ring" viewBox="0 -310 310 620" role="img" aria-label="Кольцо Radial Menu у левого края экрана"></svg>
+  <div id="cap" aria-live="polite"><b></b><small></small></div>
+  <div class="wrap">
+    <div class="copy">
+      <p class="eyebrow">Windows 10 и 11 / C++ / открытый код</p>
+      <h1>Alt <span class="plus">+</span> край экрана</h1>
+      <p class="lead">Зажмите <b>Alt</b> и доведите курсор до края - из него раскроется кольцо с вашими папками,
+        проектами и программами. <b>Одно движение вместо Проводника</b>, а вокруг - углы экрана, музыка, телефон, сеть и
+        уборка системы.</p>
+      <div class="cta">
+        <a class="btn p" href="#start">Как установить</a>
+        <a class="btn" href="https://github.com/moonlivedt-oss/CustomWindowsMoon">Исходники на GitHub</a>
+        <button class="btn" id="touch" type="button">Показать кольцо</button>
+      </div>
+      <p class="try desk">Попробуйте прямо здесь: зажмите <kbd>Alt</kbd> и подведите мышь к левому краю окна.</p>
+    </div>
+  </div>
+</header>
+
+<main>
+<section id="what">
+  <div class="wrap">
+    <h2>Что умеет</h2>
+    <p class="sub">Всё живёт у краёв и в углах экрана: появляется, когда нужно, и исчезает, когда не нужно. Окно
+      настроек одно - Radial Studio, двойной щелчок по значку в трее.</p>
+    <div class="skills" id="skills"></div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <h2>Почему так</h2>
+    <p class="sub">Программа работает постоянно, поэтому написана на C++ под Win32 - без браузера внутри, без
+      фреймворков и без облака.</p>
+    <div class="specs">
+      <div class="spec"><b>2-4 МБ</b><span>памяти в покое: после закрытия кольца и студии память отдаётся системе</span></div>
+      <div class="spec"><b>~9 мс</b><span>процессора в секунду в покое - меньше одного процента одного ядра</span></div>
+      <div class="spec"><b>0</b><span>чужих серверов: телефон, сеть и файлы - только ваш ПК и ваша сеть</span></div>
+      <div class="spec"><b>1956</b><span>автотестов прогоняются перед каждой сборкой</span></div>
+    </div>
+    <ul class="pros">
+      <li><b>Не мешает играм.</b> Полноэкранная игра - и игровой режим сам снимает перехват мыши, анимации и
+        прозрачность, ставит на паузу живые обои; после игры всё возвращается.</li>
+      <li><b>Без прав администратора.</b> Обычная работа их не просит. То немногое, что требует прав, идёт через
+        отдельную задачу с белым списком действий и один запрос UAC.</li>
+      <li><b>Удаляет только с вашего согласия.</b> Удаление и завершение процессов - отдельный RadialTools.exe по
+        кнопке, с отменой. Сама программа чистит только старые временные файлы, и то если включить «тихую
+        чистку».</li>
+      <li><b>Всё обратимо.</b> Каждая настройка Windows, которую меняет программа, запоминает прежнее значение; в трее -
+        «Вернуть всё как было».</li>
+    </ul>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <h2>Как начать</h2>
+    <p class="sub">Пять минут: собрать, запустить, разложить кольца под себя.</p>
+    <ol class="steps">
+      <li><div><h3>Соберите программу</h3>
+        <p>Нужен MSYS2 с пакетами ucrt64: <code>g++</code>, <code>cmake</code>, <code>ninja</code>. В папке проекта:</p>
+        <pre>build.cmd</pre>
+        <p>Готовый <code>RadialMenu.exe</code> появится в корне проекта рядом с папкой <code>icons</code>.</p></div></li>
+      <li><div><h3>Запустите RadialMenu.exe</h3>
+        <p>Окна не будет - программа сядет в трей. При первом запуске создастся <code>radial.cfg</code> с кольцами из
+          общих папок: Документы, Загрузки, Музыка, Изображения.</p></div></li>
+      <li><div><h3>Откройте кольцо</h3>
+        <p>Зажмите <kbd>Alt</kbd> и доведите курсор до левого или правого края экрана. Наведите на сектор - раскроется
+          второе кольцо с содержимым. Двойной щелчок или <kbd>Enter</kbd> - открыть.</p></div></li>
+      <li><div><h3>Разложите кольца под себя</h3>
+        <p>Двойной щелчок по значку в трее открывает Radial Studio. Раздел «Кольца»: перетащите папки и программы на
+          дорожку нужного края, соберите их в группы, выберите тему.</p></div></li>
+      <li><div><h3>Включите автозапуск</h3>
+        <p>Трей - «Запускать вместе с Windows». Программа создаст задачу планировщика «при входе», прав администратора
+          не нужно.</p></div></li>
+    </ol>
+
+    <table class="keys" aria-label="Управление кольцом">
+      <tr><td><kbd>Alt</kbd> + курсор к краю</td><td>открыть кольцо этого края</td></tr>
+      <tr><td>двойной щелчок или <kbd>Enter</kbd></td><td>открыть папку, файл или программу</td></tr>
+      <tr><td><kbd>Shift</kbd> + открыть</td><td>открыть папку в VS Code</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + открыть</td><td>терминал в этой папке</td></tr>
+      <tr><td>правый щелчок или колесо вверх</td><td>зайти в папку внутри кольца</td></tr>
+      <tr><td>просто печатать</td><td>поиск по всем кольцам; раскладка не важна - «ghjtrns» найдёт «Проекты»</td></tr>
+      <tr><td>файл перетащить к краю + <kbd>Alt</kbd></td><td>бросить на сектор: перенести в папку или открыть в программе</td></tr>
+      <tr><td><kbd>Alt</kbd> + <kbd>`</kbd></td><td>кольцо открытых окон с живыми миниатюрами</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>назад или закрыть</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="phone">
+  <div class="wrap phone">
+    <div>
+      <h2>Телефон рядом</h2>
+      <p class="sub" style="margin-bottom:24px">Телефон становится пультом и флешкой без облака и кабеля: связь идёт
+        напрямую с ПК по вашему Wi-Fi.</p>
+      <ol class="steps">
+        <li><div><h3>Покажите QR</h3><p>Бросьте файлы на пункт кольца «Телефон» или откройте его из кольца «Сеть» -
+          справа снизу выедет карточка с QR-кодом.</p></div></li>
+        <li><div><h3>Наведите камеру телефона</h3><p>Откроется страница: пульт музыки и громкости, тачпад и
+          клавиатура, файлы в обе стороны, общий буфер, экран ПК.</p></div></li>
+        <li><div><h3>Запомните телефон</h3><p>«Запомнить этот телефон» даёт постоянный адрес без QR. Для уведомлений,
+          SMS-кодов и фото в фоне есть Android-приложение «Компьютер рядом».</p></div></li>
+      </ol>
+    </div>
+    <div class="mock" aria-hidden="true">
+      <div class="bar"><b>Компьютер рядом</b><span class="chip">на связи</span></div>
+      <div class="card"><div class="row"><i></i><i style="flex:2"></i><i></i></div><div class="play"></div><div class="row"><i></i></div></div>
+      <div class="card"><div class="row"><i></i><i></i><i></i></div></div>
+      <div class="tabs"><b>Пульт</b><span>Тачпад</span><span>Кольцо</span><span>Файлы</span><span>Ещё</span></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Radial Menu - автор moonlivedt-oss</span>
+    <a href="https://github.com/moonlivedt-oss/CustomWindowsMoon">github.com/moonlivedt-oss/CustomWindowsMoon</a>
+  </div>
+</footer>
+
+<script>
+// ---------- что умеет: значок - маленький сектор кольца с номером позиции ----------
+var SK=[
+  ['Кольца у краёв','Свои папки, проекты и программы у левого и правого края. Второе кольцо - содержимое папки, поиск набором, перетаскивание файлов на сектор.'],
+  ['Горячие углы','Задержать курсор, толкнуть дважды или крутить колесо в углу: рабочий стол, все окна, снимок, яркость, громкость.'],
+  ['Сейчас играет','Курсор к нижнему краю - выезжает карточка с обложкой и кнопками любого плеера, даже музыки в браузере. Громкость колесом.'],
+  ['Окна','Кольцо открытых окон с миниатюрами, Alt + колесо над заголовком - прозрачность, Alt + средняя кнопка - поверх всех.'],
+  ['Телефон рядом','Файлы, буфер, пульт, тачпад и экран ПК на телефоне по Wi-Fi, без облака. Android-приложение для уведомлений и SMS.'],
+  ['Сеть','Проверка связи, разбор обрыва, починка одной кнопкой, скорость и Wi-Fi каналы. Понимает VPN-туннели.'],
+  ['Утилиты','Что занимает место, очистка кэшей, PATH, порты, процессы, автозагрузка, «кто держит файл».'],
+  ['Защита и приватность','Подозрительные процессы и автозапуск, слабые места PATH, отключение слежки Windows с откатом каждой настройки.'],
+  ['Игровой режим','Узнаёт игру сам: снимает лишнее, предлагает закрыть тяжёлые программы, после игры возвращает всё назад.'],
+  ['Красота','12 тем, рамка активного окна цветом темы, экран блокировки по теме, анимация входа из сот.']];
+function glyph(i,n){var a0=-90+i*180/n,a1=a0+180/n,R=20,r=10,c=[2,22];function p(a,rr){a=a*Math.PI/180;return(c[0]+rr*Math.cos(a)).toFixed(1)+' '+(c[1]+rr*Math.sin(a)).toFixed(1)}
+  return '<svg viewBox="0 0 44 44" aria-hidden="true"><path d="M'+p(-90,R)+'A'+R+' '+R+' 0 0 1 '+p(90,R)+'L'+p(90,r)+'A'+r+' '+r+' 0 0 0 '+p(-90,r)+'Z" fill="none" stroke="currentColor" stroke-opacity=".25"/>'+
+  '<path d="M'+p(a0,R)+'A'+R+' '+R+' 0 0 1 '+p(a1,R)+'L'+p(a1,r)+'A'+r+' '+r+' 0 0 0 '+p(a0,r)+'Z" fill="#c8323f"/></svg>'}
+document.getElementById('skills').innerHTML=SK.map(function(s,i){return '<div class="skill">'+glyph(i,SK.length)+'<div><h3>'+s[0]+'</h3><p>'+s[1]+'</p></div></div>'}).join('');
+
+// ---------- кольцо в первом экране ----------
+var RING=[
+  {n:'Проекты',c:['RadialMenu','Сайт','Игра на Unreal'],k:'12 папок, вчера'},
+  {n:'Код',c:['VS Code','Терминал','GitHub'],k:'3 программы'},
+  {n:'Загрузки',c:['setup.zip','отчёт.pdf','фото.jpg'],k:'48 файлов, сегодня'},
+  {n:'Музыка',c:['Плейлист','Подкасты','Альбомы'],k:'2,3 ГБ'},
+  {n:'Учёба',c:['Конспекты','Курсы','Книги'],k:'9 папок'},
+  {n:'Программы',c:['Браузер','Discord','OBS'],k:'7 ярлыков'}];
+var svg=document.getElementById('ring'),hero=document.getElementById('hero'),cap=document.getElementById('cap');
+var R0=78,R1=196,R2=206,R3=284,open=0,target=0,hot=-1,hotAnim=[];
+var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function pt(a,r){a=a*Math.PI/180;return (r*Math.cos(a)).toFixed(2)+' '+(r*Math.sin(a)).toFixed(2)}
+function arc(a0,a1,r0,r1){var big=a1-a0>180?1:0;return 'M'+pt(a0,r1)+'A'+r1+' '+r1+' 0 '+big+' 1 '+pt(a1,r1)+'L'+pt(a1,r0)+'A'+r0+' '+r0+' 0 '+big+' 0 '+pt(a0,r0)+'Z'}
+function ease(t){return 1-Math.pow(1-t,3)}
+function draw(){
+  var n=RING.length,span=180*open,h='';
+  // стекло полукольца
+  if(open>0.01)h+='<path d="'+arc(-span/2,span/2,R0*open,R1*open)+'" fill="var(--glass)" stroke="var(--line)"/>';
+  RING.forEach(function(s,i){
+    var a0=-90+i*180/n,a1=a0+180/n,m=(a0+a1)/2,t=Math.max(0,Math.min(1,open*1.35-i*0.06)),e=ease(t);
+    if(e<=0.01)return;
+    var lift=(hotAnim[i]||0)*10,r0=R0+2,r1=(R1-2)*e+lift,g=1.2;
+    h+='<path class="sec" data-i="'+i+'" d="'+arc(a0+g,a1-g,r0*e,r1)+'" fill="'+(i==hot?'#c8323f':'#ffffff10')+'" fill-opacity="'+(i==hot?.85:1)+'"/>';
+    var lr=(R0+R1)/2*e,lp=pt(m,lr).split(' ');
+    h+='<text x="'+lp[0]+'" y="'+lp[1]+'" text-anchor="middle" dominant-baseline="middle" fill="var(--bone)" opacity="'+e+'" style="font:600 14px var(--body);pointer-events:none">'+s.n+'</text>';
+    if(i==hot&&hotAnim[i]>0.05){ // второе кольцо - содержимое
+      var cs=s.c,ca=(a1-a0)*1.6,c0=m-ca/2,k=ease(hotAnim[i]);
+      cs.forEach(function(c,j){var b0=c0+j*ca/cs.length,b1=b0+ca/cs.length,bm=(b0+b1)/2,rp=pt(bm,(R2+R3)/2).split(' ');
+        h+='<path d="'+arc(b0+1,b1-1,R2,R2+(R3-R2)*k)+'" fill="var(--glass)" stroke="#c8323f66"/>';
+        h+='<text x="'+rp[0]+'" y="'+rp[1]+'" text-anchor="middle" dominant-baseline="middle" fill="var(--bone)" opacity="'+k+'" style="font:500 12px var(--body);pointer-events:none">'+c+'</text>'});
+    }
+  });
+  // ступица
+  if(open>0.01)h+='<circle r="'+(R0-14)*ease(open)+'" fill="var(--glass)" stroke="var(--line)"/>';
+  svg.innerHTML=h;
+}
+var last=0;function tick(t){var dt=Math.min(.05,(t-(last||t))/1000);last=t;
+  var sp=reduce?1:dt*3.2;open+=Math.sign(target-open)*Math.min(Math.abs(target-open),sp);
+  for(var i=0;i<RING.length;i++){var want=i==hot?1:0,cur=hotAnim[i]||0;hotAnim[i]=cur+Math.sign(want-cur)*Math.min(Math.abs(want-cur),reduce?1:dt*5)}
+  draw();requestAnimationFrame(tick)}
+requestAnimationFrame(tick);
+function setHot(i){hot=i;if(i<0){cap.classList.remove('show');return}
+  cap.querySelector('b').textContent=RING[i].n;cap.querySelector('small').textContent=RING[i].k;cap.classList.add('show')}
+svg.addEventListener('pointerover',function(e){var i=e.target.dataset&&e.target.dataset.i;if(i!=null)setHot(+i)});
+svg.addEventListener('pointerleave',function(){setHot(-1)});
+svg.addEventListener('click',function(e){var i=e.target.dataset&&e.target.dataset.i;if(i!=null)setHot(+i)});
+// Alt + край: как в программе (Alt в браузере не должен открывать меню окна)
+var alt=false,mx=999;
+addEventListener('keydown',function(e){if(e.key=='Alt'){alt=true;e.preventDefault();upd()}});
+addEventListener('keyup',function(e){if(e.key=='Alt'){alt=false;e.preventDefault();upd()}});
+addEventListener('blur',function(){alt=false;upd()});
+hero.addEventListener('pointermove',function(e){if(e.pointerType=='mouse'){mx=e.clientX;upd()}});
+function upd(){hero.classList.toggle('near',mx<60);
+  if(alt&&mx<60)target=1;
+  else if(target==1&&mx>Math.min(innerWidth*.62,560)){target=0;setHot(-1)}} // увели курсор далеко - кольцо закрывается
+document.getElementById('touch').addEventListener('click',function(){target=target?0:1;if(!target)setHot(-1);
+  this.textContent=target?'Спрятать кольцо':'Показать кольцо'});
+// на телефоне и при первом заходе - кольцо приоткрывается само, чтобы было видно, о чём речь
+var small=matchMedia('(max-width:640px)').matches;
+setTimeout(function(){if(target||alt)return;target=1;
+  if(small)document.getElementById('touch').textContent='Спрятать кольцо';
+  else setTimeout(function(){if(mx>60)target=0},1800)},700);
+</script>
+</body>
+</html>
