@@ -22,6 +22,7 @@
 #include "app/palette.h"
 #include "app/resume.h"
 #include "phone/phone.h"
+#include "life/convert.h"
 #include "life/batcare.h"
 #include "life/appbright.h"
 #include "life/capwatch.h"
@@ -268,6 +269,7 @@ void PollWork() {
     focus::Tick();
     share::Tick();
     phone::Tick();
+    convert::Tick();
     batcare::Tick();
     appbright::Tick();
     capwatch::Tick();
@@ -521,6 +523,10 @@ bool RunExtra(const std::wstring& a) {
         phone::OpenPage();
         return true;
     }
+    if (a == L"convert") {
+        convert::Drop({});
+        return true;
+    }
     if (a == L"remind") {
         remind::ShowRing();
         return true;
@@ -537,10 +543,11 @@ bool RunExtra(const std::wstring& a) {
 }
 
 // Файлы бросили на пункт action:<действие>: телефон берёт их на передачу
-bool DropAccepts(const std::wstring& a) { return a == L"phone"; }
+bool DropAccepts(const std::wstring& a) { return a == L"phone" || a == L"convert"; }
 
 void OnDropAction(const std::wstring& a, std::vector<std::wstring> files) {
     if (a == L"phone") phone::Offer(files);
+    if (a == L"convert") convert::Drop(files);
 }
 
 // Режим разработки включился или выключился: обои и память, красота и перехват
@@ -898,6 +905,7 @@ void ShutdownAll() {
     focus::Shutdown();
     share::Shutdown();
     phone::Shutdown();
+    convert::Shutdown();
     batcare::Shutdown();
     appbright::Shutdown();
     capwatch::Shutdown();
@@ -1364,6 +1372,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     share::Init(&g_cfg);
     selring::Start(inst, &g_cfg, &g_menu);
     phone::Init(inst, g_wnd, &g_cfg);
+    convert::Init(inst, &g_cfg, &g_menu);  // Ф2
     batcare::Init(inst, &g_cfg);  // Ж1, Л37
     appbright::Init(&g_cfg, [] { return g_game.On(); });  // Ж7
     capwatch::Init(inst, &g_cfg);  // Ж5, Б2

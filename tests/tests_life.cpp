@@ -9,6 +9,7 @@
 #include "life/batcare.h"
 #include "life/btbattery.h"
 #include "life/capwatch.h"
+#include "life/convert.h"
 #include "life/gamehot.h"
 #include "life/nightupd.h"
 #include "life/picker.h"
@@ -273,10 +274,24 @@ void TestVpnExit() {
     CHECK(back.size() == 3 && back[0].country == L"FI" && back[2].game == L"Dota");
 }
 
+void TestConvert() {
+    CHECK(convert::KindOf(L"a.HEIC") == convert::IMAGE && convert::KindOf(L"b.mov") == convert::VIDEO);
+    CHECK(convert::KindOf(L"c.Pdf") == convert::PDF && convert::KindOf(L"d.exe") == convert::OTHER);
+    CHECK(convert::OutName(L"D:\\a\\clip.mov", L".mp4", L"8 МБ") == L"D:\\a\\clip (8 МБ).mp4");
+    CHECK(convert::OutName(L"D:\\a.b\\clip", L".png", L"") == L"D:\\a.b\\clip.png");
+    int k = convert::VideoKbps(8ll << 20, 40);  // 8 МБ на 40 с
+    CHECK(k > 1400 && k < 1560);
+    CHECK(convert::VideoKbps(8ll << 20, 3600) == 64 && convert::VideoKbps(1, 0) == 0);
+    std::wstring a = convert::FfmpegArgs(L"fit", L"in.mov", L"out.mp4", 1000);
+    CHECK(a.find(L"-b:v 1000k") != std::wstring::npos && a.find(L"\"out.mp4\"") != std::wstring::npos);
+    CHECK(convert::FfmpegArgs(L"gif", L"i", L"o.gif", 0).find(L"palettegen") != std::wstring::npos);
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestConvert();
     TestVpnExit();
     TestGameHot();
     TestBatCare();

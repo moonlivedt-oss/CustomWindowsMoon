@@ -17,6 +17,7 @@
 
 #include "life/batcare.h"
 #include "life/btbattery.h"
+#include "life/convert.h"
 #include "life/vpnexit.h"
 #include "life/picker.h"
 #include "phone/phone.h"
@@ -494,6 +495,12 @@ bool Run(int& exitCode) {
         batcare::Init(GetModuleHandleW(nullptr), nullptr);
         WriteOut(L"batcare_out.txt", batcare::Status() + L"\n");
         TerminateProcess(GetCurrentProcess(), 0);
+    } else if (Has(args, L"--convert")) {  // --convert <png|jpg|img8|mp4|gif|v8|v25|pdf> файлы... -> convert_out.txt
+        size_t i = std::find(args.begin(), args.end(), L"--convert") - args.begin();
+        if (i + 2 < args.size())
+            WriteOut(L"convert_out.txt",
+                     convert::RunSync(args[i + 1], std::vector<std::wstring>(args.begin() + (long)i + 2, args.end())));
+        exitCode = 0;
     } else if (Has(args, L"--vpn-diag")) {  // Ж3: мимо VPN в Happ, TCP до 1.1.1.1:443 напрямую и как обычно
         std::wstring o, list;
         for (const std::wstring& b : vpnexit::Bypass()) list += (list.empty() ? L"" : L", ") + b;
