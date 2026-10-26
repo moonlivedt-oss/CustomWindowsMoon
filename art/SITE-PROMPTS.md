@@ -6,11 +6,28 @@
 Форматы: карточки «Что умеет» - 1200x900 (4:3), WebP до ~150 КБ; фон первого экрана - 2400x1350, WebP до ~300 КБ;
 превью ссылки - 1200x630, PNG.
 
-Общий стиль - вставлять в начало каждого промпта:
+Промпт = стиль + описание картинки из таблицы. Стилей два, по тому, где картинка будет стоять.
 
-> Dark moody digital illustration, deep wine-black background (#140b0f), crimson (#c8323f) and warm coral (#ff7b5c)
-> light accents, frosted dark glass surfaces with soft blur, subtle hexagonal glass texture, cinematic soft glow,
-> clean minimal composition, no text, no letters, no logos, no watermark.
+**Стиль А - сцена с фоном** (фон первого экрана, картинки «Что умеет», превью ссылки, фон «Как начать»):
+
+> Premium dark product illustration for a Windows desktop utility called Radial Menu. Deep wine-black backdrop
+> (#140b0f) fading to pure black at the edges. One light story: crimson (#c8323f) as the main glow, warm coral
+> (#ff7b5c) only on the brightest highlights, no other hues. Materials: frosted smoked glass with soft inner blur and
+> crisp bright rims, a faint hexagonal honeycomb texture inside the glass, glossy dark floor with a subtle
+> reflection. Cinematic lighting, shallow depth of field, soft hexagonal bokeh in the far background. Calm, precise,
+> uncluttered composition with generous negative space, single clear focal point. Photorealistic 3D render quality,
+> sharp details. No text, no letters, no numbers, no logos, no watermark, no people, no hands.
+
+**Стиль Б - предмет на прозрачном фоне** (телефон, разделители, значок и картинки для приложения):
+
+> Premium 3D render of a single object for a Windows utility called Radial Menu, isolated on a fully transparent
+> background (PNG with real alpha channel, no backdrop, no floor, no checkerboard pattern). Colour story: crimson
+> (#c8323f) glow and warm coral (#ff7b5c) highlights on dark smoked glass and graphite, faint hexagonal honeycomb
+> texture inside the glass, crisp bright rims. Soft light from the upper left, the object casts no hard shadow.
+> Clean edges, centred, small even margin around the object. No logos, no watermark.
+
+Надписи: в стиле А они запрещены; если на картинке нужен текст (как на экране телефона), пишите его прямо в
+описании в кавычках, точно как он должен выглядеть, и добавьте «crisp readable Russian text, no other text».
 
 Это иллюстрации, а не снимки экрана: интерфейс на них условный. Если хочется показать настоящую программу -
 вместо картинки можно положить свой скриншот с тем же именем.
@@ -32,7 +49,7 @@
 
 ## Следующие (по желанию)
 
-Тот же общий стиль в начале промпта. Готовое - в `00 Входящие` библиотеки картинок.
+Стиль: `start-bg` - А, остальные - Б. Готовое - в `00 Входящие` библиотеки картинок.
 
 | файл | где | что на картинке |
 |---|---|---|
