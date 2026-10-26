@@ -13,6 +13,7 @@
 #include "life/gamehot.h"
 #include "life/nightupd.h"
 #include "life/picker.h"
+#include "life/preview.h"
 #include "life/record.h"
 #include "life/remind.h"
 #include "life/tidy.h"
@@ -312,10 +313,22 @@ void TestTidy() {
     CHECK(tidy::MonthDir(L"C:\\D", ft) == L"C:\\D\\Архив\\2026-03");
 }
 
+void TestPreview() {
+    CHECK(preview::KindOf(L"a.WEBP") == preview::IMAGE && preview::KindOf(L"b.cpp") == preview::TEXT);
+    CHECK(preview::KindOf(L"c.mp4") == preview::OTHER && preview::KindOf(L"d.pdf") == preview::OTHER);
+    RECT r = preview::Fit(1920, 1080, {0, 0, 960, 960});
+    CHECK(r.left == 0 && r.right == 960 && r.bottom - r.top == 540 && r.top == 210);
+    r = preview::Fit(100, 50, {0, 0, 1000, 1000});  // мелкое - не больше чем вдвое
+    CHECK(r.right - r.left == 200 && r.bottom - r.top == 100);
+    CHECK(preview::Caption(L"a.png", 96218, 1280, 720, 3, 4) == L"a.png   93 КБ   1280 x 720   4 из 4");
+    CHECK(preview::Caption(L"b.txt", 5 << 20, 0, 0, 0, 1) == L"b.txt   5,0 МБ");
+}
+
 }  // namespace
 
 void TestLife(void (*check)(bool, const char*, int)) {
     g_check = check;
+    TestPreview();
     TestTidy();
     TestRecord();
     TestConvert();

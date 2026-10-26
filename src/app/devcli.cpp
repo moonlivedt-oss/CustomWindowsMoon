@@ -18,6 +18,7 @@
 #include "life/batcare.h"
 #include "life/btbattery.h"
 #include "life/convert.h"
+#include "life/preview.h"
 #include "life/record.h"
 #include "life/tidy.h"
 #include "life/vpnexit.h"
@@ -522,6 +523,35 @@ bool Run(int& exitCode) {
                                                   log, 30000);
         WriteOut(L"record_out.txt", L"код " + std::to_wstring(code) + L"\n" + log);
         exitCode = code == 0 ? 0 : 1;
+    } else if (Has(args, L"--preview-snap")) {  // --preview-snap <файл> <png>: окно предпросмотра в картинку
+        size_t i = std::find(args.begin(), args.end(), L"--preview-snap") - args.begin();
+        if (i + 2 < args.size()) {
+            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            Gdip gdip;
+            static Config cfg = LoadOwnConfig();
+            preview::Init(GetModuleHandleW(nullptr), &cfg);
+            preview::ShowFiles({args[i + 1]}, 0);
+            for (ULONGLONG until = GetTickCount64() + 1200; GetTickCount64() < until;) {
+                MSG m;
+                while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+                Sleep(16);
+            }
+            HWND w = FindWindowW(L"MoonRadialPreview", nullptr);
+            RECT r{};
+            GetWindowRect(w, &r);
+            HDC screen = GetDC(nullptr), mem = CreateCompatibleDC(screen);
+            HBITMAP bmp = CreateCompatibleBitmap(screen, r.right - r.left, r.bottom - r.top);
+            HGDIOBJ old = SelectObject(mem, bmp);
+            PrintWindow(w, mem, PW_RENDERFULLCONTENT);
+            SelectObject(mem, old);
+            {
+                Gdiplus::Bitmap shot(bmp, nullptr);
+                CLSID png = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+                shot.Save(args[i + 2].c_str(), &png, nullptr);
+            }
+        }
+        TerminateProcess(GetCurrentProcess(), 0);
     } else if (Has(args, L"--tidy-diag")) {  // Ф3: сколько старых файлов на столе и в снимках -> tidy_out.txt
         WriteOut(L"tidy_out.txt", tidy::Diag());
         exitCode = 0;
