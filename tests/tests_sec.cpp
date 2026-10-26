@@ -81,6 +81,35 @@ void TestPhoneDevices() {
     CHECK(phone::ParseDevices("").empty());
 }
 
+void TestPhoneBadGate() {
+    CHECK(phone::SameKey("abc", "abc"));
+    CHECK(!phone::SameKey("abd", "abc"));
+    CHECK(!phone::SameKey("ab", "abc"));
+    CHECK(!phone::SameKey("abcd", "abc"));
+    CHECK(!phone::SameKey("", ""));  // пустой ключ не открывает ничего
+    CHECK(!phone::SameKey(std::string("abc\0", 4), "abc"));
+
+    phone::BadGate g;
+    uint32_t a = 0xC0A80105, b = 0xC0A80106;
+    unsigned long long t = 1000000, ban = 1;
+    for (int i = 0; i < phone::BadGate::kFree; ++i) CHECK(g.Bad(a, t + i, &ban) == 0 && ban == 0);  // опечатки
+    CHECK(g.Bad(a, t + 10, &ban) == 250);
+    CHECK(g.Bad(a, t + 20, &ban) == 500);
+    unsigned last = 0;
+    for (int i = phone::BadGate::kFree + 3; i < phone::BadGate::kBanAt; ++i) last = g.Bad(a, t + 30 + i, &ban);
+    CHECK(last == phone::BadGate::kMaxDelayMs && ban == 0 && !g.Banned(a, t + 100));
+    CHECK(g.Bad(a, t + 100, &ban) == 0 && ban == phone::BadGate::kBanMs);  // бан
+    CHECK(g.Banned(a, t + 101) && !g.Banned(b, t + 101));                  // другой адрес не задет
+    CHECK(!g.Banned(a, t + 100 + phone::BadGate::kBanMs));
+    unsigned long long t2 = t + 100 + phone::BadGate::kBanMs;
+    for (int i = 0; i < phone::BadGate::kBanAt; ++i) g.Bad(a, t2 + i, &ban);
+    CHECK(ban == 2 * phone::BadGate::kBanMs);  // второй бан вдвое дольше
+    // долгая тишина - счёт с нуля
+    CHECK(g.Bad(b, t, &ban) == 0);
+    for (int i = 0; i < phone::BadGate::kFree; ++i) g.Bad(b, t + i, &ban);
+    CHECK(g.Bad(b, t + phone::BadGate::kForgetMs + 10, &ban) == 0);
+}
+
 }  // namespace
 
 void TestSec(void (*check)(bool, const char*, int)) {
@@ -88,4 +117,5 @@ void TestSec(void (*check)(bool, const char*, int)) {
     TestElevateHelper();
     TestPhoneHttpsOnly();
     TestPhoneDevices();
+    TestPhoneBadGate();
 }

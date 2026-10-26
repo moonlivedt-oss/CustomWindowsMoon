@@ -5,6 +5,8 @@
 #include <ws2tcpip.h>
 
 #include <algorithm>
+#include <map>
+#include <memory>
 
 #include "core/text.h"
 #include "phone/phone_internal.h"
@@ -20,6 +22,18 @@ thread_local Tls* t_tls = nullptr;  // соединение по https (кажд
 HANDLE g_thread = nullptr;
 std::atomic<bool> g_stop{false};
 std::atomic<int> g_conns{0};
+// неверные ключи и соединения по адресам: забаненный закрывается сразу, с одного адреса - не больше 8 соединений
+// (иначе один телефон в сети занял бы все 24 и задержками держал их)
+SRWLOCK g_gateLock = SRWLOCK_INIT;
+BadGate g_gate;
+std::map<uint32_t, int> g_perIp;
+constexpr int kPerIp = 8;
+
+struct Accepted {
+    SOCKET s;
+    bool tls;
+    uint32_t ip;
+};
 bool g_wsa = false;
 
 const char* Reason(int code) {
@@ -124,11 +138,16 @@ void Handle(Conn& cn, const Request& r) {
     int device = -1;
     size_t pre = KeyPrefix(r.path, &device);
     if (!pre) {
-        if (r.path != "/favicon.ico") {
-            Lock l;
-            ++S().bad;
-        }
-        Post(EV_BAD);
+        if (r.path == "/favicon.ico") return Text(cn, 404, "нет");
+        unsigned long long banMs = 0;
+        AcquireSRWLockExclusive(&g_gateLock);
+        unsigned delay = g_gate.Bad(cn.ip, GetTickCount64(), &banMs);
+        ReleaseSRWLockExclusive(&g_gateLock);
+        if (banMs)
+            Post(EV_NOTE, L"адрес " + IpText(cn.ip) + L" подбирает ключ - не пускаю " + std::to_wstring(banMs / 60000) +
+                              L" мин");
+        if (delay) Sleep(delay);
+        cn.close = true;  // следующую попытку - новым соединением
         return Text(cn, 404, "нет");
     }
     std::string base = r.path.substr(0, pre), rest = r.path.substr(pre);
@@ -166,8 +185,12 @@ void Handle(Conn& cn, const Request& r) {
 
 DWORD WINAPI ConnThread(void* p) {
     Conn cn;
-    cn.c = (SOCKET)((UINT_PTR)p & ~(UINT_PTR)1);
-    cn.tls = ((UINT_PTR)p & 1) != 0;
+    {
+        std::unique_ptr<Accepted> a((Accepted*)p);
+        cn.c = a->s;
+        cn.tls = a->tls;
+        cn.ip = a->ip;
+    }
     DWORD to = 30000;
     setsockopt(cn.c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
     setsockopt(cn.c, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to, sizeof(to));
@@ -204,6 +227,9 @@ DWORD WINAPI ConnThread(void* p) {
     t_tls = nullptr;
     shutdown(cn.c, SD_SEND);
     closesocket(cn.c);
+    AcquireSRWLockExclusive(&g_gateLock);
+    if (--g_perIp[cn.ip] <= 0) g_perIp.erase(cn.ip);
+    ReleaseSRWLockExclusive(&g_gateLock);
     --g_conns;
     return 0;
 }
@@ -218,20 +244,31 @@ DWORD WINAPI AcceptLoop(void*) {
         if (select(0, &fs, nullptr, nullptr, &tv) <= 0) continue;
         for (SOCKET l : {g_listen, g_listenTls}) {
             if (l == INVALID_SOCKET || !FD_ISSET(l, &fs)) continue;
-            SOCKET c = accept(l, nullptr, nullptr);
+            sockaddr_in from{};
+            int fromLen = sizeof(from);
+            SOCKET c = accept(l, (sockaddr*)&from, &fromLen);
             if (c == INVALID_SOCKET) continue;
-            if (g_conns >= 24) {
+            uint32_t ip = from.sin_family == AF_INET ? ntohl(from.sin_addr.s_addr) : 0;
+            bool refuse = g_conns >= 24;
+            AcquireSRWLockExclusive(&g_gateLock);
+            refuse = refuse || g_gate.Banned(ip, GetTickCount64()) || g_perIp[ip] >= kPerIp;
+            if (!refuse) ++g_perIp[ip];
+            ReleaseSRWLockExclusive(&g_gateLock);
+            if (refuse) {
                 closesocket(c);
                 continue;
             }
             ++g_conns;
-            // младший бит - https (номер сокета кратен 4)
-            HANDLE t =
-                CreateThread(nullptr, 0, ConnThread, (void*)((UINT_PTR)c | (l == g_listenTls ? 1 : 0)), 0, nullptr);
+            auto* acc = new Accepted{c, l == g_listenTls, ip};
+            HANDLE t = CreateThread(nullptr, 0, ConnThread, acc, 0, nullptr);
             if (t) {
                 CloseHandle(t);
             } else {
+                delete acc;
                 closesocket(c);
+                AcquireSRWLockExclusive(&g_gateLock);
+                if (--g_perIp[ip] <= 0) g_perIp.erase(ip);
+                ReleaseSRWLockExclusive(&g_gateLock);
                 --g_conns;
             }
         }

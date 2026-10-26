@@ -1,5 +1,7 @@
 // «Телефон рядом»: правила безопасности без сокетов и окон (под тестами) - ключи в пути, https для запомненных.
+#include <algorithm>
 #include <cstdlib>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -8,20 +10,33 @@
 
 namespace phone {
 
+bool SameKey(const std::string& got, const std::string& key) {
+    if (key.empty()) return false;
+    // время зависит только от длины настоящего ключа: по задержке ответа ключ не подобрать по букве
+    unsigned char diff = got.size() != key.size();
+    for (size_t i = 0; i < key.size(); ++i) diff |= (unsigned char)(key[i] ^ (i < got.size() ? got[i] : 0));
+    return diff == 0;
+}
+
 size_t MatchKey(const std::string& path, const std::string& token, const std::vector<std::string>& devices,
                 int* device) {
     if (device) *device = -1;
-    auto starts = [&](const std::string& base) {
-        return !base.empty() && path.size() >= base.size() && path.compare(0, base.size(), base) == 0 &&
-               (path.size() == base.size() || path[base.size()] == '/');
+    auto segment = [&](size_t from) {
+        size_t e = path.find('/', from);
+        return path.substr(from, e == std::string::npos ? std::string::npos : e - from);
     };
-    if (!token.empty() && starts("/" + token)) return token.size() + 1;
-    for (size_t i = 0; i < devices.size(); ++i)
-        if (!devices[i].empty() && starts("/d/" + devices[i])) {
-            if (device) *device = (int)i;
-            return devices[i].size() + 3;
-        }
-    return 0;
+    if (path.compare(0, 3, "/d/") == 0) {  // запомненный телефон: сверить со всеми, без выхода на первом совпадении
+        std::string got = segment(3);
+        int found = -1;
+        for (size_t i = 0; i < devices.size(); ++i)
+            if (SameKey(got, devices[i]) && found < 0) found = (int)i;
+        if (found < 0) return 0;
+        if (device) *device = found;
+        return got.size() + 3;
+    }
+    if (path.empty() || path[0] != '/') return 0;
+    std::string got = segment(1);
+    return SameKey(got, token) ? got.size() + 1 : 0;
 }
 
 std::string HttpsLocation(const std::string& host, int tlsPort, const std::string& path) {
@@ -82,6 +97,38 @@ std::string DevicesText(const std::vector<DeviceRec>& list) {
 bool DeviceStale(const DeviceRec& d, long long now) {
     long long last = d.seen > d.added ? d.seen : d.added;
     return last > 0 && now - last > kDeviceDays * 86400;
+}
+
+// ---- тормоз неверных ключей ----
+
+bool BadGate::Banned(uint32_t ip, unsigned long long now) const {
+    auto it = m_.find(ip);
+    return it != m_.end() && it->second.until > now;
+}
+
+unsigned BadGate::Bad(uint32_t ip, unsigned long long now, unsigned long long* banMs) {
+    if (banMs) *banMs = 0;
+    if (m_.size() > 4096) {  // перебор адресов: забыть тех, кто давно затих и не в бане
+        for (auto it = m_.begin(); it != m_.end();)
+            it = it->second.until <= now && now - it->second.last > kForgetMs ? m_.erase(it) : std::next(it);
+        if (m_.size() > 4096) m_.clear();
+    }
+    Rec& r = m_[ip];
+    if (r.last && now - r.last > kForgetMs) r.count = 0;
+    r.last = now;
+    ++r.count;
+    if (r.count >= kBanAt) {  // бан растёт с каждым разом: 5 минут, 10, 20... до суток
+        ++r.bans;
+        unsigned long long ms = kBanMs << std::min(r.bans - 1, 8);
+        if (ms > 24ull * 3600 * 1000) ms = 24ull * 3600 * 1000;
+        r.until = now + ms;
+        r.count = 0;
+        if (banMs) *banMs = ms;
+        return 0;
+    }
+    if (r.count <= kFree) return 0;  // опечатка в закладке - без задержки
+    unsigned d = 250u << std::min(r.count - kFree - 1, 4);
+    return d > kMaxDelayMs ? kMaxDelayMs : d;
 }
 
 }  // namespace phone

@@ -32,7 +32,6 @@ struct Session {
     std::wstring clip;  // буфер ПК для телефона (без секретов)
     long long seq = 1;  // растёт при любой перемене, которую видит страница (файлы, буфер)
     ULONGLONG started = 0, seen = 0, allDone = 0;
-    int bad = 0;       // запросы с чужим ключом
     int received = 0;  // принято файлов с телефона
     long long receivedBytes = 0;
     std::map<std::string, Incoming> incoming;
@@ -103,6 +102,7 @@ struct Conn {
     long long bodyLeft = 0;
     bool close = false;
     bool tls = false;            // пришло на порт https
+    uint32_t ip = 0;             // адрес телефона (IPv4 в порядке хоста)
     int Read(char* buf, int n);  // тело текущего запроса: сначала из in, потом из сокета; 0 - всё, -1 - обрыв
 };
 bool SendAll(UINT_PTR c, const char* p, size_t n);

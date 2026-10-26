@@ -5,8 +5,8 @@
 // файлов: буфер ПК и телефона (Ф4), фото и видео с телефона в «Изображения\Телефон\дата» (Ф5), пульт - громкость,
 // пауза, следующий, выключить экран, усыпить (Ф6). Путь выбирается сам: есть общая сеть - QR по Wi-Fi; нет -
 // карточка подскажет раздать Wi-Fi с телефона или ноутбука (QR обновится сам, как только появится адрес), мелкое -
-// Bluetooth (fsquirt). Ссылка - http://адрес:порт/<ключ>/: без ключа сервер ничего не отдаёт, после 20 неверных
-// ключей сессия закрывается. Секреты из буфера (core/secrets) на телефон не уходят.
+// Bluetooth (fsquirt). Ссылка - http://адрес:порт/<ключ>/: без ключа сервер ничего не отдаёт, неверные ключи
+// тормозят и банят адрес (BadGate). Секреты из буфера (core/secrets) на телефон не уходят.
 // phone_logic.cpp - разбор запросов, имена, адреса, выбор пути (под тестами); server.cpp - сокеты; web/ - страница
 // (встраивается cmake/embed.cmake); phone.cpp - сессия, карточка и действия.
 #include <windows.h>
@@ -171,12 +171,33 @@ private:
 };
 
 // --- безопасность (phone_sec_logic.cpp, под тестами) ---
+bool SameKey(const std::string& got, const std::string& key);  // за постоянное время; пустой ключ - никогда
 // ключ в пути: /<сессия>/... или /d/<запомненный телефон>/...; длина префикса, 0 - чужой ключ; device - номер
-// запомненного телефона (-1 - ключ сессии)
+// запомненного телефона (-1 - ключ сессии). Ключи сверяются SameKey, все до конца
 size_t MatchKey(const std::string& path, const std::string& token, const std::vector<std::string>& devices,
                 int* device);
 // та же страница по https: хост из Host (без порта), порт https; пусто - Host не имя и не IPv4
 std::string HttpsLocation(const std::string& host, int tlsPort, const std::string& path);
+// Неверные ключи - по адресу: первые kFree без задержки, дальше ответ ждёт 250 мс, 500... до 4 с; kBanAt подряд -
+// адрес в бане (соединения сразу закрываются) на 5 минут, следующий раз на 10 и т.д. до суток. 15 минут тишины -
+// счёт с нуля. Раньше 20 неверных ключей закрывали всю сессию - так любой в сети выбивал хозяина.
+class BadGate {
+public:
+    static constexpr int kFree = 3, kBanAt = 12;
+    static constexpr unsigned kMaxDelayMs = 4000;
+    static constexpr unsigned long long kBanMs = 5 * 60 * 1000, kForgetMs = 15 * 60 * 1000;
+    bool Banned(uint32_t ip, unsigned long long now) const;
+    // неверный ключ с адреса: задержка ответа, мс; banMs - адрес только что забанен на столько (иначе 0)
+    unsigned Bad(uint32_t ip, unsigned long long now, unsigned long long* banMs);
+
+private:
+    struct Rec {
+        int count = 0, bans = 0;
+        unsigned long long last = 0, until = 0;
+    };
+    std::map<uint32_t, Rec> m_;
+};
+
 // запомненный телефон: строка phone-devices.tsv (файл - под DPAPI, phone.cpp)
 struct DeviceRec {
     std::string key;       // /d/<ключ>/

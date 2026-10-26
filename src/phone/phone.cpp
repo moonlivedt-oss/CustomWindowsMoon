@@ -615,7 +615,7 @@ bool StartSession(bool oneTime, bool standing = false) {
         s.clip.clear();
         s.started = GetTickCount64();
         s.seen = s.allDone = 0;
-        s.bad = s.received = 0;
+        s.received = 0;
         s.receivedBytes = 0;
         s.standing = standing;
         s.devices = LoadDevices();
@@ -1113,18 +1113,16 @@ void Tick() {
     Watching(g_screen && !g_screenStopped && shot && tick >= shot && tick - shot < 4000);
     if (Card().Visible()) RefreshAddress(false);
     RefreshCert();  // адрес поменялся - новый сертификат
-    bool oneTime, allDone, tooBad;
+    bool oneTime, allDone;
     ULONGLONG last, seen;
     {
         Lock l;
         oneTime = S().oneTime;
         allDone = S().allDone && now - S().allDone > 60000;
-        tooBad = S().bad >= 20;
         seen = S().seen;
         last = std::max(S().started, S().seen);
     }
     if (oneTime && allDone) return StopSession(L"всё скачано");
-    if (tooBad) return StopSession(L"чужие запросы с неверным ключом");
     ULONGLONG idle = !seen ? 10 * 60000ull : oneTime ? 15 * 60000ull : 30 * 60000ull;
     if (!standing && now - last > idle)
         return StopSession(seen ? L"телефон давно не заходил" : L"никто не подключился");
