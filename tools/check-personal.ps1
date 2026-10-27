@@ -110,7 +110,9 @@ function CheckDiff([string[]]$diff) {
 
 $git = @('-c', 'core.quotepath=off')
 if ($Range) {
-    CheckDiff (& git @git diff -U0 --no-color --text $Range)
+    # каждый коммит отдельно: добавленное и убранное внутри диапазона в суммарной разнице не видно, а на сервер
+    # уходят все коммиты
+    CheckDiff (& git @git log -p -U0 --no-color --text --format= $Range)
     if ($LASTEXITCODE -ne 0) { Fail "git diff $Range не вышел." }
     foreach ($c in (& git @git log --format='%h' $Range)) {
         $head = (& git @git log -1 --format='%an <%ae>%n%cn <%ce>%n%B' $c) -join "`n"
