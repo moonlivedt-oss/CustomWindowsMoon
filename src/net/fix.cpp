@@ -232,8 +232,10 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* can
         }
         g_leftHead.clear();
     }
-    // задачу уже не пускал антивирус: не ставить её заново после каждой пересборки, а сразу одно окно UAC
-    bool blocked = elevate::Blocked(elevate::TASK_NET);
+    // задачу уже не пускал антивирус: не ставить её заново после каждой пересборки, а сразу одно окно UAC.
+    // Заметные задания (elevate::ConsentJob) - всегда через окно UAC: задачей их могла бы запустить любая программа
+    bool consent = elevate::ConsentJob(kJobKeys[j]);
+    bool blocked = consent || elevate::Blocked(elevate::TASK_NET);
     if (!blocked && !AdminReadyNow()) {
         log(elevate::TaskExists(elevate::TASK_NET)
                 ? L"Помощник с правами устарел или стоит не там - обновляю его, Windows спросит разрешение."
@@ -247,13 +249,14 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* can
     wchar_t nonce[48];
     swprintf(nonce, 48, L"%lu-%llu", GetCurrentProcessId(), (unsigned long long)GetTickCount64());
     elevate::Put(L"NetJob", std::wstring(kJobKeys[j]) + L" " + nonce);
+    if (consent) log(L"Это действие - только с подтверждением: Windows спросит разрешение.");
     if (blocked || !elevate::Run(elevate::TASK_NET)) {
         if (!blocked) {
             elevate::SetBlocked(elevate::TASK_NET, true);
             log(L"Задача с правами не запускается (похоже, её не пускает антивирус) - дальше каждое такое действие "
                 L"спросит разрешение.");
         }
-        if (!elevate::RunOnce(elevate::TASK_NET)) {
+        if (!elevate::RunOnce(elevate::TASK_NET, consent)) {
             log(L"Разрешение не дано - это действие пропущено.");
             return false;
         }
@@ -573,7 +576,7 @@ bool Job_(Job j, const Log& log) {
 
 }  // namespace
 
-int AdminMain() {
+int AdminMain(bool consented) {
     InitSockets();
     // задание: «ключ метка» из HKCU, одноразовое; журнал - в папку помощника, начинается с метки
     std::wstring req = Trim(elevate::Take(L"NetJob"));
@@ -592,7 +595,9 @@ int AdminMain() {
     int job = -1;
     for (int i = 0; i < kJobs; ++i)
         if (key == kJobKeys[i]) job = i;  // только известные действия: из файла выполнять нечего другого
-    bool ok = job >= 0 && Job_((Job)job, add);
+    bool refused = job >= 0 && elevate::ConsentJob(key) && !consented;
+    if (refused) add(L"Это задание выполняется только после подтверждения в окне Windows (UAC).");
+    bool ok = job >= 0 && !refused && Job_((Job)job, add);
     if (job < 0) add(L"Неизвестное задание.");
     put(ok ? "#done 1\n" : "#done 0\n");
     if (f != INVALID_HANDLE_VALUE) CloseHandle(f);

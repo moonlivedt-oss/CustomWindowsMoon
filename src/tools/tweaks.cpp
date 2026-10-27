@@ -82,7 +82,9 @@ bool PrivacyAdminMain(const std::wstring& req, const Log& log) {
     std::vector<std::wstring> p = Split(req, L'|');
     shutup::SetSource(L"RadialMenu");
     if (p.size() == 2 && p[0] == L"reapply" && p[1] == L"*") {
-        shutup::Backup user = shutup::LoadBackup(HKEY_CURRENT_USER), machine = shutup::LoadBackup(HKEY_LOCAL_MACHINE);
+        // «это включали мы» - только по бэкапу в HKLM: бэкап в HKCU может подделать любая программа пользователя и
+        // так попросить процесс с правами включить настройку, которой здесь не включали
+        shutup::Backup user, machine = shutup::LoadBackup(HKEY_LOCAL_MACHINE);
         int n = 0;
         bool ok = true;
         for (const shutup::Setting& s : shutup::Catalog())

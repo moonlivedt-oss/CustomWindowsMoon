@@ -1232,7 +1232,9 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 using namespace app;
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
-    crash::Install();  // первым делом: упадёт хоть что-то дальше - останется дамп
+    // первым делом: упадёт хоть что-то дальше - останется дамп. Кроме процесса с правами: папка дампов -
+    // %APPDATA% пользователя, а ссылка, подложенная туда, перенаправила бы запись и удаление старых дампов
+    if (!devcli::HasFlag(L"--net-job") && !devcli::HasFlag(L"--purge")) crash::Install();
     if (int code = 0; devcli::Run(code)) return code;
     bool wantEditor = devcli::HasFlag(L"--editor");
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\MoonRadialMenu");

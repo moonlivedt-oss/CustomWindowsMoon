@@ -5,6 +5,7 @@
 #include <sddl.h>
 #include <shlobj.h>
 #include <knownfolders.h>
+#include <userenv.h>
 #include <bcrypt.h>
 
 #include <atomic>
@@ -164,8 +165,8 @@ std::wstring UserSid() {
 
 // schtasks /Create для задачи: запускается только по требованию, дата старта - далёкое будущее
 std::wstring CreateCmd(const TaskInfo& t) {
-    return L"schtasks /Create /TN \"" + std::wstring(t.name) + L"\" /TR \"\\\"" + HelperExe() + L"\\\" " + t.arg +
-           L"\" /SC ONCE /ST 00:00 /SD 01/01/2030 /RL HIGHEST /F >nul";
+    return L"\"" + System32(L"schtasks.exe") + L"\" /Create /TN \"" + std::wstring(t.name) + L"\" /TR \"\\\"" +
+           HelperExe() + L"\\\" " + t.arg + L"\" /SC ONCE /ST 00:00 /SD 01/01/2030 /RL HIGHEST /F >nul";
 }
 
 // Начало команды системного cmd с правами: папка помощника, копия exe и сверка её SHA-256 с хэшем, посчитанным при
@@ -204,6 +205,42 @@ bool HelperIntact() {
 }
 
 bool SelfTrusted() { return TrustedHelper(ThisExe(), HelperDir(), SelfHash()); }
+
+void RemoveOldHelpers() {
+    std::wstring dir = HelperDir(), self = ThisExe();
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\RadialMenu-*.exe").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        std::wstring p = dir + L"\\" + fd.cFileName;
+        if (!(fd.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
+            _wcsicmp(p.c_str(), self.c_str()) != 0 && InsideDir(p, dir))
+            DeleteFileW(p.c_str());  // занятую (ещё работает) - в другой раз
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+void SystemEnvironment() {
+    // свои переменные - прочь, все: и PATH, и COR_PROFILER*, и APPDATA
+    if (wchar_t* env = GetEnvironmentStringsW()) {
+        std::vector<std::wstring> names;
+        for (const wchar_t* p = env; *p; p += wcslen(p) + 1) {
+            const wchar_t* eq = wcschr(p + 1, L'=');  // «=C:=C:» - служебные, имя с «=» в начале
+            if (eq) names.emplace_back(p, eq - p);
+        }
+        FreeEnvironmentStringsW(env);
+        for (const std::wstring& n : names)
+            if (!n.empty() && n[0] != L'=') SetEnvironmentVariableW(n.c_str(), nullptr);
+    }
+    void* block = nullptr;
+    if (CreateEnvironmentBlock(&block, nullptr, FALSE) && block) {  // без токена - только системные переменные
+        for (const wchar_t* p = (const wchar_t*)block; *p; p += wcslen(p) + 1) {
+            const wchar_t* eq = wcschr(p + 1, L'=');
+            if (eq) SetEnvironmentVariableW(std::wstring(p, eq - p).c_str(), eq + 1);
+        }
+        DestroyEnvironmentBlock(block);
+    }
+}
 
 std::wstring DataDir() { return HelperDir() + L"\\data"; }
 
@@ -246,16 +283,15 @@ bool TaskReadyCached(Task t) {
 // свой exe в Program Files и тут же заводит на него задачу с наивысшими правами (так выглядит закрепление
 // вредоноса). Нужная задача - всегда, остальные - только если уже были; потом убрать прежние копии помощника.
 bool Setup(Task t) {
-    std::wstring dir = HelperDir(), helper = HelperExe();
+    std::wstring dir = HelperDir();
     if (dir.empty() || SelfHash().size() != 64) return false;
-    std::wstring name = helper.substr(dir.size() + 1);
     std::wstring cmd = L"/s /c \"" + InstallCmd();
     for (int i = 0; i < (int)(sizeof(kTasks) / sizeof(kTasks[0])); ++i)
         if (i == t)
             cmd += L" & " + CreateCmd(kTasks[i]);
         else
-            cmd += L" & (schtasks /Query /TN \"" + std::wstring(kTasks[i].name) + L"\" >nul 2>&1 && " +
-                   CreateCmd(kTasks[i]) + L")";
+            cmd += L" & (\"" + System32(L"schtasks.exe") + L"\" /Query /TN \"" + std::wstring(kTasks[i].name) +
+                   L"\" >nul 2>&1 && " + CreateCmd(kTasks[i]) + L")";
     // Задачу, созданную администратором, пользователь без прав может только читать, а запуск отвечает «параметр
     // задан неверно». Право «читать и запускать» (не «менять»: иначе любая программа пользователя переписала бы
     // задачу с правами) - явно, через планировщик.
@@ -271,8 +307,9 @@ bool Setup(Task t) {
                L"$f=$s.GetFolder('\\MoonRadial');foreach($n in @(" +
                names + L")){try{$f.GetTask($n).SetSecurityDescriptor('D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FRFX;;;" + sid +
                L")',0)}catch{}}\" >nul 2>&1";
-    cmd += L" & (for %f in (\"" + dir + L"\\RadialMenu*.exe*\") do @if /i not \"%~nxf\"==\"" + name +
-           L"\" del /f /q \"%~f\" >nul 2>&1)\"";
+    // Старые копии помощника удаляет сам помощник при запуске (RemoveOldHelpers): в строке для cmd с правами нет
+    // «%» - cmd раскрыл бы его переменными окружения пользователя
+    cmd += L"\"";
     std::wstring shell = System32(L"cmd.exe");
     SHELLEXECUTEINFOW sei{sizeof(sei)};
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
@@ -314,15 +351,18 @@ void SetBlocked(Task t, bool on) {
 
 // Только помощник из Program Files: устарел - тот же cmd с правами сначала ставит и сверяет его, потом запускает.
 // Сам RadialMenu.exe из папки пользователя с правами не запускается никогда.
-bool RunOnce(Task t) {
+bool RunOnce(Task t, bool consent) {
     std::wstring helper = HelperExe(), file, args;
     if (HelperDir().empty() || SelfHash().size() != 64) return false;
+    // --consented: задание запущено через окно UAC, то есть с согласия человека, а не задачей, которую может дёрнуть
+    // любая программа (ConsentJob)
+    std::wstring arg = std::wstring(kTasks[t].arg) + (consent ? L" --consented" : L"");
     if (HelperIntact()) {
         file = helper;
-        args = kTasks[t].arg;
+        args = arg;
     } else {
         file = System32(L"cmd.exe");
-        args = L"/s /c \"" + InstallCmd() + L" & \"" + helper + L"\" " + kTasks[t].arg + L"\"";
+        args = L"/s /c \"" + InstallCmd() + L" & \"" + helper + L"\" " + arg + L"\"";
     }
     SHELLEXECUTEINFOW sei{sizeof(sei)};
     sei.lpVerb = L"runas";

@@ -668,9 +668,10 @@ std::wstring CutRefuse(const std::wstring& exe) {
     if (l.size() < 8 || l[1] != L':' || l[2] != L'\\' || !EndsWithI(l, L".exe")) return L"нужен полный путь к .exe";
     if (l.find_first_of(L"\"|<>*?") != std::wstring::npos || l.find(L':', 2) != std::wstring::npos)
         return L"странные знаки в пути";
-    // «..», «.» и короткие имена (C:\WINDOW~1) обошли бы проверку папки Windows ниже
-    if (l.find(L"\\..") != std::wstring::npos || l.find(L"\\.\\") != std::wstring::npos ||
-        l.find(L'~') != std::wstring::npos || l.find(L"\\\\") != std::wstring::npos)
+    // «..», «.», короткие имена (C:\WINDOW~1) и «/» вместо «\» (C:\Windows/System32\...) обошли бы проверки ниже
+    if (l.find(L'/') != std::wstring::npos || l.find(L"\\..") != std::wstring::npos ||
+        l.find(L"\\.\\") != std::wstring::npos || l.find(L'~') != std::wstring::npos ||
+        l.find(L"\\\\") != std::wstring::npos)
         return L"путь не в полном виде";
     wchar_t win[MAX_PATH] = {};
     GetWindowsDirectoryW(win, MAX_PATH);

@@ -301,6 +301,8 @@ void TestCut() {
     CHECK(tools::CutRefuse(L"C:\\Users\\Moon\\AppData\\Local\\Discord\\app-1.0\\Discord.exe").empty());
     CHECK(tools::CutRefuse(L"D:\\Games\\Some Game\\game.exe").empty());
     CHECK(!tools::CutRefuse(L"C:\\Windows\\System32\\svchost.exe").empty());  // часть Windows
+    CHECK(!tools::CutRefuse(L"C:\\Windows/System32\\svchost.exe").empty());   // «/» не обходит проверку папки
+    CHECK(!tools::CutRefuse(L"C:/Program Files/Windows Defender/MsMpEng.exe").empty());
     CHECK(!tools::CutRefuse(L"c:\\windows\\explorer.exe").empty());
     CHECK(!tools::CutRefuse(L"C:\\Program Files\\MoonRadial\\RadialMenu-1a2b.exe").empty());
     CHECK(!tools::CutRefuse(L"D:\\Desktop\\components\\RadialMenu\\RadialMenu.exe").empty());

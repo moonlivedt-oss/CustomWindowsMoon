@@ -31,6 +31,11 @@ void TestElevateHelper() {
     CHECK(!elevate::TrustedHelper(L"D:\\Desktop\\RadialMenu\\RadialMenu-0123456789ab.exe", dir, hash));  // не там
     CHECK(!elevate::TrustedHelper(dir + L"\\RadialMenu.exe", dir, hash));
     CHECK(!elevate::TrustedHelper(dir + L"\\RadialMenu-0123456789ab.exe", dir, L""));  // хэш не посчитался
+    // заметное - только после окна UAC; обычное (умный ремонт, DNS, подсчёт MFT) - задачей без вопросов
+    for (const wchar_t* k : {L"deep", L"repair", L"wu-reset", L"defender-offline", L"giants", L"sys-item", L"net-cut"})
+        CHECK(elevate::ConsentJob(k));
+    for (const wchar_t* k : {L"smart", L"dns-cf", L"mft-sizes", L"net-uncut", L"", L"deep "})
+        CHECK(!elevate::ConsentJob(k));
 }
 
 void TestPhoneHttpsOnly() {

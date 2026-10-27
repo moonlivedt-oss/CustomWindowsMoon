@@ -137,10 +137,12 @@ enum Job {
 };
 bool AdminReady();     // задача есть - без ожидания, последний известный ответ (для интерфейса)
 bool AdminReadyNow();  // то же с проверкой на месте (schtasks, сотни мс) - только из фоновых потоков
-bool SetupAdmin();  // создать задачу (Windows спросит разрешение)
+bool SetupAdmin();     // создать задачу (Windows спросит разрешение)
 // cancel - «Стоп»: перестать ждать (задание доработает само, следующее дождётся его конца), false
 bool RunAdmin(Job j, const Log& log, int timeoutMs = 90000, const std::atomic<bool>* cancel = nullptr);
-int AdminMain();  // RadialMenu.exe --net-job: выполнить задание, уже с правами
+// RadialMenu.exe --net-job: выполнить задание, уже с правами; consented - запущено через окно UAC (--consented):
+// без этого задания из elevate::ConsentJob не выполняются
+int AdminMain(bool consented);
 // Итог задания, брошенного по «Стоп», когда оно доработало в фоне: ok и последняя строка его журнала. Зовётся из
 // фонового потока; задаётся один раз при старте.
 void SetLeftDone(std::function<void(Job, bool ok, const std::wstring& last)> fn);

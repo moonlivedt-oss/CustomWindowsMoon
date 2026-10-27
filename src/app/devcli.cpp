@@ -233,6 +233,8 @@ bool Run(int& exitCode) {
         // из папки пользователя (её может подменить любая программа) с правами ничего не делает
         exitCode = 2;
     } else if (Has(args, L"--purge")) {  // очистка памяти; запускает задача планировщика с правами
+        elevate::SystemEnvironment();    // переменные пользователя дочерним процессам с правами не достаются
+        elevate::RemoveOldHelpers();
         // какие области чистить - из запроса в HKCU; PurgeMain знает только свои имена, прочее пропускает
         boost::Settings s;
         s.areas = Split(elevate::Take(L"PurgeAreas"), L',');
@@ -282,7 +284,9 @@ bool Run(int& exitCode) {
         }
         WriteOut(L"own_out.txt", out);
     } else if (Has(args, L"--net-job")) {  // действие с правами для раздела «Сеть»; запускает задача планировщика
-        exitCode = net::AdminMain();
+        elevate::SystemEnvironment();
+        elevate::RemoveOldHelpers();
+        exitCode = net::AdminMain(Has(args, L"--consented"));
     } else if (Has(args, L"--studio-snap")) {  // --studio-snap раздел вкладка файл.png [мс]: раздел студии в картинку
         Gdip gdip;
         size_t i = std::find(args.begin(), args.end(), L"--studio-snap") - args.begin();

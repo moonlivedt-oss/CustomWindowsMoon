@@ -15,6 +15,13 @@ bool InsideDir(const std::wstring& path, const std::wstring& dir) {
     return rest.find_first_of(L"\\/:~") == std::wstring::npos && rest != L"." && rest != L"..";
 }
 
+bool ConsentJob(const std::wstring& key) {
+    for (const wchar_t* k :
+         {L"deep", L"repair", L"wu-reset", L"defender-offline", L"adapter", L"giants", L"sys-item", L"net-cut"})
+        if (key == k) return true;
+    return false;
+}
+
 bool TrustedHelper(const std::wstring& exePath, const std::wstring& helperDir, const std::wstring& sha256) {
     if (sha256.size() != 64 || !InsideDir(exePath, helperDir)) return false;
     return !_wcsicmp(exePath.c_str() + helperDir.size() + 1, HelperName(sha256).c_str());
