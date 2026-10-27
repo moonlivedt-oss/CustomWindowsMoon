@@ -845,6 +845,14 @@ build.cmd snaps
 powershell -ExecutionPolicy Bypass -File tools/check-personal.ps1 -Range origin/main..HEAD
 ```
 
+Чтобы проверка шла сама: `tools/install-hooks.ps1` ставит в `.git/hooks` pre-commit (подготовленное) и pre-push
+(уходящие коммиты); нашлось - коммит или push не выполняется (разово обойти - `--no-verify`). Чужой хук не
+перезаписывается без `-Force`.
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools/install-hooks.ps1
+```
+
 ## Устройство
 
 ```
