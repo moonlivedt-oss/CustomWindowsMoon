@@ -151,6 +151,35 @@ std::string BasicConstraints(bool ca) {
     return Encode(X509_BASIC_CONSTRAINTS2, &bc);
 }
 
+// Ограничение корневого (NameConstraints, критическое): годится только для адресов своей сети (10/8, 172.16/12,
+// 192.168/16, 169.254/16, 127/8) и одного несуществующего имени, IPv6 - ни для какого. Ключ корневого лежит у
+// пользователя под DPAPI, и вредонос на ПК мог бы выпускать им сертификаты на любые сайты; телефон, доверивший
+// корневому, принял бы их. С ограничением сертификат на bank.ru браузер телефона отвергнет.
+std::string NameConstraints() {
+    static const BYTE kNets[][8] = {{10, 0, 0, 0, 255, 0, 0, 0},
+                                    {172, 16, 0, 0, 255, 240, 0, 0},
+                                    {192, 168, 0, 0, 255, 255, 0, 0},
+                                    {169, 254, 0, 0, 255, 255, 0, 0},
+                                    {127, 0, 0, 0, 255, 0, 0, 0}};
+    static const BYTE kAnyV6[32] = {};  // ::/0
+    std::vector<CERT_GENERAL_SUBTREE> allow;
+    for (const auto& n : kNets) {
+        CERT_GENERAL_SUBTREE t{};
+        t.Base.dwAltNameChoice = CERT_ALT_NAME_IP_ADDRESS;
+        t.Base.IPAddress = {8, (BYTE*)n};
+        allow.push_back(t);
+    }
+    CERT_GENERAL_SUBTREE dns{};
+    dns.Base.dwAltNameChoice = CERT_ALT_NAME_DNS_NAME;
+    dns.Base.pwszDNSName = (LPWSTR)L"moondesk.invalid";  // имён у сервера нет: любое другое имя - вне корневого
+    allow.push_back(dns);
+    CERT_GENERAL_SUBTREE v6{};
+    v6.Base.dwAltNameChoice = CERT_ALT_NAME_IP_ADDRESS;
+    v6.Base.IPAddress = {32, (BYTE*)kAnyV6};
+    CERT_NAME_CONSTRAINTS_INFO info{(DWORD)allow.size(), allow.data(), 1, &v6};
+    return Encode(X509_NAME_CONSTRAINTS, &info);
+}
+
 std::string KeyUsage(BYTE bits) {
     CRYPT_BIT_BLOB b{1, &bits, 0};
     return Encode(X509_KEY_USAGE, &b);
@@ -216,7 +245,8 @@ bool CreateCa(const Prov& prov, const std::wstring& dir, std::string& der) {
     der = Build(k.h, name, name, pk, 3650,
                 {{szOID_BASIC_CONSTRAINTS2, true, BasicConstraints(true)},
                  {szOID_KEY_USAGE, true, KeyUsage(CERT_KEY_CERT_SIGN_KEY_USAGE | CERT_CRL_SIGN_KEY_USAGE)},
-                 {szOID_SUBJECT_KEY_IDENTIFIER, false, OctetString(KeyId(pk))}});
+                 {szOID_SUBJECT_KEY_IDENTIFIER, false, OctetString(KeyId(pk))},
+                 {szOID_NAME_CONSTRAINTS, true, NameConstraints()}});
     if (der.empty()) return false;
     DWORD n = 0;
     if (NCryptExportKey(k.h, 0, BCRYPT_ECCPRIVATE_BLOB, nullptr, nullptr, 0, &n, 0)) return false;

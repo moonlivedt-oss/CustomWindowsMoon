@@ -468,6 +468,33 @@ void TestPhoneCert() {
         CertFreeCertificateContext(root);
         CertFreeCertificateContext(srv);
     }
+    // корневой ограничен своей сетью (NameConstraints): сертификат на публичный адрес Windows не примет
+    PCCERT_CONTEXT pub = phone::cert::IssueServer(dir, {0x08080808}, key);
+    CHECK(pub != nullptr);
+    if (pub) {
+        PCCERT_CONTEXT root = CertCreateCertificateContext(X509_ASN_ENCODING, (const BYTE*)ca.data(), (DWORD)ca.size());
+        HCERTSTORE roots = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, nullptr);
+        CertAddCertificateContextToStore(roots, root, CERT_STORE_ADD_ALWAYS, nullptr);
+        CERT_CHAIN_ENGINE_CONFIG ec{};
+        ec.cbSize = sizeof(ec);
+        ec.hExclusiveRoot = roots;
+        HCERTCHAINENGINE eng = nullptr;
+        CHECK(CertCreateCertificateChainEngine(&ec, &eng));
+        CERT_CHAIN_PARA cp{};
+        cp.cbSize = sizeof(cp);
+        PCCERT_CHAIN_CONTEXT chain = nullptr;
+        CHECK(CertGetCertificateChain(eng, pub, nullptr, nullptr, &cp, CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY, nullptr,
+                                      &chain));
+        if (chain)
+            CHECK((chain->TrustStatus.dwErrorStatus &
+                   (CERT_TRUST_HAS_NOT_PERMITTED_NAME_CONSTRAINT | CERT_TRUST_HAS_EXCLUDED_NAME_CONSTRAINT |
+                    CERT_TRUST_INVALID_NAME_CONSTRAINTS | CERT_TRUST_HAS_NOT_SUPPORTED_NAME_CONSTRAINT)) != 0);
+        if (chain) CertFreeCertificateChain(chain);
+        CertFreeCertificateChainEngine(eng);
+        CertCloseStore(roots, 0);
+        CertFreeCertificateContext(root);
+        CertFreeCertificateContext(pub);
+    }
     phone::cert::DeleteKey(key);
     DeleteFileW((dir + L"\\phone-ca.cer").c_str());
     DeleteFileW((dir + L"\\phone-ca.key").c_str());
