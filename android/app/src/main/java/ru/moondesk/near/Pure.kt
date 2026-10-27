@@ -16,9 +16,10 @@ object Pure {
     private val linkRe =
         Regex("^(https?)://([0-9]{1,3}(?:\\.[0-9]{1,3}){3})(?::([0-9]{1,5}))?(/d/[A-Za-z0-9_-]{8,64})/?")
 
-    // 10/8, 172.16/12, 192.168/16, 169.254/16 (раздача без DHCP)
+    // 10/8, 172.16/12, 192.168/16, 169.254/16 (раздача без DHCP). Без ведущих нулей: «010.1.2.3» разборщик Android
+    // может прочесть восьмерично (8.1.2.3 - чужой сервер), а здесь оно выглядело бы как 10.1.2.3
     fun lanHost(host: String): Boolean {
-        val p = host.split('.').map { it.toIntOrNull() ?: return false }
+        val p = host.split('.').map { if (it.length > 1 && it[0] == '0') return false; it.toIntOrNull() ?: return false }
         if (p.size != 4 || p.any { it !in 0..255 }) return false
         return p[0] == 10 || (p[0] == 172 && p[1] in 16..31) || (p[0] == 192 && p[1] == 168) ||
             (p[0] == 169 && p[1] == 254)
@@ -42,7 +43,9 @@ object Pure {
             port += 20
         }
         if (port !in 1..65535) return null
-        return Base(m.groupValues[2], port, m.groupValues[4] + "/")
+        // адрес - из разобранных чисел, а не строкой из ссылки
+        val host = m.groupValues[2].split('.').joinToString(".") { it.toInt().toString() }
+        return Base(host, port, m.groupValues[4] + "/")
     }
 
     // Отпечаток корневого сертификата ПК для сверки глазами: первые 12 байт SHA-256 DER - 6 групп по 4 знака hex,
@@ -63,7 +66,8 @@ object Pure {
         "bank", "sber", "tinkoff", "tbank", "vtb", "alfa", "raiffeisen", "gazprombank", "pochtabank", "otpbank",
         "sovcom", "openbank", "psbank", "rosbank", "uralsib", "mtsbank", "rshb", "qiwi", "yoomoney", "paypal",
         "revolut", "wallet", "банк", "authenticator", "authy", "yandex.key", "bitwarden", "keepass", "1password",
-        "lastpass", "госуслуги", "gosuslugi",
+        "lastpass", "госуслуги", "gosuslugi", "aegis", "proton.pass", "enpass", "dashlane", "kaspersky", "2fa",
+        "otp", "andotp", "freeotp",
     )
 
     // список из поля на главном экране: строки или через запятую, пустое - прочь
@@ -78,13 +82,32 @@ object Pure {
 
     // Похоже на код подтверждения: слово «код», «code», «OTP», «пароль» и рядом 4-8 цифр (можно «123-456»). Такие
     // уведомления по умолчанию не уходят на ПК - код увидел бы любой, кто смотрит на экран компьютера
-    private val codeWord = Regex("(код|code|otp|парол|password|pin|подтвержд|verif)", RegexOption.IGNORE_CASE)
-    private val codeDigits = Regex("(?<![0-9])[0-9]{2,4}[- ]?[0-9]{2,4}(?![0-9])")
+    private val codeWord = Regex(
+        "(код|code|otp|парол|password|pin|подтвержд|verif|ключ|token|2fa|одноразов|login|вход|sign.?in)",
+        RegexOption.IGNORE_CASE,
+    )
+    private val codeDigits = Regex("(?<![0-9])[0-9]{2,4}(?:[- ]?[0-9]{2,4}){1,2}(?![0-9])")
+    // буквы с цифрами вперемешку, 5-10 знаков: «AB12CD», «X7K9-2PQ»
+    private val codeMixed = Regex("(?<![A-Za-z0-9])(?=[A-Z0-9-]*[0-9])(?=[A-Z0-9-]*[A-Z])[A-Z0-9][A-Z0-9-]{4,9}(?![A-Za-z0-9])")
 
     fun hasCode(text: String?): Boolean {
         if (text.isNullOrBlank() || !codeWord.containsMatchIn(text)) return false
-        return codeDigits.findAll(text).any { m -> m.value.count { it.isDigit() } in 4..8 }
+        return codeDigits.findAll(text).any { m -> m.value.count { it.isDigit() } in 4..12 } ||
+            codeMixed.containsMatchIn(text)
     }
+
+    // адрес ПК для экрана: ключ под точками (его видно бы было в снимках экрана и «Недавних»)
+    fun shownLink(url: String?): String {
+        if (url == null) return ""
+        val i = url.indexOf("/d/")
+        return if (i < 0) url else url.substring(0, i + 3) + "••••/"
+    }
+
+    // отпечаток для ввода: последнюю группу человек переписывает с карточки ПК, а не жмёт «да» по привычке
+    fun fingerprintHint(fp: String): String = fp.dropLast(4) + "????"
+
+    fun fingerprintTail(fp: String, typed: String): Boolean =
+        typed.filter { !it.isWhitespace() }.equals(fp.takeLast(4), ignoreCase = true)
 
     fun form(vararg kv: Pair<String, String?>): String =
         kv.filter { it.second != null }
@@ -107,7 +130,9 @@ object Pure {
     fun haveOf(json: String): Long = Regex("\"have\":(\\d+)").find(json)?.groupValues?.get(1)?.toLongOrNull() ?: -1
 
     // новые снимки камеры (и снимки экрана Samsung) - в DCIM; присланное в мессенджерах на ПК не отправляем
-    fun cameraPath(relativePath: String?): Boolean = relativePath != null && relativePath.startsWith("DCIM/")
+    // снимки экрана (у Samsung - DCIM/Screenshots) - нет: на них бывают банки и переписка
+    fun cameraPath(relativePath: String?): Boolean = relativePath != null && relativePath.startsWith("DCIM/") &&
+        !relativePath.startsWith("DCIM/Screenshots", ignoreCase = true)
 
     // Звонок: что сказать ПК при смене состояния (IDLE, RINGING, OFFHOOK). call - звонит, end - взяли (карточку
     // убрать), missed - отзвонил без ответа или сбросили

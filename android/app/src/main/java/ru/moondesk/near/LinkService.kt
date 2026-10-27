@@ -102,7 +102,7 @@ class LinkService : Service() {
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
         val clip = PendingIntent.getActivity(
-            this, 1, Intent(this, ClipActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            this, 1, ClipActivity.own(this).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE,
         )
         val b = Notification.Builder(this, CHANNEL)

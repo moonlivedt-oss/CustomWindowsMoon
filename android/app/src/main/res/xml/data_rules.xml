@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Настройки приложения (адрес ПК, MAC для пробуждения, последний звонок) не уходят ни в облачную копию, ни при
+     переносе на новый телефон: ключ Keystore остаётся на старом, а открытые записи на новом не нужны. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+    </device-transfer>
+</data-extraction-rules>

@@ -127,7 +127,10 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(20), dp(16), dp(32))
         }
         col = root
+        // ключ к ПК не попадает в снимок «Недавних»; касания сквозь чужое окно поверх (подсунуть «Подключить») - мимо
+        if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false)
         setContentView(ScrollView(this).apply {
+            filterTouchesWhenObscured = true
             setBackgroundColor(C.BG)
             addView(root)
         })
@@ -153,6 +156,7 @@ class MainActivity : Activity() {
             bottomMargin = dp(8)
         })
         link = EditText(this).apply {
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
             hint = "https://адрес-ПК:8800/d/..."
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             isSingleLine = true
@@ -162,7 +166,10 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         col.addView(link, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
-        button("Подключить", primary = true) { pair(link.text.toString()) }
+        button("Подключить", primary = true) {
+            val t = link.text.toString()
+            pair(if (prefs.base != null && t == Pure.shownLink(prefs.base)) prefs.base!! else t)
+        }
         hint(
             "Ссылку даёт страница «Телефона рядом»: «Запомнить этот телефон», потом «Подключить приложение». " +
                 "Связь идёт только с вашим ПК в домашней сети, без чужих серверов.", 8,
@@ -202,7 +209,7 @@ class MainActivity : Activity() {
         switch("clip", "Буфер ПК - на телефон", "Скопировали на ПК - можно вставлять на телефоне")
 
         card("Действия", root)
-        button("Буфер телефона - на ПК") { startActivity(Intent(this, ClipActivity::class.java)) }
+        button("Буфер телефона - на ПК") { startActivity(ClipActivity.own(this)) }
         button("Разбудить ПК") {
             Thread {
                 val n = Wol.wake(this)
@@ -258,11 +265,12 @@ class MainActivity : Activity() {
             status.text = "Ссылка не из вашей сети - не подключаю"
             return
         }
-        link.setText(b.url)
+        link.setText(Pure.shownLink(b.url))
         // ссылку может открыть любой сайт или сообщение: подключаем только после явного «да»
         val now = prefs.base
         val msg = if (now != null && now != b.url)
-            "Сейчас подключён другой ПК ($now). Переключиться на ${b.host}? Уведомления, SMS и фото пойдут туда."
+            "Сейчас подключён другой ПК (${Pure.shownLink(now)}). Переключиться на ${b.host}? Отправка уведомлений, SMS, " +
+                "звонков и фото выключится - включите заново, если это ваш ПК."
         else "Подключить ПК ${b.host}? На него пойдут включённые ниже уведомления, SMS, звонки и фото."
         AlertDialog.Builder(this)
             .setTitle("Подключить компьютер?")
@@ -296,7 +304,7 @@ class MainActivity : Activity() {
             setSize(dp(8), dp(8))
         }
         status.setCompoundDrawablesRelativeWithIntrinsicBounds(dot, null, null, null)
-        if (Link.connected(this) && link.text.isEmpty()) link.setText(prefs.base)
+        if (Link.connected(this) && link.text.isEmpty()) link.setText(Pure.shownLink(prefs.base))
         switches["notes"]?.isChecked = prefs.notes && listenerOn()
         switches["codes"]?.isChecked = prefs.codes
         switches["sms"]?.isChecked = prefs.sms && granted(Manifest.permission.RECEIVE_SMS)
@@ -390,17 +398,34 @@ class MainActivity : Activity() {
     // Защита первого знакомства: тот, кто в одной сети, мог ответить вместо ПК. Отпечаток сертификата должен совпасть
     // с карточкой «Телефон рядом» на экране ПК - только тогда приложение его запомнит
     private fun confirm(b: Pure.Base, der: ByteArray, s: String) {
+        val fp = Pure.fingerprint(der)
+        val tail = EditText(this).apply {
+            hint = "4 знака"
+            isSingleLine = true
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+        }
         AlertDialog.Builder(this)
             .setTitle("Сверьте отпечаток")
             .setMessage(
-                "Отпечаток ПК:\n\n" + Pure.fingerprint(der) + "\n\nНа экране компьютера, на карточке «Телефон рядом», " +
-                    "должно быть то же самое. Не совпадает - нажмите «Нет»: отвечает не ваш ПК.",
+                "Отпечаток ПК:\n\n" + Pure.fingerprintHint(fp) + "\n\nНа экране компьютера, на карточке «Телефон рядом», " +
+                    "начало должно быть тем же. Впишите последние 4 знака оттуда. Начало не совпадает - «Нет»: " +
+                    "отвечает не ваш ПК.",
             )
-            .setPositiveButton("Совпадает") { _, _ ->
+            .setView(tail)
+            .setPositiveButton("Подключить") { _, _ ->
+                if (!Pure.fingerprintTail(fp, tail.text.toString())) {
+                    status.text = "Не подключено: последние знаки отпечатка не совпали с карточкой ПК"
+                    return@setPositiveButton
+                }
                 status.text = "Подключаю..."
+                val switched = prefs.base != null && prefs.base != b.url
                 Thread {
                     val msg = try {
                         val pc = Link.pair(this, b, der)
+                        if (switched) {  // другой ПК - что уходило старому, само новому не пойдёт
+                            runOnUiThread { for (k in listOf("notes", "codes", "sms", "calls", "photos", "clip")) set(k, false) }
+                        }
                         LinkService.start(this)
                         "Подключено: " + pc.ifEmpty { "ПК" }
                     } catch (e: Exception) {
@@ -409,7 +434,7 @@ class MainActivity : Activity() {
                     runOnUiThread {
                         refresh()
                         status.text = msg
-                        link.setText(prefs.base ?: s)
+                        link.setText(Pure.shownLink(prefs.base ?: s))
                     }
                 }.start()
             }

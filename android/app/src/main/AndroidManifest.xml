@@ -26,6 +26,7 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
+        android:dataExtractionRules="@xml/data_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="Компьютер рядом"
         android:supportsRtl="false"

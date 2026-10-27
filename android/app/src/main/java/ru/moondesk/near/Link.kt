@@ -77,6 +77,11 @@ class Prefs(ctx: Context) {
     var callState: String?
         get() = p.getString("callState", "IDLE")
         set(v) = p.edit().putString("callState", v).apply()
+    // метка этой установки: окно буфера читает буфер телефона только для своих (ClipActivity.own)
+    val clipToken: String
+        get() = p.getString("clipToken", null) ?: java.util.UUID.randomUUID().toString().also {
+            p.edit().putString("clipToken", it).apply()
+        }
     var callWho: String
         get() = p.getString("callWho", "") ?: ""
         set(v) = p.edit().putString("callWho", v).apply()

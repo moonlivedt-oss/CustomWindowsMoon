@@ -35,10 +35,13 @@ class SmsReceiver : BroadcastReceiver() {
         if (parts.isNullOrEmpty()) return
         val from = parts[0].displayOriginatingAddress ?: ""
         val text = parts.joinToString("") { it.displayMessageBody ?: "" }
+        val who = contactName(c, from)
+        // те же правила, что у уведомлений: банки по отправителю и коды - только если их включили
+        val prefs = Prefs(c)
+        if (Pure.skipApp(from, who, Pure.parseList(prefs.skip))) return
+        if (!prefs.codes && Pure.hasCode(text)) return
         val pending = goAsync()
-        Link.notice(
-            c, "sms", "SMS", contactName(c, from), text, from, "sms:" + parts[0].timestampMillis,
-        ) { pending.finish() }
+        Link.notice(c, "sms", "SMS", who, text, from, "sms:" + parts[0].timestampMillis) { pending.finish() }
     }
 }
 
@@ -63,9 +66,15 @@ class CallReceiver : BroadcastReceiver() {
             prefs.callWho = contactName(c, num) ?: ""
         }
         if (ev == null) return
+        val who = prefs.callWho.ifEmpty { null }
+        val callNum = prefs.callNum
+        if (ev != "call") {  // звонок кончился - номер и имя на телефоне больше не храним
+            prefs.callNum = ""
+            prefs.callWho = ""
+        }
         val pending = goAsync()
         Link.notice(
-            c, ev, "Телефон", prefs.callWho.ifEmpty { null }, null, prefs.callNum, "ring:" + prefs.callNum.hashCode(),
+            c, ev, "Телефон", who, null, callNum, "ring:" + callNum.hashCode(),
         ) { pending.finish() }
     }
 }
@@ -105,7 +114,12 @@ class NoticeService : NotificationListenerService() {
 // включение телефона и обновление приложения - связь с ПК снова в фоне
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        if (Link.connected(c)) LinkService.start(c)
+        // приёмник открыт системе: чужой явный вызов без нужного действия не запускает службу (и не роняет её из фона)
+        if (i.action != Intent.ACTION_BOOT_COMPLETED && i.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        try {
+            if (Link.connected(c)) LinkService.start(c)
+        } catch (_: Exception) {
+        }
     }
 }
 

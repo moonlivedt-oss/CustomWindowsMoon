@@ -1,6 +1,7 @@
 package ru.moondesk.near
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.PendingIntent
 import android.content.ClipboardManager
 import android.content.Context
@@ -15,6 +16,8 @@ import android.widget.Toast
 
 // Буфер телефона - на ПК. Android 10+ читает буфер только окну на экране: прозрачное окно открывается на миг,
 // берёт буфер (текст или картинку) и закрывается. Им же - «Поделиться - На ПК» для текста и ссылок.
+// Окно открыто для всех (так его видит «Поделиться»), поэтому: присланный текст уходит на ПК только после «Отправить»,
+// а буфер телефона читается, только если окно открыли свои (плитка, уведомление, кнопка) - с меткой этой установки.
 class ClipActivity : Activity() {
     private var done = false
 
@@ -22,7 +25,20 @@ class ClipActivity : Activity() {
         super.onCreate(b)
         if (intent?.action == Intent.ACTION_SEND) {
             done = true
-            sendText(applicationContext, intent.getStringExtra(Intent.EXTRA_TEXT))
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (text.isNullOrEmpty()) return finish()
+            // чужое приложение могло прислать текст само, без «Поделиться»: подменить буфер ПК - только с согласия
+            AlertDialog.Builder(this)
+                .setTitle("Отправить в буфер ПК?")
+                .setMessage(if (text.length > 300) text.take(300) + "..." else text)
+                .setPositiveButton("Отправить") { _, _ -> sendText(applicationContext, text) }
+                .setNegativeButton("Отмена", null)
+                .setOnDismissListener { finish() }
+                .show()
+            return
+        }
+        if (intent?.getStringExtra(OWN) != Prefs(this).clipToken) {  // не свои - буфер телефона не читаем
+            done = true
             finish()
         }
     }
@@ -35,7 +51,10 @@ class ClipActivity : Activity() {
         val item = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
         val uri = item?.uri
         val app = applicationContext
-        if (uri != null && cm.primaryClipDescription?.hasMimeType("image/*") == true) {
+        // картинка - только из чужого провайдера: file:// и свои файлы приложения на ПК не уходят
+        if (uri != null && uri.scheme == "content" && uri.authority?.startsWith(packageName) != true &&
+            cm.primaryClipDescription?.hasMimeType("image/*") == true
+        ) {
             Thread {  // картинку читаем, пока окно на экране (право на неё - у окна)
                 val bytes = try {
                     contentResolver.openInputStream(uri)?.use { Link.readAll(it, 30 shl 20) }
@@ -60,7 +79,12 @@ class ClipActivity : Activity() {
     }
 
     companion object {
+        private const val OWN = "ru.moondesk.near.own"
         private val main = Handler(Looper.getMainLooper())
+
+        // окно «буфер телефона - на ПК» для своих: плитка, уведомление, кнопка на главном экране
+        fun own(ctx: Context): Intent =
+            Intent(ctx, ClipActivity::class.java).putExtra(OWN, Prefs(ctx).clipToken)
 
         fun say(ctx: Context, text: String) = main.post { Toast.makeText(ctx, text, Toast.LENGTH_SHORT).show() }
 
@@ -96,7 +120,7 @@ class ClipTile : TileService() {
     }
 
     override fun onClick() {
-        val i = Intent(this, ClipActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val i = ClipActivity.own(this).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (Build.VERSION.SDK_INT >= 34)
             startActivityAndCollapse(PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE))
         else

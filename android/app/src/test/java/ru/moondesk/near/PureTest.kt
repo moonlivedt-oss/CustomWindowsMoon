@@ -94,6 +94,30 @@ class PureTest {
     }
 
     @Test
+    fun auditFixes() {
+        // ведущие нули: «010» Android может прочесть восьмерично - чужой адрес под видом домашнего
+        assertNull(Pure.parseLink("https://010.1.2.3:8800/d/AbCdEf_-12345678/"))
+        assertNull(Pure.parseLink("https://192.168.01.5:8800/d/AbCdEf_-12345678/"))
+        assertEquals("10.0.0.2", Pure.parseLink("https://10.0.0.2:8800/d/AbCdEf_-12345678/")!!.host)
+        // ключ на экране - под точками
+        val shown = Pure.shownLink("https://192.168.0.5:8800/d/AbCdEf_-12345678/")
+        assertTrue(shown.startsWith("https://192.168.0.5:8800/d/") && !shown.contains("AbCdEf"))
+        // последние знаки отпечатка вписывают с карточки ПК
+        val fp = "BA78 16BF 8F01 CFEA 4141 40DE"
+        assertEquals("BA78 16BF 8F01 CFEA 4141 ????", Pure.fingerprintHint(fp))
+        assertTrue(Pure.fingerprintTail(fp, " 40de "))
+        assertTrue(!Pure.fingerprintTail(fp, "4141") && !Pure.fingerprintTail(fp, ""))
+        // снимки экрана - не на ПК
+        assertTrue(!Pure.cameraPath("DCIM/Screenshots/") && Pure.cameraPath("DCIM/Camera/"))
+        // коды: буквы с цифрами, три группы, новые слова
+        assertTrue(Pure.hasCode("Ваш код входа: AB12CD"))
+        assertTrue(Pure.hasCode("Login code 12 34 56"))
+        assertTrue(Pure.hasCode("Одноразовый ключ 7731"))
+        assertTrue(!Pure.hasCode("Встретимся у входа в 18"))
+        assertTrue(Pure.skipApp("com.beemdevelopment.aegis", "Aegis", Pure.skipDefault))
+    }
+
+    @Test
     fun fingerprint() {
         // тот же отпечаток считает ПК (phone::CaFingerprint): SHA-256("abc") = ba7816bf8f01cfea414140de...
         assertEquals("BA78 16BF 8F01 CFEA 4141 40DE", Pure.fingerprint("abc".toByteArray()))
