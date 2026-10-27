@@ -51,6 +51,10 @@ struct Session {
     ULONGLONG ctlAskAt = 0;
     // «Запомнить этот телефон» ждёт ответа на ПК: 0 - не спрашиваем, 1 - ждём, 2 - разрешили, 3 - нет
     int pairState = 0;
+    std::vector<uint32_t> tokenIps;   // адреса, которым открыт ключ сессии (TokenIpAllowed)
+    std::vector<uint32_t> tokenDeny;  // на ПК сказали «Нет» - до конца сессии
+    uint32_t ipAsk = 0;               // о каком адресе сейчас спрашивает карточка
+    ULONGLONG ipAskAt = 0;
     ULONGLONG pairAt = 0;
 };
 Session& S();
@@ -73,17 +77,19 @@ enum Event {
     EV_CLIPIMG,
     EV_PAIRED,
     EV_OCR,
-    EV_NOTE,     // запись в журнал (что сделано с телефона)
-    EV_CALL,     // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
-    EV_CAM,      // пришёл кадр камеры телефона
-    EV_OUTBOX,   // вторая копия положила файлы в phone-outbox.txt («Отправить - На телефон»)
-    EV_NOTICE,   // приложение на телефоне: уведомление, SMS, звонок (lp - new Notice)
-    EV_ASK,      // телефон впервые берёт управление: спросить на ПК (lp - new wstring: «s» или «d:<ключ>»)
-    EV_PAIR_ASK  // телефон просит постоянный ключ: спросить на ПК (lp - new wstring: имя телефона)
+    EV_NOTE,      // запись в журнал (что сделано с телефона)
+    EV_CALL,      // CallMain: lp - CallReq на стеке потока сервера (SendMessage)
+    EV_CAM,       // пришёл кадр камеры телефона
+    EV_OUTBOX,    // вторая копия положила файлы в phone-outbox.txt («Отправить - На телефон»)
+    EV_NOTICE,    // приложение на телефоне: уведомление, SMS, звонок (lp - new Notice)
+    EV_ASK,       // телефон впервые берёт управление: спросить на ПК (lp - new wstring: «s» или «d:<ключ>»)
+    EV_PAIR_ASK,  // телефон просит постоянный ключ: спросить на ПК (lp - new wstring: имя телефона)
+    EV_IP_ASK     // ключ сессии с нового адреса: спросить на ПК (lp - адрес)
 };
 void Post(Event e, const std::wstring& text = L"");
 void PostBytes(Event e, std::string bytes);  // lp - new std::string (картинка)
 void PostNotice(const Notice& n);            // EV_NOTICE: карточка на ПК
+void PostIpAsk(uint32_t ip);                 // EV_IP_ASK: пустить ли второй телефон
 // счётчики для скорости на карточке
 extern std::atomic<long long> g_sent, g_recv, g_sendLeft;
 extern std::atomic<ULONGLONG> g_screenAt;  // когда телефон последний раз брал кадр экрана

@@ -96,6 +96,14 @@ void TestPhoneBadGate() {
     for (const char* c : {"/poll", "/clip", "/cmd", "/up", "/", "/in/", "/innn", "/ring", "/pair"})
         CHECK(!phone::ControlPath(c));
 
+    // ключ сессии из QR: первый адрес вписывается сам, другие - только после «Пустить» на ПК
+    std::vector<uint32_t> ips;
+    CHECK(phone::TokenIpAllowed(ips, 0xC0A80105) && ips.size() == 1);
+    CHECK(phone::TokenIpAllowed(ips, 0xC0A80105));
+    CHECK(!phone::TokenIpAllowed(ips, 0xC0A80107) && ips.size() == 1);  // подсмотревший ключ - не пущен
+    ips.push_back(0xC0A80107);                                          // «Пустить»
+    CHECK(phone::TokenIpAllowed(ips, 0xC0A80107));
+
     // где слушать: только адрес для телефона; общественная сеть - нигде, пока не разрешили именно её
     uint32_t lan = 0xC0A80105;
     CHECK(phone::BindAddress(lan, false, L"", L"") == lan);

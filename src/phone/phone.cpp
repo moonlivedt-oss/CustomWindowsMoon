@@ -84,6 +84,7 @@ bool g_callShown = false;   // на g_alert сейчас «Звонит» - уб
 BoostCard g_watchCard;      // «Телефон управляет ПК - Остановить»
 BoostCard g_askCard;        // «Разрешить управление этому телефону?»
 BoostCard g_pairCard;       // «Запомнить телефон?»
+BoostCard g_ipCard;         // «Пустить второй телефон?»
 bool g_watching = false;
 void Watching(bool screen, bool input);  // ниже: рамка и плашка, пока телефон смотрит экран или управляет
 
@@ -696,6 +697,9 @@ bool StartSession(bool oneTime, bool standing = false) {
         s.ctlDenied.clear();
         s.ctlAsk.clear();
         s.pairState = 0;
+        s.tokenIps.clear();
+        s.tokenDeny.clear();
+        s.ipAsk = 0;
         s.clipPng.clear();
         s.clipImg = 0;
         s.caDer = ca;
@@ -769,6 +773,10 @@ Session& S() {
 
 void Post(Event e, const std::wstring& text) {
     if (g_app) PostMessageW(g_app, WM_PHONE, e, text.empty() ? 0 : (LPARAM) new std::wstring(text));
+}
+
+void PostIpAsk(uint32_t ip) {
+    if (g_app) PostMessageW(g_app, WM_PHONE, EV_IP_ASK, (LPARAM)ip);
 }
 
 void PostNotice(const Notice& n) {
@@ -935,6 +943,7 @@ void StopSession(const wchar_t* why) {
     Watching(false, false);
     g_askCard.Hide();
     g_pairCard.Hide();
+    g_ipCard.Hide();
     g_pubCard.Hide();
     g_bindIp = 0;
     Card().Hide();
@@ -955,6 +964,7 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg) {
     g_watchCard.Create(inst);
     g_askCard.Create(inst);
     g_pairCard.Create(inst);
+    g_ipCard.Create(inst);
     g_pubCard.Create(inst);
     g_alert.Create(inst);
 }
@@ -1191,6 +1201,7 @@ void Tick() {
     g_watchCard.Tick();
     g_askCard.Tick();
     g_pairCard.Tick();
+    g_ipCard.Tick();
     g_pubCard.Tick();
     g_alert.Tick();
     RefreshCfg();
@@ -1553,6 +1564,34 @@ void OnMessage(WPARAM wp, LPARAM lp) {
         if (n && S().on) ShowNotice(*n);
         return;
     }
+    if (wp == EV_IP_ASK) {
+        if (!S().on) return;
+        uint32_t ip = (uint32_t)lp;
+        g_ipCard.kind = L"-";
+        g_ipCard.yesLabel = L"Пустить";
+        g_ipCard.noLabel = L"Нет";
+        g_ipCard.onYes = [ip] {
+            {
+                Lock l;
+                S().tokenIps.push_back(ip);
+                S().ipAsk = 0;
+            }
+            autos::Note(L"Телефон рядом: пущен второй телефон " + IpText(ip));
+        };
+        g_ipCard.onNo = [ip] {
+            {
+                Lock l;
+                S().tokenDeny.push_back(ip);
+                S().ipAsk = 0;
+            }
+            autos::Note(L"Телефон рядом: не пущен " + IpText(ip));
+        };
+        g_ipCard.Show(BoostCard::OFFER, L"Пустить второй телефон?",
+                      L"Страницу по QR открывают с адреса " + IpText(ip) +
+                          L", а она уже открыта на другом телефоне. Не вы - «Нет».",
+                      Theme(), 30000, Toast::G_ASK);
+        return;
+    }
     if (wp == EV_PAIR_ASK) {  // поток сервера ждёт ответа в S().pairState
         std::unique_ptr<std::wstring> name((std::wstring*)lp);
         if (!S().on) return;
@@ -1744,6 +1783,7 @@ void Shutdown() {
     g_alert.Destroy();
     g_askCard.Destroy();
     g_pairCard.Destroy();
+    g_ipCard.Destroy();
     g_pubCard.Destroy();
 }
 

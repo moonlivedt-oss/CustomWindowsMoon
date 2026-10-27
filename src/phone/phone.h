@@ -211,6 +211,10 @@ bool ControlPath(const std::string& rest);
 // общественная (publicNet - её имя) - нигде, пока в ней открыть не разрешили (allowed); проверка - 127.0.0.1.
 uint32_t BindAddress(uint32_t ip, bool loopback, const std::wstring& publicNet, const std::wstring& allowed);
 
+// Ключ сессии из QR ходит по http - его может подсмотреть любой в этой Wi-Fi. Поэтому он работает только с адресов
+// из allowed: первый адрес вписывается сам, остальные - после «Пустить» на ПК. false - этот адрес надо спросить
+bool TokenIpAllowed(std::vector<uint32_t>& allowed, uint32_t ip);
+
 // запомненный телефон: строка phone-devices.tsv (файл - под DPAPI, phone.cpp)
 struct DeviceRec {
     std::string key;       // /d/<ключ>/

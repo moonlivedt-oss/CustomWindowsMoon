@@ -88,6 +88,14 @@ uint32_t BindAddress(uint32_t ip, bool loopback, const std::wstring& publicNet, 
     return ip;
 }
 
+bool TokenIpAllowed(std::vector<uint32_t>& allowed, uint32_t ip) {
+    if (allowed.empty()) {
+        allowed.push_back(ip);  // первый, кто открыл страницу по QR, - тот, кто его снял
+        return true;
+    }
+    return std::find(allowed.begin(), allowed.end(), ip) != allowed.end();
+}
+
 // ---- запомненные телефоны ----
 
 std::vector<DeviceRec> ParseDevices(const std::string& text) {

@@ -158,6 +158,25 @@ void Handle(Conn& cn, const Request& r) {
     }
     std::string base = r.path.substr(0, pre), rest = r.path.substr(pre);
     if (device >= 0) DeviceSeen(device);
+    if (device < 0) {  // ключ сессии (QR): только с адреса первого телефона и тех, кого пустили на ПК
+        bool ok, denied, ask = false;
+        {
+            Lock l;
+            denied = std::find(S().tokenDeny.begin(), S().tokenDeny.end(), cn.ip) != S().tokenDeny.end();
+            ok = !denied && TokenIpAllowed(S().tokenIps, cn.ip);
+            ULONGLONG now = GetTickCount64();
+            if (!ok && !denied && (S().ipAsk != cn.ip || now - S().ipAskAt > 30000)) {
+                S().ipAsk = cn.ip;
+                S().ipAskAt = now;
+                ask = true;
+            }
+        }
+        if (ask) PostIpAsk(cn.ip);
+        if (!ok)
+            return Text(cn, 403,
+                        denied ? "с этого телефона на ПК не пустили"
+                               : "страница уже открыта на другом телефоне - разрешите на ПК: «Пустить»");
+    }
     // Ключ запомненного телефона - постоянный: по http его видит любой в той же Wi-Fi. Когда https открыт, страница
     // уходит туда, остальное по http отклоняется. Ключ сессии (QR) по http работает - это первое знакомство.
     int tlsPort = 0;
