@@ -693,7 +693,7 @@ bool StartSession(bool oneTime, bool standing = false) {
             s.devices.push_back(d.key);
             if (d.control) s.ctlKeys.push_back(d.key);
         }
-        s.tokenCtl = false;
+        s.tokenCtlIps.clear();
         s.ctlDenied.clear();
         s.ctlAsk.clear();
         s.pairState = 0;
@@ -798,15 +798,15 @@ std::vector<std::wstring> ShareRoots() {
 
 bool InputAllowed() { return g_input && !g_inputStopped; }
 
-int ControlCheck(int device) {
-    std::string id;
+int ControlCheck(const std::string& devKey, uint32_t ip) {
+    // разрешение - запомненному телефону (по ключу) или телефону по QR (по адресу: второму, пущенному по
+    // «Пустить», управление само не достаётся)
+    std::string id = devKey.empty() ? "s:" + std::to_string(ip) : "d:" + devKey;
     {
         Lock l;
-        bool dev = device >= 0 && device < (int)S().devices.size();
-        id = dev ? "d:" + S().devices[device] : "s";
         if (std::find(S().ctlDenied.begin(), S().ctlDenied.end(), id) != S().ctlDenied.end()) return -1;
-        if (dev ? std::find(S().ctlKeys.begin(), S().ctlKeys.end(), S().devices[device]) != S().ctlKeys.end()
-                : S().tokenCtl)
+        if (devKey.empty() ? std::find(S().tokenCtlIps.begin(), S().tokenCtlIps.end(), ip) != S().tokenCtlIps.end()
+                           : std::find(S().ctlKeys.begin(), S().ctlKeys.end(), devKey) != S().ctlKeys.end())
             return 1;
         ULONGLONG now = GetTickCount64();
         if (S().ctlAsk == id && now - S().ctlAskAt < 30000) return 0;  // уже спрашиваем
@@ -848,13 +848,7 @@ std::string NewDevice(const std::wstring& name) {
     return d.key;
 }
 
-void DeviceSeen(int index) {
-    std::string key;
-    {
-        Lock l;
-        if (index < 0 || index >= (int)S().devices.size()) return;
-        key = S().devices[index];
-    }
+void DeviceSeen(const std::string& key) {
     AcquireSRWLockExclusive(&g_devLock);
     if (std::find(g_devSeen.begin(), g_devSeen.end(), key) == g_devSeen.end()) g_devSeen.push_back(key);
     ReleaseSRWLockExclusive(&g_devLock);
@@ -1357,6 +1351,8 @@ void Watching(bool screen, bool input) {
 // спросит), телефону по QR - до конца сессии. «Запретить» - до конца сессии.
 void AskControl(const std::string& id) {
     std::wstring name = L"Телефон по QR";
+    if (id.compare(0, 2, "s:") == 0)
+        name += L" (адрес " + IpText((uint32_t)strtoul(id.c_str() + 2, nullptr, 10)) + L")";
     if (id.compare(0, 2, "d:") == 0) {
         name = L"Запомненный телефон";
         for (const DeviceRec& d : DeviceRecs())
@@ -1368,13 +1364,13 @@ void AskControl(const std::string& id) {
     g_askCard.onYes = [id, name] {
         {
             Lock l;
-            if (id == "s")
-                S().tokenCtl = true;
+            if (id.compare(0, 2, "s:") == 0)
+                S().tokenCtlIps.push_back((uint32_t)strtoul(id.c_str() + 2, nullptr, 10));
             else
                 S().ctlKeys.push_back(id.substr(2));
             S().ctlAsk.clear();
         }
-        if (id != "s") {
+        if (id.compare(0, 2, "d:") == 0) {
             AcquireSRWLockExclusive(&g_devLock);
             std::vector<DeviceRec> list = ReadDevices(nullptr);
             for (DeviceRec& d : list)

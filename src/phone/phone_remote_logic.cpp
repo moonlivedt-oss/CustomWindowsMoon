@@ -85,16 +85,17 @@ bool OpenAllowed(const std::wstring& path) {
     while (!leaf.empty() && (leaf.back() == L'.' || leaf.back() == L' ')) leaf.pop_back();
     if (leaf.find(L':') != std::wstring::npos) return false;  // поток NTFS
     size_t dot = leaf.find_last_of(L'.');
-    if (dot == std::wstring::npos) return true;  // папка или файл без расширения - откроется Проводником/выбором
+    if (dot == std::wstring::npos) return false;  // без расширения - неизвестно что (папки проверяет вызывающий)
     std::wstring ext = leaf.substr(dot + 1);
     for (wchar_t& c : ext) c = (wchar_t)towlower(c);
-    // всё, что Windows запускает или устанавливает, а не показывает
-    static const std::wstring kRun =
-        L" exe com scr pif bat cmd ps1 psm1 psd1 vbs vbe vb js jse wsf wsh hta msi msp mst msc cpl lnk url reg jar inf "
-        L"scf chm application appref-ms settingcontent-ms library-ms search-ms appx msix appxbundle msixbundle gadget "
-        L"xll diagcab sys dll ocx ";
-    if (kRun.find(L" " + ext + L" ") != std::wstring::npos) return false;
-    return true;
+    // Белый список: только то, что Windows показывает, а не запускает. Чёрный список всегда отстаёт (py при
+    // установленном Python, iso и vhdx, rdp, theme, документы с макросами...)
+    static const std::wstring kView =
+        L" jpg jpeg png gif webp bmp heic heif tif tiff avif "                // картинки
+        L"mp4 mov mkv avi webm m4v 3gp wmv mpg mpeg "                         // видео
+        L"mp3 m4a aac flac wav ogg opus wma "                                 // музыка
+        L"pdf txt md csv log rtf docx xlsx pptx odt ods odp epub fb2 djvu ";  // документы без макросов
+    return kView.find(L" " + ext + L" ") != std::wstring::npos;
 }
 
 }  // namespace phone

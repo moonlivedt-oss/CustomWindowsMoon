@@ -45,7 +45,7 @@ struct Session {
     std::vector<std::wstring> links;   // ссылки с ПК для телефона («На телефон»)
     // управление с телефона (ControlPath): кому разрешено на ПК
     std::vector<std::string> ctlKeys;    // запомненные телефоны с разрешением (из файла)
-    bool tokenCtl = false;               // телефону по QR этой сессии разрешили
+    std::vector<uint32_t> tokenCtlIps;   // телефонам по QR (адреса) этой сессии разрешили
     std::vector<std::string> ctlDenied;  // «s» (по QR) или «d:<ключ>»: на ПК нажали «Запретить» - до конца сессии
     std::string ctlAsk;                  // о ком сейчас спрашивает карточка
     ULONGLONG ctlAskAt = 0;
@@ -113,11 +113,11 @@ bool InputAllowed();                              // phone_input: тачпад �
 bool ScreenAllowed();                             // phone_screen и не остановлено на ПК
 bool FilesAllowed();                              // phone_files: открыть, копировать, переместить, в Корзину
 std::string NewDevice(const std::wstring& name);  // запомнить телефон: ключ (пусто - не вышло)
-void DeviceSeen(int index);
-// управление с телефона (номер запомненного или -1 - по QR): 1 - разрешено, 0 - спросили на ПК, ждём, -1 - запрещено
-int ControlCheck(int device);
-extern std::atomic<ULONGLONG> g_ctlAt;  // когда телефон последний раз управлял (тачпад, клавиатура, кольцо) //
-                                        // запомненный телефон (номер в S().devices) заходил
+void DeviceSeen(const std::string& key);          // запомненный телефон заходил
+// управление с телефона (ключ запомненного; пусто - по QR, тогда по адресу): 1 - разрешено, 0 - спросили на ПК,
+// ждём, -1 - запрещено
+int ControlCheck(const std::string& devKey, uint32_t ip);
+extern std::atomic<ULONGLONG> g_ctlAt;  // когда телефон последний раз управлял (тачпад, клавиатура, кольцо)
 
 // Соединение (сервер держит его открытым между запросами): что уже пришло и не разобрано, сколько тела осталось
 struct Conn {

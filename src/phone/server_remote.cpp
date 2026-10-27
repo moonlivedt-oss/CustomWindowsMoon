@@ -168,8 +168,10 @@ bool ShellOp(UINT func, const std::wstring& from, const std::wstring& to, bool r
     op.wFunc = func;
     op.pFrom = f.c_str();
     op.pTo = to.empty() ? nullptr : t.c_str();
-    op.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR | (recycle ? FOF_ALLOWUNDO : 0) |
-                (func == FO_COPY || func == FO_MOVE ? FOF_RENAMEONCOLLISION : 0);
+    // FOF_NORECURSEREPARSE: ссылки внутри папки не раскрываются - иначе копия папки втащила бы в открытую папку то,
+    // что лежит снаружи неё
+    op.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR | FOF_NORECURSEREPARSE |
+                (recycle ? FOF_ALLOWUNDO : 0) | (func == FO_COPY || func == FO_MOVE ? FOF_RENAMEONCOLLISION : 0);
     return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
 }
 
@@ -183,7 +185,10 @@ void Fs(Conn& cn, const Request& r) {
     std::wstring name = src.substr(src.find_last_of(L'\\') + 1), what;
     bool ok = false;
     if (op == "open") {
-        if (!OpenAllowed(src)) return Text(cn, 403, "программы и скрипты с телефона не запускаются - только файлы");
+        DWORD a = GetFileAttributesW(src.c_str());
+        bool dir = a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+        if (!dir && !OpenAllowed(src))
+            return Text(cn, 403, "с телефона открываются только картинки, видео, музыка и документы");
         std::string out;
         ok = CallMain("open:" + Narrow(src), out);
         what = L"открыто на ПК: " + src;

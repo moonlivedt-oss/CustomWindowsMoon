@@ -75,8 +75,10 @@ std::wstring CaFingerprint(const std::string& der) {
 }
 
 bool ControlPath(const std::string& rest) {
-    static const char* const kControl[] = {"/in",   "/type", "/combo", "/tap",    "/screen",
-                                           "/mons", "/wins", "/win",   "/ringrun"};
+    // ещё файлы ПК (/fs: открыть, переименовать, в Корзину), ссылка в браузер ПК (/open) и пульт (/cmd: сон,
+    // блокировка, экран)
+    static const char* const kControl[] = {"/in",   "/type", "/combo",   "/tap", "/screen", "/mons",
+                                           "/wins", "/win",  "/ringrun", "/fs",  "/open",   "/cmd"};
     for (const char* c : kControl)
         if (rest == c) return true;
     return false;

@@ -130,10 +130,15 @@ void ClipIn(Conn& cn, const Request& r) {
 }
 
 // ключ в пути: /<сессия> или /d/<запомненный телефон>; вернёт длину префикса, 0 - чужой
-size_t KeyPrefix(const std::string& path, int* device) {
+// devKey - ключ запомненного телефона (пусто - ключ сессии): ключ, а не номер - «Забыть» сдвигает номера
+size_t KeyPrefix(const std::string& path, std::string* devKey) {
     Lock l;
     if (!S().on) return 0;
-    return MatchKey(path, S().token, S().devices, device);
+    int device = -1;
+    size_t pre = MatchKey(path, S().token, S().devices, &device);
+    devKey->clear();
+    if (pre && device >= 0) *devKey = S().devices[device];
+    return pre;
 }
 
 void Handle(Conn& cn, const Request& r) {
@@ -141,8 +146,9 @@ void Handle(Conn& cn, const Request& r) {
         Lock l;
         if (!S().on) return Text(cn, 404, "передача закончилась");
     }
-    int device = -1;
-    size_t pre = KeyPrefix(r.path, &device);
+    std::string devKey;
+    size_t pre = KeyPrefix(r.path, &devKey);
+    bool device = !devKey.empty();
     if (!pre) {
         if (r.path == "/favicon.ico") return Text(cn, 404, "нет");
         unsigned long long banMs = 0;
@@ -157,8 +163,8 @@ void Handle(Conn& cn, const Request& r) {
         return Text(cn, 404, "нет");
     }
     std::string base = r.path.substr(0, pre), rest = r.path.substr(pre);
-    if (device >= 0) DeviceSeen(device);
-    if (device < 0) {  // ключ сессии (QR): только с адреса первого телефона и тех, кого пустили на ПК
+    if (device) DeviceSeen(devKey);
+    if (!device) {  // ключ сессии (QR): только с адреса первого телефона и тех, кого пустили на ПК
         bool ok, denied, ask = false;
         {
             Lock l;
@@ -177,14 +183,15 @@ void Handle(Conn& cn, const Request& r) {
                         denied ? "с этого телефона на ПК не пустили"
                                : "страница уже открыта на другом телефоне - разрешите на ПК: «Пустить»");
     }
-    // Ключ запомненного телефона - постоянный: по http его видит любой в той же Wi-Fi. Когда https открыт, страница
-    // уходит туда, остальное по http отклоняется. Ключ сессии (QR) по http работает - это первое знакомство.
+    // Ключ запомненного телефона - постоянный: по http его видит любой в той же Wi-Fi. Страница уходит на https,
+    // остальное по http отклоняется (https не открылся - тоже: постоянный ключ по http не ходит вовсе). Ключ сессии
+    // (QR) по http работает - это первое знакомство, но без управления, экрана и файлов (ниже).
     int tlsPort = 0;
     {
         Lock l;
         tlsPort = S().tlsPort;
     }
-    if (device >= 0 && !cn.tls && tlsPort) {
+    if (device && !cn.tls) {
         auto host = r.headers.find("host");
         std::string to =
             HttpsLocation(host == r.headers.end() ? "" : host->second, tlsPort, base + (rest.empty() ? "/" : rest));
@@ -192,8 +199,14 @@ void Handle(Conn& cn, const Request& r) {
             return Reply(cn, 301, "", "", "Location: " + to + "\r\n");
         return Text(cn, 403, "запомненный телефон - только по https");
     }
-    if (ControlPath(rest)) {  // тачпад, клавиатура, экран: с нового телефона - только после «Разрешить» на ПК
-        int ok = ControlCheck(device);
+    // уведомления, SMS, звонки и MAC для пробуждения - только приложению (оно ходит по ключу запомненного телефона)
+    if (!device && (rest == "/notice" || rest == "/pcinfo")) return Text(cn, 403, "только для приложения");
+    if (ControlPath(rest)) {  // тачпад, клавиатура, экран, файлы: с нового телефона - только после «Разрешить» на ПК
+        // По http нажатия (и набранные пароли), кадры экрана и операции с файлами видит любой в этой Wi-Fi, а
+        // подменивший адрес телефона ими бы управлял. Есть https - только там
+        if (!cn.tls && tlsPort)
+            return Text(cn, 403, "управление, экран и файлы - только на защищённой странице (https)");
+        int ok = ControlCheck(devKey, cn.ip);
         if (ok < 0) return Text(cn, 403, "управление с этого телефона запрещено на ПК");
         if (ok == 0) return Text(cn, 403, "разрешите управление на ПК: карточка справа внизу экрана");
         if (rest != "/screen" && rest != "/mons") g_ctlAt = GetTickCount64();
@@ -230,9 +243,13 @@ DWORD WINAPI ConnThread(void* p) {
     char buf[8192];
     if (cn.tls && !(t_tls = TlsAccept(cn.c))) cn.close = true;  // сертификат не принят или не TLS
     for (int requests = 0; !g_stop && !cn.close && requests < 10000; ++requests) {
+        // заголовок - целиком за 10 с: по байту в 29 с без ключа можно держать соединение вечно и занять все слоты
+        DWORD headTo = 10000;
+        setsockopt(cn.c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&headTo, sizeof(headTo));
+        ULONGLONG headUntil = GetTickCount64() + 10000;
         size_t end;
         while ((end = cn.in.find("\r\n\r\n")) == std::string::npos && cn.in.size() < 16384) {
-            int k = NetRecv(cn.c, buf, sizeof(buf));
+            int k = GetTickCount64() > headUntil ? 0 : NetRecv(cn.c, buf, sizeof(buf));
             if (k <= 0) {
                 cn.close = true;
                 break;
@@ -240,6 +257,7 @@ DWORD WINAPI ConnThread(void* p) {
             cn.in.append(buf, (size_t)k);
         }
         if (cn.close) break;
+        setsockopt(cn.c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));  // тело - как раньше, 30 с
         Request r;
         if (end == std::string::npos || !ParseHead(cn.in.substr(0, end + 2), r)) {
             cn.close = true;

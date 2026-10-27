@@ -231,7 +231,7 @@ void Finish(Conn& cn, Incoming in, const std::string& kind) {
         return Text(cn, 500, "не записать");
     }
     SetFileAttributesW(final.c_str(), FILE_ATTRIBUTE_NORMAL);
-    if (!IsMedia(in.name)) MarkFromInternet(final);
+    MarkFromInternet(final);  // всем: переименовать x.mp4 в x.py - и метка «из интернета» останется
     {
         Lock l;
         ++S().received;
@@ -254,12 +254,17 @@ void Upload(Conn& cn, const Request& r) {
     if (!r.headers.count("content-length")) return Text(cn, 411, "нужна длина");
     long long off = atoll(Q(r, "off").c_str()), total = atoll(Q(r, "total").c_str());
     if (total < 0 || off < 0 || off + r.length > total) return Text(cn, 400, "кусок не сходится");
+    if (total > (64ll << 30)) return Text(cn, 413, "файл больше 64 ГБ");
     Incoming in;
+    long long reserved = 0;  // ещё не дописанное другими загрузками: место нужно и им
     {
         Lock l;
+        for (const auto& [oid, o] : S().incoming)
+            if (oid != id) reserved += o.total - o.have;
         auto it = S().incoming.find(id);
         if (it == S().incoming.end()) {  // новый файл
             if (off != 0) return JsonReply(cn, "{\"have\":0}");
+            if (S().incoming.size() >= 64) return Text(cn, 503, "слишком много загрузок сразу - подождите");
             Incoming n;
             n.name = SafeName(Widen(Q(r, "name")));
             n.mt = atoll(Q(r, "mt").c_str());
@@ -289,7 +294,7 @@ void Upload(Conn& cn, const Request& r) {
         }
         ULARGE_INTEGER freeB{};
         if (GetDiskFreeSpaceExW(in.dir.c_str(), &freeB, nullptr, nullptr) &&
-            (long long)freeB.QuadPart < total + (256ll << 20)) {
+            (long long)freeB.QuadPart < total + reserved + (256ll << 20)) {
             release(0);
             return Text(cn, 507, "на компьютере мало места");
         }
@@ -487,7 +492,9 @@ bool HandleFiles(Conn& cn, const Request& r, const std::string& rest) {
         Seen();
         std::wstring p = ShareFile(r);
         DWORD a = p.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(p.c_str());
-        if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) {
+        // скрытые и системные (desktop.ini, Thumbs.db, недокачанные .part) список не показывает - и не отдаём
+        if (a == INVALID_FILE_ATTRIBUTES ||
+            (a & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))) {
             Text(cn, 403, "нет доступа");
             return true;
         }

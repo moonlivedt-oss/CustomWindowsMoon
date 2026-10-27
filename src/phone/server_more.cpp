@@ -209,12 +209,8 @@ bool HandleMore(Conn& cn, const Request& r, const std::string& rest) {
     }
     if (rest == "/pair" && post) {  // запомнить этот телефон: постоянная ссылка без QR
         Seen();
-        bool tlsOn = false;
-        {
-            Lock l;
-            tlsOn = S().tlsPort != 0;
-        }
-        if (tlsOn && !cn.tls) {  // постоянный ключ по http увидел бы любой в этой Wi-Fi
+        if (!cn.tls) {  // постоянный ключ по http увидел бы любой в этой Wi-Fi (https не открылся - не запоминаем
+                        // вовсе)
             Text(cn, 403, "запомнить можно только на защищённой странице (https)");
             return true;
         }

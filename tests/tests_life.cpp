@@ -490,7 +490,11 @@ void TestPhoneRemote() {
     CHECK(s.cx == 320 && s.cy == 180);
     CHECK(phone::Combo("copy") == std::vector<WORD>({VK_CONTROL, 'C'}) && phone::Combo("rm -rf").empty());
     CHECK(phone::FsOp("move") && phone::FsOp("delete") && !phone::FsOp("format") && !phone::FsOp(""));
-    CHECK(phone::OpenAllowed(L"C:\\Users\\u\\Downloads\\отчёт.pdf") && phone::OpenAllowed(L"C:\\Music\\Альбом"));
+    CHECK(phone::OpenAllowed(L"C:\\Users\\u\\Downloads\\отчёт.pdf") && phone::OpenAllowed(L"C:\\Music\\a.MP3"));
+    // белый список: без расширения (папки проверяет сервер) и всё неизвестное - нет
+    CHECK(!phone::OpenAllowed(L"C:\\Music\\Альбом") && !phone::OpenAllowed(L"C:\\Downloads\\x.py"));
+    CHECK(!phone::OpenAllowed(L"C:\\Downloads\\disk.iso") && !phone::OpenAllowed(L"C:\\Downloads\\a.docm"));
+    CHECK(!phone::OpenAllowed(L"C:\\Downloads\\a.rdp") && !phone::OpenAllowed(L"C:\\Downloads\\page.html"));
     CHECK(!phone::OpenAllowed(L"C:\\Downloads\\setup.EXE") && !phone::OpenAllowed(L"C:\\Downloads\\run.bat"));
     CHECK(!phone::OpenAllowed(L"C:\\Downloads\\a.exe. .") && !phone::OpenAllowed(L"C:\\Downloads\\x.lnk"));
     CHECK(!phone::OpenAllowed(L"C:\\Downloads\\doc.txt:evil.exe") && !phone::OpenAllowed(L"D:\\a\\b.ps1"));

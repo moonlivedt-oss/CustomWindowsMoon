@@ -91,9 +91,10 @@ void TestPhoneBadGate() {
     CHECK(!phone::SameKey(std::string("abc\0", 4), "abc"));
 
     // управление - только после «Разрешить» на ПК; буфер, файлы и пульт громкости - без вопроса
-    for (const char* c : {"/in", "/type", "/combo", "/tap", "/screen", "/mons", "/wins", "/win", "/ringrun"})
+    for (const char* c :
+         {"/in", "/type", "/combo", "/tap", "/screen", "/mons", "/wins", "/win", "/ringrun", "/fs", "/open", "/cmd"})
         CHECK(phone::ControlPath(c));
-    for (const char* c : {"/poll", "/clip", "/cmd", "/up", "/", "/in/", "/innn", "/ring", "/pair"})
+    for (const char* c : {"/poll", "/clip", "/up", "/", "/in/", "/innn", "/ring", "/pair", "/fsx"})
         CHECK(!phone::ControlPath(c));
 
     // ключ сессии из QR: первый адрес вписывается сам, другие - только после «Пустить» на ПК

@@ -141,7 +141,7 @@ void Share(Conn& cn, const Request& r) {
         if (final.empty() || !MoveFileExW(cur.tmp.c_str(), final.c_str(), 0)) return (err = "не записать"), false;
         cur.tmp.clear();
         SetFileAttributesW(final.c_str(), FILE_ATTRIBUTE_NORMAL);
-        if (!IsMedia(cur.name)) MarkFromInternet(final);
+        MarkFromInternet(final);
         ++files;
         bytes += cur.size;
         last = final;
