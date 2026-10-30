@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(RadialMenu CXX RC)
+project(RadialMenu C CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -104,3 +104,22 @@ foreach(t RadialMenu RadialTools RadialShutUp)
     COMMAND ${CMAKE_COMMAND} -DSRC=$<TARGET_FILE:${t}> -DDST=${dst} -P ${CMAKE_SOURCE_DIR}/cmake/deploy.cmake
     COMMAND ${CMAKE_COMMAND} -DEXE=${dst} -P ${CMAKE_SOURCE_DIR}/cmake/integrity.cmake)
 endforeach()
+
+# PlayerMoon lives in this repository and is built for Windows with the same toolchain.
+# It starts on demand; the radial menu does not load the audio engine into its process.
+option(RADIAL_PLAYER "Build the bundled PlayerMoon music player" ON)
+if(RADIAL_PLAYER)
+  add_subdirectory(player)
+  add_custom_target(radial_player_bundle
+    COMMAND ${CMAKE_COMMAND} -DSRC=$<TARGET_FILE:PlayerMoon>
+            -DDST=${RADIAL_OUT_DIR}/apps/PlayerMoon/PlayerMoon.exe -P ${CMAKE_SOURCE_DIR}/cmake/deploy.cmake
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/player/assets ${RADIAL_OUT_DIR}/apps/PlayerMoon/assets
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${RADIAL_OUT_DIR}/apps/PlayerMoon/plugins/history ${RADIAL_OUT_DIR}/apps/PlayerMoon/plugins/downloader
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:pm_plugin_history> ${RADIAL_OUT_DIR}/apps/PlayerMoon/plugins/history/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/player/plugins/history/plugin.json ${RADIAL_OUT_DIR}/apps/PlayerMoon/plugins/history/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:pm_plugin_downloader> ${RADIAL_OUT_DIR}/apps/PlayerMoon/plugins/downloader/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/player/plugins/downloader/plugin.json ${RADIAL_OUT_DIR}/apps/PlayerMoon/plugins/downloader/
+    DEPENDS PlayerMoon pm_plugin_history pm_plugin_downloader
+    COMMENT "PlayerMoon -> apps/PlayerMoon")
+  add_dependencies(RadialMenu radial_player_bundle)
+endif()

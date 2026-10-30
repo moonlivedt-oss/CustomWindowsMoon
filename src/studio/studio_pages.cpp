@@ -19,6 +19,7 @@
 #include "app/settingsio.h"
 #include "core/text.h"
 #include "desk/corners.h"
+#include "desk/playermoon.h"
 #include "gfx/accent.h"
 #include "gfx/draw.h"
 #include "gfx/icons.h"
@@ -341,7 +342,7 @@ void Studio::DeskPage(const RectF& r) {
         L"Колесо над ней - громкость плеера, кнопка со строками - текст песни (lrclib.net), клик по строке "
         L"перематывает. Если играют сразу несколько программ, сверху появится переключатель.";
     float noteH = ui.MeasureWrapped(mediaNote, 11.5f, false, w - ui.S(36)) + ui.S(4);  // высота по тексту
-    RectF mc(x, y, w, ui.S(52) + 2 * rowH + noteH + ui.S(20));
+    RectF mc(x, y, w, ui.S(52) + 2 * rowH + noteH + ui.S(94));
     Card(mc);
     ui.Text(L"Сейчас играет", RectF(mc.X + ui.S(18), mc.Y + ui.S(14), w, ui.S(24)), c.text, 14, true);
     RectF mb(mc.X + ui.S(18), mc.Y + ui.S(48), w - ui.S(36), 2 * rowH);
@@ -358,6 +359,26 @@ void Studio::DeskPage(const RectF& r) {
     toggle(mb, 0, L"Панель у нижнего края", ID_MEDIA, cfg.media);
     toggle(mb, 1, L"Показывать трек при смене", ID_MEDIA_TOAST, cfg.mediaToast);
     ui.Text(mediaNote, RectF(mb.X, mb.Y + 2 * rowH, mb.Width, noteH), c.muted, 11.5f, false, ui::Left, true);
+    float playerY = mb.Y + 2 * rowH + noteH + ui.S(10);
+    if (ui.Button(playermoon::kOpenControl, RectF(mb.X, playerY, ui.S(190), ui.S(36)), L"Открыть PlayerMoon"))
+        Defer([this] { playermoon::Open(wnd); });
+    bool added = false;
+    for (const auto* ring : {&cfg.left, &cfg.right})
+        for (const auto& item : *ring) if (item.path == L"{player}") added = true;
+    if (ui.Button(playermoon::kSectorControl, RectF(mb.X + ui.S(200), playerY, ui.S(190), ui.S(36)),
+                  added ? L"Уже в кольце" : L"Добавить в кольцо", Kind::Ghost) && !added) {
+        Change();
+        Item player;
+        player.name = L"PlayerMoon";
+        player.path = L"{player}";
+        player.icon = L"icons/music.png";
+        Resolve(player);
+        cfg.right.push_back(player);
+        Save();
+        Log(L"PlayerMoon добавлен в правое кольцо");
+    }
+    ui.Text(L"Плеер из комплекта: библиотека, очередь и визуализатор. Запускается только по запросу.",
+            RectF(mb.X, playerY + ui.S(42), mb.Width, ui.S(22)), c.faint, 11, false, ui::Left, true);
     y += mc.Height + ui.S(16);
 
     // окна: прозрачность и «поверх всех»

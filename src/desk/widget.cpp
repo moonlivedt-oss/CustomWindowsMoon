@@ -14,6 +14,7 @@
 #include "core/night.h"
 #include "core/files.h"
 #include "desk/corners.h"
+#include "desk/playermoon.h"
 #include "desk/volume.h"
 #include "desk/widget_internal.h"
 #include "gfx/color.h"
@@ -473,6 +474,8 @@ void MediaWidget::Wheel(int delta, POINT client) {
 }
 void MediaWidget::ContextMenu() {
     HMENU m = CreatePopupMenu();
+    AppendMenuW(m, MF_STRING, 3, L"Открыть PlayerMoon");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | (lyricsOn_ ? MF_CHECKED : 0), 2, L"Текст песни");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, 1, L"Выключить панель");
@@ -482,6 +485,7 @@ void MediaWidget::ContextMenu() {
     int cmd = TrackPopupMenu(m, TPM_RIGHTBUTTON | TPM_RETURNCMD, p.x, p.y, 0, wnd_, nullptr);
     PostMessageW(wnd_, WM_NULL, 0, 0);
     DestroyMenu(m);
+    if (cmd == 3) playermoon::Open(wnd_);
     if (cmd == 2) {
         lyricsOn_ = !lyricsOn_;
         if (lyricsOn_) RequestLyrics();

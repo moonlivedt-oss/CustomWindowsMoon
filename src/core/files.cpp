@@ -51,6 +51,7 @@ std::wstring ExeDir() {
 
 std::wstring ExpandPath(const std::wstring& p) {
     if (p.empty()) return p;
+    if (p == L"{player}") return ExeDir() + L"\\apps\\PlayerMoon\\PlayerMoon.exe";
     std::wstring s = p;
     static const struct {
         const wchar_t* tok;

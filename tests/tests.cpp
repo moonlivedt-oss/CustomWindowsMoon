@@ -12,6 +12,7 @@
 
 #include "core/bg.h"
 #include "core/crash.h"
+#include "core/files.h"
 #include "tools/journal.h"
 #include "tools/mft_detail.h"
 #include "tools/selfwatch.h"
@@ -695,6 +696,7 @@ void TestLife(void (*check)(bool, const char*, int));   // tests_life.cpp
 void TestSec(void (*check)(bool, const char*, int));    // tests_sec.cpp
 
 int wmain() {
+    CHECK(ExpandPath(L"{player}") == ExeDir() + L"\\apps\\PlayerMoon\\PlayerMoon.exe");
     TestTop20(Check);
     TestMore(Check);
     TestLife(Check);

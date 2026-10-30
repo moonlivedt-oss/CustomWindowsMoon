@@ -37,6 +37,7 @@ exit /b %CODE%
 
 :test
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release || exit /b 1
-cmake --build build --target radial_tests || exit /b 1
+cmake --build build --target radial_tests pm_tests || exit /b 1
 build\radial_tests.exe || exit /b 1
+build\player\pm_tests.exe || exit /b 1
 echo OK: radial_tests

@@ -16,6 +16,8 @@ wifi_qr.png
 __pycache__/
 build-check/
 build-sym/
+build-player/
+apps/PlayerMoon/
 dev.on
 
 # локальные настройки редакторов и помощников - не в репозиторий

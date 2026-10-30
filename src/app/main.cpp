@@ -20,6 +20,7 @@
 #include "app/focus.h"
 #include "app/modestats.h"
 #include "app/palette.h"
+#include "desk/playermoon.h"
 #include "app/resume.h"
 #include "phone/phone.h"
 #include "life/shelf.h"
@@ -1440,6 +1441,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     focus::onChange = [](bool on) { NoteFocus(on); };
     corners::SetExtra(RunExtra);
     g_menu.focusStatus = [] { return focus::Status(); };
+    palette::AddSource([](std::vector<Item>& out) {
+        Item player;
+        player.name = L"PlayerMoon — открыть музыкальный плеер";
+        player.path = L"pm|open";
+        player.icon = L"icons/music.png";
+        player.special = 3;
+        out.push_back(player);
+    });
+    palette::AddRunner(L"pm|", [](const std::wstring&) { playermoon::Open(g_wnd); });
     palette::AddSource([](std::vector<Item>& out) {
         Item it;
         it.name = focus::On() ? L"Фокус: закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут";

@@ -481,7 +481,7 @@ std::wstring AppName(const std::wstring& aumid) {
     struct {
         const wchar_t* key;
         const wchar_t* name;
-    } known[] = {{L"yandex", L"Яндекс"},        {L"spotify", L"Spotify"},
+    } known[] = {{L"playermoon", L"PlayerMoon"}, {L"yandex", L"Яндекс"}, {L"spotify", L"Spotify"},
                  {L"chrome", L"Chrome"},        {L"308046b0af4a39cb", L"Firefox"},
                  {L"firefox", L"Firefox"},      {L"msedge", L"Edge"},
                  {L"telegram", L"Telegram"},    {L"vlc", L"VLC"},
@@ -568,6 +568,13 @@ std::vector<std::wstring> SourceExes(const std::wstring& aumid) {
 
 void FocusSource(const std::wstring& aumid) {
     if (aumid.empty()) return;
+    if (_wcsicmp(aumid.c_str(), L"MoonDesk.PlayerMoon") == 0) {
+        if (HWND player = FindWindowW(L"PlayerMoonWindow", nullptr)) {
+            ShowWindow(player, IsIconic(player) ? SW_RESTORE : SW_SHOW);
+            SetForegroundWindow(player);
+            return;
+        }
+    }
     FindCtx c;
     c.aumid = aumid;
     c.exe = Lower(aumid);
