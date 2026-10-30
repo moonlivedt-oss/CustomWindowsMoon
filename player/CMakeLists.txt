@@ -149,7 +149,7 @@ add_custom_command(TARGET pm_test_plugin_pages POST_BUILD
 add_executable(pm_tests tests/main.cpp tests/test_motion.cpp tests/test_json.cpp tests/test_theme.cpp
     tests/test_playlist.cpp tests/test_tags.cpp tests/test_fft.cpp tests/test_state.cpp tests/test_engine.cpp
     tests/test_view.cpp tests/test_plugins.cpp tests/test_downloader.cpp tests/test_lyrics.cpp tests/test_history.cpp
-    plugins/downloader/ytdlp.cpp)
+    plugins/downloader/ytdlp.cpp tests/test_home.cpp)
 target_link_libraries(pm_tests PRIVATE pm_view pm_theme pm_core pm_motion)
 target_compile_options(pm_tests PRIVATE ${PM_WARNINGS})
 # GCC 13 даёт ложное срабатывание stringop-overflow на vector::push_back при -O3 в тестах,

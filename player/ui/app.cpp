@@ -66,6 +66,7 @@ enum MenuId : UINT {
     kMenuRowRemove,
     kMenuWave,
     kMenuStats,
+    kMenuHome,
     kMenuThemeFirst = 100,          // встроенные темы по порядку
     kMenuLibraryFolderFirst = 200,  // папки библиотеки (убрать)
     kMenuPluginItemFirst = 1000,    // пункты, добавленные плагинами
@@ -208,7 +209,17 @@ int App::Run(HINSTANCE instance, int show) {
                   [hwnd] { PostMessageW(hwnd, kLyricsMessage, 0, 0); });
 
     view_.SetHost(this);
+    home_.Init(hwnd_, &renderer_, &text_);
+    LoadHomePreferences();
+    SetHomeWindowStyle();
     LoadSavedState();
+    RefreshHome();
+    if (homeMode_ && view_.mini) view_.ToggleMini(Now());
+    ResizeWindow(homeMode_      ? homeSize_
+                 : view_.mini   ? view::Size{view::kMiniWidth, view::kMiniHeight}
+                 : view_.layout ? view_.layout->WindowSize(view_.layoutInput, view_.playlistOpen)
+                                : view::Size{420, 680});
+    LayoutHomeSearch();
 
     // Файлы из командной строки («Открыть с помощью»)
     int argc = 0;
@@ -232,6 +243,7 @@ int App::Run(HINSTANCE instance, int show) {
     }
     MessageLoop();
 
+    home_.Shutdown();
     watcher_.Stop();
     scanner_.Stop();
     plugins_.UnloadAll();
@@ -284,7 +296,8 @@ bool App::CreateMainWindow(HINSTANCE instance) {
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarButtonCreated");
 
     // WS_CAPTION нужен для системной тени и скруглённых углов; саму рамку убирает WM_NCCALCSIZE
-    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    const DWORD style =
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_CLIPCHILDREN;
     hwnd_ = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_APPWINDOW | WS_EX_ACCEPTFILES, kClassName,
                             L"PlayerMoon", style, CW_USEDEFAULT, CW_USEDEFAULT, 420, 680, nullptr, nullptr, instance,
                             this);
@@ -383,11 +396,16 @@ void App::SaveCurrentState() {
         st.windowY = rc.top;
     }
     pm::SaveState(statePath_, st);
+    SaveHomePreferences();
 }
 
 void App::MarkDirty() {
     // Повторный вызов переставляет таймер: серия изменений даёт одну запись
     if (hwnd_) SetTimer(hwnd_, kSaveTimer, 2000, nullptr);
+}
+void App::ResetTickTimer() {
+    KillTimer(hwnd_, kTickTimer);
+    tickTimer_ = false;
 }
 
 // ---------------- тема ----------------
@@ -407,7 +425,7 @@ bool App::SystemPrefersLight() {
 
 void App::ApplyTopmost() {
     // Мини-плеер поверх окон (настройка), полный режим - обычное окно
-    const bool want = view_.mini && miniOnTop_;
+    const bool want = !homeMode_ && view_.mini && miniOnTop_;
     if (want == topmostApplied_) return;
     SetWindowPos(hwnd_, want ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     topmostApplied_ = want;
@@ -506,6 +524,7 @@ void App::RebuildRows() {
     swprintf(buf, 64, L"%d %ls, %ld мин", pl.Size(), TracksWord(pl.Size()), std::lround(total / 60));
     countText_ = pl.Size() > 0 ? buf : L"";
     view_.SetPlaylistSize(pl.Size());
+    RefreshHome();
 }
 
 void App::LoadPaths(const std::vector<std::filesystem::path>& paths, bool append) {
@@ -597,6 +616,7 @@ void App::ExportTheme() {
 void App::ShowContextMenu(POINT screen) {
     HMENU menu = CreatePopupMenu();
     HMENU themes = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, kMenuHome, homeMode_ ? L"Компактный плеер\tCtrl+H" : L"Главная PlayerMoon\tCtrl+H");
     AppendMenuW(menu, MF_STRING, kMenuOpenFiles, L"Открыть файлы...");
     AppendMenuW(menu, MF_STRING, kMenuOpenFolder, L"Открыть папку...");
 
@@ -658,12 +678,18 @@ void App::ShowContextMenu(POINT screen) {
 
     switch (cmd) {
         case 0: break;
+        case kMenuHome:
+            ToggleHome();
+            break;
         case kMenuOpenFiles: OpenFiles(false); break;
         case kMenuOpenFolder: OpenFiles(true); break;
         case kMenuImportTheme: ImportTheme(); break;
         case kMenuExportTheme: ExportTheme(); break;
         case kMenuPlaylist: view_.TogglePlaylist(Now()); break;
-        case kMenuMini: view_.ToggleMini(Now()); break;
+        case kMenuMini:
+            if (homeMode_) ToggleHome();
+            view_.ToggleMini(Now());
+            break;
         case kMenuExit: CloseWindow(); break;
         case kMenuNormalize: player_.SetNormalize(!player_.Normalize()); break;
         case kMenuMiniTop:
@@ -816,6 +842,19 @@ void App::PlayIndex(int index) {
 }
 
 void App::ResizeWindow(view::Size dip) {
+    if (homeMode_) {
+        if (IsZoomed(hwnd_)) {
+            Invalidate();
+            return;
+        }
+        dip = homeSize_;
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &mi)) {
+            dip.w = std::min(dip.w, (mi.rcWork.right - mi.rcWork.left) * 96.f / dpi_ - 24);
+            dip.h = std::min(dip.h, (mi.rcWork.bottom - mi.rcWork.top) * 96.f / dpi_ - 24);
+        }
+    }
     // Мгновенно: левый верхний угол на месте, содержимое анимирует PlayerView
     SetWindowPos(hwnd_, nullptr, 0, 0, ToPx(dip.w), ToPx(dip.h), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     Invalidate();
@@ -1002,7 +1041,8 @@ void App::RenderFrame() {
 
     // Спектр считаем, только когда визуализатор видно и звук идёт
     const std::vector<float>* spectrum = nullptr;
-    if (visible_ && ps.playing && view_.WantsSpectrum() && player_.AudioDeviceRunning() && view_.viz.Bars() > 0) {
+    if (!homeMode_ && visible_ && ps.playing && view_.WantsSpectrum() && player_.AudioDeviceRunning() &&
+        view_.viz.Bars() > 0) {
         if (player_.ReadPcm(pcm_.data(), pcm_.size()) == pcm_.size()) {
             analyzer_.Compute(pcm_.data(), player_.SampleRate(), view_.viz.Bars(), spectrum_);
             spectrum = &spectrum_;
@@ -1032,9 +1072,10 @@ void App::RenderFrame() {
     }
 
     // Раз в секунду: мини-режим во время игры и свёрнутое окно (полоса на панели задач)
-    const bool wantTicks = view_.WantsSecondTicks() || (ps.playing && !visible_);
+    const bool wantTicks = homeMode_ ? ps.playing : view_.WantsSecondTicks() || (ps.playing && !visible_);
     if (wantTicks != tickTimer_) {
-        if (wantTicks) SetTimer(hwnd_, kTickTimer, 1000, nullptr);
+        if (wantTicks)
+            SetTimer(hwnd_, kTickTimer, homeMode_ && visible_ ? 250 : 1000, nullptr);
         else KillTimer(hwnd_, kTickTimer);
         tickTimer_ = wantTicks;
     }
@@ -1057,14 +1098,26 @@ void App::RenderFrame() {
     in.plugins = &pluginRows_;
     in.pluginCountText = pluginCountText_;
     in.pluginsHint = L"Плагинов пока нет. Положите папку плагина в plugins рядом с PlayerMoon.exe";
-    painter_.Paint(dc, view_, in);
+    if (homeMode_) {
+        homeInput_.size = ClientDip();
+        homeInput_.playback = snap;
+        homeInput_.scanning = scanner_.Running();
+        homeInput_.searchFocused = GetFocus() == homeSearch_;
+        SendMessageW(homeSearch_, EM_GETSEL, (WPARAM)&homeInput_.selectionStart, (LPARAM)&homeInput_.selectionEnd);
+        const auto& np = player_.Current();
+        homeInput_.current = np.path;
+        homeInput_.title = ::text::Utf8ToWide(np.title);
+        homeInput_.artist = ::text::Utf8ToWide(np.tags.artist);
+        home_.Paint(dc, homeInput_);
+    } else
+        painter_.Paint(dc, view_, in);
     if (!renderer_.EndFrame()) dirty_ = true;  // устройство пересоздано - повторить кадр
 }
 
 void App::MessageLoop() {
     MSG msg;
     for (;;) {
-        const bool frames = dirty_ || (visible_ && view_.NeedsFrames());
+        const bool frames = dirty_ || (!homeMode_ && visible_ && view_.NeedsFrames());
         HANDLE waitable = renderer_.FrameWaitable();
         if (frames && waitable) {
             // Ждём, пока DWM готов принять кадр, и одновременно обрабатываем сообщения
@@ -1110,19 +1163,67 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     switch (msg) {
+        case Home::kArtReady:
+            Invalidate();
+            return 0;
+        case WM_GETMINMAXINFO:
+            if (homeMode_) {
+                auto* info = reinterpret_cast<MINMAXINFO*>(lp);
+                info->ptMinTrackSize = {ToPx(900), ToPx(640)};
+                MONITORINFO mi{};
+                mi.cbSize = sizeof(mi);
+                if (GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &mi)) {
+                    info->ptMaxPosition = {mi.rcWork.left - mi.rcMonitor.left, mi.rcWork.top - mi.rcMonitor.top};
+                    info->ptMaxSize = {mi.rcWork.right - mi.rcWork.left, mi.rcWork.bottom - mi.rcWork.top};
+                }
+                return 0;
+            }
+            break;
+        case WM_CTLCOLOREDIT:
+            if ((HWND)lp == homeSearch_) {
+                SetTextColor((HDC)wp, RGB(239, 235, 238));
+                SetBkColor((HDC)wp, RGB(17, 20, 28));
+                SetDCBrushColor((HDC)wp, RGB(17, 20, 28));
+                return (LRESULT)GetStockObject(DC_BRUSH);
+            }
+            break;
         case WM_NCCALCSIZE:
             // Клиентская область = всё окно: рамку и заголовок рисуем сами
-            if (wp) return 0;
+            if (wp) {
+                if (homeMode_ && IsZoomed(hwnd_)) {
+                    MONITORINFO mi{};
+                    mi.cbSize = sizeof(mi);
+                    if (GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &mi))
+                        reinterpret_cast<NCCALCSIZE_PARAMS*>(lp)->rgrc[0] = mi.rcWork;
+                }
+                return 0;
+            }
             break;
         case WM_NCHITTEST: {
             POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd_, &pt);
             const float k = 96.f / dpi_;
             const view::Point p{static_cast<float>(pt.x) * k, static_cast<float>(pt.y) * k};
+            if (homeMode_) {
+                auto size = ClientDip();
+                if (!IsZoomed(hwnd_)) {
+                    bool l = p.x<6, r = p.x> size.w - 6, t = p.y<6, b = p.y> size.h - 6;
+                    if (t && l) return HTTOPLEFT;
+                    if (t && r) return HTTOPRIGHT;
+                    if (b && l) return HTBOTTOMLEFT;
+                    if (b && r) return HTBOTTOMRIGHT;
+                    if (l) return HTLEFT;
+                    if (r) return HTRIGHT;
+                    if (t) return HTTOP;
+                    if (b) return HTBOTTOM;
+                }
+                return p.y < 48 && p.x < size.w - 132 ? HTCAPTION : HTCLIENT;
+            }
             return view_.HitTest(p) == view::PlayerView::Hit::Caption ? HTCAPTION : HTCLIENT;
         }
         case WM_SIZE:
             renderer_.Resize(LOWORD(lp), HIWORD(lp));
+            LayoutHomeSearch();
             visible_ = wp != SIZE_MINIMIZED;
             Invalidate();
             return 0;
@@ -1134,10 +1235,10 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             renderer_.SetDpi(dpi_);
             // Размер окна в DIP не меняется - пересчитываем пиксели от новой точки
             const RECT* suggested = reinterpret_cast<const RECT*>(lp);
-            const view::Size dip = view_.mini ? view::Size{view::kMiniWidth, view::kMiniHeight}
-                                              : view_.layout ? view_.layout->WindowSize(view_.layoutInput,
-                                                                                        view_.playlistOpen)
-                                                             : view::Size{420, 680};
+            const view::Size dip = homeMode_      ? homeSize_
+                                   : view_.mini   ? view::Size{view::kMiniWidth, view::kMiniHeight}
+                                   : view_.layout ? view_.layout->WindowSize(view_.layoutInput, view_.playlistOpen)
+                                                  : view::Size{420, 680};
             SetWindowPos(hwnd_, nullptr, suggested->left, suggested->top, ToPx(dip.w), ToPx(dip.h),
                          SWP_NOZORDER | SWP_NOACTIVATE);
             Invalidate();
@@ -1148,28 +1249,44 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd_, 0};
                 trackingMouse_ = TrackMouseEvent(&tme);
             }
-            view_.OnMouseMove(ToDip(lp), Now());
+            if (homeMode_)
+                home_.Move(ToDip(lp));
+            else
+                view_.OnMouseMove(ToDip(lp), Now());
             Invalidate();
             return 0;
         case WM_MOUSELEAVE:
             trackingMouse_ = false;
-            view_.OnMouseLeave(Now());
+            if (homeMode_)
+                home_.Move({-1, -1});
+            else
+                view_.OnMouseLeave(Now());
             Invalidate();
             return 0;
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
             SetCapture(hwnd_);
-            view_.OnMouseDown(ToDip(lp), Now());
+            if (homeMode_) {
+                SetFocus(hwnd_);
+                home_.Move(ToDip(lp));
+            } else
+                view_.OnMouseDown(ToDip(lp), Now());
             Invalidate();
             return 0;
         case WM_LBUTTONUP:
             ReleaseCapture();
-            view_.OnMouseUp(ToDip(lp), Now());
+            if (homeMode_)
+                HomeClick(ToDip(lp));
+            else
+                view_.OnMouseUp(ToDip(lp), Now());
             MarkDirty();
             Invalidate();
             return 0;
         case WM_RBUTTONUP:
-            view_.OnRightClick(ToDip(lp));
+            if (homeMode_)
+                ShowMenu(ToDip(lp));
+            else
+                view_.OnRightClick(ToDip(lp));
             return 0;
         case WM_NCRBUTTONUP:
             // Правый клик по заголовку - наше меню вместо системного
@@ -1182,13 +1299,29 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd_, &pt);
             const float k = 96.f / dpi_;
-            view_.OnWheel({static_cast<float>(pt.x) * k, static_cast<float>(pt.y) * k},
-                          static_cast<float>(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA, Now());
+            if (homeMode_)
+                home_.Scroll(static_cast<float>(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA);
+            else
+                view_.OnWheel({static_cast<float>(pt.x) * k, static_cast<float>(pt.y) * k},
+                              static_cast<float>(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA, Now());
             MarkDirty();
             Invalidate();
             return 0;
         }
         case WM_KEYDOWN: {
+            if (GetKeyState(VK_CONTROL) < 0 && wp == 'H') {
+                ToggleHome();
+                return 0;
+            }
+            if (homeMode_ && GetKeyState(VK_CONTROL) < 0 && wp == 'F') {
+                SetFocus(homeSearch_);
+                return 0;
+            }
+            if (homeMode_ && wp == VK_ESCAPE) {
+                SetWindowTextW(homeSearch_, L"");
+                SetFocus(hwnd_);
+                return 0;
+            }
             const pm::PlayerState ps = player_.GetState();
             switch (wp) {
                 case VK_SPACE: TogglePlay(); break;
@@ -1197,7 +1330,12 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 case VK_UP: SetVolume(std::min(1.f, ps.volume + 0.05f)); break;
                 case VK_DOWN: SetVolume(std::max(0.f, ps.volume - 0.05f)); break;
                 case 'M': ToggleMute(); break;
-                case 'L': view_.TogglePlaylist(Now()); break;
+                case 'L':
+                    if (homeMode_)
+                        home_.Navigate(view::HomeModel::Queue);
+                    else
+                        view_.TogglePlaylist(Now());
+                    break;
                 case 'O':
                     if (GetKeyState(VK_CONTROL) < 0) OpenFiles(false);
                     break;
@@ -1262,6 +1400,14 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             Invalidate();
             return 0;
         case WM_COMMAND:
+            if ((HWND)lp == homeSearch_ && HIWORD(wp) == EN_CHANGE) {
+                wchar_t query[181]{};
+                GetWindowTextW(homeSearch_, query, 181);
+                home_.model.query = query;
+                home_.ResetScroll();
+                Invalidate();
+                return 0;
+            }
             // Кнопки в превью окна на панели задач
             if (HIWORD(wp) == THBN_CLICKED) {
                 switch (LOWORD(wp)) {
@@ -1281,6 +1427,10 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             SnapToEdges(reinterpret_cast<RECT*>(lp));
             return TRUE;
         case WM_EXITSIZEMOVE:
+            if (homeMode_ && !IsZoomed(hwnd_)) {
+                homeSize_ = ClientDip();
+                SaveHomePreferences();
+            }
             MarkDirty();  // новое место окна
             return 0;
         case kLibraryMessage:
@@ -1321,6 +1471,10 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             DestroyWindow(hwnd_);
             return 0;
         case WM_DESTROY:
+            if (homeSearchFont_) {
+                DeleteObject(homeSearchFont_);
+                homeSearchFont_ = nullptr;
+            }
             for (int id = kHotPlay; id <= kHotStop; ++id) UnregisterHotKey(hwnd_, id);
             KillTimer(hwnd_, kTickTimer);
             KillTimer(hwnd_, kSaveTimer);
@@ -1444,6 +1598,7 @@ void App::OnLibraryScanned() {
         if (!known.count(t.path) && !InPlaylist(t.path)) fresh.push_back({t.path, t.meta});
     const bool wasEmpty = library_.Tracks().empty();
     library_.SetTracks(std::move(tracks));
+    RefreshHome();
     library_.Save(libraryPath_);
 
     if (player_.GetPlaylist().Empty() && !library_.Tracks().empty()) {

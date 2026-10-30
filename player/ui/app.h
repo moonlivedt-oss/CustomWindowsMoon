@@ -25,6 +25,7 @@
 #include "ui/covers.h"
 #include "ui/folder_watch.h"
 #include "ui/icons.h"
+#include "ui/home.h"
 #include "ui/painter.h"
 #include "ui/renderer.h"
 #include "ui/smtc.h"
@@ -61,6 +62,22 @@ public:
     float MeasureWrapped(view::TextStyle style, const std::string& text, float width) override;
 
 private:
+    void RefreshHome();
+    void HomeClick(view::Point point);
+    void ToggleHome();
+    void LayoutHomeSearch();
+    void SetHomeWindowStyle();
+    void LoadHomePreferences();
+    void SaveHomePreferences();
+    void ResetTickTimer();
+    Home home_;
+    Home::Input homeInput_;
+    HWND homeSearch_ = nullptr;
+    HFONT homeSearchFont_ = nullptr;
+    static LRESULT CALLBACK SearchProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+    WNDPROC homeSearchProc_ = nullptr;
+    bool homeMode_ = true;
+    view::Size homeSize_{1200,800};
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT Handle(UINT msg, WPARAM wp, LPARAM lp);
 
