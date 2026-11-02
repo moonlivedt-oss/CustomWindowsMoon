@@ -18,8 +18,10 @@
 #include <shlobj.h>
 
 #include <atomic>
+#include <algorithm>
 #include <cstdio>
 #include <deque>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -75,12 +77,16 @@ struct Job {
     int row = 0;
     Kind kind = Kind::Download;
     std::string url;
+    std::wstring executable;
+    dl::Options options;
     dl::Source source = dl::Source::Other;
     State state = State::Waiting;
     std::string title, artist, error;
     double percent = -1;
     std::string speed;
     bool converting = false;
+    bool partial = false;
+    std::set<std::string> skipped;
     int item = 0, items = 0;
     std::vector<std::string> files;
 };
@@ -250,12 +256,8 @@ void WorkerLoop(Plugin* pp) {
         }
         Job job = p.queue.front();
         p.queue.pop_front();
-        const std::wstring exe = p.ytdlp;
-        dl::Options o;
-        o.outDir = p.outDir;
-        o.browser = p.browser;
-        o.mp3 = !p.ffmpeg.empty();
-        if (!p.ffmpeg.empty()) o.ffmpegDir = Utf8(p.ffmpeg.substr(0, p.ffmpeg.find_last_of(L"\\/")));
+        const std::wstring exe = job.executable;
+        const auto& o = job.options;
         ReleaseSRWLockExclusive(&p.lock);
 
         std::vector<std::string> args;
@@ -274,8 +276,16 @@ void WorkerLoop(Plugin* pp) {
 }
 
 void Enqueue(Plugin& p, const Job& j) {
+    // UI-owned settings are captured once; the worker never races with settings edits.
+    Job queued = j;
+    queued.executable = p.ytdlp;
+    queued.options.outDir = p.outDir;
+    queued.options.archiveFile = p.outDir + "/.playermoon-archive.txt";
+    queued.options.browser = p.browser;
+    queued.options.mp3 = !p.ffmpeg.empty();
+    if (!p.ffmpeg.empty()) queued.options.ffmpegDir = Utf8(p.ffmpeg.substr(0, p.ffmpeg.find_last_of(L"\\/")));
     AcquireSRWLockExclusive(&p.lock);
-    p.queue.push_back(j);
+    p.queue.push_back(std::move(queued));
     ReleaseSRWLockExclusive(&p.lock);
     WakeConditionVariable(&p.wake);
 }
@@ -312,7 +322,7 @@ void ShowToolsRow(Plugin& p) {
     } else if (p.ffmpeg.empty()) {
         static const PmAction acts[3] = {{kActGetFfmpeg, "Скачать"}, {kActBinFolder, "Папка bin"}, {kActRecheck, "Проверить"}};
         r.title = "Нужен ffmpeg для MP3";
-        r.subtitle = "Без него треки останутся в m4a/opus - PlayerMoon их пока не играет. winget install Gyan.FFmpeg";
+        r.subtitle = "Без него сохраняется исходный m4a/opus; воспроизведение зависит от кодеков Windows. Для MP3 установите ffmpeg.";
         r.state = PM_ROW_ERROR;
         r.actions = acts;
         r.actionCount = 3;
@@ -343,6 +353,7 @@ void ShowJob(Plugin& p, const Job& j) {
     int state = PM_ROW_NORMAL;
     static const PmAction kRunning[1] = {{kActCancel, "Отмена"}};
     static const PmAction kDone[3] = {{kActPlay, "Играть"}, {kActShow, "Показать"}, {kActRemove, "Убрать"}};
+    static const PmAction kPartial[4] = {{kActPlay, "Играть"}, {kActShow, "Показать"}, {kActRetry, "Повторить недоступные"}, {kActRemove, "Убрать"}};
     static const PmAction kFailed[2] = {{kActRetry, "Повторить"}, {kActRemove, "Убрать"}};
     const PmAction* acts = kRunning;
     int count = 1;
@@ -370,8 +381,8 @@ void ShowJob(Plugin& p, const Job& j) {
             status = j.files.size() > 1 ? "Готово: " + std::to_string(j.files.size()) + " треков"
                      : j.files.empty()  ? "Уже было скачано"
                                         : "Готово";
-            acts = j.files.empty() ? kDone + 2 : kDone;
-            count = j.files.empty() ? 1 : 3;
+            acts = j.partial ? kPartial : j.files.empty() ? kDone + 2 : kDone;
+            count = j.partial ? 4 : j.files.empty() ? 1 : 3;
             break;
         case Job::State::Error:
         case Job::State::Cancelled:
@@ -381,6 +392,8 @@ void ShowJob(Plugin& p, const Job& j) {
             count = 2;
             break;
     }
+    if (!j.skipped.empty()) sub += " · Повторы пропущены: " + std::to_string(j.skipped.size());
+    if (j.partial) sub += " · Часть треков недоступна";
     PmPageRow r{j.row, title.c_str(), sub.c_str(), status.c_str(), progress, state, acts, count};
     p.host->pageSetRow(p.host->ctx, kPage, &r);
 }
@@ -401,6 +414,19 @@ void CheckTools(Plugin& p) {
 }
 
 void AddUrl(Plugin& p, const std::string& url) {
+    if (dl::NeedsAccount(url) && p.browser.empty()) {
+        p.Toast("Это личный плейлист. Выберите браузер, в котором выполнен вход в YouTube Music.");
+        return;
+    }
+    const auto key = dl::CanonicalDownloadKey(url);
+    for (const auto& job : p.jobs) {
+        if (dl::CanonicalDownloadKey(job.url) != key) continue;
+        if (job.state == Job::State::Waiting || job.state == Job::State::Running ||
+            (job.state == Job::State::Done && !dl::IsPlaylist(url))) {
+            p.Toast("Эта музыка уже загружается или уже скачана. Повтор не добавлен.");
+            return;
+        }
+    }
     Job j;
     j.row = p.nextRow++;
     j.url = url;
@@ -419,7 +445,7 @@ void OnUiMessage(void* data) {
             const std::string line = m->raw;
             if (p.version.empty() && !line.empty() && line[0] >= '0' && line[0] <= '9')
                 p.version = line.substr(0, line.find_first_of("\r\n "));
-            if (line.rfind("YandexMusic", 0) == 0) p.yandex = 1;
+            if (dl::IsYandexMusicExtractor(line)) p.yandex = 1;
         } else {
             if (m->raw == "probe" && p.yandex < 0 && m->exitCode == 0) p.yandex = 0;
             p.probing = false;
@@ -451,7 +477,11 @@ void OnUiMessage(void* data) {
                 j->converting = false;
                 break;
             case dl::Event::Type::Converting: j->converting = true; break;
+            case dl::Event::Type::Skipped:
+                j->skipped.insert(e.text);
+                break;
             case dl::Event::Type::File: {
+                if (!FileExists(Wide(e.text)) || std::find(j->files.begin(), j->files.end(), e.text) != j->files.end()) break;
                 j->files.push_back(e.text);
                 const char* path = e.text.c_str();
                 p.host->addFiles(p.host->ctx, &path, 1, 0);  // сразу в плейлист
@@ -462,14 +492,23 @@ void OnUiMessage(void* data) {
         }
     } else if (j->state != Job::State::Cancelled) {
         if (m->cancelled) j->state = Job::State::Cancelled;
-        else if (m->exitCode == 0) j->state = Job::State::Done;
+        else if (m->exitCode == 0 || !j->files.empty()) {
+            j->state = Job::State::Done;
+            j->partial = m->exitCode != 0;
+            if (j->files.empty() && j->skipped.empty()) {
+                j->state = Job::State::Error;
+                if (j->error.empty()) j->error = "Новых треков не получено. Проверьте ссылку и доступ к плейлисту.";
+            }
+        }
         else {
             j->state = Job::State::Error;
             if (j->error.empty()) j->error = "yt-dlp завершился с кодом " + std::to_string(m->exitCode);
         }
         if (j->state == Job::State::Done) {
             const std::string name = j->title.empty() ? std::string("трек") : j->title;
-            p.Toast(j->files.size() > 1 ? "Скачано треков: " + std::to_string(j->files.size()) : "Скачано: " + name);
+            if (j->files.empty() && !j->skipped.empty()) p.Toast("Повторы пропущены: " + std::to_string(j->skipped.size()));
+            else if (j->partial) p.Toast("Получено треков: " + std::to_string(j->files.size()) + ". Часть плейлиста недоступна.");
+            else p.Toast(j->files.size() > 1 ? "Скачано треков: " + std::to_string(j->files.size()) : "Скачано: " + name);
         } else if (j->state == Job::State::Error) {
             p.Toast("Не удалось скачать: " + j->error);
         }
@@ -503,12 +542,19 @@ void OnPageAction(void* self, int pageId, int rowId, int actionId) {
     Plugin& p = *static_cast<Plugin*>(self);
     if (pageId != kPage) return;
     if (rowId == 0) {
+        if (actionId >= 21 && actionId <= 24) {
+            const char* browsers[] = {"", "firefox", "chrome", "edge"};
+            p.browser = browsers[actionId - 21];
+            SaveSettings(p); ShowHeader(p);
+            p.Toast(p.browser.empty() ? "Вход не используется" : "Выбран браузер: " + p.browser + ". Выбор действует для новых загрузок.");
+            return;
+        }
         if (actionId == kActPaste) {
             char buf[8192];
             const int n = p.host->clipboardText(p.host->ctx, buf, sizeof(buf));
             const auto urls = dl::ExtractUrls(n > 0 ? std::string(buf, static_cast<size_t>(n)) : std::string());
-            if (p.ytdlp.empty()) p.Toast("Сначала установите yt-dlp - строка внизу подскажет как");
-            else if (urls.empty()) p.Toast("В буфере обмена нет ссылки - скопируйте её в браузере");
+            if (p.ytdlp.empty()) p.Toast("Сначала установите yt-dlp — раздел инструментов подскажет как");
+            else if (urls.empty()) p.Toast("Ссылка не найдена. Вставьте адрес трека, альбома или плейлиста.");
             else {
                 // Напоминание о правах - один раз за запуск
                 if (!p.warned) {

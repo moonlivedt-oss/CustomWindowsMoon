@@ -169,6 +169,25 @@ Settings Load(const std::wstring& dir) {
     return s;
 }
 
+bool SetMinFreePercent(const std::wstring& dir, int percent) {
+    if (dir.empty()) return false;
+    std::wstring file = dir + L"\\boost.config.json";
+    std::wstring t = ReadText(file);
+    size_t p = ValueAt(t, L"minFreePercent");
+    if (p == std::wstring::npos) return false;
+    size_t end = p;
+    while (end < t.size() && (iswdigit(t[end]) || t[end] == L'-')) ++end;
+    t.replace(p, end - p, std::to_wstring(std::clamp(percent, 0, 100)));
+    // с BOM, как было: скрипты Boost читает Windows PowerShell 5.1, без BOM он путает кириллицу в комментариях
+    std::string bytes = "\xEF\xBB\xBF" + Narrow(t);
+    HANDLE f = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD put = 0;
+    bool ok = WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr) && put == bytes.size();
+    CloseHandle(f);
+    return ok;
+}
+
 std::vector<Group> Scan(const Settings& s) {
     std::vector<Group> out;
     if (!s.ok) return out;

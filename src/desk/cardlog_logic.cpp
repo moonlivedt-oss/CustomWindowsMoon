@@ -1,4 +1,5 @@
 // Память карточек-вопросов: вид по заголовку, счёт закрытий без действия, файл заглушённых (без окон, под тестами).
+#include <cwchar>
 #include <cwctype>
 
 #include "desk/cardlog.h"
@@ -21,6 +22,25 @@ bool Strikes::Closed(const std::wstring& kind, bool acted) {
         return false;
     }
     return ++n[kind] == 3;
+}
+
+std::wstring StrikesText(const Strikes& s) {
+    std::wstring out;
+    for (const auto& [kind, n] : s.n)
+        if (n > 0 && kind.find_first_of(L"\t\r\n") == std::wstring::npos)
+            out += kind + L"\t" + std::to_wstring(n) + L"\n";
+    return out;
+}
+
+Strikes ParseStrikes(const std::wstring& text) {
+    Strikes s;
+    for (const std::wstring& line : ParseMutes(text)) {
+        size_t tab = line.rfind(L'\t');
+        if (tab == std::wstring::npos || tab == 0) continue;
+        int n = _wtoi(line.c_str() + tab + 1);
+        if (n > 0) s.n[line.substr(0, tab)] = n;
+    }
+    return s;
 }
 
 std::wstring MutesText(const std::set<std::wstring>& kinds) {

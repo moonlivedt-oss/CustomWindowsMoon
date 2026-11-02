@@ -1,5 +1,6 @@
 #include "ui/app.h"
 #include "core/text.h"
+#include "ui/workspace.h"
 #include <commctrl.h>
 #include <fstream>
 #include <map>
@@ -9,6 +10,18 @@ LRESULT CALLBACK App::SearchProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto* app = reinterpret_cast<App*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (!app) return DefWindowProcW(hwnd, msg, wp, lp);
     if (msg == WM_KEYDOWN) {
+        if (GetKeyState(VK_CONTROL) < 0 && wp == VK_OEM_COMMA) {
+            app->OpenWorkspace(view::HomeModel::Settings);
+            return 0;
+        }
+        if (GetKeyState(VK_CONTROL) < 0 && wp == 'M') {
+            app->EnterMini();
+            return 0;
+        }
+        if (hwnd == app->downloadEdit_ && wp == VK_RETURN) {
+            app->WorkspaceCommand(workspace::SubmitDownload);
+            return 0;
+        }
         if (wp == VK_ESCAPE) {
             SetWindowTextW(hwnd, L"");
             SetFocus(app->hwnd_);
@@ -19,6 +32,10 @@ LRESULT CALLBACK App::SearchProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
     }
+    // TranslateMessage still posts characters for keys handled above: Ctrl+H is Backspace (would erase
+    // the query), Enter/Ctrl+M are CR and Esc - the single-line edit beeps on them.
+    if (msg == WM_CHAR && (wp == L'\r' || wp == L'\n' || wp == 0x1b || (wp == 0x08 && GetKeyState(VK_CONTROL) < 0)))
+        return 0;
     auto result = CallWindowProcW(app->homeSearchProc_, hwnd, msg, wp, lp);
     if (msg == WM_KEYUP || msg == WM_LBUTTONUP || msg == WM_SETFOCUS || msg == WM_KILLFOCUS) app->Invalidate();
     return result;
@@ -45,6 +62,8 @@ void App::RefreshHome() {
         row.lastPlayed = t.lastPlayed;
         home_.model.tracks.push_back(std::move(row));
         seen.insert(t.path);
+        if (library_.HideDuplicates())
+            for (const auto& alias : t.copies) seen.insert(alias);
     }
     const auto& pl = player_.GetPlaylist();
     for (int i = 0; i < pl.Size(); ++i) {
@@ -60,6 +79,7 @@ void App::LoadHomePreferences() {
     json::Value document;
     if (json::Parse(content, document) && document.IsObject()) {
         homeMode_ = document.Get("dashboard").AsBool(true);
+        reduceMotion_ = document.Get("reduceMotion").AsBool(false);
         homeSize_.w = (float)std::clamp(document.Get("width").AsNumber(1200), 900.0, 2400.0);
         homeSize_.h = (float)std::clamp(document.Get("height").AsNumber(800), 640.0, 1600.0);
         for (const auto& path : document.Get("favorites").Items())
@@ -71,11 +91,17 @@ void App::LoadHomePreferences() {
     SetWindowLongPtrW(homeSearch_, GWLP_USERDATA, (LONG_PTR)this);
     homeSearchProc_ = (WNDPROC)SetWindowLongPtrW(homeSearch_, GWLP_WNDPROC, (LONG_PTR)&App::SearchProc);
     SendMessageW(homeSearch_, EM_SETCUEBANNER, FALSE, (LPARAM)L"Поиск по названию, исполнителю или альбому");
+    downloadEdit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 1, 1, hwnd_,
+                                    (HMENU)3002, GetModuleHandleW(nullptr), nullptr);
+    SendMessageW(downloadEdit_, EM_SETLIMITTEXT, 8192, 0);
+    SetWindowLongPtrW(downloadEdit_, GWLP_USERDATA, (LONG_PTR)this);
+    SetWindowLongPtrW(downloadEdit_, GWLP_WNDPROC, (LONG_PTR)&App::SearchProc);
     LayoutHomeSearch();
 }
 void App::SaveHomePreferences() {
     json::Value prefs = json::Value::MakeObject();
     prefs["dashboard"] = homeMode_;
+    prefs["reduceMotion"] = reduceMotion_;
     prefs["width"] = homeSize_.w;
     prefs["height"] = homeSize_.h;
     prefs["favorites"] = json::Value::MakeArray();
@@ -93,20 +119,25 @@ void App::SaveHomePreferences() {
 }
 void App::LayoutHomeSearch() {
     if (!homeSearch_) return;
-    if (!homeMode_) {
-        ShowWindow(homeSearch_, SW_HIDE);
-        return;
-    }
+    const bool downloads = homeMode_ && home_.model.page == view::HomeModel::Downloads;
+    const bool search = homeMode_ && home_.model.page < view::HomeModel::Plugins;
+    ShowWindow(homeSearch_, search ? SW_SHOW : SW_HIDE);
+    if (downloadEdit_) ShowWindow(downloadEdit_, downloads ? SW_SHOW : SW_HIDE);
+    if (!homeMode_) return;
     const auto size = ClientDip();
-    const float end = size.w >= 1100 ? size.w - 258 : size.w - 26;
-    SetWindowPos(homeSearch_, nullptr, ToPx(247), ToPx(67), ToPx(std::max(100.f, end - 263)), ToPx(24),
+    const auto layout = view::HomeLayout(size, search);
+    const auto field = layout.searchText;
+    SetWindowPos(homeSearch_, nullptr, ToPx(field.x), ToPx(field.y), ToPx(field.w), ToPx(field.h),
                  SWP_NOZORDER | SWP_NOACTIVATE);
+    if (downloadEdit_)
+        SetWindowPos(downloadEdit_, nullptr, ToPx(layout.mainX + 15), ToPx(156),
+                     ToPx(std::max(100.f, layout.mainW - 194)), ToPx(24), SWP_NOZORDER | SWP_NOACTIVATE);
     HFONT font = CreateFontW(-ToPx(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
                              CLEARTYPE_QUALITY, 0, L"Segoe UI");
     SendMessageW(homeSearch_, WM_SETFONT, (WPARAM)font, TRUE);
+    if (downloadEdit_) SendMessageW(downloadEdit_, WM_SETFONT, (WPARAM)font, TRUE);
     if (homeSearchFont_) DeleteObject(homeSearchFont_);
     homeSearchFont_ = font;
-    ShowWindow(homeSearch_, SW_SHOW);
 }
 void App::SetHomeWindowStyle() {
     LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
@@ -120,9 +151,10 @@ void App::SetHomeWindowStyle() {
 }
 void App::ToggleHome() {
     if (homeMode_ && !IsZoomed(hwnd_)) homeSize_ = ClientDip();
+    // Restore while the old mode and frame style still agree with Windows.
+    if (IsZoomed(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     homeMode_ = !homeMode_;
     ResetTickTimer();
-    if (IsZoomed(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     SetHomeWindowStyle();
     if (view_.mini) view_.ToggleMini(Now());
     ResizeWindow(homeMode_ ? homeSize_
@@ -136,8 +168,10 @@ void App::ToggleHome() {
 }
 void App::HomeClick(view::Point point) {
     auto hit = home_.At(point);
-    if (hit.action == Home::None && hit.index >= 10000 && hit.index < 10004) {
+    if (hit.action == Home::None && hit.index >= 10000 && hit.index < 10007) {
         home_.Navigate(hit.index - 10000);
+        workspaceNotice_.clear();
+        LayoutHomeSearch();
         SetFocus(hwnd_);
         Invalidate();
         return;
@@ -215,8 +249,11 @@ void App::HomeClick(view::Point point) {
         case Home::Compact:
             ToggleHome();
             break;
+        case Home::WorkspaceCommand:
+            WorkspaceCommand(hit.index);
+            break;
         case Home::Menu:
-            ShowMenu(point);
+            OpenWorkspace(view::HomeModel::Settings);
             break;
         case Home::Minimize:
             MinimizeWindow();

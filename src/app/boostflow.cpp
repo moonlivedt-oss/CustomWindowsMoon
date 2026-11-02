@@ -159,8 +159,23 @@ void ApplyPick(const std::vector<BoostPick::Row>& rows) {
 void GamePrep() {
     bg::Run([] {
         gameprep::In in;
-        std::shared_ptr<const procsnap::List> ps = procsnap::Get(0);
-        for (const PROCESSENTRY32W& p : *ps) in.updates = in.updates || !_wcsicmp(p.szExeFile, L"TiWorker.exe");
+        // TiWorker часами висит без дела после обновлений: «ставит обновления» - только если он (или служба
+        // обновлений) за 2 с занял процессор хотя бы на 10% одного ядра
+        auto updaterCpu = [] {
+            std::map<DWORD, ULONGLONG> out;
+            for (const procsnap::Info& p : procsnap::All())
+                if (!_wcsicmp(p.name.c_str(), L"TiWorker.exe") || !_wcsicmp(p.name.c_str(), L"MoUsoCoreWorker.exe"))
+                    out[p.pid] = p.cpu;
+            return out;
+        };
+        std::map<DWORD, ULONGLONG> before = updaterCpu();
+        if (!before.empty()) {
+            Sleep(2000);
+            for (const auto& [pid, cpu] : updaterCpu()) {
+                auto was = before.find(pid);
+                if (was != before.end() && cpu - was->second >= 2000000) in.updates = true;  // 0.2 с из 2 с
+            }
+        }
         in.steam = afterwork::SteamDownloading();
         in.partials = afterwork::FreshPartials();
         in.downMbps = toolsui::NetDownBps() * 8 / 1e6;
@@ -208,7 +223,10 @@ void OfferBoost(bool manual, const std::wstring& why) {
     }
     int used = 0;
     double avail = boost::AvailMb(&used);
-    if (!manual && s.minFreePercent > 0 && 100 - used >= s.minFreePercent) return;  // памяти и так хватает
+    // памяти и так хватает - не спрашивать. minFreePercent = 0 у Boost значит «чистить всегда», но для карточки
+    // при запуске это было «спрашивать всегда», даже когда закрытие ничего не даёт: тогда порог - как у
+    // MemoryOffer (больше 4 ГБ свободно и занято меньше 80%)
+    if (!manual && (s.minFreePercent > 0 ? 100 - used >= s.minFreePercent : avail > 4096 && used < 80)) return;
     g_boostGroups = boost::Scan(s);
     double mb = boost::TotalMb(g_boostGroups);
     if (g_boostGroups.empty() || (!manual && mb < 150)) {
@@ -256,6 +274,16 @@ void BoostDone(boost::Result* r) {
     std::wstring what;
     if (r->closed) what += L"Закрыто: " + std::to_wstring(r->closed);
     if (r->slept) what += (what.empty() ? L"Усыплено: " : L", усыплено: ") + std::to_wstring(r->slept);
+    // «Освобождено 0 МБ» - честно сказать, что толку почти не было, и не делать вид, что помогло
+    if (r->freedMb < 100) {
+        g_boostCard.Show(BoostCard::DONE, L"Память почти не освободилась",
+                         (what.empty() ? L"" : what + L". ") + L"Свободно " + Size(boost::AvailMb()) +
+                             L" - программы держали мало. Если тормозит, дело не в памяти.",
+                         CurrentTheme(g_cfg), 6000);
+        delete r;
+        RunAfterBoost();
+        return;
+    }
     g_boostCard.Show(BoostCard::DONE, L"Освобождено " + Size(r->freedMb),
                      what + L". Свободно " + Size(boost::AvailMb()) +
                          (g_cfg.boostRestore && !r->reopen.empty() ? L". После игры закрытое можно будет вернуть."
@@ -295,7 +323,7 @@ void BoostAfterGame() {
     boost::GameTweaks(s, false);
     gboost::Restore(L'g');
     if (!g_dev.On()) gboost::Restore(L's');  // усыплённые для редактора спят, пока он открыт
-    gboost::QuietFor(L'g', false);  // фокус и показ экрана держат тишину сами
+    gboost::QuietFor(L'g', false);           // фокус и показ экрана держат тишину сами
     if (g_cfg.boostAfter && s.purge) boost::RunPurge(s);
     OfferRestore();
 }
@@ -409,7 +437,9 @@ void OnBoostNote(const gboost::Note& n) {
             g_gbCard.onYes = [exe, dg, editor] {
                 bool ok = gboost::PreferDiscrete(exe);
                 g_gbCard.Show(BoostCard::DONE, ok ? L"Готово" : L"Не получилось",
-                              ok ? (editor ? L"После перезапуска редактор пойдёт на " : L"При следующем запуске игра пойдёт на ") + dg + L"."
+                              ok ? (editor ? L"После перезапуска редактор пойдёт на "
+                                           : L"При следующем запуске игра пойдёт на ") +
+                                       dg + L"."
                                  : L"Windows не дала записать настройку видеокарты.",
                               CurrentTheme(g_cfg));
             };
@@ -417,7 +447,8 @@ void OnBoostNote(const gboost::Note& n) {
                 g_gbCard.Show(BoostCard::OFFER, L"Редактор на встроенной видеокарте",
                               L"«" + gm::FileName(exe) + L"» рисует на " + ig + L", а " + dg +
                                   L" простаивает: вьюпорт и шейдеры медленнее. «Включить» - после перезапуска "
-                                  L"редактора он пойдёт на " + dg + L".",
+                                  L"редактора он пойдёт на " +
+                                  dg + L".",
                               t, 30000, Toast::G_WARN);
             else
                 g_gbCard.Show(BoostCard::OFFER, L"Игра на встроенной видеокарте",
@@ -441,10 +472,13 @@ void OnBoostNote(const gboost::Note& n) {
                 eco = gboost::BackgroundEco({L"UnrealEditor", L"ShaderCompileWorker", L"UnrealBuildTool", L"UbaHost",
                                              L"dotnet", L"cl", L"link"},
                                             boost::Load(BoostDir()).guarded);
+            // начало само по себе не новость: карточка - только если что-то сделали (фон приглушён); итог придёт
+            // карточкой EV_SHADERS_DONE, если компиляция шла заметно долго
+            if (!eco) return;
             g_gbCard.Show(BoostCard::DONE, L"Компилируются шейдеры",
                           L"Работают " + Plural((int)n.a, L"процесс", L"процесса", L"процессов") +
-                              (eco ? L", фон приглушён до конца." : L".") + L" Сообщу, когда закончится.",
-                          t, 7000, Toast::G_INFO);
+                              L", фон приглушён до конца компиляции.",
+                          t, 5000, Toast::G_INFO);
             return;
         }
         case gboost::EV_SHADERS_DONE:

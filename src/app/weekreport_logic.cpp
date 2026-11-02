@@ -1,6 +1,8 @@
 // Недельный отчёт: числа для сравнения и разница к прошлому отчёту (weekreport.h) - без окон и файлов.
+#include <algorithm>
 #include <cmath>
 #include <cwchar>
+#include <map>
 
 #include "app/weekreport.h"
 #include "tools/tools.h"
@@ -85,6 +87,63 @@ std::vector<std::wstring> Deltas(const Data& now, const Data& prev) {
     if (now.batteryWear >= 0 && prev.batteryWear >= 0 && now.batteryWear > prev.batteryWear)
         out.push_back(L"износ батареи " + std::to_wstring(now.batteryWear) + L"% (было " +
                       std::to_wstring(prev.batteryWear) + L"%)");
+    return out;
+}
+
+namespace {
+// «1 раз», «3 раза», «12 раз»
+std::wstring Times(int n) {
+    int d = n % 10, h = n % 100;
+    return std::to_wstring(n) + (d >= 2 && d <= 4 && (h < 12 || h > 14) ? L" раза" : L" раз");
+}
+}  // namespace
+
+std::vector<std::wstring> Waste(const std::vector<std::wstring>& journal) {
+    std::vector<std::wstring> out;
+    // «Игровой режим выключен (SnippingTool.exe, шёл 12 с)»: секунды, а не минуты - режим зря дёргался
+    auto shortModes = [&](const std::wstring& prefix, const wchar_t* what, const wchar_t* fix) {
+        std::map<std::wstring, int> by;
+        int total = 0;
+        for (const std::wstring& t : journal) {
+            if (t.rfind(prefix, 0) != 0) continue;
+            size_t ran = t.rfind(L", шёл ");
+            if (ran == std::wstring::npos || t.size() < 3 || t.compare(t.size() - 3, 3, L" с)") != 0) continue;
+            size_t open = t.find(L'(');
+            if (open == std::wstring::npos || open > ran) continue;
+            ++by[t.substr(open + 1, ran - open - 1)];
+            ++total;
+        }
+        if (total < 2) return;  // один случайный раз - не повод
+        auto top =
+            std::max_element(by.begin(), by.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
+        out.push_back(std::wstring(what) + L" " + Times(total) +
+                      L" включался меньше чем на минуту, чаще "
+                      L"всего из-за «" +
+                      top->first + L"». " + fix);
+    };
+    shortModes(L"Игровой режим выключен (", L"Игровой режим",
+               L"Если это не игра - добавьте её в «Не игры» (студия: Стол - Красота).");
+    shortModes(L"Режим разработки выключен (", L"Режим разработки",
+               L"Если редактор открывали на минуту - это нормально, иначе проверьте список редакторов.");
+    // «Тихая чистка (...): освобождено 0 байт»
+    int emptyCleans = 0;
+    for (const std::wstring& t : journal)
+        if (t.rfind(L"Тихая чистка", 0) == 0 && t.find(L"освобождено 0 ") != std::wstring::npos) ++emptyCleans;
+    if (emptyCleans >= 2)
+        out.push_back(L"Чистка " + Times(emptyCleans) +
+                      L" ничего не нашла - мусора почти нет, вручную её можно запускать реже.");
+    // «Сборка CMake упала: путь» - одна и та же папка раз за разом
+    std::map<std::wstring, int> builds;
+    for (const std::wstring& t : journal) {
+        size_t at = t.find(L" упала: ");
+        if (t.rfind(L"Сборка", 0) == 0 && at != std::wstring::npos) ++builds[t.substr(at + 8)];
+    }
+    for (const auto& [path, n] : builds)
+        if (n >= 3) {
+            size_t slash = path.find_last_of(L"\\/");
+            out.push_back(L"Сборка в «" + (slash == std::wstring::npos ? path : path.substr(slash + 1)) + L"» падала " +
+                          Times(n) + L" за неделю - стоит один раз посмотреть почему.");
+        }
     return out;
 }
 

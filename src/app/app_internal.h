@@ -52,7 +52,9 @@ enum Cmd {
     CMD_AFTER_SLEEP,  // Л6: усыпить, когда всё закончится (второй раз - отменить)
     CMD_AFTER_OFF,    // Л6: выключить, когда всё закончится
     CMD_FOCUS,        // Л8: фокус на N минут (второй раз - закончить)
-    CMD_SHARE         // показ экрана: свои окна мимо захвата, уведомления молчат
+    CMD_SHARE,        // показ экрана: свои окна мимо захвата, уведомления молчат
+    CMD_PALETTE,      // поиск и команды - то же, что palette_key, но мышью
+    CMD_WINDOWS       // кольцо открытых окон - то же, что Alt+`
 };
 constexpr UINT WM_BOOST_DONE = WM_APP + 60;  // поток Boost закончил: lParam - boost::Result*
 constexpr UINT WM_DROP_DONE = WM_APP + 71;   // бросок на папку кольца разобран: lParam - DropMsg*
@@ -147,7 +149,8 @@ void ModeFlowInit(HINSTANCE inst);
 void ModeFlowShutdown();
 void ModeFlowTick(ULONGLONG now);
 bool GameInBackground();  // игра идёт, но свёрнута: перехват мыши и эффекты вернули (Г2)
-void GameLearnOffer();    // после игры: запомнить игру, узнанную по окну на весь экран (Г1)
+void GameGuessOffer();  // режим включился по догадке: сразу «Не игра» / «Это игра»
+void GameLearnOffer(ULONGLONG playedMs);  // после игры: запомнить игру, узнанную по окну на весь экран (Г1)
 
 // mcflow.cpp
 std::wstring McIni();

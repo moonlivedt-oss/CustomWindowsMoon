@@ -46,6 +46,7 @@ private:
     bool Busy() const override { return mode_ == WORKING; }
     void Closed() override;
     void Unanswered();  // вопрос ушёл без нажатия: в пропущенные и в счёт закрытий
+    void InfoGone();    // сообщение без кнопок ушло: не читали (мышь не подходила) - в счёт закрытий, читали - с нуля
     Gdiplus::Color Tone() const override;
     bool Buttons() const { return mode_ == OFFER || mode_ == RESTORE || StopButton(); }
     bool StopButton() const { return mode_ == WORKING && onStop; }
@@ -53,6 +54,10 @@ private:
 
     Mode mode_ = OFFER;
     bool asked_ = false;  // на экране вопрос с кнопкой действия, ответа ещё не было
+    // на экране сообщение без кнопок, которое пришло само (не итог только что нажатого): его тоже можно заглушить,
+    // если его раз за разом не читают
+    bool info_ = false, seen_ = false;
+    std::wstring infoKind_;
     std::wstring askKind_, askYes_, askNo_;
     std::function<void()> askOnYes_, askOnNo_;
     Glyph glyph_ = G_NONE;

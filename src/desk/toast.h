@@ -55,6 +55,8 @@ protected:
     float ButtonWidth(Gdiplus::Graphics& g, const std::wstring& label) const;
     float TextHeight(Gdiplus::Graphics& g, const std::wstring& s, const Gdiplus::Font& f, float width) const;
     Gdiplus::RectF Body() const;  // в координатах окна
+    // в Closed: убрали руками (крестик, правый клик, бросок), а не ушла по таймеру
+    bool ClosedByHand() const { return byHand_; }
 
     ThemeInfo theme_{};
     double k_ = 1;
@@ -69,7 +71,7 @@ private:
 
     HWND wnd_ = nullptr;
     RECT work_{};
-    bool open_ = false, tracking_ = false, dirty_ = false, dragging_ = false;
+    bool open_ = false, tracking_ = false, dirty_ = false, dragging_ = false, byHand_ = false;
     float hover_[kMaxHits] = {};
     int hot_ = H_NONE, down_ = H_NONE;
     // движение

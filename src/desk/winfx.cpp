@@ -12,6 +12,7 @@
 #include "core/fx.h"
 #include "core/llmouse.h"
 #include "core/config.h"
+#include "core/usage.h"
 #include "desk/layout.h"
 #include "desk/zones.h"
 #include "gfx/color.h"
@@ -244,6 +245,7 @@ bool WindowFx::OnMouse(WPARAM wp, const MSLLHOOKSTRUCT& m) {
     if ((wp == WM_LBUTTONDOWN || wp == WM_RBUTTONDOWN) && alt && !other && g_dragOn && !g_blocked) {
         HWND w = DragTarget(m.pt);
         if (!w) return false;
+        usage::Hit(L"windrag");  // только память: из перехвата мыши на диск не пишем
         bool size = wp == WM_RBUTTONDOWN;
         g_dragUp = size ? WM_RBUTTONUP : WM_LBUTTONUP;
         PostMessageW(g_fx->wnd_, WM_FX_DRAG, (WPARAM)w, MAKELPARAM(m.pt.x, m.pt.y) | 0);

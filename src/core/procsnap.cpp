@@ -94,13 +94,14 @@ std::shared_ptr<const List> Get(DWORD maxAgeMs) {
     return list;
 }
 
-std::vector<Info> Session() {
+namespace {
+std::vector<Info> Collect(bool mineOnly) {
     std::vector<Info> out;
     DWORD mine = 0;
     ProcessIdToSessionId(GetCurrentProcessId(), &mine);
     ForEach([&](const SysProc& p) {
         DWORD pid = (DWORD)(ULONG_PTR)p.pid;
-        if (pid <= 4 || p.session != mine) return;
+        if (pid <= 4 || (mineOnly && p.session != mine)) return;
         Info i;
         i.pid = pid;
         i.parent = (DWORD)(ULONG_PTR)p.parent;
@@ -112,5 +113,9 @@ std::vector<Info> Session() {
     });
     return out;
 }
+}  // namespace
+
+std::vector<Info> Session() { return Collect(true); }
+std::vector<Info> All() { return Collect(false); }
 
 }  // namespace procsnap

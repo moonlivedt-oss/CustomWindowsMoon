@@ -17,6 +17,7 @@
 #include "core/macro.h"
 #include "core/secrets.h"
 #include "core/text.h"
+#include "core/usage.h"
 #include "desk/share.h"
 #include "desk/snip.h"
 #include "menu/menu.h"
@@ -388,6 +389,7 @@ std::vector<Item> Items(const std::wstring& tag) {
 
 void Use(int n) {
     if (n < 0 || n >= (int)g_list.size() || !OpenRetry()) return;
+    usage::Hit(L"cliphist");
     Entry e = g_list[n];
     EmptyClipboard();
     bool ok = false;

@@ -25,6 +25,7 @@
 #include "gfx/scene.h"
 #include "app/toolsui.h"
 #include "core/cfgdiff.h"
+#include "core/usage.h"
 
 namespace studio {
 
@@ -152,6 +153,8 @@ enum Id {
     ID_GAME_LEARN,
     ID_GAME_BACK,
     ID_GAME_LIGHT,
+    ID_GAME_SKIP,        // «Не игры» (games_skip)
+    ID_BOOST_THRESHOLD,  // когда предлагать освободить память (minFreePercent в boost.config.json)
     ID_DEV_MEM,
     ID_DEV_BUSY,
     ID_SHARE_MASK,
@@ -277,9 +280,12 @@ enum Id {
     ID_LANE_BIN,          // «Кольца»: корзина под дорожками
     ID_TAPE,              // лента правок
     ID_ICON_DOCK,         // сетка значков-дока (наведение)
-    ID_FLOW_FILL,         // «Наполнить из папки»
-    ID_FLOW_FILES,        // «И обычные файлы»
-    ID_APP_NEW,           // «Программы»: поле своей программы
+    ID_ICON_SEARCH,
+    ID_ICON_STYLE,
+    ID_ICON_THEME,
+    ID_FLOW_FILL,   // «Наполнить из папки»
+    ID_FLOW_FILES,  // «И обычные файлы»
+    ID_APP_NEW,     // «Программы»: поле своей программы
     ID_APP_NEW_BTN,
     ID_APP_PRESET = 11800,    // +i: заготовка кольца программы
     ID_APP = 12000,           // +кольцо*100 + поле (studio_apps.cpp)
@@ -325,15 +331,17 @@ enum Id {
     ID_SUBTAB = 9700,        // +страница: вкладка внутри группы
     ID_HOME_TILE = 9800,     // +i: предмет карты экрана «Обзора» (+50 - его анимация)
 
-    ID_STATE_PROJ = 10000,  // +i: строка мусора проектов (выбор)
-    ID_STATE_DL = 10100,    // +i: строка Загрузок (выбор)
-    ID_STATE_APP = 10200,   // +i: «Закрыть» у тяжёлой программы
-    ID_STATE_ANIM = 10300,  // +i: появление шкал и полос
-    ID_PATH_SUGG = 10400,   // +i: подсказка похожей папки под путём
-    ID_LANE_FIND = 10500,   // +край*100 + i: «найти» на карточке с пропавшим путём
-    ID_LANE_MINI = 10700,   // +j: пункт раскрытой стопки
-    ID_FLOW = 10800,        // +n: плашка второго кольца (щелчок - закрепить)
-    ID_LANE_ANIM = 11000,   // +край*100 + i: раскрытие стопки
+    ID_STATE_PROJ = 10000,    // +i: строка мусора проектов (выбор)
+    ID_STATE_DL = 10100,      // +i: строка Загрузок (выбор)
+    ID_STATE_APP = 10200,     // +i: «Закрыть» у тяжёлой программы
+    ID_STATE_ANIM = 10300,    // +i: появление шкал и полос
+    ID_PATH_SUGG = 10400,     // +i: подсказка похожей папки под путём
+    ID_LANE_FIND = 10500,     // +край*100 + i: «найти» на карточке с пропавшим путём
+    ID_LANE_MINI = 10700,     // +j: пункт раскрытой стопки
+    ID_FLOW = 10800,          // +n: плашка второго кольца (щелчок - закрепить)
+    ID_LANE_ANIM = 11000,     // +край*100 + i: раскрытие стопки
+    ID_STATE_UNUSED = 20300,  // +i: «Выключить» у неиспользуемой возможности
+    ID_ICON_TOPIC = 20200,    // +category
 };
 
 // Пружина раздела «Кольца» (studio_lanes.cpp): карточка, пункт веера, плашка второго кольца, значок дока.
@@ -586,11 +594,12 @@ private:
     void AutoPage(const RectF& r);     // «Автоматика»: переключатели и журнал
     float SubTabs(const RectF& body);  // вкладки группы над страницей; сколько места заняли
     void ToolsPage(const RectF& r);
-    void ToolsPathTab(struct ToolsKit& tk);        // studio_tools_path.cpp
-    void ToolsDiskTab(struct ToolsKit& tk);        // studio_tools_disks.cpp
-    tools::AppHealthIn AppHealthNow();             // снимок для строки здоровья программы (Л27)
-    float MissedCards(float x, float y, float w);  // пропущенные карточки (Л10/Л11); высота, 0 - нечего показать
-    void ToolsDemo();                              // PATH и «Диски» на выдуманных данных (RADIAL_DEMO, эталоны снимков)
+    void ToolsPathTab(struct ToolsKit& tk);           // studio_tools_path.cpp
+    void ToolsDiskTab(struct ToolsKit& tk);           // studio_tools_disks.cpp
+    tools::AppHealthIn AppHealthNow();                // снимок для строки здоровья программы (Л27)
+    float UnusedFeatures(float x, float y, float w);  // «Чем не пользуетесь» (core/usage); 0 - нечего предложить
+    float MissedCards(float x, float y, float w);     // пропущенные карточки (Л10/Л11); высота, 0 - нечего показать
+    void ToolsDemo();  // PATH и «Диски» на выдуманных данных (RADIAL_DEMO, эталоны снимков)
     void ToolsRun(const std::wstring& title, std::function<bool(const tools::Log&, ToolsJob&)> work);
     void ToolsScan(const std::wstring& dir, bool setup = false);  // setup - сперва настроить задачу с правами
     void NetCheck();
@@ -711,6 +720,9 @@ private:
     std::vector<cardlog::Missed> missed_;   // пропущенные карточки (Л10) и заглушённые виды (Л11)
     std::set<std::wstring> muted_;
     unsigned missedGen_ = 0;
+    std::vector<usage::Idle> unused_;
+    int unusedDays_ = 0;
+    ULONGLONG unusedAt_ = 0;
     POINT stateCur_{};  // курсор на прошлом замере: двигался ли, пока перехват молчал
     ULONGLONG stateCurAt_ = 0;
     std::wstring ruleDraft_;  // «Помощники», «Если - то»: правило, что ещё набирают
@@ -728,6 +740,7 @@ private:
     std::wstring boostDir_;
     bool boostPurge_ = true;
     ULONGLONG boostReadAt_ = 0;
+    int boostMinFree_ = 0;  // minFreePercent из boost.config.json
     bool savePending_ = false;
     std::vector<Config> undo_, redo_;
     std::vector<std::wstring> undoWhat_, redoWhat_;  // что сделала каждая правка: подписи ленты правок
@@ -871,7 +884,9 @@ private:
     bool problemsHidden_ = false;
     std::map<std::wstring, FolderStats> stats_;
     std::map<std::wstring, std::vector<Item>> listings_;  // содержимое папок для вкладки «Второе кольцо»
-    std::vector<std::wstring> programIcons_;              // icons\*.png, читаются один раз
+    std::vector<std::wstring> programIcons_;              // relative PNG paths, stable drag IDs
+    std::wstring iconSearch_, iconTheme_, iconContext_, iconViewKey_;
+    int iconTopic_ = 0, iconStyle_ = 0;
     const std::vector<Item>& Listing(const Item& it);
     std::map<std::wstring, std::unique_ptr<Bitmap>> imgs_;
     std::vector<std::function<void()>> deferred_;

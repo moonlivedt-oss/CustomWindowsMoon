@@ -24,5 +24,7 @@ struct Info {
     ULONGLONG priv = 0;     // частные байты
 };
 std::vector<Info> Session();
+// То же по всем сеансам: службы Windows (TiWorker, обновления) работают в сеансе 0
+std::vector<Info> All();
 
 }  // namespace procsnap

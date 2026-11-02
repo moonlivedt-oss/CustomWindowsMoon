@@ -13,11 +13,13 @@ bool Check(const In& in, Out& out) {
         lines.push_back(L"Браузер качает - сеть занята, пинг выше.");
     else if (in.downMbps >= 20)
         lines.push_back(L"Сеть занята приёмом (" + std::to_wstring((int)in.downMbps) + L" Мбит/с) - пинг выше.");
-    if (in.battery)
+    // Одна батарея - не повод для карточки: о ней уже говорит значок режима («От батареи: баланс»). Строкой -
+    // только вместе с тем, что действительно мешает.
+    if (in.battery && !lines.empty())
         lines.push_back(L"От батареи" + (in.percent >= 0 ? L" (" + std::to_wstring(in.percent) + L"%)" : L"") +
                         L": медленнее, хватит на час-полтора; с зарядкой станет «максимум».");
     if (lines.empty()) return false;
-    out.title = lines.size() == 1 && in.battery ? L"Игра от батареи" : L"Перед игрой";
+    out.title = L"Перед игрой";
     for (size_t i = 0; i < lines.size(); ++i) out.text += (i ? L"\n" : L"") + lines[i];
     if (in.updates) {
         out.action = Out::OPEN_UPDATES;

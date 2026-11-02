@@ -10,6 +10,7 @@
 #include "core/bg.h"
 #include "core/text.h"
 #include "core/winlist.h"
+#include "core/usage.h"
 #include "tools/tools.h"
 #include "menu/menu.h"
 #include "studio/studio.h"
@@ -116,6 +117,7 @@ std::wstring Status() { return g_status; }
 
 void Show() {
     if (!g_menu || g_menu->IsOpen()) return;
+    usage::Hit(L"palette");
     std::vector<Item> extra;
     // команды программы, что впереди (кольцо программы): «VS Code: Палитра команд»
     if (const AppRing* app = g_cfg->AppFor(ForegroundExe()))

@@ -639,6 +639,7 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         }
     } else
         GoPage((Page)page);
+    if (page == PAGE_RINGS) tab_ = std::clamp(tab, 0, 2);
     // RADIAL_JOURNAL=n - снять с открытым журналом и отличиями n-й резервной копии (с 1; 0 - без отличий)
     if (const wchar_t* jr = _wgetenv(L"RADIAL_JOURNAL")) {
         ov_ = OV_JOURNAL;

@@ -15,58 +15,45 @@
 // Окно на весь монитор, но точно не игра: браузеры, плееры, показ слайдов, удалённый стол, свои и рабочие
 // программы. Имя exe - в нижнем регистре.
 inline bool NotAGame(const std::wstring& exeLower) {
-    static const wchar_t* kExact[] = {L"chrome.exe",
-                                      L"msedge.exe",
-                                      L"firefox.exe",
-                                      L"opera.exe",
-                                      L"brave.exe",
-                                      L"vivaldi.exe",
-                                      L"browser.exe",
-                                      L"arc.exe",
-                                      L"librewolf.exe",
-                                      L"waterfox.exe",
-                                      L"iexplore.exe",
-                                      L"vlc.exe",
-                                      L"mpc-hc64.exe",
-                                      L"mpc-hc.exe",
-                                      L"mpc-be64.exe",
-                                      L"mpc-be.exe",
-                                      L"mpv.exe",
-                                      L"wmplayer.exe",
-                                      L"video.ui.exe",
-                                      L"smplayer.exe",
-                                      L"stremio.exe",
-                                      L"microsoft.media.player.exe",
-                                      L"powerpnt.exe",
-                                      L"acrord32.exe",
-                                      L"acrobat.exe",
-                                      L"explorer.exe",
-                                      L"applicationframehost.exe",
-                                      L"mstsc.exe",
-                                      L"msrdc.exe",
-                                      L"vmconnect.exe",
-                                      L"obs64.exe",
-                                      L"code.exe",
-                                      L"devenv.exe",
-                                      L"rider64.exe",
-                                      L"blender.exe",
-                                      L"discord.exe",
-                                      L"telegram.exe",
-                                      L"spotify.exe",
-                                      L"steam.exe",
-                                      L"steamwebhelper.exe",
-                                      L"radialmenu.exe",
-                                      L"radialshutup.exe",
-                                      L"windowsterminal.exe",
-                                      L"photos.exe",
-                                      L"microsoft.photos.exe",
-                                      L"unrealeditor.exe",
-                                      L"ue4editor.exe"};
-    static const wchar_t* kPrefix[] = {L"potplayer", L"kmplayer", L"vmware", L"virtualbox", L"plex"};
+    static const wchar_t* kExact[] = {
+        L"chrome.exe", L"msedge.exe", L"firefox.exe", L"opera.exe", L"brave.exe", L"vivaldi.exe", L"browser.exe",
+        L"arc.exe", L"librewolf.exe", L"waterfox.exe", L"iexplore.exe", L"vlc.exe", L"mpc-hc64.exe", L"mpc-hc.exe",
+        L"mpc-be64.exe", L"mpc-be.exe", L"mpv.exe", L"wmplayer.exe", L"video.ui.exe", L"smplayer.exe", L"stremio.exe",
+        L"microsoft.media.player.exe", L"powerpnt.exe", L"acrord32.exe", L"acrobat.exe", L"explorer.exe",
+        L"applicationframehost.exe", L"mstsc.exe", L"msrdc.exe", L"vmconnect.exe", L"obs64.exe", L"code.exe",
+        L"devenv.exe", L"rider64.exe", L"blender.exe", L"discord.exe", L"telegram.exe", L"spotify.exe", L"steam.exe",
+        L"steamwebhelper.exe", L"radialmenu.exe", L"radialshutup.exe", L"windowsterminal.exe", L"photos.exe",
+        L"microsoft.photos.exe", L"unrealeditor.exe", L"ue4editor.exe",
+        // экраны и оверлеи Windows - во весь экран и через Direct3D (журнал: SnippingTool
+        // включал игровой режим 28 раз, экран блокировки - 10, на часы)
+        L"snippingtool.exe", L"screenclippinghost.exe", L"lockapp.exe", L"logonui.exe", L"searchhost.exe",
+        L"searchapp.exe", L"shellexperiencehost.exe", L"startmenuexperiencehost.exe", L"textinputhost.exe",
+        L"magnify.exe", L"sharex.exe",
+        // творческие программы, в том числе из библиотеки Steam
+        L"maya.exe", L"3dsmax.exe", L"houdini.exe", L"houdinifx.exe", L"resolve.exe", L"photoshop.exe", L"afterfx.exe",
+        L"krita.exe", L"unity.exe", L"vtube studio.exe", L"zoom.exe", L"ms-teams.exe"};
+    static const wchar_t* kPrefix[] = {L"potplayer", L"kmplayer", L"vmware", L"virtualbox", L"plex",
+                                       L"godot",     L"start11",  L"adobe ", L"cinema 4d"};
     for (const wchar_t* e : kExact)
         if (exeLower == e) return true;
     for (const wchar_t* p : kPrefix)
         if (exeLower.compare(0, wcslen(p), p) == 0) return true;
+    // заставки Windows
+    return exeLower.size() > 4 && exeLower.compare(exeLower.size() - 4, 4, L".scr") == 0;
+}
+
+// Маска называет программу прямо по имени (NFS14.exe), а не папкой (*\steamapps\common\*): такой выбор - за
+// пользователем, и список «не игр» его не отменяет.
+inline bool NamedExactly(const std::wstring& exeLower, const std::wstring& masks) {
+    for (size_t a = 0; a <= masks.size();) {
+        size_t b = masks.find(L'|', a);
+        if (b == std::wstring::npos) b = masks.size();
+        std::wstring m = masks.substr(a, b - a);
+        if (!m.empty() && m.find_first_of(L"\\*?") == std::wstring::npos && m.size() == exeLower.size() &&
+            _wcsicmp(m.c_str(), exeLower.c_str()) == 0)
+            return true;
+        a = b + 1;
+    }
     return false;
 }
 

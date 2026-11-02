@@ -64,6 +64,7 @@ public:
 
 private:
     using Rgba = motion::Rgba;
+    CoverCache placeholderArt_;
 
     // ----- ресурсы -----
     void EnsureResources(ID2D1DeviceContext* dc);

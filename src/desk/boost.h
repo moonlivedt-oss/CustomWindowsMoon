@@ -24,6 +24,9 @@ struct Settings {
 // Папка Boost: из radial.cfg (boost_dir) или рядом с программой (..\Boost).
 std::wstring Dir(const std::wstring& configured);
 Settings Load(const std::wstring& dir);
+// Порог «предлагать освободить память» из студии: меняется одно число в boost.config.json, остальное - как было
+// (файл общий со скриптами Boost). false - файла нет или в нём нет такого ключа.
+bool SetMinFreePercent(const std::wstring& dir, int percent);
 
 // Что можно закрыть: программы из белого списка, по имени, с памятью.
 struct Group {
@@ -57,7 +60,7 @@ double AvailMb(int* usedPercent = nullptr);
 
 // Очистка памяти с правами администратора.
 bool PurgeTaskExists();
-bool SetupPurgeTask();             // создать задачу (Windows спросит разрешение)
+bool SetupPurgeTask();                                       // создать задачу (Windows спросит разрешение)
 bool RunPurgeAreas(const std::vector<std::wstring>& areas);  // то же с явными областями
 bool RunPurge(const Settings& s);  // запустить задачу без запросов (области - из s); false - не готова
 int PurgeMain(const Settings& s);  // RadialMenu.exe --purge: сама очистка, уже с правами

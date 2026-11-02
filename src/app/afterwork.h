@@ -37,9 +37,12 @@ private:
     ULONGLONG idleSince_ = 0, actAt_ = 0;
 };
 
+// Папки библиотек Steam из libraryfolders.vdf: строки «"path"  "D:\\SteamLibrary"» (\\ в файле - один \)
+std::vector<std::wstring> SteamLibraries(const std::wstring& vdf);
+
 // --- в программе ---
 int FreshPartials();      // недокачанных файлов в Загрузках, которые писались за 2 минуты (и для Л21)
-bool SteamDownloading();  // в steamapps\downloading есть папки игр
+bool SteamDownloading();  // в steamapps\downloading какой-нибудь библиотеки писали за 2 минуты (пауза - не загрузка)
 void Init(HINSTANCE inst, const Config* cfg);
 void Arm(Mode m);  // OFF - отменить
 Mode Armed();

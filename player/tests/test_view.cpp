@@ -71,6 +71,23 @@ void RunUntil(view::PlayerView& v, double& now, double t, const view::PlaybackSn
 
 }  // namespace
 
+TEST(ClassicLayoutGrowsForLargeTextWithoutControlOverlap) {
+    const auto theme = Lib().Make("moon");
+    view::LayoutInput input;
+    input.theme = &theme;
+    input.geometry = Lib().Layout("classic");
+    auto layout = view::MakeLayout("classic");
+    for (float scale : {1.f, 1.2f, 1.5f}) {
+        input.textScale = scale;
+        view::Frame frame;
+        layout->Arrange(input, false, frame);
+        const auto size = layout->WindowSize(input, false);
+        CHECK(frame[view::Elem::Play].Bottom() < frame[view::Elem::Volume].y);
+        CHECK(frame[view::Elem::VolBtn].Bottom() <= size.h);
+        CHECK(frame[view::Elem::Album].Bottom() < frame[view::Elem::Viz].y);
+    }
+}
+
 TEST(ClassicLayoutMatchesMockup) {
     // Эталон - getBoundingClientRect() элементов mockup/index.html (тема «Стекло», окно 420x680)
     const theme::Theme t = Lib().Make("glass");
@@ -190,6 +207,8 @@ TEST(ViewButtonsAndSliders) {
     // Заголовок окна тянет окно, кнопки заголовка - нет
     CHECK(v.HitTest({100, 20}) == view::PlayerView::Hit::Caption);
     CHECK(v.HitTest({400, 20}) == view::PlayerView::Hit::Client);
+    CHECK(v.HitTest({210, 150}) == view::PlayerView::Hit::Caption);  // cover drags the compact window
+    CHECK(v.HitTest({210, 370}) == view::PlayerView::Hit::Caption);  // title also drags
 }
 
 TEST(ViewPlaylistAndMiniTransitions) {
@@ -218,6 +237,11 @@ TEST(ViewPlaylistAndMiniTransitions) {
     CHECK(host.lastSize.w == 360 && host.lastSize.h == 88);
     CHECK(std::abs(v.miniAlpha.Value(now) - 1) < 1e-4 && v.fullAlpha.Value(now) < 1e-4);
     CHECK(v.HitTest({200, 40}) == view::PlayerView::Hit::Caption);  // мини-полоску можно тянуть
+    CHECK(v.HitTest({35, 40}) == view::PlayerView::Hit::Caption);  // mini cover
+    CHECK(v.HitTest({6, 40}) == view::PlayerView::Hit::Caption);   // explicit grip
+    CHECK(v.HitTest({282, 42}) == view::PlayerView::Hit::Client);  // play stays clickable
+    CHECK(v.HitTest({333, 42}) == view::PlayerView::Hit::Client);  // expand stays clickable
+    CHECK(v.HitTest({180, 82}) == view::PlayerView::Hit::Client);  // seek stays draggable
     v.ToggleMini(now);
     RunUntil(v, now, now + 0.5, s);
     CHECK(host.lastSize.w == 420 && host.lastSize.h == 680);

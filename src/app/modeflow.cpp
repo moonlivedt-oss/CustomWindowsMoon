@@ -105,14 +105,16 @@ void GameBackTick(ULONGLONG now) {
 }
 
 // Г1: игру узнали по окну на весь экран - после игры предложить запомнить её в games (тогда режим включится сразу)
-void GameLearnOffer() {
+void GameLearnOffer(ULONGLONG playedMs) {
     std::wstring path = g_game.TakeGuessed();
-    if (path.empty() || !g_cfg.gameLearn) return;
+    // Пару минут во весь экран - не игра: снимок экрана, заставка, показ слайдов. Такое не предлагаем запомнить,
+    // иначе одно «Запомнить» превращает каждый снимок экрана в игровой режим.
+    if (path.empty() || !g_cfg.gameLearn || playedMs < 3 * 60000) return;
     std::wstring exe = gm::FileName(path), key = L"game:" + exe;
     if (exe.empty() || ModeAsked(key) || gm::MatchAny(path, g_cfg.games)) return;
     g_modeCard.kind = L"Запомнить игру";
-    g_modeCard.yesLabel = L"Запомнить";
-    g_modeCard.noLabel = L"Не спрашивать";
+    g_modeCard.yesLabel = L"Это игра";
+    g_modeCard.noLabel = L"Не игра";
     g_modeCard.onYes = [exe] {
         ClearLabels();
         EditConfig([&](Config& c) { c.games += (c.games.empty() ? L"" : L"|") + exe; });
@@ -121,14 +123,48 @@ void GameLearnOffer() {
                         L"Красота, «Игровой режим».",
                         CurrentTheme(g_cfg));
     };
-    g_modeCard.onNo = [key] {
+    // «Не игра» - в исключения: раньше она лишь переставала спрашивать, а режим всё равно включался
+    g_modeCard.onNo = [key, exe] {
         ClearLabels();
         ModeMarkAsked(key);
+        EditConfig([&](Config& c) { c.gamesSkip += (c.gamesSkip.empty() ? L"" : L"|") + exe; });
     };
-    g_modeCard.Show(BoostCard::OFFER, L"Запомнить «" + exe + L"» как игру?",
-                    L"Узнал её по окну на весь экран. В списке игр режим включится сразу, без 4 с ожидания. Если "
-                    L"игра лёгкая и красоту выключать не нужно - добавьте её в «Лёгкие игры» в студии.",
+    g_modeCard.Show(BoostCard::OFFER, L"«" + exe + L"» - это игра?",
+                    L"Игровой режим включился сам: программа была во весь экран. «Это игра» - в следующий раз режим "
+                    L"включится сразу. «Не игра» - больше не будет включаться из-за неё.",
                     CurrentTheme(g_cfg), 30000);
+}
+
+// Режим включился по догадке (окно на весь экран, не по списку игр): сразу сказать почему и дать исправить одним
+// нажатием - не ждать конца «игры», которая может оказаться экраном блокировки на два часа
+void GameGuessOffer() {
+    const std::wstring path = g_game.Guessed();
+    if (path.empty() || g_game.Manual() || !g_cfg.gameLearn) return;
+    std::wstring exe = gm::FileName(path), key = L"game:" + exe;
+    if (exe.empty() || ModeAsked(key) || gm::MatchAny(path, g_cfg.games)) return;
+    g_modeCard.kind = L"Игровой режим по догадке";
+    g_modeCard.yesLabel = L"Не игра";
+    g_modeCard.noLabel = L"Это игра";
+    g_modeCard.onYes = [key, exe] {
+        ClearLabels();
+        ModeMarkAsked(key);
+        EditConfig([&](Config& c) { c.gamesSkip += (c.gamesSkip.empty() ? L"" : L"|") + exe; });
+        g_game.SetManual(false, g_cfg);  // выключить сейчас, не дожидаясь, пока программа уйдёт с экрана
+        g_modeCard.Show(BoostCard::DONE, L"Игровой режим выключен",
+                        L"«" + exe +
+                            L"» больше не будет его включать. Вернуть - в студии: Стол - Красота, "
+                            L"«Не игры».",
+                        CurrentTheme(g_cfg), 6000);
+    };
+    g_modeCard.onNo = [key, exe] {
+        ClearLabels();
+        ModeMarkAsked(key);
+        EditConfig([&](Config& c) { c.games += (c.games.empty() ? L"" : L"|") + exe; });
+    };
+    g_modeCard.Show(BoostCard::OFFER, L"Игровой режим: «" + exe + L"»",
+                    L"Включился сам: программа во весь экран и рисует через видеокарту. Если это не игра - нажмите, "
+                    L"режим выключится и больше не будет включаться из-за неё.",
+                    CurrentTheme(g_cfg), 15000, Toast::G_INFO);
 }
 
 // Р1: в режиме разработки физическая память занята на 90% дольше 20 с - сказать, кто её занимает, и предложить
@@ -173,6 +209,8 @@ void DevMemTick(ULONGLONG now) {
         if (EndsWithI(n, L".exe")) n.resize(n.size() - 4);
         who += (i ? L", " : L"") + n + L" " + Size(top[i].second / 1048576.0);
     }
+    // память занял сам редактор - закрывать нечего, «Освободить» ничего бы не дал
+    if (who.empty()) return;
     g_modeCard.kind = L"Память в режиме разработки";
     g_modeCard.yesLabel = L"Освободить";
     g_modeCard.noLabel = L"Не сейчас";

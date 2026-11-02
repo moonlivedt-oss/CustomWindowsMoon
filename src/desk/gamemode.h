@@ -44,8 +44,9 @@ public:
     bool GameInFront() const;
     // игра, узнанная по окну на весь экран (не по маске), - полный путь; пусто - такой не было. Забирается один раз.
     std::wstring TakeGuessed();
+    const std::wstring& Guessed() const { return guessPath_; }  // то же, не забирая (режим включился по догадке)
     std::vector<DWORD> GamePids() const;  // процессы игр; для полноэкранной без маски - процесс активного окна
-    void Shutdown();                                        // при выходе: вернуть систему как была
+    void Shutdown();                      // при выходе: вернуть систему как была
 
 private:
     bool Detect(const Config& cfg, std::wstring& name);

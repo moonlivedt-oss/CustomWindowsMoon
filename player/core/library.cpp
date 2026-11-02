@@ -7,6 +7,8 @@
 #include <unordered_map>
 
 #include "core/player.h"
+#include "core/duplicates.h"
+#include <map>
 #include "core/tags.h"
 #include "core/text.h"
 
@@ -59,9 +61,19 @@ bool Library::RemoveFolder(const std::filesystem::path& dir) {
     folders_.erase(std::remove_if(folders_.begin(), folders_.end(), [&](const auto& f) { return Key(f) == k; }),
                    folders_.end());
     if (folders_.size() == before) return false;
+    // A hidden copy in a folder that stays takes over, otherwise the music would vanish until a rescan
+    for (auto& t : tracks_) {
+        t.copies.erase(std::remove_if(t.copies.begin(), t.copies.end(), [&](const auto& c) { return !Contains(c); }),
+                       t.copies.end());
+        if (!Contains(t.path) && !t.copies.empty()) {
+            t.path = t.copies.front();
+            t.copies.erase(t.copies.begin());
+        }
+    }
     // Треки из убранной папки уходят сразу, не дожидаясь сканирования
-    tracks_.erase(std::remove_if(tracks_.begin(), tracks_.end(), [&](const LibraryTrack& t) { return !Contains(t.path); }),
-                  tracks_.end());
+    tracks_.erase(
+        std::remove_if(tracks_.begin(), tracks_.end(), [&](const LibraryTrack& t) { return !Contains(t.path); }),
+        tracks_.end());
     return true;
 }
 
@@ -94,7 +106,8 @@ void Library::SetTracks(std::vector<LibraryTrack> tracks) {
 void Library::NotePlayed(const std::filesystem::path& file, int64_t unixTime) {
     const std::string k = Key(file);
     for (auto& t : tracks_)
-        if (Key(t.path) == k) {
+        if (Key(t.path) == k ||
+            std::any_of(t.copies.begin(), t.copies.end(), [&](const auto& c) { return Key(c) == k; })) {
             ++t.plays;
             t.lastPlayed = unixTime;
             return;
@@ -109,7 +122,8 @@ std::vector<PlaylistEntry> Library::Entries() const {
 }
 
 std::vector<LibraryTrack> Library::Scan(const std::vector<std::filesystem::path>& folders,
-                                        const std::vector<LibraryTrack>& previous, const std::atomic<bool>* cancel) {
+                                        const std::vector<LibraryTrack>& previous, const std::atomic<bool>* cancel,
+                                        bool hideDuplicates) {
     std::unordered_map<std::string, const LibraryTrack*> cache;
     for (const auto& t : previous) cache[Key(t.path)] = &t;
     std::vector<LibraryTrack> out;
@@ -158,6 +172,34 @@ std::vector<LibraryTrack> Library::Scan(const std::vector<std::filesystem::path>
         if (a.trackNo != b.trackNo) return (a.trackNo ? a.trackNo : 100000) < (b.trackNo ? b.trackNo : 100000);
         return NaturalLess(text::PathToUtf8(a.path.filename()), text::PathToUtf8(b.path.filename()));
     });
+    if (hideDuplicates) {
+        std::map<uint64_t, size_t> sizes;
+        for (const auto& track : out) ++sizes[track.size];
+        std::map<std::pair<uint64_t, uint64_t>, std::vector<size_t>> fingerprints;
+        std::vector<LibraryTrack> unique;
+        for (auto& track : out) {
+            if (cancel && cancel->load()) return {};
+            track.copies.clear();
+            bool duplicate = false;
+            if (track.size && sizes[track.size] > 1) {
+                const auto fingerprint = FileFingerprint(track.path, cancel);
+                if (fingerprint) {
+                    auto& candidates = fingerprints[{track.size, *fingerprint}];
+                    for (auto index : candidates) {
+                        // A hash is only an index: compare bytes before hiding anything.
+                        if (SameFileContents(track.path, unique[index].path, cancel)) {
+                            unique[index].copies.push_back(track.path);
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate) candidates.push_back(unique.size());
+                }
+            }
+            if (!duplicate) unique.push_back(std::move(track));
+        }
+        return unique;
+    }
     return out;
 }
 
@@ -165,6 +207,7 @@ json::Value Library::ToJson() const {
     json::Value v = json::Value::MakeObject();
     v["version"] = 1;
     v["autoScan"] = autoScan_;
+    v["hideDuplicates"] = hideDuplicates_;
     json::Value folders = json::Value::MakeArray();
     for (const auto& f : folders_) folders.Push(text::PathToUtf8(f));
     v["folders"] = std::move(folders);
@@ -176,6 +219,10 @@ json::Value Library::ToJson() const {
         if (!t.meta.artist.empty()) o["artist"] = t.meta.artist;
         if (!t.meta.album.empty()) o["album"] = t.meta.album;
         if (t.meta.duration > 0) o["duration"] = std::round(t.meta.duration * 100) / 100;
+        if (!t.copies.empty()) {
+            o["copies"] = json::Value::MakeArray();
+            for (const auto& path : t.copies) o["copies"].Push(text::PathToUtf8(path));
+        }
         if (t.trackNo) o["track"] = t.trackNo;
         o["size"] = static_cast<double>(t.size);
         o["mtime"] = std::to_string(t.mtime);  // строкой: в double счётчик времени Windows теряет точность
@@ -191,12 +238,15 @@ void Library::FromJson(const json::Value& v) {
     folders_.clear();
     tracks_.clear();
     autoScan_ = v.Get("autoScan").AsBool(true);
+    hideDuplicates_ = v.Get("hideDuplicates").AsBool(true);
     for (const auto& f : v.Get("folders").Items())
         if (f.IsString() && !f.AsString().empty()) folders_.push_back(text::Utf8ToPath(f.AsString()));
     for (const auto& o : v.Get("tracks").Items()) {
         if (!o.Get("path").IsString()) continue;
         LibraryTrack t;
         t.path = text::Utf8ToPath(o.Get("path").AsString());
+        for (const auto& alias : o.Get("copies").Items())
+            if (alias.IsString()) t.copies.push_back(text::Utf8ToPath(alias.AsString()));
         t.meta.title = o.Get("title").AsString();
         t.meta.artist = o.Get("artist").AsString();
         t.meta.album = o.Get("album").AsString();
@@ -241,19 +291,19 @@ bool Library::Load(const std::filesystem::path& file) {
 LibraryScanner::~LibraryScanner() { Stop(); }
 
 bool LibraryScanner::Start(std::vector<std::filesystem::path> folders, std::vector<LibraryTrack> previous,
-                           std::function<void()> done) {
+                           std::function<void()> done, bool hideDuplicates) {
     if (running_.load()) return false;
     if (thread_.joinable()) thread_.join();
     running_ = true;
     cancel_ = false;
     ready_ = false;
-    thread_ = std::thread([this, folders = std::move(folders), previous = std::move(previous),
-                           done = std::move(done)] {
-        result_ = Library::Scan(folders, previous, &cancel_);
-        ready_ = !cancel_.load();
-        running_ = false;
-        if (ready_ && done) done();
-    });
+    thread_ = std::thread(
+        [this, folders = std::move(folders), previous = std::move(previous), done = std::move(done), hideDuplicates] {
+            result_ = Library::Scan(folders, previous, &cancel_, hideDuplicates);
+            ready_ = !cancel_.load();
+            running_ = false;
+            if (ready_ && done) done();
+        });
     return true;
 }
 

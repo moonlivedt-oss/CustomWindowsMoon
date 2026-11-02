@@ -108,6 +108,7 @@
         "skin": {
           "description": "Пресет",
           "enum": [
+            "moon",
             "glass",
             "frost",
             "neon",
@@ -814,6 +815,7 @@
         },
         "id": {
           "enum": [
+            "moon",
             "glass",
             "frost",
             "neon",

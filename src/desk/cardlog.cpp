@@ -16,7 +16,7 @@ unsigned g_gen = 1;
 Strikes g_strikes;
 std::set<std::wstring> g_mutes;
 bool g_mutesRead = false;
-std::function<void(const std::wstring&)> g_ask;
+std::function<bool(const std::wstring&)> g_ask;
 std::function<bool(const std::wstring&, const std::wstring&)> g_digest;
 
 std::wstring MutesFile() {
@@ -24,6 +24,11 @@ std::wstring MutesFile() {
     ExpandEnvironmentStringsW(L"%APPDATA%\\MoonDesk", p, MAX_PATH);
     CreateDirectoryW(p, nullptr);
     return std::wstring(p) + L"\\cards.tsv";
+}
+
+std::wstring StrikesFile() {
+    std::wstring f = MutesFile();
+    return f.substr(0, f.size() - 4) + L"_strikes.tsv";
 }
 
 // под g_lock
@@ -38,16 +43,28 @@ void ReadMutes() {
     CloseHandle(f);
     raw.resize(got);
     g_mutes = ParseMutes(Widen(raw));
+    // счёт закрытий подряд - рядом, в cards_strikes.tsv
+    f = CreateFileW(StrikesFile().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    raw.assign(64 * 1024, '\0');
+    got = 0;
+    ReadFile(f, raw.data(), (DWORD)raw.size(), &got, nullptr);
+    CloseHandle(f);
+    raw.resize(got);
+    g_strikes = ParseStrikes(Widen(raw));
 }
 
-void WriteMutes() {
-    std::string s = Narrow(MutesText(g_mutes));
-    HANDLE f = CreateFileW(MutesFile().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+void WriteText(const std::wstring& file, const std::wstring& text) {
+    std::string s = Narrow(text);
+    HANDLE f = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
     if (f == INVALID_HANDLE_VALUE) return;
     DWORD put = 0;
     WriteFile(f, s.data(), (DWORD)s.size(), &put, nullptr);
     CloseHandle(f);
 }
+
+void WriteMutes() { WriteText(MutesFile(), MutesText(g_mutes)); }
+void WriteStrikes() { WriteText(StrikesFile(), StrikesText(g_strikes)); }
 
 void Prune() {  // под g_lock: старше суток и сверх 12 - прочь
     ULONGLONG now = GetTickCount64();
@@ -123,11 +140,20 @@ void Forget(int id) {
 }
 
 void Closed(const std::wstring& kind, bool acted) {
+    if (kind.empty() || kind == L"-") return;
     AcquireSRWLockExclusive(&g_lock);
     ReadMutes();
+    std::wstring before = StrikesText(g_strikes);
     bool ask = !g_mutes.count(kind) && g_strikes.Closed(kind, acted);
+    if (StrikesText(g_strikes) != before) WriteStrikes();
     ReleaseSRWLockExclusive(&g_lock);
-    if (ask && g_ask) g_ask(kind);
+    // не спросили (шла игра) - спросить на следующем закрытии, а не никогда
+    if (ask && g_ask && !g_ask(kind)) {
+        AcquireSRWLockExclusive(&g_lock);
+        g_strikes.Rearm(kind);
+        WriteStrikes();
+        ReleaseSRWLockExclusive(&g_lock);
+    }
 }
 
 bool Muted(const std::wstring& kind) {
@@ -147,6 +173,7 @@ void Mute(const std::wstring& kind, bool on) {
         g_mutes.erase(kind);
     g_strikes.n.erase(kind);
     WriteMutes();
+    WriteStrikes();
     ++g_gen;
     ReleaseSRWLockExclusive(&g_lock);
 }
@@ -159,7 +186,7 @@ std::set<std::wstring> MutedKinds() {
     return m;
 }
 
-void SetAsk(std::function<void(const std::wstring&)> ask) { g_ask = std::move(ask); }
+void SetAsk(std::function<bool(const std::wstring&)> ask) { g_ask = std::move(ask); }
 
 void SetDigest(std::function<bool(const std::wstring&, const std::wstring&)> digest) { g_digest = std::move(digest); }
 

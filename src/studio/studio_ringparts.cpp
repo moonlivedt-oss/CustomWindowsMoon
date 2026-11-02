@@ -12,6 +12,7 @@
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "studio/studio_internal.h"
+#include "studio/icon_catalog.h"
 
 using namespace Gdiplus;
 using ui::Kind;
@@ -376,6 +377,7 @@ float Studio::RingFlow(const RectF& view, float x, float y, float w) {
 float Studio::IconDock(const RectF& view, float x, float y, float w) {
     Item* it = Sel();
     const UiColors& c = ui.C();
+    const float startY = y;
     if (programIcons_.empty()) {  // папка значков не меняется, пока открыта студия
         WIN32_FIND_DATAW fd;
         HANDLE h = FindFirstFileW((ExeDir() + L"\\icons\\*.png").c_str(), &fd);
@@ -387,12 +389,115 @@ float Studio::IconDock(const RectF& view, float x, float y, float w) {
             FindClose(h);
         }
         std::sort(programIcons_.begin(), programIcons_.end());
+        for (const auto& theme : Themes()) {
+            auto dir = std::wstring(L"illustrated/") + theme.key + L"/";
+            HANDLE scan = FindFirstFileW((ExeDir() + L"/icons/" + dir + L"*.png").c_str(), &fd);
+            if (scan == INVALID_HANDLE_VALUE) continue;
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) programIcons_.push_back(dir + fd.cFileName);
+            } while (FindNextFileW(scan, &fd));
+            FindClose(scan);
+        }
+        // Tile IDs are ID_GRID_ICON + index: beyond the range they would collide with ID_LIB_CAT
+        if (programIcons_.size() > ID_LIB_CAT - ID_GRID_ICON) programIcons_.resize(ID_LIB_CAT - ID_GRID_ICON);
     }
-    const std::vector<std::wstring>& files = programIcons_;
-    float tile = ui.S(64), gap = ui.S(10);
+    // Change selection: start with recommendations for the new sector, retain its palette choice.
+    std::wstring context = it->name + L" " + it->path;
+    if (!icon_catalog::Topic(context))
+        for (size_t n = 0; n < std::min<size_t>(it->children.size(), 16); ++n) context += L" " + it->children[n].name;
+    auto contextKey = std::to_wstring(ring_) + L":" + std::to_wstring(sel_);
+    if (iconContext_ != contextKey) {
+        iconContext_ = contextKey;
+        iconSearch_.clear();
+        iconTopic_ = 0;
+    }
+    float searchW = std::max(ui.S(140), w - ui.S(350));
+    FieldOrText(
+        ID_ICON_SEARCH, RectF(x, y, searchW, ui.S(36)), view, iconSearch_,
+        [this](const std::wstring& s) { iconSearch_ = s; }, L"Найти: книга, музыка, код, folder…");
+    ui.Segmented(ID_ICON_STYLE, RectF(x + searchW + ui.S(10), y, w - searchW - ui.S(10), ui.S(36)),
+                 {L"Объёмные", L"Все", L"Прежние"}, iconStyle_);
+    y += ui.S(46);
+    auto themeKey = iconTheme_.empty() ? cfg.theme : iconTheme_;
+    std::wstring themeName = themeKey;
+    for (const auto& theme : Themes())
+        if (theme.key == themeKey) themeName = theme.name;
+    if (ui.Button(ID_ICON_THEME, RectF(x, y, std::min(w, ui.S(320)), ui.S(34)),
+                  (iconTheme_.empty() ? L"Тема автоматически: " : L"Тема: ") + themeName + L"  ▾")) {
+        Defer([this] {
+            HMENU menu = CreatePopupMenu();
+            AppendMenuW(menu, MF_STRING | (iconTheme_.empty() ? MF_CHECKED : 0), 1,
+                        L"Автоматически по теме RadialMenu");
+            int n = 0;
+            for (const auto& theme : Themes()) {
+                AppendMenuW(menu, MF_STRING | (theme.key == iconTheme_ ? MF_CHECKED : 0), 10 + n++, theme.name);
+            }
+            POINT pt = ui.Mouse();
+            ClientToScreen(wnd, &pt);
+            int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, wnd, nullptr);
+            DestroyMenu(menu);
+            if (cmd == 1) iconTheme_.clear();
+            if (cmd >= 10 && cmd < 10 + (int)Themes().size()) iconTheme_ = Themes()[cmd - 10].key;
+        });
+    }
+    y += ui.S(44);
+    float chipX = x;
+    const auto& topics = icon_catalog::Topics();
+    for (int n = 0; n < (int)topics.size(); ++n) {
+        float cw = ui.Measure(topics[n], 12, true) + ui.S(24);
+        if (chipX + cw > x + w && chipX > x) {
+            chipX = x;
+            y += ui.S(36);
+        }
+        if (ui.Button(ID_ICON_TOPIC + n, RectF(chipX, y, cw, ui.S(30)), topics[n],
+                      iconTopic_ == n ? Kind::Primary : Kind::Ghost))
+            iconTopic_ = n;
+        chipX += cw + ui.S(5);
+    }
+    y += ui.S(42);
+    std::vector<std::wstring> files;
+    std::vector<int> ids;
+    std::vector<std::pair<int, int>> ranked;
+    for (int n = 0; n < (int)programIcons_.size(); ++n) {
+        const auto& file = programIcons_[n];
+        bool illustrated = file.rfind(L"illustrated/", 0) == 0;
+        if (iconStyle_ == 0 && !illustrated) continue;
+        if (iconStyle_ == 2 && illustrated) continue;
+        if (illustrated && file.rfind(L"illustrated/" + themeKey + L"/", 0) != 0) continue;
+        auto e = icon_catalog::Describe(file);
+        if (!icon_catalog::Matches(e, file, iconSearch_)) continue;
+        if (iconTopic_ >= 2 && e.topic != iconTopic_) continue;
+        int score = icon_catalog::Score(e, file, context);
+        // A search is explicit intent: do not hide its matches behind inferred recommendations.
+        if (iconTopic_ == 0 && iconSearch_.empty() && score <= 0) continue;
+        ranked.push_back({n, score});
+    }
+    std::stable_sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    for (const auto& match : ranked) {
+        files.push_back(programIcons_[match.first]);
+        ids.push_back(match.first);
+    }
+    auto viewKey = contextKey + L"|" + themeKey + L"|" + std::to_wstring(iconStyle_) + L"|" +
+                   std::to_wstring(iconTopic_) + L"|" + iconSearch_;
+    if (iconViewKey_ != viewKey) {
+        dockTiles_.clear();
+        dockDrag_ = -1;
+        iconViewKey_ = viewKey;
+    }
+    int inferred = icon_catalog::Topic(context);
+    std::wstring summary = std::to_wstring(files.size()) + L" значков";
+    if (iconTopic_ == 0 && inferred) summary += L" · по названию и пути: " + topics[inferred];
+    ui.Text(summary, RectF(x, y, w, ui.S(22)), c.muted, 12);
+    y += ui.S(28);
+    if (files.empty()) {
+        ui.Text(L"Подходящих значков нет. Выбери «Все» или измени запрос и набор.", RectF(x, y, w, ui.S(48)), c.muted,
+                13, false, ui::Left, true);
+        return y - startY + ui.S(54);
+    }
+    float tile = ui.S(80), gap = ui.S(12), rowStep = tile + ui.S(32);
     int cols = std::max(1, (int)((w + gap) / (tile + gap)));
     int rows = ((int)files.size() + cols - 1) / cols;
-    RectF grid(x, y, w, rows * (tile + gap));
+    RectF grid(x, y, w, rows * rowStep);
     RectF gv = Intersect(grid, view);
     if (gv.Height > 1) {
         ui.Hover(ID_ICON_DOCK, gv);
@@ -403,7 +508,7 @@ float Studio::IconDock(const RectF& view, float x, float y, float w) {
         ui.interactive && Grow(grid, ui.S(24)).Contains((REAL)m.x, (REAL)m.y) && view.Contains((REAL)m.x, (REAL)m.y);
     int dragK = -1;
     for (int k = 0; k < (int)files.size(); ++k)
-        if (ui.Dragging(ID_GRID_ICON + k)) dragK = k;
+        if (ui.Dragging(ID_GRID_ICON + ids[k])) dragK = k;
     if (!ui.Down()) dockDrag_ = -1;
     PointF sq(iconTile_.X + iconTile_.Width / 2 - x, iconTile_.Y + iconTile_.Height / 2 - y);  // в рамке сетки
     float reach = ui.S(120);
@@ -421,7 +526,7 @@ float Studio::IconDock(const RectF& view, float x, float y, float w) {
     };
     std::vector<int> order;
     for (int k = 0; k < (int)files.size(); ++k) {
-        float hx = (k % cols) * (tile + gap), hy = (k / cols) * (tile + gap);
+        float hx = (k % cols) * (tile + gap), hy = (k / cols) * rowStep;
         auto f = dockTiles_.find(files[k]);
         if (f == dockTiles_.end()) {
             Mover mv;
@@ -432,7 +537,7 @@ float Studio::IconDock(const RectF& view, float x, float y, float w) {
         float cxk = x + hx + tile / 2, cyk = y + hy + tile / 2;
         float nb = inside && dragK < 0 ? std::max(0.0f, 1 - std::hypot(m.x - cxk, m.y - cyk) / ui.S(90)) : 0;
         moving |= Fade(mv.s, 1 + nb * 0.35f, ldt_, 12);
-        int id = ID_GRID_ICON + k;
+        int id = ID_GRID_ICON + ids[k];
         RectF home(x + hx, y + hy, tile, tile);
         RectF vis = Intersect(home, view);
         bool clicked = vis.Height > 1 && ui.Click(id, vis);
@@ -475,16 +580,21 @@ float Studio::IconDock(const RectF& view, float x, float y, float w) {
         std::wstring rel = L"icons/" + files[k];
         bool on = _wcsicmp(it->icon.c_str(), rel.c_str()) == 0 ||
                   _wcsicmp(it->icon.c_str(), (L"icons\\" + files[k]).c_str()) == 0;
-        int id = ID_GRID_ICON + k;
+        int id = ID_GRID_ICON + ids[k];
         if (k == dragK)
             ui.Fill(RectF(tr.X + ui.S(3), tr.Y + ui.S(8), tr.Width, tr.Height), Color(100, 0, 0, 0), ui.S(14));
         ui.Fill(tr, on || ui.Hot(id) || k == dragK ? c.cardHi : c.card, ui.S(12) * s);
         if (on) ui.Stroke(tr, c.accent, ui.S(12) * s, ui.S(2));
         IconDrawn(ExeDir() + L"\\icons\\" + files[k], L"", Inset(tr, ui.S(10) * s, ui.S(10) * s));
-        ui.Tip(id, L"Щелчок - поставить; или тяни к квадрату значка");
+        auto info = icon_catalog::Describe(files[k]);
+        ui.Text(info.label,
+                RectF(x + (k % cols) * (tile + gap) - ui.S(3), y + (k / cols) * rowStep + tile + ui.S(3),
+                      tile + ui.S(6), ui.S(21)),
+                on ? c.text : c.muted, 10.5f, false, ui::Center);
+        ui.Tip(id, info.label + L"\n" + files[k] + L"\nЩелчок — поставить; можно перетащить к квадрату");
     }
     if (moving) ui.Invalidate();
-    return grid.Height;
+    return y - startY + grid.Height;
 }
 
 }  // namespace studio

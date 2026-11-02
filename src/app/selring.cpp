@@ -11,6 +11,7 @@
 #include "core/files.h"
 #include "core/launch.h"
 #include "core/text.h"
+#include "core/usage.h"
 #include "desk/cliphist.h"
 #include "gfx/qr.h"
 #include "menu/menu.h"
@@ -363,6 +364,7 @@ void Start(HINSTANCE inst, const Config* cfg, RadialMenu* menu) {
 
 void Trigger() {
     if (!g_wnd || g_busy || (g_menu && g_menu->IsOpen())) return;
+    usage::Hit(L"selring");
     g_busy = true;
     bool copy = !IsTerminal(GetForegroundWindow());
     if (!bg::Run([copy] { Capture(copy); })) g_busy = false;

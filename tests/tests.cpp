@@ -694,6 +694,7 @@ void TestTop20(void (*check)(bool, const char*, int));  // tests_top20.cpp
 void TestMore(void (*check)(bool, const char*, int));   // tests_more.cpp
 void TestLife(void (*check)(bool, const char*, int));   // tests_life.cpp
 void TestSec(void (*check)(bool, const char*, int));    // tests_sec.cpp
+void TestIconCatalog(void (*check)(bool, const char*, int));  // test_icon_catalog.cpp
 
 int wmain() {
     CHECK(ExpandPath(L"{player}") == ExeDir() + L"\\apps\\PlayerMoon\\PlayerMoon.exe");
@@ -701,6 +702,7 @@ int wmain() {
     TestMore(Check);
     TestLife(Check);
     TestSec(Check);
+    TestIconCatalog(Check);
     TestParseCleanLine();
     TestTempRemovable();
     TestWalk();

@@ -30,8 +30,9 @@ public:
     bool Init(HWND hwnd);
     void Shutdown();
 
-    // Размер в физических пикселях
+    // Remember the size; GPU resources are resized between frames, outside window callbacks.
     bool Resize(UINT width, UINT height);
+    void ResetDevice();
     void SetDpi(float dpi);
     float Dpi() const { return dpi_; }
 
@@ -53,6 +54,7 @@ public:
 
 private:
     bool CreateDevice();
+    bool SyncSize();
     void ReleaseDevice();
     bool CreateTarget();
     DXGI_SWAP_CHAIN_DESC1 ChainDesc(bool alpha) const;
@@ -61,6 +63,7 @@ private:
 
     HWND hwnd_ = nullptr;
     UINT width_ = 1, height_ = 1;
+    UINT requestedWidth_ = 1, requestedHeight_ = 1;
     float dpi_ = 96;
     uint64_t generation_ = 0;
     bool composition_ = false;

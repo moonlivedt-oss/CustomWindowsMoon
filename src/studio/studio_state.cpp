@@ -20,6 +20,7 @@
 #include "core/fx.h"
 #include "core/llmouse.h"
 #include "core/text.h"
+#include "core/usage.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "studio/studio.h"
@@ -337,6 +338,7 @@ void Studio::StatePage(const RectF& r) {
 
     // ---- пропущенные карточки (Л10) и заглушённые виды (Л11) ----
     if (float mh = MissedCards(x, y, w)) y += mh + gap;
+    if (float uh = UnusedFeatures(x, y, w)) y += uh + gap;
 
     // ---- важное сейчас (О4): те же дела, что в первом секторе кольца утилит, с кнопкой ----
     if (!stateImpAt_ || now - stateImpAt_ > 10000) {

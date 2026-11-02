@@ -23,7 +23,12 @@ std::wstring KindOf(const std::wstring& title);
 struct Strikes {
     std::map<std::wstring, int> n;
     bool Closed(const std::wstring& kind, bool acted);
+    // вопрос не задали (шла игра): следующее закрытие без действия спросит снова
+    void Rearm(const std::wstring& kind) { n[kind] = 2; }
 };
+// Счёт хранится в файле: иначе карточку, которую отмахивают раз за запуск, перезапуск обнулял навсегда
+std::wstring StrikesText(const Strikes& s);  // строка на вид: «вид<TAB>число»
+Strikes ParseStrikes(const std::wstring& text);
 std::wstring MutesText(const std::set<std::wstring>& kinds);  // строка на вид
 std::set<std::wstring> ParseMutes(const std::wstring& text);
 
@@ -47,9 +52,9 @@ void Closed(const std::wstring& kind, bool acted);  // карточка ушла
 bool Muted(const std::wstring& kind);
 void Mute(const std::wstring& kind, bool on);
 std::set<std::wstring> MutedKinds();
-// Как спросить «больше не показывать?» (основной поток, своя карточка) и куда класть заглушённое (дайджест: true -
-// принято). Задаются один раз при старте.
-void SetAsk(std::function<void(const std::wstring& kind)> ask);
+// Как спросить «больше не показывать?» (основной поток, своя карточка; false - сейчас не спросили, спросить в
+// следующий раз) и куда класть заглушённое (дайджест: true - принято). Задаются один раз при старте.
+void SetAsk(std::function<bool(const std::wstring& kind)> ask);
 void SetDigest(std::function<bool(const std::wstring& title, const std::wstring& text)> digest);
 bool ToDigest(const std::wstring& title, const std::wstring& text);
 

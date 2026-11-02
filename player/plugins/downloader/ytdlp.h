@@ -16,12 +16,17 @@ namespace dl {
 enum class Source { YouTubeMusic, YouTube, Yandex, Other, Invalid };
 
 Source DetectSource(const std::string& url);
+bool IsYandexMusicExtractor(const std::string& line);
+std::string CanonicalDownloadKey(const std::string& url);
+bool IsPlaylist(const std::string& url);
+bool NeedsAccount(const std::string& url);
 const char* SourceName(Source s);  // «YouTube Music», «Яндекс Музыка»...
 
 // Все ссылки http(s) из текста буфера обмена, без повторов, в порядке появления
 std::vector<std::string> ExtractUrls(const std::string& text);
 
 struct Options {
+    std::string archiveFile;  // persistent successful source IDs, shared across playlists
     std::string outDir;     // куда сохранять (UTF-8)
     std::string browser;    // откуда взять вход: "", "firefox", "chrome", "edge"
     std::string ffmpegDir;  // папка с ffmpeg, если не в PATH
@@ -34,7 +39,7 @@ std::vector<std::string> BuildArgs(const std::string& url, const Options& o);
 std::string QuoteArgs(const std::vector<std::string>& args);
 
 struct Event {
-    enum class Type { None, Item, Progress, File, Converting, Error, Warning };
+    enum class Type { None, Item, Progress, File, Converting, Error, Warning, Skipped };
     Type type = Type::None;
     double percent = -1;        // 0..100
     std::string speed, eta;     // как печатает yt-dlp: «2.10MiB/s», «00:05»

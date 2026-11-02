@@ -192,3 +192,54 @@ TEST(LibraryScannerInBackground) {
     CHECK(done && scanner.Take(out) && out.size() == 5);
     CHECK(!scanner.Take(out));  // результат забирается один раз
 }
+
+TEST(LibraryExactDuplicatesAreReversible) {
+    const auto root = tests::TempDir("library_copies");
+    auto original = tests::MakeWav(0.1);
+    auto other = original;
+    other.back() ^= 0x01;  // same size, genuinely different audio data
+    tests::WriteBytes(root / "1 original.wav", original);
+    tests::WriteBytes(root / "2 copy.wav", original);
+    tests::WriteBytes(root / "3 different.wav", other);
+    auto all = pm::Library::Scan({root}, {}, nullptr, false);
+    CHECK(all.size() == 3);
+    auto unique = pm::Library::Scan({root}, all, nullptr, true);
+    CHECK(unique.size() == 2);
+    CHECK(unique[0].path.filename() == "1 original.wav");
+    CHECK(unique[0].copies.size() == 1 && unique[0].copies[0].filename() == "2 copy.wav");
+    CHECK(std::filesystem::exists(root / "2 copy.wav"));
+    pm::Library library;
+    library.AddFolder(root);
+    library.SetTracks(unique);
+    CHECK(library.Save(root / "library.json"));
+    pm::Library restored;
+    CHECK(restored.Load(root / "library.json") && restored.HideDuplicates());
+    CHECK(restored.Tracks()[0].copies == unique[0].copies);
+    all = pm::Library::Scan(restored.Folders(), restored.Tracks(), nullptr, false);
+    CHECK(all.size() == 3);
+    restored.SetHideDuplicates(false);
+    CHECK(restored.Save(root / "library.json"));
+    CHECK(library.Load(root / "library.json") && !library.HideDuplicates());
+}
+
+TEST(LibraryHiddenCopySurvivesFolderRemoval) {
+    const auto root = tests::TempDir("library_copy_folders");
+    const auto wav = tests::MakeWav(0.1);
+    std::filesystem::create_directories(root / "A");
+    std::filesystem::create_directories(root / "B");
+    tests::WriteBytes(root / "A" / "song.wav", wav);
+    tests::WriteBytes(root / "B" / "song.wav", wav);
+    pm::Library library;
+    library.AddFolder(root / "A");
+    library.AddFolder(root / "B");
+    library.SetTracks(pm::Library::Scan(library.Folders(), {}, nullptr, true));
+    CHECK(library.Tracks().size() == 1 && library.Tracks()[0].copies.size() == 1);
+    // Playing the hidden copy counts for the visible track
+    library.NotePlayed(root / "B" / "song.wav", 1700000000);
+    CHECK(library.Tracks()[0].plays == 1);
+    // The folder with the visible file goes away - the copy in the remaining folder takes its place
+    CHECK(library.RemoveFolder(root / "A"));
+    CHECK(library.Tracks().size() == 1);
+    CHECK(library.Tracks()[0].path.parent_path().filename() == "B" && library.Tracks()[0].copies.empty());
+    CHECK(library.Tracks()[0].plays == 1);
+}

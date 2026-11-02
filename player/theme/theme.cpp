@@ -15,7 +15,7 @@ namespace {
 constexpr const char* kFormat = "playermoon-theme";
 constexpr int kVersion = 1;
 // Порядок встроенных тем - как в макете
-constexpr const char* kBuiltinIds[] = {"glass", "frost", "neon", "sunset", "minimal"};
+constexpr const char* kBuiltinIds[] = {"moon", "glass", "frost", "neon", "sunset", "minimal"};
 
 int HexDigit(char c) {
     if (c >= '0' && c <= '9') return c - '0';

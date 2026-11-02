@@ -32,6 +32,7 @@ struct LibraryTrack {
     int64_t mtime = 0;
     uint32_t plays = 0;  // сколько раз дослушан или выбран
     int64_t lastPlayed = 0;  // секунды Unix
+    std::vector<std::filesystem::path> copies;  // byte-identical aliases, never removed from disk
 };
 
 class Library {
@@ -45,6 +46,8 @@ public:
     bool LearnFrom(const std::filesystem::path& opened);
     bool Contains(const std::filesystem::path& file) const;
 
+    bool HideDuplicates() const { return hideDuplicates_; }
+    void SetHideDuplicates(bool on) { hideDuplicates_ = on; }
     bool AutoScan() const { return autoScan_; }
     void SetAutoScan(bool on) { autoScan_ = on; }
 
@@ -64,12 +67,13 @@ public:
     // cancel - флаг остановки (выход из программы). Результат отсортирован: папка, номер, имя.
     static std::vector<LibraryTrack> Scan(const std::vector<std::filesystem::path>& folders,
                                           const std::vector<LibraryTrack>& previous,
-                                          const std::atomic<bool>* cancel = nullptr);
+                                          const std::atomic<bool>* cancel = nullptr, bool hideDuplicates = false);
 
 private:
     std::vector<std::filesystem::path> folders_;
     std::vector<LibraryTrack> tracks_;
     bool autoScan_ = true;
+    bool hideDuplicates_ = true;
 };
 
 // Сканирование в фоновом потоке. done вызывается из фонового потока по окончании
@@ -79,7 +83,7 @@ public:
     ~LibraryScanner();
     // false - сканирование уже идёт (новое начнётся по Rescan после окончания)
     bool Start(std::vector<std::filesystem::path> folders, std::vector<LibraryTrack> previous,
-               std::function<void()> done);
+               std::function<void()> done, bool hideDuplicates = false);
     bool Running() const { return running_.load(); }
     // Результат последнего сканирования (только после done)
     bool Take(std::vector<LibraryTrack>& out);

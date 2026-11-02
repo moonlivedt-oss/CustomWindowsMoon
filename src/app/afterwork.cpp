@@ -1,6 +1,7 @@
 // Сон после работы (Л6): раз в 5 с - идёт ли ещё работа, затихло - отсчёт с карточкой, потом сон или выключение.
 #include <windows.h>
 
+#include <algorithm>
 #include <map>
 
 #include "app/afterwork.h"
@@ -134,19 +135,67 @@ int FreshPartials() {
     return n;
 }
 
-// Steam качает: в steamapps\downloading есть папки игр
-bool SteamDownloading() {
-    wchar_t p[MAX_PATH];
-    ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\Steam\\steamapps\\downloading\\*", p, MAX_PATH);
+namespace {
+
+// Файл в папке (до depth уровней вглубь) писали после since. budget - сколько записей ещё можно посмотреть:
+// у большой игры в downloading тысячи файлов, а ответ нужен за миллисекунды.
+bool WrittenSince(const std::wstring& dir, ULONGLONG since, int depth, int& budget) {
     WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(p, &fd);
+    HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
     if (h == INVALID_HANDLE_VALUE) return false;
-    bool any = false;
+    bool yes = false;
     do {
-        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != L'.') any = true;
-    } while (!any && FindNextFileW(h, &fd));
+        if (fd.cFileName[0] == L'.' || --budget < 0) continue;
+        ULONGLONG wt = ((ULONGLONG)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            yes = depth > 0 && WrittenSince(dir + L"\\" + fd.cFileName, since, depth - 1, budget);
+        else
+            yes = wt >= since;
+    } while (!yes && budget > 0 && FindNextFileW(h, &fd));
     FindClose(h);
-    return any;
+    return yes;
+}
+
+std::vector<std::wstring> SteamLibraryDirs() {
+    wchar_t root[MAX_PATH]{};
+    DWORD size = sizeof(root);
+    std::wstring steam;
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath", RRF_RT_REG_SZ, nullptr, root, &size) ==
+        ERROR_SUCCESS)
+        steam = root;
+    else {
+        ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\Steam", root, MAX_PATH);
+        steam = root;
+    }
+    std::replace(steam.begin(), steam.end(), L'/', L'\\');  // в реестре Steam пишет c:/program files (x86)/steam
+    std::vector<std::wstring> dirs{steam};
+    HANDLE f = CreateFileW((steam + L"\\steamapps\\libraryfolders.vdf").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        std::string text(std::min<DWORD>(GetFileSize(f, nullptr), 1u << 20), '\0');
+        DWORD got = 0;
+        if (!ReadFile(f, text.data(), (DWORD)text.size(), &got, nullptr)) got = 0;
+        CloseHandle(f);
+        text.resize(got);
+        for (const std::wstring& lib : SteamLibraries(Widen(text)))
+            if (_wcsicmp(lib.c_str(), steam.c_str()) != 0) dirs.push_back(lib);
+    }
+    return dirs;
+}
+
+}  // namespace
+
+// Steam качает: в steamapps\downloading любой библиотеки что-то писали за 2 минуты. Одна папка там - ещё не
+// загрузка: поставленные на паузу и ждущие обновления лежат в ней днями (и держали «Сон после работы»).
+bool SteamDownloading() {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULONGLONG since = (((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime) - 2ull * 60 * 10000000;
+    for (const std::wstring& lib : SteamLibraryDirs()) {
+        int budget = 4000;
+        if (WrittenSince(lib + L"\\steamapps\\downloading", since, 3, budget)) return true;
+    }
+    return false;
 }
 
 void Init(HINSTANCE inst, const Config* cfg) {

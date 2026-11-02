@@ -48,7 +48,7 @@ endif()
 set(PM_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(PM_ASSET_FILES
     assets/theme-schema.json assets/layouts.json
-    assets/themes/glass.json assets/themes/frost.json assets/themes/neon.json
+    assets/themes/moon.json assets/themes/glass.json assets/themes/frost.json assets/themes/neon.json
     assets/themes/sunset.json assets/themes/minimal.json)
 set(PM_ASSET_ABS)
 foreach(f ${PM_ASSET_FILES})
@@ -160,12 +160,29 @@ endif()
 target_compile_definitions(pm_tests PRIVATE PM_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     PM_PLUGINS_DIR="${CMAKE_CURRENT_BINARY_DIR}/plugins" PM_TEST_PLUGINS_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
 add_dependencies(pm_tests pm_plugin_history pm_test_plugin_pages)
+if(WIN32)
+    target_compile_definitions(pm_tests PRIVATE PM_FAKE_YTDLP_PATH="${CMAKE_CURRENT_BINARY_DIR}/tools/yt-dlp.exe")
+    add_dependencies(pm_tests pm_plugin_downloader pm_fake_ytdlp)
+endif()
 enable_testing()
 add_test(NAME pm_tests COMMAND pm_tests)
 
 # ---------- Окно (только Windows) ----------
 if(WIN32)
     file(GLOB PM_UI_SOURCES CONFIGURE_DEPENDS ui/*.cpp)
+    add_executable(pm_renderer_tests tests/test_renderer_win.cpp ui/renderer.cpp)
+    target_include_directories(pm_renderer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(pm_renderer_tests PRIVATE ${PM_WARNINGS})
+    target_link_libraries(pm_renderer_tests PRIVATE d2d1 dwrite dcomp d3d11 dxgi windowscodecs ole32 user32)
+    add_test(NAME pm_renderer_tests COMMAND pm_renderer_tests)
+    add_executable(pm_settings_render_tests tests/test_settings_render_win.cpp
+        ui/renderer.cpp ui/text.cpp ui/icons.cpp ui/covers.cpp ui/painter.cpp
+        ui/home.cpp ui/home_workspace.cpp ui/home_settings.cpp ui/settings_preview.cpp)
+    target_compile_options(pm_settings_render_tests PRIVATE ${PM_WARNINGS})
+    target_link_libraries(pm_settings_render_tests PRIVATE pm_view pm_theme pm_core pm_motion
+        d2d1 dwrite dcomp d3d11 dxgi dxguid dwmapi windowscodecs ole32 oleaut32 uuid shell32
+        shlwapi user32 uxtheme advapi32 gdi32 runtimeobject shcore winhttp)
+    add_test(NAME pm_settings_render_tests COMMAND pm_settings_render_tests)
     add_executable(PlayerMoon WIN32 ${PM_UI_SOURCES} ui/res/app.rc)
     target_link_libraries(PlayerMoon PRIVATE pm_view pm_theme pm_core pm_motion
         d2d1 dwrite dcomp d3d11 dxgi dxguid dwmapi windowscodecs ole32 oleaut32 uuid shell32 shlwapi user32 uxtheme advapi32 gdi32

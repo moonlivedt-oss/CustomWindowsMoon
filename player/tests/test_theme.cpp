@@ -1,4 +1,4 @@
-// Темы: все 5 встроенных проходят схему, слияние пользовательской темы, очистка как в макете, палитра обложки.
+// Темы: все 6 встроенных проходят схему, слияние пользовательской темы, очистка как в макете, палитра обложки.
 #include <cmath>
 
 #include "core/json.h"
@@ -30,7 +30,7 @@ bool SameColor(const motion::Rgba& c, int r, int g, int b) {
 TEST(BuiltinThemesPassSchema) {
     const json::Value schema = LoadJson("assets/theme-schema.json");
     CHECK(schema.IsObject());
-    for (const char* id : {"glass", "frost", "neon", "sunset", "minimal"}) {
+    for (const char* id : {"moon", "glass", "frost", "neon", "sunset", "minimal"}) {
         const json::Value doc = LoadJson(std::string("assets/themes/") + id + ".json");
         std::vector<std::string> errs;
         const bool ok = theme::ValidateSchema(schema, doc, &errs);
@@ -60,7 +60,7 @@ TEST(LibraryLoadsAndResolves) {
     theme::ThemeLibrary lib;
     std::vector<std::string> log;
     CHECK(lib.Load(AssetsDir(), &log));
-    CHECK(lib.BuiltinIds().size() == 5);
+    CHECK(lib.BuiltinIds().size() == 6);
     const theme::Theme* neon = lib.Builtin("neon");
     CHECK(neon != nullptr);
     if (!neon) return;

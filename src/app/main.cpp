@@ -57,6 +57,7 @@
 #include "core/themes.h"
 #include "core/night.h"
 #include "core/perf.h"
+#include "core/usage.h"
 #include "desk/battery.h"
 #include "desk/boost.h"
 #include "desk/boostcard.h"
@@ -288,6 +289,7 @@ void PollWork() {
     picker::Tick();
     awake::Tick();
     ModeFlowTick(nowMs);
+    usage::Flush();  // счёт «чем пользуются» - на диск, если менялся
     if (!alt) {
         g_armed = true;
         g_altTab = false;
@@ -395,6 +397,7 @@ void Poll() {
 // Кольцо открытых окон вокруг курсора (Alt + ` или горячий угол).
 void ShowWindowsRing() {
     if (g_menu.IsOpen()) return;
+    usage::Hit(L"winring");
     POINT pt;
     GetCursorPos(&pt);
     HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -663,6 +666,7 @@ void OnGameMode(bool on) {
         gboost::SetGame(true, g_game.GamePids(), GameExe(), g_game.Reason(), g_cfg.boostIslc);
         if (g_cfg.boostOffer) OfferBoost(false);
         GamePrep();  // Л21: обновления, загрузки, батарея - одной карточкой
+        GameGuessOffer();  // по догадке - сразу дать сказать «не игра»
     } else {
         bool quiet = gboost::QuietOn();
         gboost::SetGame(false, {}, L"", L"", false);
@@ -672,8 +676,8 @@ void OnGameMode(bool on) {
             McEnd(sess);
         else
             SessionSummary(sess);
-        g_dev.Reapply(g_cfg);  // игра вернула обои, а редактор ещё открыт
-        GameLearnOffer();      // игру узнали по окну на весь экран - запомнить?
+        g_dev.Reapply(g_cfg);     // игра вернула обои, а редактор ещё открыт
+        GameLearnOffer(sess.ms);  // игру узнали по окну на весь экран - запомнить?
         chips.push_back(L"Красота вернулась");
         if (g_cfg.gameWallpaper && !(g_dev.On() && g_cfg.devWallpaper)) chips.push_back(L"Обои снова идут");
         if (g_cfg.boostEco) chips.push_back(L"Приоритеты как были");
@@ -759,13 +763,12 @@ void RestoreEverything() {
 }
 
 void TrayMenu() {
+    // Сверху - то, чем пользуются каждый день, и всё, что иначе открывается только сочетанием клавиш;
+    // служебное (файл настроек, восстановление) - в подменю, чтобы не мешало
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING | MF_DEFAULT, CMD_EDITOR, L"Редактор колец");
-    AppendMenuW(m, MF_STRING, CMD_EDIT, L"Открыть radial.cfg");
-    AppendMenuW(m, MF_STRING, CMD_FOLDER, L"Папка программы");
-    AppendMenuW(m, MF_STRING, CMD_RELOAD, L"Перечитать настройки");
-    AppendMenuW(m, MF_STRING, CMD_RESET_WINDOWS, L"Вернуть окнам прозрачность и закрепление");
-    AppendMenuW(m, MF_STRING, CMD_RESTORE_ALL, L"Вернуть всё как было");
+    AppendMenuW(m, MF_STRING, CMD_PALETTE, L"Поиск и команды...");
+    AppendMenuW(m, MF_STRING, CMD_WINDOWS, L"Открытые окна кольцом");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     std::wstring game = L"Игровой режим";
     if (g_game.On() && !g_game.Manual()) game += L": " + g_game.Reason();
@@ -789,6 +792,14 @@ void TrayMenu() {
     AppendMenuW(m, MF_STRING | (aw == afterwork::SHUTDOWN ? MF_CHECKED : 0), CMD_AFTER_OFF,
                 (L"Выключить, когда всё закончится" + (aw == afterwork::SHUTDOWN ? awWhy : L"")).c_str());
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    HMENU service = CreatePopupMenu();
+    AppendMenuW(service, MF_STRING, CMD_RESTORE_ALL, L"Вернуть всё как было");
+    AppendMenuW(service, MF_STRING, CMD_RESET_WINDOWS, L"Вернуть окнам прозрачность и закрепление");
+    AppendMenuW(service, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(service, MF_STRING, CMD_RELOAD, L"Перечитать настройки");
+    AppendMenuW(service, MF_STRING, CMD_EDIT, L"Открыть radial.cfg");
+    AppendMenuW(service, MF_STRING, CMD_FOLDER, L"Папка программы");
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)service, L"Обслуживание");
     AppendMenuW(m, MF_STRING | (AutostartOn() ? MF_CHECKED : 0), CMD_AUTOSTART, L"Запускать вместе с Windows");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, CMD_EXIT, L"Выход");
@@ -846,6 +857,7 @@ void ShowDropped(std::unique_ptr<DropMsg> m) {
 void OnPad(int action, LPARAM lp) {
     if (action == gamepad::OPEN) {
         if (g_menu.IsOpen()) return;
+        usage::Hit(L"gamepad");
         POINT pt;
         GetCursorPos(&pt);
         HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -958,6 +970,7 @@ void ShutdownAll() {
     netui::Shutdown();
     toolsui::Shutdown();
     cliphist::Stop();
+    usage::Flush();
     appvol::Stop();
     autos::Shutdown();
     boost::GameTweaks(boost::Load(BoostDir()), false);
@@ -1059,6 +1072,12 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                     break;
                 case CMD_BOOST:
                     OfferBoost(true);
+                    break;
+                case CMD_PALETTE:
+                    palette::Show();
+                    break;
+                case CMD_WINDOWS:
+                    ShowWindowsRing();
                     break;
                 case CMD_FOCUS:
                     focus::On() ? focus::Stop() : focus::Start(0);
@@ -1319,6 +1338,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     // двойной клик по пустому столу: целое кольцо вокруг курсора
     g_deskClick.onDouble = [](POINT pt) {
         if (g_menu.IsOpen()) return;
+        usage::Hit(L"deskdouble");
         FILETIME ft = FileTime(g_cfgPath);
         if (CompareFileTime(&g_cfgTime, &ft) != 0) Reload();
         HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -1356,16 +1376,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     // Л11: вид карточек трижды подряд закрыт без действия - один раз спросить; заглушённое - в вечерний дайджест
     cardlog::SetDigest([](const std::wstring& title, const std::wstring& text) { return autos::Digest(title, text); });
     cardlog::SetAsk([](const std::wstring& kind) {
-        if (fx::Game()) return;  // в игре не спрашиваем: третий раз ещё будет
+        if (fx::Game()) return false;  // в игре не спрашиваем: спросим на следующем закрытии
         g_askCard.kind = L"-";
         g_askCard.yesLabel = L"Не показывать";
         g_askCard.noLabel = L"Оставить";
         g_askCard.onYes = [kind] { cardlog::Mute(kind, true); };
-        g_askCard.onNo = nullptr;
+        g_askCard.onNo = [kind] { cardlog::Closed(kind, true); };  // нужна - счёт с нуля
         g_askCard.Show(BoostCard::OFFER, L"«" + kind + L"» - больше не показывать?",
-                       L"Трижды подряд закрыта без действия. Такие карточки будут ждать в студии (Состояние - "
-                       L"пропущенные) и в вечернем дайджесте; вернуть можно там же.",
+                       L"Трижды подряд её закрывали, не читая. Такие карточки уйдут в вечерний дайджест (вопросы - "
+                       L"ещё и в студию, Состояние - пропущенные); вернуть можно там же.",
                        CurrentTheme(g_cfg), 20000);
+        return true;
     });
     gboost::Start(g_wnd);
     g_game.recognize = [](DWORD pid, const std::wstring& path) { return mc::GameName(pid, path); };
@@ -1468,7 +1489,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
         }
     });
     palette::AddRunner(L"l|", [](const std::wstring& dir) { toolsui::LaunchProject(dir); });
-    corners::SetClip([] { cliphist::ShowRing(g_menu); });
+    corners::SetClip([] {
+        usage::Hit(L"cliphist");
+        cliphist::ShowRing(g_menu);
+    });
     palette::AddSource([](std::vector<Item>& out) {
         for (Item& it : cliphist::Items(L"b|")) {
             it.name = L"Буфер: " + it.name;

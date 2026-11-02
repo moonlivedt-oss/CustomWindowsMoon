@@ -21,9 +21,20 @@ std::wstring Pretty(std::wstring s) {
     return s;
 }
 
+// Когда последний раз нажимали кнопку на любой карточке: сообщение сразу после нажатия - итог того, что
+// попросили («Готово», «Список в буфере»), а не новость, и в счёт «не читают» не идёт
+ULONGLONG g_lastClick = 0;
+
 }  // namespace
 
 void BoostCard::Create(HINSTANCE inst) { CreateWnd(inst, L"MoonRadialBoost", L"Boost"); }
+
+void BoostCard::InfoGone() {
+    if (!info_) return;
+    info_ = false;
+    // смахнули руками - не нужна, даже если мышь по пути прошла над ней; ушла сама - важно, читали ли
+    cardlog::Closed(infoKind_, seen_ && !ClosedByHand());
+}
 
 void BoostCard::Unanswered() {
     if (!asked_) return;
@@ -40,7 +51,10 @@ void BoostCard::Unanswered() {
     cardlog::Closed(askKind_, false);
 }
 
-void BoostCard::Closed() { Unanswered(); }
+void BoostCard::Closed() {
+    Unanswered();
+    InfoGone();
+}
 
 void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs,
                      Glyph glyph) {
@@ -50,6 +64,17 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
     more.clear();
     // прежний вопрос сменился другим, так и не отвеченный (тот же вид - просто обновление)
     if (Visible() && k != askKind_) Unanswered();
+    // итог того, что только что делалось в этой карточке или нажали секунды назад, - не новость
+    bool result = (Visible() && mode_ == WORKING) || GetTickCount64() - g_lastClick < 3000;
+    if (Visible() && k != infoKind_) InfoGone();
+    bool info = mode == DONE && !result && k != L"-";
+    if (info && cardlog::Muted(k)) {  // заглушённое сообщение: не выезжает, только в вечерний дайджест
+        cardlog::ToDigest(title, sub);
+        return;
+    }
+    if (info && k != infoKind_) seen_ = false;  // то же сообщение обновилось - прочитанное остаётся прочитанным
+    info_ = info;
+    infoKind_ = k;
     bool ask = (mode == OFFER || mode == RESTORE) && onYes && k != L"-";
     if (ask && cardlog::Muted(k)) {  // заглушённый вид (Л11): не выезжает - в пропущенные и в дайджест
         cardlog::Missed m;
@@ -182,6 +207,7 @@ float BoostCard::BodyHeight(Graphics& g) {
 }
 
 void BoostCard::Paint(Graphics& g, const RectF& body) {
+    if (Hovered()) seen_ = true;  // мышь подходила - сообщение читали
     float K = k();
     Color fg = ToColor(theme_.fg), muted = ToColor(theme_.muted);
     DrawGlyph(g, body.X + 35 * K, body.Y + 35 * K, glyph_, Tone());
@@ -259,6 +285,8 @@ int BoostCard::HitContent(const PointF& p) const {
 }
 
 void BoostCard::Click(int id) {
+    seen_ = true;
+    g_lastClick = GetTickCount64();
     if (id == H_MORE) {
         moreOpen_ = !moreOpen_;
         Invalidate();  // высота пересчитается

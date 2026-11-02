@@ -85,6 +85,68 @@ Source DetectSource(const std::string& url) {
     return Source::Other;
 }
 
+namespace {
+std::string Query(const std::string& url, const std::string& key) {
+    auto start = url.find('?');
+    while (start != std::string::npos && start < url.size()) {
+        const auto end = url.find_first_of("&#", start + 1);
+        const auto item = url.substr(start + 1, end == std::string::npos ? end : end - start - 1);
+        if (item.rfind(key + "=", 0) == 0) return item.substr(key.size() + 1);
+        if (end == std::string::npos || url[end] == '#') break;
+        start = end;
+    }
+    return {};
+}
+std::string UrlPath(const std::string& url) {
+    const auto scheme = url.find("://");
+    if (scheme == std::string::npos) return {};
+    const auto slash = url.find('/', scheme + 3);
+    if (slash == std::string::npos) return "/";
+    const auto end = url.find_first_of("?#", slash);
+    return url.substr(slash, end == std::string::npos ? end : end - slash);
+}
+}
+bool IsPlaylist(const std::string& url) {
+    const auto source = DetectSource(url);
+    const auto path = UrlPath(url);
+    if (source == Source::YouTube || source == Source::YouTubeMusic)
+        return !Query(url, "list").empty() && Query(url, "v").empty() &&
+               (path == "/playlist" || path == "/" || (Host(url) != "youtu.be" && path == "/watch"));
+    if (source == Source::Yandex)
+        return path.find("/track/") == std::string::npos &&
+               (path.find("/album/") != std::string::npos || path.find("/playlists/") != std::string::npos);
+    return false;
+}
+bool NeedsAccount(const std::string& url) {
+    const auto list = Query(url, "list");
+    return IsPlaylist(url) && (DetectSource(url) == Source::YouTube || DetectSource(url) == Source::YouTubeMusic) &&
+        (list == "LM" || list == "LL" || list == "WL");
+}
+std::string CanonicalDownloadKey(const std::string& url) {
+    const auto source = DetectSource(url);
+    const auto path = UrlPath(url);
+    if (source == Source::YouTube || source == Source::YouTubeMusic) {
+        if (IsPlaylist(url)) return "youtube:playlist:" + Query(url, "list");
+        auto id = Query(url, "v");
+        if (id.empty() && Host(url) == "youtu.be") id = path.substr(1);
+        for (const auto* prefix : {"/shorts/", "/embed/", "/live/"})
+            if (id.empty() && path.rfind(prefix, 0) == 0) id = path.substr(std::string(prefix).size());
+        const auto slash = id.find('/');
+        if (slash != std::string::npos) id.resize(slash);
+        if (!id.empty()) return "youtube:video:" + id;
+    }
+    if (source == Source::Yandex) {
+        const auto track = path.find("/track/");
+        if (track != std::string::npos) return "yandex:track:" + path.substr(track + 7);
+    }
+    const auto fragment = url.find('#');
+    return "url:" + url.substr(0, fragment);
+}
+
+bool IsYandexMusicExtractor(const std::string& line) {
+    return Lower(Trim(StripAnsi(line))).rfind("yandexmusic", 0) == 0;
+}
+
 const char* SourceName(Source s) {
     switch (s) {
         case Source::YouTubeMusic: return "YouTube Music";
@@ -125,15 +187,18 @@ std::vector<std::string> BuildArgs(const std::string& url, const Options& o) {
         "--newline", "--no-colors", "--encoding", "utf-8", "--ignore-config", "--no-mtime",
         // Шаблоны вывода с метками PM*, их разбирает ParseLine. --print прячет обычный вывод и
         // включает «только посмотреть» - поэтому --progress и --no-simulate.
-        "--progress", "--no-simulate",
+        "--progress", "--no-simulate", "--continue", "--no-overwrites", "--windows-filenames",
+        "--trim-filenames", "180", "--retries", "3", "--fragment-retries", "3", "--no-abort-on-error",
         "--progress-template", "download:PMPROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
         "--print", "before_dl:PMITEM|%(playlist_index)s|%(n_entries)s|%(title)s|%(artist,creator,uploader,channel)s",
         "--print", "after_move:PMFILE|%(filepath)s",
         // Без перекодирования в MP3 берём M4A: его плеер играет через Media Foundation без расширений
         "-f", o.mp3 ? "bestaudio/best" : "bestaudio[ext=m4a]/bestaudio/best",
         "--embed-metadata", "--embed-thumbnail",
-        "-o", o.outDir + "/%(artist,creator,uploader,channel)s - %(title)s.%(ext)s",
+        "-o", o.outDir + "/%(artist,creator,uploader,channel)s - %(title)s [%(extractor_key)s-%(id)s].%(ext)s",
     };
+    a.push_back(IsPlaylist(url) ? "--yes-playlist" : "--no-playlist");
+    if (!o.archiveFile.empty()) a.insert(a.end(), {"--download-archive", o.archiveFile});
     if (o.mp3) {
         a.insert(a.end(), {"-x", "--audio-format", "mp3", "--audio-quality", "0"});
     }
@@ -206,6 +271,12 @@ Event ParseLine(std::string line) {
     if (line.rfind("PMFILE|", 0) == 0) {
         e.type = Event::Type::File;
         e.text = line.substr(7);
+        return e;
+    }
+    if (line.find("has already been recorded in the archive") != std::string::npos ||
+        line.find("has already been downloaded") != std::string::npos) {
+        e.type = Event::Type::Skipped;
+        e.text = line;
         return e;
     }
     if (line.rfind("ERROR:", 0) == 0) {

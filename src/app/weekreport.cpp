@@ -15,6 +15,7 @@
 #include "gfx/color.h"
 #include "net/net.h"
 #include "net/speed.h"
+#include "tools/journal.h"
 #include "tools/tools.h"
 
 using namespace Gdiplus;
@@ -97,6 +98,20 @@ void AppendNumbers(const Data& d) {
     CloseHandle(f);
 }
 
+// «дд.мм чч:мм» (журналы сети и автоматики) - не старше недели; год - текущий (на стыке лет - прошлый)
+bool InWeek(const std::wstring& when, const SYSTEMTIME& now) {
+    if (when.size() < 5) return false;
+    SYSTEMTIME st = now;
+    st.wDay = (WORD)_wtoi(when.substr(0, 2).c_str());
+    st.wMonth = (WORD)_wtoi(when.substr(3, 2).c_str());
+    if (st.wMonth > now.wMonth) --st.wYear;
+    FILETIME a, b;
+    if (!SystemTimeToFileTime(&st, &a) || !SystemTimeToFileTime(&now, &b)) return false;
+    ULONGLONG ta = ((ULONGLONG)a.dwHighDateTime << 32) | a.dwLowDateTime,
+              tb = ((ULONGLONG)b.dwHighDateTime << 32) | b.dwLowDateTime;
+    return tb >= ta && (tb - ta) / 10000000ull < (ULONGLONG)kWeek;
+}
+
 const CLSID kPng = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
 
 }  // namespace
@@ -116,20 +131,9 @@ Data Collect() {
         (c.what == tools::WeekChange::ADDED ? d.added : c.what == tools::WeekChange::REMOVED ? d.removed : d.updated)++;
         if (c.what == tools::WeekChange::ADDED && d.addedNames.size() < 3) d.addedNames.push_back(c.entry.label);
     }
-    // обрывы: строки журнала сети «дд.мм чч:мм», год - текущий (на стыке лет - прошлый)
-    for (const auto& [when, text] : net::History(400)) {
-        if (text.rfind(L"Пропал интернет", 0) != 0 || when.size() < 5) continue;
-        SYSTEMTIME st = now;
-        st.wDay = (WORD)_wtoi(when.substr(0, 2).c_str());
-        st.wMonth = (WORD)_wtoi(when.substr(3, 2).c_str());
-        if (st.wMonth > now.wMonth) --st.wYear;
-        FILETIME a, b;
-        SystemTimeToFileTime(&st, &a);
-        SystemTimeToFileTime(&now, &b);
-        ULONGLONG ta = ((ULONGLONG)a.dwHighDateTime << 32) | a.dwLowDateTime,
-                  tb = ((ULONGLONG)b.dwHighDateTime << 32) | b.dwLowDateTime;
-        if (tb >= ta && (tb - ta) / 10000000ull < (ULONGLONG)kWeek) ++d.drops;
-    }
+    // обрывы: строки журнала сети «дд.мм чч:мм»
+    for (const auto& [when, text] : net::History(400))
+        if (text.rfind(L"Пропал интернет", 0) == 0 && InWeek(when, now)) ++d.drops;
     // скорость за неделю: медианы своего вида только по замерам этой недели
     std::vector<net::Speed> week;
     ULONGLONG since = (ULONGLONG)(d.when - kWeek + 11644473600ll) * 10000000ull;
@@ -149,6 +153,11 @@ Data Collect() {
     tools::BatteryInfo bat = tools::Battery();
     if (bat.present && bat.designed) d.batteryWear = (int)(100 - bat.full * 100 / bat.designed);
     d.modes = modestats::Line(modestats::Now());
+    // самопроверка: записи журнала автоматики за ту же неделю
+    std::vector<std::wstring> notes;
+    for (const tools::JournalEntry& e : tools::JournalRead(tools::DataDir(), 2000))
+        if (InWeek(e.when, now)) notes.push_back(e.text);
+    d.waste = Waste(notes);
     return d;
 }
 
@@ -170,11 +179,16 @@ Data DemoData(bool previous) {
     d.crashes = 0;
     d.batteryWear = 11;
     d.modes = modestats::Line(modestats::Demo());
+    if (!previous)
+        d.waste = {
+            L"Игровой режим 5 раз включался меньше чем на минуту, чаще всего из-за «SnippingTool.exe». Если "
+            L"это не игра - добавьте её в «Не игры» (студия: Стол - Красота)."};
     return d;
 }
 
 bool Render(const Data& d, const Data* prev, const UiColors& c, const std::wstring& png) {
-    const int W = 1200, H = 760;
+    // «Работало впустую» - полоса снизу, только если есть что сказать
+    const int W = 1200, H = d.waste.empty() ? 760 : 760 + 52 + 30 * (int)std::min<size_t>(d.waste.size(), 3) + 20;
     Bitmap bmp(W, H, PixelFormat32bppARGB);
     Graphics g(&bmp);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
@@ -261,8 +275,8 @@ bool Render(const Data& d, const Data* prev, const UiColors& c, const std::wstri
          cw - 40, 15, d.crashes ? c.warn : c.text, true);
     text(d.batteryWear >= 0 ? L"износ батареи " + std::to_wstring(d.batteryWear) + L"%" : std::wstring(L"батареи нет"),
          60, top3 + 86, cw - 40, 14, c.text);
-    text(d.modes.empty() ? std::wstring(L"режимы не включались") : L"в режимах: " + d.modes, 60, top3 + 112, cw - 40, 14,
-         c.muted);
+    text(d.modes.empty() ? std::wstring(L"режимы не включались") : L"в режимах: " + d.modes, 60, top3 + 112, cw - 40,
+         14, c.muted);
     card(40 + cw + 20, top3, cw, 170, L"К прошлой неделе");
     std::vector<std::wstring> deltas = prev ? Deltas(d, *prev) : std::vector<std::wstring>();
     y = top3 + 52;
@@ -270,6 +284,12 @@ bool Render(const Data& d, const Data* prev, const UiColors& c, const std::wstri
         text(prev && prev->when ? L"всё примерно так же" : L"сравнение - со следующего отчёта", x1, y, cw - 40, 14,
              c.muted);
     for (size_t i = 0; i < deltas.size() && i < 4; ++i, y += 26) text(deltas[i], x1, y, cw - 40, 14, c.text);
+    if (!d.waste.empty()) {
+        REAL top4 = top3 + 190;
+        size_t n = std::min<size_t>(d.waste.size(), 3);
+        card(40, top4, W - 80, 52 + 30.0f * n, L"Работало впустую");
+        for (size_t i = 0; i < n; ++i) text(d.waste[i], 60, top4 + 50 + 30.0f * i, W - 120, 14, c.gold);
+    }
     return bmp.Save(png.c_str(), &kPng, nullptr) == Ok;
 }
 
@@ -282,7 +302,12 @@ std::wstring Make(const UiColors& c, std::vector<std::wstring>* deltas) {
     swprintf(name, 48, L"\\week-%04u-%02u-%02u.png", st.wYear, st.wMonth, st.wDay);
     std::wstring path = Dir() + name;
     if (!Render(now, had ? &prev : nullptr, c, path)) return L"";
-    if (deltas) *deltas = had ? Deltas(now, prev) : std::vector<std::wstring>();
+    if (deltas) {
+        // в дайджест - сначала то, что работало впустую (с ним можно что-то сделать), потом разница к прошлой неделе
+        *deltas = now.waste;
+        if (had)
+            for (std::wstring& s : Deltas(now, prev)) deltas->push_back(std::move(s));
+    }
     AppendNumbers(now);
     return path;
 }

@@ -8,6 +8,7 @@
 #include <random>
 
 #include "core/text.h"
+#include "theme/assets.h"
 #include "plugins/sdk/playermoon_plugin.h"
 
 namespace ui {
@@ -65,6 +66,15 @@ void Painter::Init(Renderer* renderer, TextSystem* text, IconSet* icons, CoverCa
     text_ = text;
     icons_ = icons;
     covers_ = covers;
+    placeholderArt_.Init(renderer->Wic());
+    wchar_t exe[32768]{};
+    GetModuleFileNameW(nullptr, exe, 32768);
+    std::string bytes;
+    const auto image = std::filesystem::path(exe).parent_path() / L"assets" / L"art" / L"moon-session.png";
+    if (theme::ReadFile(image, bytes, 8u << 20)) {
+        theme::CoverPalette palette;
+        placeholderArt_.Load(1, std::vector<uint8_t>(bytes.begin(), bytes.end()), "PlayerMoon", palette);
+    }
 }
 
 // ---------------- ресурсы ----------------
@@ -424,14 +434,17 @@ void Painter::DrawTitleBar(const view::PlayerView& v) {
     const theme::Material& m = v.theme.material;
     const Rect& brand = v.frame[Elem::Brand];
     const Icon& moon = icons_->Get(IconId::Moon);
-    DrawIcon(moon, {brand.x + 8, brand.CenterY()}, 16, accent_, 0);
+    dc_->FillRoundedRectangle(D2D1::RoundedRect(
+        D2D1::RectF(brand.x - 4, brand.CenterY() - 13, brand.x + 22, brand.CenterY() + 13), 9, 9),
+        Brush(accent_, .12f));
+    DrawIcon(moon, {brand.x + 9, brand.CenterY()}, 15, accent_, 0);
     TextSpec spec;
-    spec.size = 12;
+    spec.size = 13;
     spec.weight = 600;
     spec.spacing = 0.2f;
     spec.ellipsis = false;
     if (auto l = text_->Layout(L"PlayerMoon", spec, 0, 16))
-        dc_->DrawTextLayout({brand.x + 24, brand.CenterY() - 8}, l.Get(), Brush(Text2()));
+        dc_->DrawTextLayout({brand.x + 31, brand.CenterY() - 8}, l.Get(), Brush(Text2()));
 
     struct TbDef {
         Elem e;
@@ -444,7 +457,8 @@ void Painter::DrawTitleBar(const view::PlayerView& v) {
         const float h = std::clamp(st.hoverAmt.Value(v.now), 0.f, 1.f);
         const bool close = d.e == Elem::TbClose;
         const Rgba bg = close ? Color(m.color.closeHover) : Color(m.color.btnHover);
-        if (h > 0.003f) dc_->FillRectangle(ToD2D(r), Brush(bg, h));
+        if (h > 0.003f) dc_->FillRoundedRectangle(
+            D2D1::RoundedRect(Inflate(ToD2D(r), -5), 8, 8), Brush(bg, h));
         const Rgba fg = motion::Mix(Text2(), close ? Rgba{1, 1, 1, 1} : text_c_, h);
         // Значок настроек при наведении поворачивается, остальные - пружинят масштабом
         const bool settings = d.e == Elem::TbSettings;
@@ -485,6 +499,20 @@ void Painter::DrawIcon(const Icon& icon, D2D1_POINT_2F c, float size, const Rgba
 
 void Painter::DrawPlaceholder(const theme::CoverPalette& p, const D2D1_RECT_F& r, ID2D1Geometry* clip,
                               float alpha) {
+    if (auto* bitmap = placeholderArt_.Get(1, dc_, renderer_->DeviceGeneration())) {
+        const auto size = bitmap->GetSize();
+        const float scale = std::max(Width(r) / size.width, Height(r) / size.height);
+        const auto transform = D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(
+            r.left + (Width(r) - size.width * scale) * .78f,
+            r.top + (Height(r) - size.height * scale) * .5f);
+        ComPtr<ID2D1BitmapBrush> brush;
+        if (SUCCEEDED(dc_->CreateBitmapBrush(bitmap, D2D1::BitmapBrushProperties(),
+                                             D2D1::BrushProperties(alpha, transform), &brush))) {
+            dc_->FillGeometry(clip, brush.Get());
+            dc_->FillGeometry(clip, Brush(p.a, alpha * .18f));
+            return;
+        }
+    }
     // Перенос coverBackground() из макета: каждый слой CSS - кисть, которой заливается рамка обложки.
     // Без слоёв D2D: дешевле и обрезка по скруглению получается сама.
     const float w = Width(r), h = Height(r);
@@ -1189,6 +1217,10 @@ void Painter::DrawPluginRows(const view::PlayerView& v, const PaintInput& in) {
 // ---------------- мини-режим ----------------
 
 void Painter::DrawMini(const view::PlayerView& v) {
+    // A quiet grip makes the draggable surface discoverable, away from the transport.
+    for (int i = 0; i < 3; ++i)
+        dc_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(6, 36.f + i * 6), 1, 1), Brush(Text3(), .7f));
+
     const theme::Material& m = v.theme.material;
     const float ts = v.layoutInput.textScale;
     const Rect& cover = v.frame[Elem::MiniCover];

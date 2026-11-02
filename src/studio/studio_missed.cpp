@@ -2,6 +2,7 @@
 // карточек (Л11) - вернуть одной кнопкой. Данные - desk/cardlog.
 #include <windows.h>
 
+#include "core/usage.h"
 #include "desk/cardlog.h"
 #include "studio/studio_internal.h"
 
@@ -100,6 +101,72 @@ float Studio::MissedCards(float x, float y, float w) {
             mx += kw + ui.S(8);
             ++i;
         }
+    }
+    return h;
+}
+
+// «Чем не пользуетесь»: включённые возможности, которых давно не касались (core/usage), - выключить одной кнопкой.
+// Пока счёт ведётся меньше двух недель или всё в ходу - блока нет.
+float Studio::UnusedFeatures(float x, float y, float w) {
+    struct Feature {
+        const wchar_t* key;
+        const wchar_t* label;
+        bool Config::* flag;
+    };
+    static const Feature kFeatures[] = {
+        {L"winring", L"Кольцо открытых окон (Alt + `)", &Config::winRing},
+        {L"selring", L"Кольцо выделенного текста (Ctrl + Alt + Пробел)", &Config::selectionRing},
+        {L"palette", L"Поиск и команды (палитра)", &Config::palette},
+        {L"deskdouble", L"Двойной клик по пустому столу", &Config::deskDouble},
+        {L"stroke", L"Росчерк с зажатым Alt", &Config::stroke},
+        {L"gamepad", L"Кольцо с геймпада", &Config::gamepad},
+        {L"windrag", L"Alt + мышь: тащить и тянуть окна", &Config::winDrag},
+        {L"cliphist", L"История буфера обмена", &Config::clipHistory},
+    };
+    const UiColors& c = ui.C();
+    ULONGLONG now = GetTickCount64();
+    if (!unusedAt_ || now - unusedAt_ > 3000 || Demo()) {
+        unusedAt_ = now;
+        std::vector<std::wstring> on;
+        for (const Feature& f : kFeatures)
+            if (cfg.*f.flag) on.push_back(f.key);
+        usage::Data d = usage::Snapshot();
+        int today = usage::Today();
+        if (Demo()) {
+            d.since = today - 30;
+            d.rec[L"palette"] = {today - 1, 40};
+        }
+        unused_ = usage::Unused(d, on, today);
+        unusedDays_ = usage::TrackedDays(d, today);
+    }
+    if (unused_.empty()) return 0;
+    float rh = ui.S(44);
+    float h = ui.S(52) + unused_.size() * rh + ui.S(8);
+    Card(RectF(x, y, w, h));
+    ui.Text(L"Чем не пользуетесь", RectF(x + ui.S(18), y + ui.S(14), w, ui.S(24)), c.text, 14, true);
+    ui.Text(L"за " + std::to_wstring(unusedDays_) + L" дн. счёта - выключите, и программа станет проще",
+            RectF(x + ui.S(18) + ui.Measure(L"Чем не пользуетесь", 14, true) + ui.S(14), y + ui.S(17), w, ui.S(20)),
+            c.faint, 11);
+    float ry = y + ui.S(50);
+    for (size_t i = 0; i < unused_.size(); ++i, ry += rh) {
+        const Feature* f = nullptr;
+        for (const Feature& k : kFeatures)
+            if (unused_[i].key == k.key) f = &k;
+        if (!f) continue;
+        ui.Text(f->label, RectF(x + ui.S(18), ry + ui.S(2), w - ui.S(200), ui.S(22)), c.text, 12, true);
+        ui.Text(unused_[i].days < 0 ? L"ни разу" : L"не было " + std::to_wstring(unused_[i].days) + L" дн.",
+                RectF(x + ui.S(18), ry + ui.S(22), w - ui.S(200), ui.S(20)), c.muted, 10.5f);
+        int id = ID_STATE_UNUSED + (int)i;
+        float bw = ui.S(120);
+        if (ui.Button(id, RectF(x + w - ui.S(18) - bw, ry + ui.S(6), bw, ui.S(32)), L"Выключить", Kind::Secondary) &&
+            !Demo()) {
+            Change();
+            cfg.*(f->flag) = false;
+            Save();
+            unusedAt_ = 0;
+            Toast(std::wstring(f->label) + L" - выключено. Вернуть - тем же переключателем в студии.");
+        }
+        ui.Tip(id, L"Выключить; включить снова можно в любой момент");
     }
     return h;
 }

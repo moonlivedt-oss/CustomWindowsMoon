@@ -19,6 +19,7 @@
 #include "core/text.h"
 #include "core/themes.h"
 #include "core/winlist.h"
+#include "core/usage.h"
 #include "desk/share.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -551,7 +552,7 @@ void RadialMenu::Hide() {
     grabSpun_ = false;
     if (GetCapture() == hwnd_) ReleaseCapture();
     ShowWindow(hwnd_, SW_HIDE);
-    ++glassGen_;  // снимок, который ещё идёт, уже не нужен
+    ++glassGen_;                                         // снимок, который ещё идёт, уже не нужен
     SetWindowDisplayAffinity(hwnd_, share::Affinity());  // в показе экрана - мимо захвата
     blurPx_ = {};
     maskPx_ = {};
@@ -611,6 +612,7 @@ void RadialMenu::Tick() {
         if (cfg_->stroke && !winMode_ && altWasDown_ && alt && !flick_ && now - tOpen_ < 600) {
             stroke_.Feed(now, pt.x, pt.y);
             flick_ = stroke_.Flick(70 * geo_.k);
+            if (flick_) usage::Hit(L"stroke");
         }
         if (flick_ && altWasDown_ && !alt) {
             flick_ = false;
@@ -736,7 +738,7 @@ LRESULT RadialMenu::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_MENU_GLASS: {
             std::unique_ptr<std::vector<uint32_t>> px((std::vector<uint32_t>*)lp);
-            if ((int)wp != glassGen_) return 0;  // меню уже закрыли или открыли заново
+            if ((int)wp != glassGen_) return 0;                  // меню уже закрыли или открыли заново
             SetWindowDisplayAffinity(hwnd_, share::Affinity());  // в показе экрана - мимо захвата
             if (open_ && px->size() == (size_t)geo_.w * geo_.h) {
                 blurPx_ = std::move(*px);

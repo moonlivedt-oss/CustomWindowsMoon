@@ -6,6 +6,15 @@
 #include "plugins/downloader/ytdlp.h"
 #include "tests/check.h"
 
+TEST(DownloaderRecognizesActualYandexExtractorNames) {
+    CHECK(dl::IsYandexMusicExtractor("yandexmusic:track"));
+    CHECK(dl::IsYandexMusicExtractor("yandexmusic:album"));
+    CHECK(dl::IsYandexMusicExtractor("YandexMusicPlaylist"));
+    CHECK(!dl::IsYandexMusicExtractor("YandexVideo"));
+    CHECK(!dl::IsYandexMusicExtractor("YandexDisk"));
+}
+
+
 TEST(DownloaderSourcesAndUrls) {
     using dl::Source;
     CHECK(dl::DetectSource("https://music.youtube.com/watch?v=abc&list=x") == Source::YouTubeMusic);
@@ -68,4 +77,36 @@ TEST(DownloaderParseOutput) {
     CHECK(dl::HumanSpeed("2.10MiB/s") == "2.1 МБ/с");
     CHECK(dl::HumanSpeed("512.00KiB/s") == "512 КБ/с");
     CHECK(dl::HumanSpeed("?") == "?");
+}
+
+TEST(DownloaderSmartIdentityAndArchive) {
+    const auto key = dl::CanonicalDownloadKey("https://music.youtube.com/watch?v=AbC_12&list=LM&si=tracking");
+    CHECK(key == "youtube:video:AbC_12");
+    CHECK(key == dl::CanonicalDownloadKey("https://youtu.be/AbC_12?t=12"));
+    CHECK(key == dl::CanonicalDownloadKey("https://www.youtube.com/watch?v=AbC_12#tracking"));
+    CHECK(key != dl::CanonicalDownloadKey("https://youtu.be/abc_12")); // source IDs are case sensitive
+    CHECK(dl::CanonicalDownloadKey("https://music.yandex.ru/album/1/track/25?x=1") ==
+          dl::CanonicalDownloadKey("https://music.yandex.com/album/999/track/25"));
+    CHECK(dl::IsPlaylist("https://music.youtube.com/playlist?list=LM"));
+    CHECK(dl::NeedsAccount("https://music.youtube.com/playlist?list=LM"));
+    CHECK(!dl::NeedsAccount("https://music.youtube.com/watch?v=AbC_12&list=LM"));
+    CHECK(!dl::NeedsAccount("https://youtube.com/playlist?list=PLpublic"));
+    CHECK(!dl::IsPlaylist("https://youtu.be/AbC_12?list=PLpublic"));
+    CHECK(!dl::IsPlaylist("https://youtube.com/watch?v=AbC_12&list=PLpublic"));
+    CHECK(dl::IsPlaylist("https://music.yandex.ru/album/1"));
+    CHECK(!dl::IsPlaylist("https://music.yandex.ru/album/1/track/25"));
+    dl::Options options;
+    options.outDir = "D:/Музыка";
+    options.archiveFile = options.outDir + "/.playermoon-archive.txt";
+    auto args = dl::BuildArgs("https://music.youtube.com/playlist?list=LM", options);
+    const auto has = [&](const char* flag) { return std::find(args.begin(), args.end(), flag) != args.end(); };
+    CHECK(has("--yes-playlist") && has("--no-overwrites") && has("--continue") && has("--no-abort-on-error"));
+    const auto archive = std::find(args.begin(), args.end(), "--download-archive");
+    CHECK(archive != args.end() && archive + 1 != args.end() && *(archive + 1) == options.archiveFile);
+    const auto output = std::find(args.begin(), args.end(), "-o");
+    CHECK(output != args.end() && output + 1 != args.end() && (output + 1)->find("%(id)s") != std::string::npos);
+    args = dl::BuildArgs("https://youtube.com/watch?v=abc&list=LM", options);
+    CHECK(has("--no-playlist") && !has("--yes-playlist"));
+    CHECK(dl::ParseLine("[download] abc: Video has already been recorded in the archive").type == dl::Event::Type::Skipped);
+    CHECK(dl::ParseLine("[download] path.mp3 has already been downloaded").type == dl::Event::Type::Skipped);
 }

@@ -88,6 +88,7 @@ void Toast::Open(int holdMs, bool onCursor) {
 void Toast::Dismiss() {
     if (!open_) return;
     open_ = false;
+    byHand_ = true;
     Closed();
 }
 
@@ -118,6 +119,7 @@ void Toast::Tick() {
         left_ -= dt;
         if (left_ <= 0) {
             open_ = false;
+            byHand_ = false;
             Closed();
         }
     }
@@ -230,8 +232,8 @@ void Toast::Render() {
             GraphicsState st = g.Save();
             g.SetClip(&path, CombineModeIntersect);
             // свет знака слева и блик сверху
-            LinearGradientBrush glow(PointF(body.X - 1, 0), PointF(body.X + body.Width * 0.55f + 1, 0), WithAlpha(tone, 34),
-                                     WithAlpha(tone, 0));
+            LinearGradientBrush glow(PointF(body.X - 1, 0), PointF(body.X + body.Width * 0.55f + 1, 0),
+                                     WithAlpha(tone, 34), WithAlpha(tone, 0));
             g.FillRectangle(&glow, RectF(body.X, body.Y, body.Width * 0.55f, body.Height));
             LinearGradientBrush shine(PointF(0, body.Y - 1), PointF(0, body.Y + 36 * K + 1), Color(18, 255, 255, 255),
                                       Color(0, 255, 255, 255));

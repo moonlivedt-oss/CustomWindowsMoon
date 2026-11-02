@@ -1,0 +1,122 @@
+[
+  {
+    "name": "projects",
+    "cell": 0,
+    "bounds": [
+      54,
+      32,
+      348,
+      341
+    ]
+  },
+  {
+    "name": "code",
+    "cell": 1,
+    "bounds": [
+      39,
+      65,
+      333,
+      319
+    ]
+  },
+  {
+    "name": "study",
+    "cell": 2,
+    "bounds": [
+      8,
+      63,
+      362,
+      348
+    ]
+  },
+  {
+    "name": "game",
+    "cell": 3,
+    "bounds": [
+      26,
+      53,
+      332,
+      328
+    ]
+  },
+  {
+    "name": "music",
+    "cell": 4,
+    "bounds": [
+      57,
+      12,
+      343,
+      362
+    ]
+  },
+  {
+    "name": "apps",
+    "cell": 5,
+    "bounds": [
+      50,
+      24,
+      333,
+      289
+    ]
+  },
+  {
+    "name": "folder",
+    "cell": 6,
+    "bounds": [
+      28,
+      25,
+      338,
+      362
+    ]
+  },
+  {
+    "name": "downloads",
+    "cell": 7,
+    "bounds": [
+      46,
+      21,
+      320,
+      302
+    ]
+  },
+  {
+    "name": "web",
+    "cell": 8,
+    "bounds": [
+      52,
+      0,
+      360,
+      273
+    ]
+  },
+  {
+    "name": "terminal",
+    "cell": 9,
+    "bounds": [
+      58,
+      12,
+      330,
+      265
+    ]
+  },
+  {
+    "name": "career",
+    "cell": 10,
+    "bounds": [
+      41,
+      0,
+      335,
+      290
+    ]
+  },
+  {
+    "name": "tools",
+    "cell": 11,
+    "bounds": [
+      34,
+      0,
+      322,
+      287
+    ]
+  }
+]

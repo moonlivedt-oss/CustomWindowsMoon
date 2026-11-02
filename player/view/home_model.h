@@ -31,7 +31,7 @@ inline std::wstring HomePathKey(const std::filesystem::path& path) {
 }
 class HomeModel {
 public:
-    enum Page { Home, Library, Favorites, Queue };
+    enum Page { Home, Library, Favorites, Queue, Plugins, Downloads, Settings };
     std::vector<HomeTrack> tracks;
     std::set<std::wstring> favorites;
     Page page = Home;

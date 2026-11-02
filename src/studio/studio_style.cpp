@@ -92,7 +92,7 @@ void Studio::StylePage(const RectF& r) {
     });
 
     // игровой режим
-    card(L"Игровой режим", 11.4f, [&](const RectF& b) {
+    card(L"Игровой режим", 12.4f, [&](const RectF& b) {
         toggle(row(b, 0, L"Включать сам, когда запущена игра"), ID_GAME_AUTO, cfg.gameAuto);
         toggle(row(b, 1, L"Выключать анимации Windows"), ID_GAME_ANIM, cfg.gameWinAnim);
         toggle(row(b, 2, L"Выключать прозрачность Windows"), ID_GAME_TRANSP, cfg.gameTransparency);
@@ -116,12 +116,21 @@ void Studio::StylePage(const RectF& r) {
                 cfg.gamesLight = s;
             },
             L"Лёгкие игры: красота и обои остаются, например Phasmophobia.exe");
+        RectF sr(b.X, b.Y + 9 * rowH + ui.S(4), b.Width, ui.S(36));
+        FieldOrText(
+            ID_GAME_SKIP, sr, view, cfg.gamesSkip,
+            [this](const std::wstring& s) {
+                FieldEdit(ID_GAME_SKIP);
+                cfg.gamesSkip = s;
+            },
+            L"Не игры: никогда не включают режим, например blender.exe");
+        ui.Tip(ID_GAME_SKIP, L"Не игры: эти программы никогда не включают игровой режим (маски через |)");
         std::wstring now = GameStatus();
-        note(b, 9, 3,
+        note(b, 10, 3,
              (now.empty() ? L"" : L"Сейчас: " + now + L". ") +
                  L"Игрой считается программа из этих папок, всё в эксклюзивном полноэкранном режиме и (переключатель "
-                 L"выше) окно на весь монитор, которое рисует через Direct3D, Vulkan или OpenGL, - не браузер и не "
-                 L"плеер; лишнее - в games_skip. "
+                 L"выше) окно на весь монитор, которое рисует через Direct3D, Vulkan или OpenGL, - не браузер, не "
+                 L"плеер и не из «Не игр». "
                  L"Без анимаций, стекла, свечений и рамок; у лёгких игр - только тишина, приоритеты и итог. Включить "
                  L"вручную - в меню значка в трее.",
              c.muted);
@@ -273,19 +282,22 @@ void Studio::StylePage(const RectF& r) {
     });
 
     // Boost: память перед игрой
-    card(L"Память перед игрой", 6.7f, [&](const RectF& b) {
+    card(L"Память перед игрой", 8.2f, [&](const RectF& b) {
         // boost.config.json читается не на каждый кадр, а раз в пару секунд
         ULONGLONG now = GetTickCount64();
         if (!boostReadAt_ || now - boostReadAt_ > 2000) {
             boostReadAt_ = now;
             boostDir_ = boost::Dir(cfg.boostDir);
-            boostPurge_ = boost::Load(boostDir_).purge;
+            boost::Settings bs = boost::Load(boostDir_);
+            boostPurge_ = bs.purge;
+            boostMinFree_ = bs.minFreePercent;
         }
         const std::wstring& dir = boostDir_;
         toggle(row(b, 0, L"Предлагать освободить память"), ID_BOOST_OFFER, cfg.boostOffer);
         toggle(row(b, 1, L"После игры вернуть закрытое"), ID_BOOST_RESTORE, cfg.boostRestore);
         toggle(row(b, 2, L"После игры почистить ещё раз"), ID_BOOST_AFTER, cfg.boostAfter);
-        if (!boostTask_) boostTask_ = std::make_shared<std::atomic<int>>(
+        if (!boostTask_)
+            boostTask_ = std::make_shared<std::atomic<int>>(
                 !elevate::Blocked(elevate::TASK_PURGE) && elevate::TaskReadyCached(elevate::TASK_PURGE) ? 1 : 0);
         int task = *boostTask_;
         RectF tr = row(b, 3, task == 1 ? L"Очистка кэша: без запросов" : L"Очистка кэша без запросов");
@@ -321,7 +333,25 @@ void Studio::StylePage(const RectF& r) {
             dir.empty() ? L"Папка Boost не найдена: положи её рядом с RadialMenu или укажи boost_dir в radial.cfg."
                         : std::wstring(mem) + L"Списки и что чистить - в boost.config.json, общем со скриптами Boost" +
                               (boostPurge_ ? L"." : L"; очистка кэша там выключена (purgeStandby).");
-        note(b, 5, 3, s, dir.empty() ? c.warn : c.muted);
+        // когда спрашивать при запуске игры или редактора: порог Boost (minFreePercent) - отсюда, без правки файла
+        {
+            static const int kPct[] = {0, 15, 25, 100};
+            int sel = boostMinFree_ <= 0 ? 0 : boostMinFree_ <= 15 ? 1 : boostMinFree_ <= 25 ? 2 : 3;
+            RectF qr = row(b, 5, L"Спрашивать, когда свободно");
+            float sw = std::min(ui.S(250), qr.Width * 0.5f);
+            if (ui.Segmented(ID_BOOST_THRESHOLD, RectF(qr.X + qr.Width - sw, qr.Y + ui.S(4), sw, ui.S(36)),
+                             {L"Мало", L"<15%", L"<25%", L"Всегда"}, sel) &&
+                kPct[sel] != boostMinFree_) {
+                if (boost::SetMinFreePercent(dir, kPct[sel]))
+                    boostMinFree_ = kPct[sel];
+                else
+                    Toast(L"Не нашёл boost.config.json - порог не сохранён");
+            }
+            ui.Tip(ID_BOOST_THRESHOLD,
+                   L"Когда при запуске игры или редактора предлагать закрыть лишнее.\n«Мало» - "
+                   L"свободно меньше 4 ГБ или занято больше 80%; «Всегда» - при каждом запуске.");
+        }
+        note(b, 6, 3, s, dir.empty() ? c.warn : c.muted);
     });
 
     // Boost во время игры: силы игре, тишина, слежка за памятью и видеокартой

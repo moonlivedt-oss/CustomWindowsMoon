@@ -36,6 +36,7 @@
 #include "app/resume.h"
 #include "app/afterwork.h"
 #include "app/gameprep.h"
+#include "core/usage.h"
 #include "app/focus.h"
 #include "desk/appvol.h"
 #include "desk/cardlog.h"
@@ -172,8 +173,7 @@ void TestRules() {
     }
     // простой, сеть по имени, «не»
     auto more = rules::Parse(
-        {L"idle>15 & !net:Home* -> power:eco", L"net:Office+Work -> mute", L"!! ac -> mute", L"idle>0 -> mute"},
-        &bad);
+        {L"idle>15 & !net:Home* -> power:eco", L"net:Office+Work -> mute", L"!! ac -> mute", L"idle>0 -> mute"}, &bad);
     CHECK(more.size() == 2);
     if (more.size() == 2) {
         rules::Facts g;
@@ -574,6 +574,14 @@ void TestModeSwitch() {
     CHECK(NotAGame(L"chrome.exe") && NotAGame(L"vlc.exe") && NotAGame(L"powerpnt.exe"));
     CHECK(NotAGame(L"potplayermini64.exe") && NotAGame(L"unrealeditor.exe"));
     CHECK(!NotAGame(L"eldenring.exe") && !NotAGame(L"minecraft.windows.exe"));
+    // из журнала: снимок экрана, экран блокировки, программы из библиотеки Steam, заставка
+    CHECK(NotAGame(L"snippingtool.exe") && NotAGame(L"lockapp.exe") && NotAGame(L"blender.exe"));
+    CHECK(NotAGame(L"godot_v4.3-stable_win64.exe") && NotAGame(L"vtube studio.exe") && NotAGame(L"mystify.scr"));
+    CHECK(!NotAGame(L".scr") && !NotAGame(L"ahitr.exe"));
+    // папка-маска не делает игрой Blender из Steam, а названная по имени программа - игра
+    const std::wstring games = L"*\\steamapps\\common\\*|NFS14.exe|Blender*.exe";
+    CHECK(NamedExactly(L"nfs14.exe", games) && !NamedExactly(L"blender.exe", games));
+    CHECK(!NamedExactly(L"common", games) && !NamedExactly(L"nfs14.exe", L""));
     CHECK(Is3dModule(L"d3d12.dll") && Is3dModule(L"vulkan-1.dll") && Is3dModule(L"opengl32.dll"));
     CHECK(!Is3dModule(L"dxgi.dll") && !Is3dModule(L"d3dcompiler_47.dll"));
 }
@@ -894,6 +902,55 @@ void TestAppHealth() {
     CHECK(v[1].state == tools::AppPart::BAD && v[2].state == tools::AppPart::BAD && v[4].state == tools::AppPart::BAD);
 }
 
+// Самопроверка за неделю (строки - как в настоящем журнале автоматики)
+void TestWeekWaste() {
+    std::vector<std::wstring> j = {
+        L"Игровой режим выключен (SnippingTool.exe, шёл 12 с)",
+        L"Игровой режим выключен (SnippingTool.exe, шёл 14 с)",
+        L"Игровой режим выключен (LockApp.exe, шёл 25 с)",
+        L"Игровой режим выключен (ahitr.exe, шёл 65 мин)",  // настоящая игра - не впустую
+        L"Режим разработки выключен (Unreal Editor, шёл 20 мин)",
+        L"Тихая чистка (Вручную из студии): освобождено 0 байт",
+        L"Тихая чистка (Вручную из студии): освобождено 0 байт",
+        L"Тихая чистка (раз в неделю): освобождено 1,21 ГБ",
+        L"Сборка CMake упала: D:\\Desktop\\RadialMenu\\build-check",
+        L"Сборка CMake упала: D:\\Desktop\\RadialMenu\\build-check",
+        L"Сборка CMake упала: D:\\Desktop\\RadialMenu\\build-check",
+        L"Сборка CMake упала: D:\\other",
+    };
+    auto w = weekreport::Waste(j);
+    CHECK(w.size() == 3);
+    CHECK(w.size() > 0 && w[0].find(L"Игровой режим 3 раза") == 0 &&
+          w[0].find(L"«SnippingTool.exe»") != std::wstring::npos);
+    CHECK(w.size() > 1 && w[1].find(L"Чистка 2 раза") == 0);
+    CHECK(w.size() > 2 && w[2].find(L"«build-check» падала 3 раза") != std::wstring::npos);
+    // по одному разу - случайность, не повод
+    CHECK(weekreport::Waste({L"Игровой режим выключен (x.exe, шёл 9 с)", L"Сборка CMake упала: D:\\a"}).empty());
+    CHECK(weekreport::Waste({}).empty());
+}
+
+// «Чем не пользуетесь»: судить только после двух недель счёта; ни разу - первыми, дальше - кто дольше без дела
+void TestUsage() {
+    usage::Data d;
+    d.since = 1000;
+    d.rec[L"palette"] = {1018, 40};    // вчера
+    d.rec[L"winring"] = {1001, 2};     // 19 дней назад
+    d.rec[L"deskdouble"] = {1010, 1};  // 10 дней назад - ещё в ходу
+    std::vector<std::wstring> on{L"palette", L"winring", L"deskdouble", L"gamepad"};
+    CHECK(usage::Unused(d, on, 1010).empty());  // счёт идёт 10 дней - рано судить
+    auto idle = usage::Unused(d, on, 1019);
+    CHECK(idle.size() == 2 && idle[0].key == L"gamepad" && idle[0].days == -1);
+    CHECK(idle[1].key == L"winring" && idle[1].days == 18);
+    CHECK(usage::TrackedDays(d, 1019) == 19 && usage::TrackedDays(usage::Data{}, 1019) == 0);
+    // выключенное не предлагаем: его нет в списке включённых
+    CHECK(usage::Unused(d, {L"palette"}, 1019).empty());
+    // файл туда и обратно; мусор и служебные ключи - мимо
+    usage::Data back = usage::Parse(usage::Text(d));
+    CHECK(back.since == 1000 && back.rec.size() == 3 && back.rec[L"winring"].count == 2);
+    usage::Data junk = usage::Parse(L"_since\t5\r\nx\t0\t3\ny\t7\nz\t9\t2\n\t1\t1\n");
+    CHECK(junk.since == 5 && junk.rec.size() == 1 && junk.rec[L"z"].last == 9);
+}
+
 // Память карточек (Л10/Л11): вид без чисел, третье закрытие подряд - вопрос один раз, действие обнуляет счёт
 void TestCardLog() {
     CHECK(cardlog::KindOf(L"Освободить ~1.2 ГБ перед игрой?") == L"Освободить");
@@ -909,6 +966,17 @@ void TestCardLog() {
     std::set<std::wstring> m{L"Загрузки", L"Выход сменился"};
     CHECK(cardlog::ParseMutes(cardlog::MutesText(m)) == m);
     CHECK(cardlog::ParseMutes(L"a\r\n\nb\r\n") == (std::set<std::wstring>{L"a", L"b"}));
+    // счёт переживает перезапуск: файл туда и обратно
+    cardlog::Strikes saved;
+    saved.n = {{L"Перед игрой", 2}, {L"Компилируются шейдеры", 1}};
+    CHECK(cardlog::ParseStrikes(cardlog::StrikesText(saved)).n == saved.n);
+    CHECK(cardlog::ParseStrikes(L"a\t2\r\n\tx\nb\tz\nc\t0\n").n == (std::map<std::wstring, int>{{L"a", 2}}));
+    // вопрос не задали (игра) - следующее закрытие спросит, а не промолчит навсегда
+    cardlog::Strikes later;
+    later.Closed(L"x", false), later.Closed(L"x", false);
+    CHECK(later.Closed(L"x", false));
+    later.Rearm(L"x");
+    CHECK(later.Closed(L"x", false));
 }
 
 // Отмена записи журнала (Л3): упаковка туда и обратно, путь с «|» не упаковывается, третий столбец читается
@@ -1092,6 +1160,12 @@ void TestResume() {
 void TestAfterWork() {
     std::vector<afterwork::ProcNow> ps = {{L"explorer.exe", 0.01}, {L"blender.exe", 0.05}};
     CHECK(afterwork::BusyReason(ps, L"ninja.exe|UnrealBuildTool.exe", 0, false).empty());
+    // библиотеки Steam: \ в файле - один \, значение «path» - только с той же строки
+    auto libs = afterwork::SteamLibraries(
+        L"\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n"
+        L"\t\t\"apps\" { \"228980\" \"1\" }\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\SteamLibrary\"\n\t}\n}\n");
+    CHECK(libs.size() == 2 && libs[0] == L"C:\\Program Files (x86)\\Steam" && libs[1] == L"D:\\SteamLibrary");
+    CHECK(afterwork::SteamLibraries(L"\"path\"\n\"x\"").empty() && afterwork::SteamLibraries(L"").empty());
     ps[1].cpu = 0.6;  // рендер
     CHECK(afterwork::BusyReason(ps, L"ninja.exe", 0, false) == L"рендер Blender");
     ps.push_back({L"UnrealBuildTool.exe", 0.3});
@@ -1118,8 +1192,11 @@ void TestGamePrep() {
     CHECK(!gameprep::Check(in, o));
     in.battery = true;
     in.percent = 41;
-    CHECK(gameprep::Check(in, o) && o.title == L"Игра от батареи" && o.action == gameprep::Out::NONE && o.yes.empty());
-    CHECK(o.text.find(L"(41%)") != std::wstring::npos);
+    CHECK(!gameprep::Check(in, o));  // одна батарея - молчим: о ней говорит значок режима
+    in.downMbps = 45;
+    CHECK(gameprep::Check(in, o) && o.title == L"Перед игрой" && o.action == gameprep::Out::NONE && o.yes.empty());
+    CHECK(o.text.find(L"(41%)") != std::wstring::npos);  // при настоящей помехе батарея - строкой
+    in.downMbps = 5;
     in.steam = true;
     in.partials = 2;  // Steam и браузер - одна строка про загрузку
     CHECK(gameprep::Check(in, o) && o.title == L"Перед игрой" && o.action == gameprep::Out::OPEN_STEAM_DOWNLOADS);
@@ -1263,8 +1340,10 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestScanCache();
     TestCfgDiff();
     TestWeekReport();
+    TestWeekWaste();
     TestAppHealth();
     TestCardLog();
+    TestUsage();
     TestJournalUndo();
     TestBuildErr();
     TestDevServers();

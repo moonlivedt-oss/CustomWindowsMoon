@@ -483,7 +483,10 @@ void PlayerView::OnWheel(Point p, float delta, double nowTime) {
 
 PlayerView::Hit PlayerView::HitTest(Point p) const {
     if (mini) return HitElement(p) == Elem::Count ? Hit::Caption : Hit::Client;
-    if (frame[Elem::TitleBar].Contains(p.x, p.y) && HitElement(p) == Elem::Count) return Hit::Caption;
+    if (HitElement(p) == Elem::Count) {
+        for (Elem e : {Elem::TitleBar, Elem::Cover, Elem::Title, Elem::Artist, Elem::Album})
+            if (frame[e].Contains(p.x, p.y)) return Hit::Caption;
+    }
     return Hit::Client;
 }
 

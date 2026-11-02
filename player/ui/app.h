@@ -29,6 +29,8 @@
 #include "ui/painter.h"
 #include "ui/renderer.h"
 #include "ui/smtc.h"
+#include "ui/settings_preview.h"
+#include <optional>
 #include "ui/taskbar.h"
 #include "ui/text.h"
 #include "view/player_view.h"
@@ -63,6 +65,25 @@ public:
 
 private:
     void RefreshHome();
+    void OpenWorkspace(view::HomeModel::Page page);
+    void BuildWorkspace();
+    SettingsPreview settingsPreview_;
+    bool previewMini_ = false, previewLarge_ = false;
+    int settingsSection_ = 0;
+    struct SettingsSnapshot {
+        theme::Theme theme;
+        bool user, reduce, normalize, remaining, top, autoScan, hideDuplicates;
+    };
+    std::optional<SettingsSnapshot> settingsUndo_;
+    void WorkspaceCommand(int command);
+    void EnterMini();
+    std::string submittedDownload_;
+    std::vector<std::filesystem::path> pendingPluginFolders_;
+    HWND downloadEdit_ = nullptr;
+    bool reduceMotion_ = false;
+    std::wstring workspaceNotice_;
+    struct WorkspaceBinding { size_t page; int row, action; };
+    std::vector<WorkspaceBinding> workspaceBindings_;
     void HomeClick(view::Point point);
     void ToggleHome();
     void LayoutHomeSearch();
@@ -211,6 +232,7 @@ private:
     bool topmostApplied_ = false;
     bool visible_ = true;
     bool dirty_ = true;
+    bool rendering_ = false;
     bool started_ = false;  // после запуска смена трека анимируется
     bool trackingMouse_ = false;
     bool tickTimer_ = false;

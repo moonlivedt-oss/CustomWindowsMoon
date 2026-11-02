@@ -49,9 +49,18 @@ class ClassicLayout final : public ILayout {
 public:
     std::string_view Id() const override { return "classic"; }
 
+    static float Height(const LayoutInput& in) {
+        const auto& m = in.theme->material;
+        const auto& g = in.geometry;
+        const float extra = (TextMetrics::TitleLine(g.fsTitle * in.textScale) - TextMetrics::TitleLine(g.fsTitle)) +
+            (TextMetrics::SubLine(m.font.fsArtist * in.textScale) - TextMetrics::SubLine(m.font.fsArtist)) +
+            (TextMetrics::SubLine(m.font.fsAlbum * in.textScale) - TextMetrics::SubLine(m.font.fsAlbum));
+        return g.winH + std::max(0.f, extra);
+    }
+
     Size WindowSize(const LayoutInput& in, bool playlistOpen) const override {
         const auto& g = in.geometry;
-        return {g.winW + (playlistOpen ? g.playlistW : 0), g.winH};
+        return {g.winW + (playlistOpen ? g.playlistW : 0), Height(in)};
     }
 
     void Arrange(const LayoutInput& in, bool playlistOpen, Frame& f) const override {
@@ -63,7 +72,8 @@ public:
         const float pad = g.padding;
         const float top = m.size.titlebar;
         const float left = pad, width = g.winW - 2 * pad;
-        f[Elem::Main] = {0, top, g.winW, g.winH - top};
+        const float height = Height(in);
+        f[Elem::Main] = {0, top, g.winW, height - top};
 
         float y = top + 4;
         f[Elem::Cover] = {(g.winW - g.cover) / 2, y + (g.art - g.cover) / 2, g.cover, g.cover};
@@ -100,14 +110,14 @@ public:
         }
 
         // Нижний ряд прижат к низу: громкость слева, плейлист справа
-        const float extrasY = g.winH - pad - btn;
+        const float extrasY = height - pad - btn;
         f[Elem::VolBtn] = {left, extrasY, btn, btn};
         f[Elem::PlBtn] = {left + width - btn, extrasY, btn, btn};
         // Блок громкости: flex 1 с max-width 220, делит место с растяжкой справа поровну
         const float volBlock = std::min(220.f, (width - btn - 2 * 8) / 2);
         f[Elem::Volume] = {left + btn + 6, extrasY + (btn - 20) / 2, volBlock - btn - 6, 20};
 
-        ArrangeSidePanel(m, ts, g.winW, top, g.playlistW, g.winH - top, f);
+        ArrangeSidePanel(m, ts, g.winW, top, g.playlistW, height - top, f);
     }
 };
 

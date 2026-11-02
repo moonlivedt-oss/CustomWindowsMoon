@@ -1,8 +1,27 @@
 #include "ui/renderer.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <filesystem>
 
 namespace ui {
+namespace {
+void GraphicsError(const char* operation, HRESULT error) {
+    // Bounded local diagnostics: no track paths or other personal data.
+    wchar_t exe[32768]{};
+    GetModuleFileNameW(nullptr, exe, 32768);
+    auto file = std::filesystem::path(exe).parent_path() / L"renderer.log";
+    std::error_code ec;
+    const auto bytes = std::filesystem::file_size(file, ec);
+    FILE* out = _wfopen(file.c_str(), !ec && bytes > 65536 ? L"wb" : L"ab");
+    if (!out) return;
+    SYSTEMTIME time{};
+    GetLocalTime(&time);
+    std::fprintf(out, "%04u-%02u-%02u %02u:%02u:%02u %s: 0x%08lX\n", time.wYear, time.wMonth,
+                 time.wDay, time.wHour, time.wMinute, time.wSecond, operation, static_cast<unsigned long>(error));
+    std::fclose(out);
+}
+}  // namespace
 
 bool Renderer::Init(HWND hwnd) {
     hwnd_ = hwnd;
@@ -19,6 +38,8 @@ bool Renderer::Init(HWND hwnd) {
     GetClientRect(hwnd_, &rc);
     width_ = static_cast<UINT>(std::max<LONG>(1, rc.right - rc.left));
     height_ = static_cast<UINT>(std::max<LONG>(1, rc.bottom - rc.top));
+    requestedWidth_ = width_;
+    requestedHeight_ = height_;
     return CreateDevice();
 }
 
@@ -130,20 +151,41 @@ bool Renderer::CreateTarget() {
 }
 
 bool Renderer::Resize(UINT width, UINT height) {
-    width = std::max<UINT>(1, width);
-    height = std::max<UINT>(1, height);
-    if (width == width_ && height == height_) return true;
-    width_ = width;
-    height_ = height;
-    if (!swapChain_) return false;
+    // WM_SIZE also arrives during minimize and nested SetWindowPos/ShowWindow calls.
+    // Never resize a composition surface to 1x1 or call the driver from that callback.
+    if (width && height) {
+        requestedWidth_ = width;
+        requestedHeight_ = height;
+    }
+    return true;
+}
+
+void Renderer::ResetDevice() { ReleaseDevice(); }
+
+bool Renderer::SyncSize() {
+    RECT client{};
+    if (GetClientRect(hwnd_, &client) && !IsIconic(hwnd_) && client.right > 0 && client.bottom > 0)
+        Resize(static_cast<UINT>(client.right), static_cast<UINT>(client.bottom));
+    if (width_ == requestedWidth_ && height_ == requestedHeight_) return true;
+    width_ = requestedWidth_;
+    height_ = requestedHeight_;
+    if (!dc_ || !swapChain_) return true;  // CreateDevice below uses the latest dimensions.
     dc_->SetTarget(nullptr);
     target_.Reset();
-    if (FAILED(swapChain_->ResizeBuffers(0, width_, height_, DXGI_FORMAT_UNKNOWN,
-                                         DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))) {
+    dc_->Flush();
+    ComPtr<ID3D11DeviceContext> immediate;
+    d3d_->GetImmediateContext(&immediate);
+    immediate->ClearState();
+    immediate->Flush();
+    const HRESULT hr = swapChain_->ResizeBuffers(0, width_, height_, DXGI_FORMAT_UNKNOWN,
+                                                DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+    if (FAILED(hr)) {
+        GraphicsError("ResizeBuffers", hr);
         ReleaseDevice();
-        return CreateDevice();
+        return true;
     }
-    return CreateTarget();
+    if (!CreateTarget()) ReleaseDevice();
+    return true;
 }
 
 void Renderer::SetDpi(float dpi) {
@@ -152,9 +194,14 @@ void Renderer::SetDpi(float dpi) {
 }
 
 ID2D1DeviceContext* Renderer::BeginFrame() {
+    if (IsIconic(hwnd_)) return nullptr;
+    SyncSize();
     if (!dc_ || !target_) {
         ReleaseDevice();
-        if (!CreateDevice()) return nullptr;
+        if (!CreateDevice()) {
+            GraphicsError("CreateDevice", E_FAIL);
+            return nullptr;
+        }
     }
     dc_->BeginDraw();
     dc_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -163,13 +210,13 @@ ID2D1DeviceContext* Renderer::BeginFrame() {
 }
 
 bool Renderer::EndFrame() {
+    if (!dc_ || !swapChain_) return false;
     HRESULT hr = dc_->EndDraw();
     if (SUCCEEDED(hr)) hr = swapChain_->Present(1, 0);
-    if (hr == static_cast<HRESULT>(D2DERR_RECREATE_TARGET) || hr == static_cast<HRESULT>(DXGI_ERROR_DEVICE_REMOVED) ||
-        hr == static_cast<HRESULT>(DXGI_ERROR_DEVICE_RESET)) {
-        // Устройство потеряно: пересоздаём всё, кадр нарисуется заново
+    if (FAILED(hr)) {
+        GraphicsError("EndDraw/Present", hr);
+        // Includes invalid resources after a mode change, not only DEVICE_REMOVED.
         ReleaseDevice();
-        CreateDevice();
         return false;
     }
     return true;

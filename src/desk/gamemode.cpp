@@ -177,8 +177,12 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
         } else {
             // путь спрашиваем только у новых процессов: старые уже проверены
             std::wstring path = ProcessPath(pid);
+            // Папка-маска (*\steamapps\common\*) ловит и программы из Steam: Blender, OBS, Godot - они не игры,
+            // если их не назвали по имени
+            std::wstring low = Lower(FileName(path));
             if (!path.empty() && MatchAny(path, cfg.games) && !MatchAny(path, cfg.gamesSkip) &&
-                !MatchAny(path, cfg.devApps))  // редактор из папки Epic Games - не игра
+                !MatchAny(path, cfg.devApps) &&  // редактор из папки Epic Games - не игра
+                (!NotAGame(low) || NamedExactly(low, cfg.games)))
                 game = FileName(path);
             else if (!path.empty() && recognize && !MatchAny(path, cfg.gamesSkip))
                 game = recognize(pid, path);

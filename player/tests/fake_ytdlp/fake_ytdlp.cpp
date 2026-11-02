@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -53,9 +54,9 @@ void WriteWav(const std::wstring& path, double hz) {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    std::wstring outTemplate, url;
+    std::wstring outTemplate, url, archive;
     for (int i = 1; i < argc; ++i) {
-        const std::wstring a = argv[i];
+        const std::wstring_view a = argv[i];
         if (a == L"--version") {
             Out("2026.08.19");
             return 0;
@@ -63,13 +64,14 @@ int wmain(int argc, wchar_t** argv) {
         if (a == L"--list-extractors") {
             Out("youtube");
             Out("youtube:tab");
-            Out("YandexMusicTrack");
+            Out("yandexmusic:track");
             return 0;
         }
         if (a == L"-U") {
             Out("Latest version: 2026.08.19, Current version: 2026.08.19");
             return 0;
         }
+        if (a == L"--download-archive" && i + 1 < argc) archive = argv[++i];
         if (a == L"-o" && i + 1 < argc) outTemplate = argv[++i];
         if (a == L"--" && i + 1 < argc) url = argv[++i];
     }
@@ -81,7 +83,21 @@ int wmain(int argc, wchar_t** argv) {
         return 1;
     }
     const int items = url.find(L"list") != std::wstring::npos ? 2 : 1;
+    const bool fast = url.find(L"fixture-fast") != std::wstring::npos;
+    int errors = 0;
     for (int n = 1; n <= items; ++n) {
+        const std::string id = std::string(url.find(L"partial") != std::wstring::npos ? "partial-" : "fixture-") + std::to_string(n);
+        if (url.find(L"partial") != std::wstring::npos && n == 2) {
+            Out("ERROR: [youtube] partial: Video unavailable"); ++errors; continue;
+        }
+        bool recorded = false;
+        if (FILE* file = archive.empty() ? nullptr : _wfopen(archive.c_str(), L"rb")) {
+            char line[1024];
+            while (std::fgets(line, sizeof(line), file))
+                if (std::string(line) == "youtube " + id + "\n") recorded = true;
+            std::fclose(file);
+        }
+        if (recorded) { Out("[download] " + id + ": Video has already been recorded in the archive"); continue; }
         const std::string title = items > 1 ? "Трек из плейлиста " + std::to_string(n) : "Тестовый трек";
         Out("PMITEM|" + std::string(items > 1 ? std::to_string(n) : "NA") + "|" +
             std::string(items > 1 ? std::to_string(items) : "NA") + "|" + title + "|Тестовый артист");
@@ -90,14 +106,17 @@ int wmain(int argc, wchar_t** argv) {
             std::snprintf(line, sizeof(line), "PMPROG|\x1b[0;94m%5.1f%%\x1b[0m|%.2fMiB/s|00:%02d", static_cast<double>(p),
                           1.5 + p / 100.0, (100 - p) / 20);
             Out(line);
-            Sleep(120);
+            if (!fast) Sleep(120);
         }
         Out("[ExtractAudio] Destination: x.mp3");
-        Sleep(300);
+        if (!fast) Sleep(300);
         const std::wstring file = dir + L"\\Тестовый артист - " +
-                                  (items > 1 ? L"Трек из плейлиста " + std::to_wstring(n) : L"Тестовый трек") + L".wav";
+                                  (items > 1 ? L"Трек из плейлиста " + std::to_wstring(n) : L"Тестовый трек") + L" [" + std::wstring(id.begin(), id.end()) + L"].wav";
         WriteWav(file, 330.0 + 110 * n);
         Out("PMFILE|" + Utf8(file));
+        if (FILE* record = archive.empty() ? nullptr : _wfopen(archive.c_str(), L"ab")) {
+            std::fprintf(record, "youtube %s\n", id.c_str()); std::fclose(record);
+        }
     }
-    return 0;
+    return errors ? 1 : 0;
 }

@@ -430,7 +430,7 @@ void Studio::TabIcon(const RectF& view, float y, float& bottom) {
 
     BlockIn(1);
     float dockY = y;
-    ui.Text(L"Значки программы", RectF(x, y, w, ui.S(24)), c.text, 14, true);
+    ui.Text(L"Подобрать значок", RectF(x, y, w, ui.S(24)), c.text, 14, true);
     ui.Text(L"щелчок или тяни к квадрату", RectF(x, y, w, ui.S(24)), c.faint, 11.5f, false, ui::Right);
     y += ui.S(34);
     y += IconDock(view, x, y, w);

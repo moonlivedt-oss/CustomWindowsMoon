@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "core/plugins.h"
+#include "core/text.h"
 #include "tests/check.h"
 #include "tests/wav_util.h"
 
@@ -137,3 +138,81 @@ TEST(PluginsPagesAndPost) {
     pm.RunPosted();  // код плагина уже выгружен - вызов не должен случиться
     (void)shown;
 }
+
+#ifdef _WIN32
+TEST(DownloaderQueueArchiveAndPartialPlaylist) {
+    const auto root = tests::TempDir("downloader_archive");
+    const auto plugin = root / "extensions/downloader";
+    const auto data = root / "data";
+    const auto output = root / "music";
+    std::filesystem::create_directories(plugin / "bin");
+    std::filesystem::create_directories(data / "downloader");
+    std::filesystem::create_directories(output);
+    for (const auto* name : {"downloader.dll", "plugin.json"})
+        std::filesystem::copy_file(std::filesystem::path(PM_PLUGINS_DIR) / "downloader" / name, plugin / name);
+    // Always use this fixture's executable, never a real downloader or browser account.
+    std::filesystem::copy_file(PM_FAKE_YTDLP_PATH, plugin / "bin/yt-dlp.exe");
+    const std::string config = "outDir=" + text::PathToUtf8(output) + "\nbrowser=\n";
+    tests::WriteBytes(data / "downloader/settings.txt", {config.begin(), config.end()});
+    std::string url;
+    int added = 0;
+    std::vector<std::string> toasts;
+    pm::PluginHostFunctions host;
+    host.clipboardText = [&] { return url; };
+    host.addFiles = [&](const std::vector<std::string>& files, bool) {
+        for (const auto& path : files) CHECK(std::filesystem::exists(text::Utf8ToPath(path)));
+        added += (int)files.size();
+    };
+    host.toast = [&](const std::string& message) { toasts.push_back(message); };
+    pm::PluginManager manager;
+    manager.SetDataRoot(data); manager.SetHost(host); manager.Discover({root / "extensions"});
+    CHECK(manager.Plugins().size() == 1 && manager.SetEnabled(0, true));
+    if (manager.Pages().empty()) return;
+    auto jobs = [&] {
+        return std::count_if(manager.Pages()[0].rows.begin(), manager.Pages()[0].rows.end(),
+            [](const auto& row) { return row.id >= 100; });
+    };
+    auto wait = [&](int id) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        do {
+            manager.RunPosted();
+            for (const auto& row : manager.Pages()[0].rows)
+                if (row.id == id && (row.state == PM_ROW_DONE || row.state == PM_ROW_ERROR)) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        } while (std::chrono::steady_clock::now() < deadline);
+        return false;
+    };
+    url = "https://music.youtube.com/playlist?list=LM";
+    manager.PageAction(0, 0, 1);
+    CHECK(jobs() == 0 && !toasts.empty() && toasts.back().find("Выберите браузер") != std::string::npos);
+    manager.PageAction(0, 0, 23); // Explicit Chrome choice saves a preference; it does not read cookies.
+    CHECK(ReadAll(data / "downloader/settings.txt").find("browser=chrome") != std::string::npos);
+    manager.PageAction(0, 0, 21);
+    url = "https://youtube.com/playlist?list=fixture-fast";
+    manager.PageAction(0, 0, 1);
+    url = "https://music.youtube.com/playlist?list=fixture-fast&si=tracking";
+    manager.PageAction(0, 0, 1);
+    CHECK(jobs() == 1); // Same list across two domains is queued once.
+    CHECK(wait(100) && added == 2);
+    CHECK(std::filesystem::exists(output / ".playermoon-archive.txt"));
+    manager.PageAction(0, 0, 1); // A finished playlist can be synced again.
+    CHECK(wait(101) && jobs() == 2 && added == 2);
+    bool skipped = false;
+    for (const auto& row : manager.Pages()[0].rows)
+        if (row.id == 101) skipped = row.state == PM_ROW_DONE && row.subtitle.find("Повторы пропущены: 2") != std::string::npos;
+    CHECK(skipped);
+    CHECK(manager.SetEnabled(0, false) && manager.SetEnabled(0, true));
+    manager.PageAction(0, 0, 1); // Reopening the plugin retains the archive.
+    CHECK(wait(100) && added == 2);
+    url = "https://youtube.com/playlist?list=partial-fixture-fast";
+    manager.PageAction(0, 0, 1);
+    CHECK(wait(101) && added == 3);
+    bool partial = false, retry = false;
+    for (const auto& row : manager.Pages()[0].rows) if (row.id == 101) {
+        partial = row.state == PM_ROW_DONE && row.subtitle.find("Часть треков недоступна") != std::string::npos;
+        for (const auto& action : row.actions) if (action.id == 5) retry = true;
+    }
+    CHECK(partial && retry);
+    manager.UnloadAll();
+}
+#endif
