@@ -45,6 +45,7 @@ bool Player::Init(const Options& options, WakeFn wake, std::string* error) {
     eo.nullBackend = options.nullBackend;
     ready_ = engine_.Start(eo, std::move(wake), error);
     ApplyVolume();
+    engine_.SetCrossfade(crossfade_);  // длина в кадрах зависит от частоты устройства
     return ready_;
 }
 
@@ -158,7 +159,9 @@ void Player::PreloadNext() {
     }
     TagInfo tags;
     ReadTags(e.path, tags, false);
-    engine_.QueueNext(std::move(decoder), TrackGain(tags));
+    // альбом слушают целиком: между его треками стык без перехода (концерты, миксы, сюиты)
+    const bool sameAlbum = !tags.album.empty() && tags.album == now_.tags.album;
+    engine_.QueueNext(std::move(decoder), TrackGain(tags), crossfade_ > 0 && !sameAlbum);
     queued_ = next;
 }
 
@@ -245,6 +248,14 @@ void Player::SetNormalize(bool on) {
         OpenTrack(now_.index, pos, 0);
         if (playing) engine_.Play();
     }
+}
+
+void Player::SetCrossfade(double seconds) {
+    seconds = seconds > 0 ? std::min(seconds, 12.0) : 0;
+    if (seconds == crossfade_) return;
+    crossfade_ = seconds;
+    engine_.SetCrossfade(seconds);
+    if (engine_.HasTrack()) PreloadNext();  // разрешение перехода хранится у открытого заранее трека
 }
 
 void Player::Remove(int index) {

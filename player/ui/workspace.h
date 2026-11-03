@@ -8,7 +8,7 @@ enum Command {
     SettingsAppearance, SettingsSound, SettingsLibrary, SettingsGeneral, LikedMusic, HideDuplicates,
     BrowserNone, BrowserFirefox, BrowserChrome, BrowserEdge,
     ShapeFirst = 54, MotionFirst = 57, AccentFirst = 63, AccentFromCover = 69,
-    AmbientFirst = 70, Visualizer = 73, VizLess, VizMore,
+    AmbientFirst = 70, Visualizer = 73, VizLess, VizMore, CrossfadeFirst = 76,  // 76..79: стык, 3, 6, 10 с
     ThemeFirst = 100, RemoveFolderFirst = 300, PluginFirst = 600, PluginMenuFirst = 1000,
     PageActionFirst = 2000
 };

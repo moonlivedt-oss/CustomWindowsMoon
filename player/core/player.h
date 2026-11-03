@@ -78,6 +78,9 @@ public:
     // Выравнивание громкости по ReplayGain (по умолчанию включено)
     void SetNormalize(bool on);
     bool Normalize() const { return normalize_; }
+    // Плавный переход между треками, секунды (0 - стык). Внутри одного альбома всегда стык
+    void SetCrossfade(double seconds);
+    double Crossfade() const { return crossfade_; }
     // Убрать трек из плейлиста. Если он играет - начинается следующий (с тем же состоянием пуска).
     void Remove(int index);
     // Трек пойдёт сразу после текущего
@@ -114,6 +117,7 @@ private:
     bool muted_ = false;
     bool ready_ = false;
     bool normalize_ = true;
+    double crossfade_ = 0;
     int queued_ = -1;  // индекс трека, открытого заранее в движке
 };
 

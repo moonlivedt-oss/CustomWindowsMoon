@@ -345,6 +345,7 @@ void App::LoadSavedState() {
     miniOnTop_ = st.miniOnTop;
     playlistFromLibrary_ = st.playlistFromLibrary;
     player_.SetNormalize(st.normalize);
+    player_.SetCrossfade(st.crossfade);
 
     view_.RestoreModes(st.mini, st.playlistOpen);
     ApplyTheme(t, false);
@@ -387,6 +388,7 @@ void App::SaveCurrentState() {
     st.themeId = theme_.id;
     if (userTheme_) st.userTheme = themes_.ToUserDocument(theme_, theme_.name);
     st.normalize = player_.Normalize();
+    st.crossfade = player_.Crossfade();
     st.showRemaining = view_.showRemaining;
     st.miniOnTop = miniOnTop_;
     st.playlistFromLibrary = playlistFromLibrary_;

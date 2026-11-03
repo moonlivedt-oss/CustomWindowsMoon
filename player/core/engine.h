@@ -22,6 +22,11 @@
 
 namespace pm {
 
+// Равномощный переход, t от 0 до 1: уходящий трек cos, входящий sin. Сумма квадратов 1 - громкость в середине
+// перехода не проседает, как при линейном
+float CrossfadeOut(float t);
+float CrossfadeIn(float t);
+
 class Engine {
 public:
     static constexpr uint32_t kChannels = 2;
@@ -46,8 +51,11 @@ public:
     // gain - множитель громкости трека (ReplayGain), 1 - без изменений.
     // Новый трек отменяет поставленный в очередь следующий.
     void SetTrack(std::unique_ptr<IDecoder> decoder, uint64_t startFrame, float gain = 1.f);
-    // Бесшовный переход: следующий трек открыт заранее и начнётся в том же буфере, где кончился текущий
-    void QueueNext(std::unique_ptr<IDecoder> decoder, float gain = 1.f);
+    // Бесшовный переход: следующий трек открыт заранее и начнётся в том же буфере, где кончился текущий.
+    // crossfade - разрешён ли для этой пары плавный переход (внутри одного альбома - нет, там нужен стык)
+    void QueueNext(std::unique_ptr<IDecoder> decoder, float gain = 1.f, bool crossfade = false);
+    // Длина плавного перехода между треками, 0 - выключен. Действует со следующего перехода
+    void SetCrossfade(double seconds);
     void ClearNext();
     void ClearTrack();
     void Play();
@@ -55,7 +63,7 @@ public:
     void Seek(uint64_t frame);
     void SetVolume(float volume);  // 0..1, применяется плавно (без щелчков)
 
-    bool IsPlaying() const;  // намерение: нажат ли «пуск»
+    bool IsPlaying() const;      // намерение: нажат ли «пуск»
     bool DeviceRunning() const;  // работает ли аудиопоток (на паузе после затухания - нет)
     bool HasTrack() const;
     uint64_t PositionFrames() const;

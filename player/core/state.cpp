@@ -28,6 +28,7 @@ json::Value StateToJson(const AppState& s) {
     v["theme"] = s.themeId;
     if (!s.userTheme.IsNull()) v["userTheme"] = s.userTheme;
     v["normalize"] = s.normalize;
+    v["crossfade"] = s.crossfade;
     v["showRemaining"] = s.showRemaining;
     v["miniOnTop"] = s.miniOnTop;
     v["playlistFromLibrary"] = s.playlistFromLibrary;
@@ -62,6 +63,7 @@ AppState StateFromJson(const json::Value& v) {
     if (v.Get("theme").IsString() && !v.Get("theme").AsString().empty()) s.themeId = v.Get("theme").AsString();
     if (v.Get("userTheme").IsObject()) s.userTheme = v.Get("userTheme");
     s.normalize = v.Get("normalize").AsBool(true);
+    s.crossfade = v.Get("crossfade").AsNumber(0);
     s.showRemaining = v.Get("showRemaining").AsBool(false);
     s.miniOnTop = v.Get("miniOnTop").AsBool(true);
     s.playlistFromLibrary = v.Get("playlistFromLibrary").AsBool(false);

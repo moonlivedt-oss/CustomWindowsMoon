@@ -73,6 +73,7 @@ private:
     struct SettingsSnapshot {
         theme::Theme theme;
         bool user, reduce, normalize, remaining, top, autoScan, hideDuplicates;
+        double crossfade = 0;
     };
     std::optional<SettingsSnapshot> settingsUndo_;
     void WorkspaceCommand(int command);

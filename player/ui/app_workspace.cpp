@@ -90,6 +90,15 @@ void App::BuildWorkspace() {
                 {{L"Импорт", workspace::ImportTheme}, {L"Экспорт", workspace::ExportTheme}});
         } else if (settingsSection_ == 1) {
             toggle(L"Выровнять громкость", L"Громкие и тихие треки ближе по уровню. Работает, если в файле есть метки ReplayGain.", Normalize, player_.Normalize());
+            {
+                const double cf = player_.Crossfade();
+                add(L"Плавный переход между треками",
+                    L"Конец трека затихает, следующий в это время нарастает. Треки одного альбома идут стыком, как записаны.",
+                    {{L"Стык", CrossfadeFirst, cf <= 0},
+                     {L"3 с", CrossfadeFirst + 1, cf > 0 && cf < 4.5},
+                     {L"6 с", CrossfadeFirst + 2, cf >= 4.5 && cf < 8},
+                     {L"10 с", CrossfadeFirst + 3, cf >= 8}});
+            }
             toggle(L"Показывать, сколько осталось", L"Посмотрите на время под обложкой в образце. Выключено — полная длительность; включено — обратный отсчёт.", Remaining, view_.showRemaining);
             toggle(L"Мини-плеер поверх окон", L"Мини-полоска останется видна поверх других программ. Обычный плеер это не затрагивает.", MiniTop, miniOnTop_);
             add(L"Размер окна", L"Выберите реальный режим. Образец справа можно переключать, не закрывая настройки.",
@@ -186,9 +195,16 @@ void App::BuildWorkspace() {
 void App::WorkspaceCommand(int command) {
     workspaceNotice_.clear();
     if ((command >= ShapeFirst && command <= VizMore) || (command >= ThemeFirst && command < RemoveFolderFirst) || command == FontSmaller || command == FontLarger ||
-        command == Normalize || command == Remaining || command == MiniTop || command == ReduceMotion || command == AutoScan || command == HideDuplicates)
+        command == Normalize || command == Remaining || command == MiniTop || command == ReduceMotion || command == AutoScan || command == HideDuplicates ||
+        (command >= CrossfadeFirst && command < CrossfadeFirst + 4))
         settingsUndo_ = SettingsSnapshot{theme_, userTheme_, reduceMotion_, player_.Normalize(), view_.showRemaining,
-                                        miniOnTop_, library_.AutoScan(), library_.HideDuplicates()};
+                                        miniOnTop_, library_.AutoScan(), library_.HideDuplicates(), player_.Crossfade()};
+    if (command >= CrossfadeFirst && command < CrossfadeFirst + 4) {
+        const double seconds[] = {0, 3, 6, 10};
+        player_.SetCrossfade(seconds[command - CrossfadeFirst]);
+        Invalidate();
+        return;
+    }
     if (command >= ShapeFirst && command <= VizMore) {
         auto next = theme_;
         auto& settings = next.settings;
@@ -219,6 +235,7 @@ void App::WorkspaceCommand(int command) {
                 auto before = *settingsUndo_; settingsUndo_.reset();
                 userTheme_ = before.user; reduceMotion_ = before.reduce; miniOnTop_ = before.top;
                 view_.showRemaining = before.remaining; player_.SetNormalize(before.normalize);
+                player_.SetCrossfade(before.crossfade);
                 library_.SetAutoScan(before.autoScan); library_.SetHideDuplicates(before.hideDuplicates);
                 library_.Save(libraryPath_); RestartWatcher(); StartLibraryScan();
                 ApplyTheme(before.theme, false); ApplyTopmost();
