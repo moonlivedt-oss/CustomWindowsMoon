@@ -15,7 +15,7 @@ std::string ReadSource(const std::filesystem::path& p) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 std::wstring WideKey(const std::string& s) { return {s.begin(), s.end()}; }
-}
+}  // namespace
 
 void TestUsageCatalog(void (*check)(bool, const char*, int)) {
 #define CHECK_USAGE(x) check((x), #x, __LINE__)
@@ -56,10 +56,19 @@ void TestUsageCatalog(void (*check)(bool, const char*, int)) {
     CHECK_USAGE(!config.empty() && !catalog.empty());
     const std::regex configFlag(R"(cfg\.(\w+)\s*=\s*ParseBool\(val\))"), catalogFlag(R"(&Config::(\w+))");
     std::set<std::string> mapped, switches;
-    for (auto it = std::sregex_iterator(catalog.begin(), catalog.end(), catalogFlag); it != std::sregex_iterator(); ++it)
+    for (auto it = std::sregex_iterator(catalog.begin(), catalog.end(), catalogFlag); it != std::sregex_iterator();
+         ++it)
         mapped.insert((*it)[1]);
     for (auto it = std::sregex_iterator(config.begin(), config.end(), configFlag); it != std::sregex_iterator(); ++it)
         if ((*it)[1] != "tourDone") switches.insert((*it)[1]);
+    // Most switches are rows of the kBoolKeys table in LoadConfig rather than ParseBool assignments
+    const auto table = config.find("kBoolKeys[] = {");
+    CHECK_USAGE(table != std::string::npos);
+    if (table != std::string::npos) {
+        const auto rows = config.substr(table, config.find("};", table) - table);
+        for (auto it = std::sregex_iterator(rows.begin(), rows.end(), catalogFlag); it != std::sregex_iterator(); ++it)
+            if ((*it)[1] != "tourDone") switches.insert((*it)[1]);
+    }
     // These boolean UI choices are serialized as text. tourDone is onboarding state.
     switches.insert("accentAuto");
     switches.insert("lockPortal");

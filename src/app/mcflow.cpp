@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <map>
 
-#include "app/autos.h"
-#include "app/toolsui.h"
+#include "system/auto/autos.h"
+#include "system/ui/toolsui.h"
 #include "core/bg.h"
 #include "core/files.h"
 #include "core/fx.h"

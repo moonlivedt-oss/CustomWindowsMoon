@@ -12,7 +12,7 @@
 #include "core/bg.h"
 #include "core/perf.h"
 #include "core/text.h"
-#include "tools/tools.h"
+#include "system/tools.h"
 #include "net/vpnguard.h"
 
 namespace net {

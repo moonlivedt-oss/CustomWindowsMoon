@@ -57,7 +57,7 @@ void Studio::TourOverlay(float w, float h) {
     ui.Fill(RectF(0, 0, w, h), Color(170, 0, 0, 0));
     ui.Hover(ID_OV_BG, RectF(0, 0, w, h));
     struct Step {
-        const wchar_t* picture;  // art\tour\*.jpg - широкая картинка сверху; нет файла - талисман
+        const wchar_t* picture;  // images\tour\*.jpg - широкая картинка сверху; нет файла - талисман
         const wchar_t* mascot;
         const wchar_t* title;
         const wchar_t* text;
@@ -79,7 +79,7 @@ void Studio::TourOverlay(float w, float h) {
     ui.Hover(ID_OV_BG + 1, card);
     // сверху картинка шага во всю ширину карточки (cover, скруглены только верхние углы)
     RectF banner(card.X, card.Y, card.Width, ui.S(250));
-    Bitmap* pic = s.picture[0] ? Img(ExeDir() + L"\\art\\tour\\" + s.picture, 1280) : nullptr;
+    Bitmap* pic = s.picture[0] ? Img(ExeDir() + L"\\images\\tour\\" + s.picture, 1280) : nullptr;
     if (pic) {
         ui.Picture(pic, banner, ui.S(18), false);
     } else {

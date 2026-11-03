@@ -10,7 +10,7 @@
 #include "core/procsnap.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "desk/modeswitch.h"
+#include "modes/modeswitch.h"
 
 namespace app {
 

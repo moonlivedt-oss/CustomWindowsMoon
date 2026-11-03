@@ -85,6 +85,151 @@ void Resolve(Item& it) {
     for (Item& c : it.children) Resolve(c);
 }
 
+// Ключи [settings], которые читаются одной строкой: имя в radial.cfg -> поле Config. Ключи со своей логикой
+// (цвета, углы, списки, перечисления) разбираются в LoadConfig ниже.
+struct BoolKey {
+    const wchar_t* key;
+    bool Config::* field;
+};
+struct TextKey {
+    const wchar_t* key;
+    std::wstring Config::* field;
+};
+struct IntKey {
+    const wchar_t* key;
+    int Config::* field;
+    int lo, hi;
+};
+const BoolKey kBoolKeys[] = {
+    {L"desktop_only", &Config::desktopOnly},
+    {L"skip_fullscreen", &Config::skipFullscreen},
+    {L"inner_edges", &Config::innerEdges},
+    {L"window_frame", &Config::windowFrame},
+    {L"window_captions", &Config::windowCaptions},
+    {L"game_auto", &Config::gameAuto},
+    {L"game_fullscreen", &Config::gameFullscreen},
+    {L"share_auto", &Config::shareAuto},
+    {L"share_hide", &Config::shareHide},
+    {L"game_learn", &Config::gameLearn},
+    {L"game_back", &Config::gameBack},
+    {L"dev_mem", &Config::devMem},
+    {L"share_mask", &Config::shareMask},
+    {L"game_win_anim", &Config::gameWinAnim},
+    {L"game_transparency", &Config::gameTransparency},
+    {L"game_wallpaper", &Config::gameWallpaper},
+    {L"dev_auto", &Config::devAuto},
+    {L"dev_wallpaper", &Config::devWallpaper},
+    {L"dev_boost", &Config::devBoost},
+    {L"lock_reveal", &Config::lockReveal},
+    {L"boost_offer", &Config::boostOffer},
+    {L"boost_restore", &Config::boostRestore},
+    {L"boost_after", &Config::boostAfter},
+    {L"boost_eco", &Config::boostEco},
+    {L"boost_quiet", &Config::boostQuiet},
+    {L"boost_islc", &Config::boostIslc},
+    {L"boost_gpu", &Config::boostGpu},
+    {L"boost_summary", &Config::boostSummary},
+    {L"dev_watch", &Config::devWatch},
+    {L"speed_auto", &Config::speedAuto},
+    {L"net_watch", &Config::netWatch},
+    {L"net_security", &Config::netSecurity},
+    {L"net_changes", &Config::netChanges},
+    {L"net_vpn_watch", &Config::netVpnWatch},
+    {L"net_vpn_block", &Config::netVpnBlock},
+    {L"transfer_gentle", &Config::transferGentle},
+    {L"net_exit", &Config::netExit},
+    {L"net_game", &Config::netGame},
+    {L"auto_clean", &Config::autoClean},
+    {L"crash_restart", &Config::crashRestart},
+    {L"digest", &Config::digest},
+    {L"auto_downloads", &Config::autoDownloads},
+    {L"auto_power", &Config::autoPower},
+    {L"phone_input", &Config::phoneInput},
+    {L"phone_always", &Config::phoneAlways},
+    {L"phone_screen", &Config::phoneScreen},
+    {L"phone_files", &Config::phoneFiles},
+    {L"bright_by_app", &Config::brightByApp},
+    {L"winget_night", &Config::wingetNight},
+    {L"winget_night_accept", &Config::wingetAccept},
+    {L"auto_repair", &Config::autoRepair},
+    {L"auto_report", &Config::autoReport},
+    {L"auto_backup", &Config::autoBackup},
+    {L"tools_disk_warn", &Config::toolsDiskWarn},
+    {L"day_tint", &Config::dayTint},
+    {L"hex_glass", &Config::hexGlass},
+    {L"boot_portal", &Config::bootPortal},
+    {L"wake_portal", &Config::wakePortal},
+    {L"stroke", &Config::stroke},
+    {L"palette", &Config::palette},
+    {L"gamepad", &Config::gamepad},
+    {L"clip_history", &Config::clipHistory},
+    {L"clip_secrets", &Config::clipSecrets},
+    {L"win_drag", &Config::winDrag},
+    {L"cpu_balance", &Config::cpuBalance},
+    {L"no_sleep", &Config::noSleep},
+    {L"long_watch", &Config::longWatch},
+    {L"app_volume", &Config::appVolume},
+    {L"blur", &Config::blur},
+    {L"sounds", &Config::sounds},
+    {L"tour_done", &Config::tourDone},
+    {L"media", &Config::media},
+    {L"media_toast", &Config::mediaToast},
+    {L"window_fx", &Config::winFx},
+    {L"window_ring", &Config::winRing},
+    {L"selection_ring", &Config::selectionRing},
+    {L"desk_double", &Config::deskDouble},
+    {L"battery_glow", &Config::batteryGlow},
+    {L"snip_card", &Config::snipCard},
+    {L"night", &Config::night},
+};
+const TextKey kTextKeys[] = {
+    {L"share_apps", &Config::shareApps},
+    {L"games", &Config::games},
+    {L"games_skip", &Config::gamesSkip},
+    {L"games_light", &Config::gamesLight},
+    {L"dev_busy", &Config::devBusy},
+    {L"share_titles", &Config::shareTitles},
+    {L"dev_apps", &Config::devApps},
+    {L"security_dir", &Config::securityDir},
+    {L"lock_source", &Config::lockSource},
+    {L"boost_dir", &Config::boostDir},
+    {L"boost_keep_fast", &Config::boostKeepFast},
+    {L"net_vpn_route", &Config::netVpnRoute},
+    {L"net_vpn_apps", &Config::netVpnApps},
+    {L"phone_share", &Config::phoneShare},
+    {L"bright_apps", &Config::brightApps},
+    {L"winget_skip", &Config::wingetSkip},
+    {L"avatar_source", &Config::avatarSource},
+    {L"proc_rules", &Config::procRules},
+    {L"no_sleep_apps", &Config::noSleepApps},
+    {L"long_apps", &Config::longApps},
+    {L"focus_apps", &Config::focusApps},
+    {L"focus_auto", &Config::focusAuto},
+    {L"folder_icon", &Config::folderIcon},
+    {L"vscode", &Config::vscode},
+    {L"terminal", &Config::terminal},
+    {L"library", &Config::library},
+};
+const IntKey kIntKeys[] = {
+    {L"digest_hour", &Config::digestHour, 0, 23},      {L"downloads_days", &Config::downloadsDays, 3, 180},
+    {L"net_interval", &Config::netInterval, 5, 600},   {L"clip_secret_sec", &Config::clipSecretSec, 10, 600},
+    {L"long_min", &Config::longMin, 1, 120},           {L"focus_minutes", &Config::focusMinutes, 5, 240},
+    {L"max_children", &Config::maxChildren, 4, 24},    {L"volume", &Config::volume, 0, 100},
+    {L"corner_delay", &Config::cornerDelay, 50, 2000}, {L"battery_low", &Config::batteryLow, 5, 50},
+    {L"night_from", &Config::nightFrom, 0, 23},        {L"night_to", &Config::nightTo, 0, 23},
+    {L"cursor_size", &Config::cursorSize, 0, 128},
+};
+
+bool ApplySimpleKey(Config& cfg, const std::wstring& key, const std::wstring& val) {
+    for (const BoolKey& k : kBoolKeys)
+        if (key == k.key) return cfg.*k.field = ParseBool(val), true;
+    for (const TextKey& k : kTextKeys)
+        if (key == k.key) return cfg.*k.field = val, true;
+    for (const IntKey& k : kIntKeys)
+        if (key == k.key) return cfg.*k.field = std::clamp(_wtoi(val.c_str()), k.lo, k.hi), true;
+    return false;
+}
+
 bool LoadConfig(const std::wstring& file, Config& out) {
     PERF_SCOPE("config.Load");
     HANDLE f =
@@ -142,202 +287,17 @@ bool LoadConfig(const std::wstring& file, Config& out) {
         std::wstring val = Trim(line.substr(eq + 1));
 
         if (inSettings) {
-            if (key == L"desktop_only")
-                cfg.desktopOnly = ParseBool(val);
-            else if (key == L"skip_fullscreen")
-                cfg.skipFullscreen = ParseBool(val);
-            else if (key == L"inner_edges")
-                cfg.innerEdges = ParseBool(val);
-            else if (key == L"motion")
+            if (ApplySimpleKey(cfg, key, val)) continue;  // однострочные ключи - из таблиц выше
+            if (key == L"motion")
                 cfg.motion = Lower(val) == L"calm" ? 0 : Lower(val) == L"lively" ? 2 : 1;
-            else if (key == L"window_frame")
-                cfg.windowFrame = ParseBool(val);
-            else if (key == L"window_captions")
-                cfg.windowCaptions = ParseBool(val);
-            else if (key == L"game_auto")
-                cfg.gameAuto = ParseBool(val);
-            else if (key == L"game_fullscreen")
-                cfg.gameFullscreen = ParseBool(val);
-            else if (key == L"share_auto")
-                cfg.shareAuto = ParseBool(val);
-            else if (key == L"share_apps")
-                cfg.shareApps = val;
-            else if (key == L"share_hide")
-                cfg.shareHide = ParseBool(val);
-            else if (key == L"games")
-                cfg.games = val;
-            else if (key == L"games_skip")
-                cfg.gamesSkip = val;
-            else if (key == L"games_light")
-                cfg.gamesLight = val;
-            else if (key == L"game_learn")
-                cfg.gameLearn = ParseBool(val);
-            else if (key == L"game_back")
-                cfg.gameBack = ParseBool(val);
-            else if (key == L"dev_busy")
-                cfg.devBusy = val;
-            else if (key == L"dev_mem")
-                cfg.devMem = ParseBool(val);
-            else if (key == L"share_titles")
-                cfg.shareTitles = val;
-            else if (key == L"share_mask")
-                cfg.shareMask = ParseBool(val);
-            else if (key == L"game_win_anim")
-                cfg.gameWinAnim = ParseBool(val);
-            else if (key == L"game_transparency")
-                cfg.gameTransparency = ParseBool(val);
-            else if (key == L"game_wallpaper")
-                cfg.gameWallpaper = ParseBool(val);
-            else if (key == L"dev_auto")
-                cfg.devAuto = ParseBool(val);
-            else if (key == L"dev_apps")
-                cfg.devApps = val;
-            else if (key == L"security_dir")
-                cfg.securityDir = val;
-            else if (key == L"dev_wallpaper")
-                cfg.devWallpaper = ParseBool(val);
-            else if (key == L"dev_boost")
-                cfg.devBoost = ParseBool(val);
-            else if (key == L"lock_source")
-                cfg.lockSource = val;
-            else if (key == L"lock_reveal")
-                cfg.lockReveal = ParseBool(val);
-            else if (key == L"boost_dir")
-                cfg.boostDir = val;
-            else if (key == L"boost_offer")
-                cfg.boostOffer = ParseBool(val);
-            else if (key == L"boost_restore")
-                cfg.boostRestore = ParseBool(val);
-            else if (key == L"boost_after")
-                cfg.boostAfter = ParseBool(val);
-            else if (key == L"boost_eco")
-                cfg.boostEco = ParseBool(val);
-            else if (key == L"boost_keep_fast")
-                cfg.boostKeepFast = val;
-            else if (key == L"boost_quiet")
-                cfg.boostQuiet = ParseBool(val);
-            else if (key == L"boost_islc")
-                cfg.boostIslc = ParseBool(val);
-            else if (key == L"boost_gpu")
-                cfg.boostGpu = ParseBool(val);
-            else if (key == L"boost_summary")
-                cfg.boostSummary = ParseBool(val);
-            else if (key == L"dev_watch")
-                cfg.devWatch = ParseBool(val);
-            else if (key == L"speed_auto")
-                cfg.speedAuto = ParseBool(val);
-            else if (key == L"net_watch")
-                cfg.netWatch = ParseBool(val);
-            else if (key == L"net_security")
-                cfg.netSecurity = ParseBool(val);
-            else if (key == L"net_changes") cfg.netChanges = ParseBool(val);
-            else if (key == L"net_vpn_watch") cfg.netVpnWatch = ParseBool(val);
-            else if (key == L"net_vpn_block") cfg.netVpnBlock = ParseBool(val);
-            else if (key == L"transfer_gentle") cfg.transferGentle = ParseBool(val);
-            else if (key == L"net_vpn_route") cfg.netVpnRoute = val;
-            else if (key == L"net_vpn_apps") cfg.netVpnApps = val;
-            else if (key == L"net_exit")
-                cfg.netExit = ParseBool(val);
-            else if (key == L"net_game")
-                cfg.netGame = ParseBool(val);
-            else if (key == L"auto_clean")
-                cfg.autoClean = ParseBool(val);
-            else if (key == L"crash_restart")
-                cfg.crashRestart = ParseBool(val);
-            else if (key == L"digest")
-                cfg.digest = ParseBool(val);
-            else if (key == L"digest_hour")
-                cfg.digestHour = std::clamp(_wtoi(val.c_str()), 0, 23);
-            else if (key == L"auto_downloads")
-                cfg.autoDownloads = ParseBool(val);
-            else if (key == L"downloads_days")
-                cfg.downloadsDays = std::clamp(_wtoi(val.c_str()), 3, 180);
-            else if (key == L"auto_power")
-                cfg.autoPower = ParseBool(val);
-            else if (key == L"phone_share")
-                cfg.phoneShare = val;
-            else if (key == L"phone_input")
-                cfg.phoneInput = ParseBool(val);
-            else if (key == L"phone_always")
-                cfg.phoneAlways = ParseBool(val);
-            else if (key == L"phone_screen")
-                cfg.phoneScreen = ParseBool(val);
-            else if (key == L"phone_files")
-                cfg.phoneFiles = ParseBool(val);
-            else if (key == L"bright_by_app")
-                cfg.brightByApp = ParseBool(val);
-            else if (key == L"bright_apps")
-                cfg.brightApps = val;
-            else if (key == L"winget_night")
-                cfg.wingetNight = ParseBool(val);
-            else if (key == L"winget_skip")
-                cfg.wingetSkip = val;
-            else if (key == L"winget_night_accept")
-                cfg.wingetAccept = ParseBool(val);
-            else if (key == L"auto_repair")
-                cfg.autoRepair = ParseBool(val);
-            else if (key == L"auto_report")
-                cfg.autoReport = ParseBool(val);
-            else if (key == L"auto_backup")
-                cfg.autoBackup = ParseBool(val);
-            else if (key == L"tools_disk_warn")
-                cfg.toolsDiskWarn = ParseBool(val);
-            else if (key == L"net_interval")
-                cfg.netInterval = std::clamp(_wtoi(val.c_str()), 5, 600);
-            else if (key == L"day_tint")
-                cfg.dayTint = ParseBool(val);
-            else if (key == L"hex_glass")
-                cfg.hexGlass = ParseBool(val);
-            else if (key == L"boot_portal")
-                cfg.bootPortal = ParseBool(val);
-            else if (key == L"wake_portal")
-                cfg.wakePortal = ParseBool(val);
             else if (key == L"lock_pattern")
                 cfg.lockPattern = Lower(val) == L"none" ? 0 : Lower(val) == L"shards" ? 2 : 1;
             else if (key == L"lock_anim")
                 cfg.lockPortal = Lower(val) != L"fade";
-            else if (key == L"avatar_source")
-                cfg.avatarSource = val;
-            else if (key == L"stroke")
-                cfg.stroke = ParseBool(val);
-            else if (key == L"palette")
-                cfg.palette = ParseBool(val);
             else if (key == L"palette_key")
                 cfg.paletteKey = Lower(val);
             else if (key == L"rule")
                 cfg.rules.push_back(val);
-            else if (key == L"proc_rules")
-                cfg.procRules = val;
-            else if (key == L"gamepad")
-                cfg.gamepad = ParseBool(val);
-            else if (key == L"clip_history")
-                cfg.clipHistory = ParseBool(val);
-            else if (key == L"clip_secrets")
-                cfg.clipSecrets = ParseBool(val);
-            else if (key == L"clip_secret_sec")
-                cfg.clipSecretSec = std::clamp(_wtoi(val.c_str()), 10, 600);
-            else if (key == L"win_drag")
-                cfg.winDrag = ParseBool(val);
-            else if (key == L"cpu_balance")
-                cfg.cpuBalance = ParseBool(val);
-            else if (key == L"no_sleep")
-                cfg.noSleep = ParseBool(val);
-            else if (key == L"no_sleep_apps")
-                cfg.noSleepApps = val;
-            else if (key == L"long_watch")
-                cfg.longWatch = ParseBool(val);
-            else if (key == L"long_apps")
-                cfg.longApps = val;
-            else if (key == L"long_min")
-                cfg.longMin = std::clamp(_wtoi(val.c_str()), 1, 120);
-            else if (key == L"app_volume")
-                cfg.appVolume = ParseBool(val);
-            else if (key == L"focus_minutes")
-                cfg.focusMinutes = std::clamp(_wtoi(val.c_str()), 5, 240);
-            else if (key == L"focus_apps")
-                cfg.focusApps = val;
-            else if (key == L"focus_auto")
-                cfg.focusAuto = val;
             else if (key == L"scale")
                 cfg.scale = std::clamp(_wtof(val.c_str()), 0.5, 3.0);
             else if (key == L"accent") {
@@ -345,24 +305,8 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 if (!cfg.accentAuto) ParseColor(val, cfg.accentManual);
             } else if (key == L"accent_color")
                 ParseColor(val, cfg.accentManual);
-            else if (key == L"max_children")
-                cfg.maxChildren = std::clamp(_wtoi(val.c_str()), 4, 24);
             else if (key == L"theme")
                 cfg.theme = Lower(val);
-            else if (key == L"blur")
-                cfg.blur = ParseBool(val);
-            else if (key == L"sounds")
-                cfg.sounds = ParseBool(val);
-            else if (key == L"volume")
-                cfg.volume = std::clamp(_wtoi(val.c_str()), 0, 100);
-            else if (key == L"folder_icon")
-                cfg.folderIcon = val;
-            else if (key == L"vscode")
-                cfg.vscode = val;
-            else if (key == L"terminal")
-                cfg.terminal = val;
-            else if (key == L"library")
-                cfg.library = val;
             else if (key == L"custom_bg")
                 ParseColor(val, cfg.customBg);
             else if (key == L"custom_accent")
@@ -371,8 +315,6 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 ParseColor(val, cfg.customAccent2);
             else if (key == L"custom_gold")
                 ParseColor(val, cfg.customGold);
-            else if (key == L"tour_done")
-                cfg.tourDone = ParseBool(val);
             else if (key.size() > 3 && (key.rfind(L"corner_", 0) == 0 || key.rfind(L"corner2_", 0) == 0 ||
                                         key.rfind(L"wheel_", 0) == 0)) {
                 std::wstring side = key.substr(key.size() - 2), kind = key.substr(0, key.size() - 2);
@@ -382,36 +324,10 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                     if (kind == L"corner2_") cfg.corners2[i] = val;
                     if (kind == L"wheel_") cfg.cornerWheel[i] = val;
                 }
-                if (key == L"corner_delay") cfg.cornerDelay = std::clamp(_wtoi(val.c_str()), 50, 2000);
-            } else if (key == L"media")
-                cfg.media = ParseBool(val);
-            else if (key == L"media_toast")
-                cfg.mediaToast = ParseBool(val);
-            else if (key == L"window_fx")
-                cfg.winFx = ParseBool(val);
-            else if (key == L"window_ring")
-                cfg.winRing = ParseBool(val);
-            else if (key == L"selection_ring")
-                cfg.selectionRing = ParseBool(val);
-            else if (key == L"desk_double")
-                cfg.deskDouble = ParseBool(val);
-            else if (key == L"battery_glow")
-                cfg.batteryGlow = ParseBool(val);
-            else if (key == L"battery_low")
-                cfg.batteryLow = std::clamp(_wtoi(val.c_str()), 5, 50);
-            else if (key == L"snip_card")
-                cfg.snipCard = ParseBool(val);
-            else if (key == L"night")
-                cfg.night = ParseBool(val);
-            else if (key == L"night_from")
-                cfg.nightFrom = std::clamp(_wtoi(val.c_str()), 0, 23);
-            else if (key == L"night_to")
-                cfg.nightTo = std::clamp(_wtoi(val.c_str()), 0, 23);
-            else if (key == L"cursor_color") {
+            } else if (key == L"cursor_color") {
                 COLORREF tmp;
                 cfg.cursorColor = ParseColor(val, tmp) ? val : L"";
-            } else if (key == L"cursor_size")
-                cfg.cursorSize = std::clamp(_wtoi(val.c_str()), 0, 128);
+            }
             continue;
         }
         if (!cur) continue;

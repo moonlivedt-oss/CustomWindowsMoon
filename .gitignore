@@ -7,16 +7,13 @@ RadialMenu.exe
 radial.cfg
 backups/
 
-# служебные файлы отладки
+# служебные файлы отладки (dev-режимы exe пишут их в build/out)
 *.log
 *_out.txt
 media_snap.png
 wifi_qr.png
 .ruff_cache/
 __pycache__/
-build-check/
-build-sym/
-build-player/
 apps/PlayerMoon/
 dev.on
 

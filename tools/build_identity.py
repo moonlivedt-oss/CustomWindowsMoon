@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT.parent
-OUT = ROOT / 'art' / 'identity'
+OUT = ROOT / 'docs' / 'design' / 'identity'
 BACKUP = ROOT / 'backups' / 'identity-originals'
 S = 4
 

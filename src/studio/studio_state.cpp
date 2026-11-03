@@ -7,13 +7,13 @@
 #include <cmath>
 #include <ctime>
 
-#include "app/autos.h"
-#include "life/nightupd.h"
+#include "system/auto/autos.h"
+#include "system/auto/nightupd.h"
 #include "phone/phone.h"
 #include "app/autostart.h"
-#include "app/modestats.h"
-#include "app/toolsui.h"
-#include "app/weekreport.h"
+#include "modes/modestats.h"
+#include "system/ui/toolsui.h"
+#include "system/auto/weekreport.h"
 #include "core/bg.h"
 #include "core/elevate.h"
 #include "core/files.h"
@@ -1065,11 +1065,11 @@ void Studio::AutoPage(const RectF& r) {
         toggle(rr, ID_PHONE_SCREEN, cfg.phoneScreen);
         rr = cols.Row(b, 3, L"Файлы: открыть, копировать, в Корзину");
         toggle(rr, ID_PHONE_FILES, cfg.phoneFiles);
-        if (phones.empty()) {  // картинка art/empty/no-phone.png и как подключить
+        if (phones.empty()) {  // картинка images/empty/no-phone.png и как подключить
             RectF er = cols.Row(b, 4, L"", 0.95f);
             float ih = ui.S(112), iw = ui.S(132);  // поля у картинки прозрачные - бока обрезаются
             RectF pic(er.X, er.Y + ui.S(4), iw, ih);
-            if (Bitmap* img = Img(ExeDir() + L"\\art\\empty\\no-phone.png", 640)) ui.Picture(img, pic, 0);
+            if (Bitmap* img = Img(ExeDir() + L"\\images\\empty\\no-phone.png", 640)) ui.Picture(img, pic, 0);
             float tx = pic.X + iw + ui.S(18), tw = er.X + er.Width - tx;
             ui.Text(L"Телефон ещё не подключён", RectF(tx, pic.Y + ui.S(6), tw, ui.S(24)), c.text, 14, true);
             ui.Text(

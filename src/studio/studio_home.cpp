@@ -13,7 +13,7 @@
 #include "core/fx.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "desk/corners.h"
+#include "desktop/corners.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "studio/studio.h"

@@ -30,16 +30,16 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRADIAL_OUT_DIR="$PWD/out"
+        run: cmake -S . -B build/main -G Ninja -DCMAKE_BUILD_TYPE=Release -DRADIAL_OUT_DIR="$PWD/out"
 
       - name: Build
-        run: cmake --build build
+        run: cmake --build build/main
 
       - name: Tests
         run: |
-          cmake --build build --target radial_tests pm_tests
-          ./build/radial_tests.exe
-          ./build/player/pm_tests.exe
+          cmake --build build/main --target radial_tests pm_tests
+          ./build/main/radial_tests.exe
+          ./build/main/player/pm_tests.exe
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:

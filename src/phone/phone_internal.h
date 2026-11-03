@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "desk/toast.h"
+#include "cards/toast.h"
 #include "phone/phone.h"
 
 namespace phone::detail {
@@ -165,7 +165,7 @@ bool HandleExtra(Conn& cn, const Request& r, const std::string& rest);  // serve
 bool HandleApp(Conn& cn, const Request& r, const std::string& rest);    // server_app.cpp: приложение на телефоне
 void HoldKey(WORD vk, bool down);                                       // server_more.cpp: геймпад
 void ReleaseKeys();
-void MediaStart();  // что играет на ПК (desk/media) - пока идёт передача
+void MediaStart();  // что играет на ПК (media/media) - пока идёт передача
 void MediaStop();
 std::wstring UniquePath(const std::wstring& dir, const std::wstring& name);  // «a (2).jpg», если занято
 void MarkFromInternet(const std::wstring& path);                             // Zone.Identifier

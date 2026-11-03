@@ -2,7 +2,7 @@
 #include "net/vpnguard.h"
 #include "core/elevate.h"
 #include "core/text.h"
-#include "tools/tools.h"
+#include "system/tools.h"
 #include <set>
 
 namespace net {

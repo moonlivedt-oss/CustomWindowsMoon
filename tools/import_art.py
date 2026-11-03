@@ -1,4 +1,4 @@
-"""Режет сгенерированные листы из art/ на значки и кладёт их в icons/.
+"""Режет сгенерированные листы из docs/design/ на значки и кладёт их в icons/.
 
 Запуск: python tools/import_art.py
 Значки на листе ищутся по прозрачным промежуткам между ними (порядок: по строкам, слева направо),
@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
-ART = ROOT / "art"
+ART = ROOT / "docs" / "design" / "sheets"
 OUT = ROOT / "icons"
 SIZE = 256
 

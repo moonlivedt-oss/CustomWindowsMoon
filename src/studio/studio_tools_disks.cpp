@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "app/toolsui.h"
+#include "system/ui/toolsui.h"
 #include "core/bg.h"
 #include "core/elevate.h"
 #include "core/files.h"

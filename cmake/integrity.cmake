@@ -1,5 +1,5 @@
 # Отметка целостности: SHA-256 exe сразу после сборки.
-# %APPDATA%\MoonDesk\integrity\<sha256 пути в нижнем регистре>.txt - «Защита» сверяет с ней exe (tools/syscheck.cpp).
+# %APPDATA%\MoonDesk\integrity\<sha256 пути в нижнем регистре>.txt - «Защита» сверяет с ней exe (system/syscheck.cpp).
 # Вызов: cmake -DEXE=<путь к exe> -P integrity.cmake
 file(SHA256 "${EXE}" hash)
 string(REPLACE "/" "\\" native "${EXE}")

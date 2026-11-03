@@ -5,7 +5,7 @@
 #include "net/recovery.h"
 #include "net/security.h"
 #include "net/background.h"
-#include "life/vpnexit.h"
+#include "net/vpnexit.h"
 
 #include <algorithm>
 #include <map>

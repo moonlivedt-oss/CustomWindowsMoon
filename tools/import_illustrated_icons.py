@@ -12,7 +12,7 @@ from collections import deque
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'art' / 'illustrated-icons'
+SOURCE = ROOT / 'docs' / 'design' / 'illustrated-icons'
 OUT = ROOT / 'icons' / 'illustrated'
 NAMES = ['projects', 'code', 'study', 'game', 'music', 'apps', 'folder', 'downloads', 'web', 'terminal', 'career', 'tools']
 THEMES = ['crimson', 'sunset', 'moon', 'mocha', 'tokyo', 'dracula', 'rosepine', 'nord', 'gruvbox', 'onedark', 'forest', 'wallpaper', 'custom']

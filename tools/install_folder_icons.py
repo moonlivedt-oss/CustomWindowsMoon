@@ -94,7 +94,7 @@ def main():
         print(f'Restored folder metadata: {len(state)} folders')
         return
 
-    projects = json.loads((ROOT / 'art/identity/manifest.json').read_text(encoding='utf-8'))['projects']
+    projects = json.loads((ROOT / 'docs/design/identity/manifest.json').read_text(encoding='utf-8'))['projects']
     for name in projects:
         folder = WORK / name
         ini = folder / 'desktop.ini'
@@ -107,7 +107,7 @@ def main():
                 shutil.copy2(ini, saved)
             # Persist rollback information before touching each folder.
             MANIFEST.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
-        source = ROOT / 'art/identity/logos' / f'{name}.ico'
+        source = ROOT / 'docs/design/identity/logos' / f'{name}.ico'
         if name == 'image':
             # Image library files must be managed through its API.
             # Only Explorer metadata is written here; artwork stays outside it.

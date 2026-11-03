@@ -17,10 +17,10 @@
 #include "net/security.h"
 #include "net/probe_policy.h"
 #include "net/background.h"
-#include "tools/journal.h"
-#include "tools/mft_detail.h"
-#include "tools/selfwatch.h"
-#include "tools/tools.h"
+#include "system/journal.h"
+#include "system/mft_detail.h"
+#include "system/selfwatch.h"
+#include "system/tools.h"
 
 namespace {
 
@@ -220,7 +220,7 @@ void TestLiveSize() {
     CHECK(got.today == 0 && got.hour == 0);  // первый замер - точка отсчёта
 }
 
-// ---- MFT: синтетические записи (tools/mft_detail.h), без прав и без тома ----
+// ---- MFT: синтетические записи (system/mft_detail.h), без прав и без тома ----
 
 namespace md = tools::mft_detail;
 

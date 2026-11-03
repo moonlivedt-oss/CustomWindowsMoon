@@ -1,4 +1,5 @@
 #include "core/perf.h"
+#include "core/files.h"
 
 #include <cstdio>
 #include <map>
@@ -43,10 +44,7 @@ void Flush() {
     std::map<std::string, Stat> stats = Stats();
     ReleaseSRWLockExclusive(&g_lock);
     if (stats.empty()) return;
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(nullptr, path, MAX_PATH);
-    std::wstring p = path;
-    p = p.substr(0, p.find_last_of(L'\\')) + L"\\profile.log";
+    std::wstring p = DevOutPath(L"profile.log");
     FILE* f = _wfopen(p.c_str(), L"w");
     if (!f) return;
     fprintf(f, "%-28s %8s %10s %10s\n", "scope", "count", "avg ms", "max ms");

@@ -12,18 +12,18 @@
 #include <string>
 #include <vector>
 
-#include "desk/lockscreen.h"
+#include "desktop/lockscreen.h"
 #include "net/net.h"
 #include "net/speed.h"
 #include "net/wifi.h"
-#include "desk/cardlog.h"
-#include "tools/healthscore.h"
-#include "tools/tools.h"
+#include "cards/cardlog.h"
+#include "system/healthscore.h"
+#include "system/tools.h"
 #include "core/config.h"
 #include "core/themes.h"
 #include "ui/ui.h"
 #include "gfx/scene.h"
-#include "app/toolsui.h"
+#include "system/ui/toolsui.h"
 #include "core/cfgdiff.h"
 #include "core/usage.h"
 
@@ -824,7 +824,7 @@ private:
     void CleanSceneIn(const RectF& r);
     bool netWasBusy_ = false;
     ULONGLONG netDoneAt_ = 0;  // когда пришёл итог проверки: узлы схемы загораются по очереди
-    // шар связи в «Состоянии» (art\net\*.png) по сторожу связи: 0 есть, 1 медленно, 2 нет, 3 через VPN; -1 не знаем
+    // шар связи в «Состоянии» (images\net\*.png) по сторожу связи: 0 есть, 1 медленно, 2 нет, 3 через VPN; -1 не знаем
     void NetOrb(const RectF& r);
     int netOrb_ = -1, netOrbWas_ = -1;
     ULONGLONG netOrbAt_ = 0, netProbeAt_ = 0;     // смена шара (для плавного перехода), последняя учтённая проба

@@ -7,10 +7,10 @@
 #include <algorithm>
 #include <map>
 
-#include "app/afterwork.h"
-#include "app/autos.h"
-#include "app/gameprep.h"
-#include "app/toolsui.h"
+#include "helpers/afterwork.h"
+#include "system/auto/autos.h"
+#include "modes/gameprep.h"
+#include "system/ui/toolsui.h"
 #include "core/bg.h"
 #include "core/files.h"
 #include "core/procsnap.h"

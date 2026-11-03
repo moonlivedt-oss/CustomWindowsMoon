@@ -80,7 +80,7 @@ struct Config {
     bool mediaToast = true;
     bool winFx = true;
     bool winRing = true;              // Alt + ` - кольцо открытых окон
-    bool selectionRing = true;        // Ctrl + Alt + Пробел - кольцо выделенного текста (app/selring)
+    bool selectionRing = true;        // Ctrl + Alt + Пробел - кольцо выделенного текста (ring/selring)
     bool deskDouble = true;           // двойной клик по пустому столу - целое кольцо вокруг курсора
     bool batteryGlow = true;          // свечение у нижнего края: мало заряда, подключили зарядку
     int batteryLow = 15;              // с какого процента заряд считается низким
@@ -100,7 +100,7 @@ struct Config {
     // игра без маски: окно на весь монитор (в том числе без рамки), процесс рисует через Direct3D, Vulkan или
     // OpenGL, и это не браузер и не плеер
     bool gameFullscreen = true;
-    // показ экрана (desk/share): включать самому, пока запущена программа трансляции или показа (имена exe через
+    // показ экрана (desktop/share): включать самому, пока запущена программа трансляции или показа (имена exe через
     // |); share_hide - окна RadialMenu мимо захвата экрана (вы их видите, зрители нет)
     bool shareAuto = true;
     std::wstring shareApps = L"obs64.exe|obs32.exe|CptHost.exe|Streamlabs OBS.exe|XSplit.Core.exe";
@@ -177,7 +177,7 @@ struct Config {
     // пульт: экран ПК на телефоне (касание - щелчок в точку) и операции с файлами в открытых папках - по умолчанию нет
     bool phoneScreen = false;
     bool phoneFiles = false;
-    // Ж7: яркость по программе (life/appbright): exe=+N/-N от нынешней яркости или exe=N, через |
+    // Ж7: яркость по программе (desktop/appbright): exe=+N/-N от нынешней яркости или exe=N, через |
     bool brightByApp = true;
     std::wstring brightApps =
         L"figma.exe=+20|vlc.exe=+25|mpc-hc64.exe=+25|potplayermini64.exe=+25|sumatrapdf.exe=-15|acrobat.exe=-15|"
@@ -187,7 +187,7 @@ struct Config {
     std::wstring wingetSkip;
     bool wingetAccept = false;  // принимать соглашения пакетов за вас (по умолчанию - нет: такие - вручную)
     bool autoRepair = true;
-    bool autoReport = true;     // раз в неделю сам собрать отчёт картинкой (app/weekreport), итог - в дайджест
+    bool autoReport = true;     // раз в неделю сам собрать отчёт картинкой (system/auto/weekreport), итог - в дайджест
     bool autoBackup = true;     // раз в сутки копия radial.cfg в backups, если он поменялся (правка не из студии)
     bool toolsDiskWarn = true;  // карточка, когда на диске мало места (меньше 10% и меньше 20 ГБ)
     int lockPattern = 1;        // узор стекла при переходе: 0 - нет, 1 - соты, 2 - осколки
@@ -198,7 +198,7 @@ struct Config {
     std::wstring paletteKey = L"alt+space";  // её сочетание
     std::vector<std::wstring> rules;         // «если - то» (app/rules): строки rule = условие -> действия
     std::wstring procRules;   // постоянные правила процессов (И25): chrome.exe=below,eco | blender.exe=high
-    bool gamepad = true;      // геймпад: зажать View - кольцо, стик - сектор, A - открыть (desk/gamepad)
+    bool gamepad = true;      // геймпад: зажать View - кольцо, стик - сектор, A - открыть (modes/gamepad)
     bool clipHistory = true;  // история буфера: последние тексты и картинки
     bool clipSecrets = true;  // токены, ключи и номера карт не запоминать, из буфера стирать
     int clipSecretSec = 60;   // через сколько секунд стирать секрет из буфера

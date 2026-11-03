@@ -11,11 +11,11 @@
 #include "core/files.h"
 #include "core/perf.h"
 #include "core/themes.h"
-#include "desk/boostcard.h"
-#include "desk/boostpick.h"
-#include "tools/explain.h"
+#include "cards/boostcard.h"
+#include "modes/boostpick.h"
+#include "system/explain.h"
 #include "gfx/scene.h"
-#include "menu/menu.h"
+#include "ring/menu.h"
 #include "studio/studio.h"
 
 namespace devcli {

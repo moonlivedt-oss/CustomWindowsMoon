@@ -81,7 +81,7 @@ void Studio::NetCheck() {
     });
 }
 
-// Живой шар связи по сторожу (netui::State): картинка art\net\*.png, пинг крупно, страна выхода или туннель,
+// Живой шар связи по сторожу (netui::State): картинка images\net\*.png, пинг крупно, страна выхода или туннель,
 // и точки последних проб. Смена состояния - растворением одного шара в другом, «есть связь» - мягкое дыхание.
 void Studio::NetOrb(const RectF& r) {
     const UiColors& c = ui.C();
@@ -120,9 +120,9 @@ void Studio::NetOrb(const RectF& r) {
         ui.G().FillEllipse(&glow, o.X - g, o.Y - g, o.Width + 2 * g, o.Height + 2 * g);
     }
     if (netOrbWas_ >= 0 && mix < 1)
-        if (Bitmap* b = Img(ExeDir() + L"\\art\\net\\" + kFile[netOrbWas_], 256))
+        if (Bitmap* b = Img(ExeDir() + L"\\images\\net\\" + kFile[netOrbWas_], 256))
             ui.Picture(b, o, 0, true, (BYTE)(255 * (1 - mix)));
-    if (Bitmap* b = Img(ExeDir() + L"\\art\\net\\" + kFile[now < 0 ? 0 : now], 256))
+    if (Bitmap* b = Img(ExeDir() + L"\\images\\net\\" + kFile[now < 0 ? 0 : now], 256))
         ui.Picture(b, o, 0, true, (BYTE)((now < 0 ? 90 : 255) * mix));
     if (!fx::Game() && (mix < 1 || now == 0 || now == 2)) RepaintIn(mix < 1 ? 16 : 66);
 

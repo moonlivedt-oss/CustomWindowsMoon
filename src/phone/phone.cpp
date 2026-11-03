@@ -19,7 +19,7 @@
 #include <ctime>
 #include <memory>
 
-#include "app/autos.h"
+#include "system/auto/autos.h"
 #include "core/bg.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -27,11 +27,11 @@
 #include "core/secrets.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "desk/boostcard.h"
+#include "cards/boostcard.h"
 #include "core/winlist.h"
-#include "desk/corners.h"
-#include "desk/ocr.h"
-#include "desk/volume.h"
+#include "desktop/corners.h"
+#include "helpers/ocr.h"
+#include "media/volume.h"
 #include "phone/cert.h"
 #include "phone/phone_internal.h"
 #include "net/net.h"

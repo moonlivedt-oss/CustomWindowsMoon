@@ -7,14 +7,14 @@
 #include <algorithm>
 #include <cwctype>
 
-#include "app/autos.h"
+#include "system/auto/autos.h"
 #include "core/config.h"
 #include "core/text.h"
-#include "desk/corners.h"
-#include "desk/share.h"
-#include "desk/volume.h"
-#include "tools/guard.h"
-#include "tools/tools.h"
+#include "desktop/corners.h"
+#include "desktop/share.h"
+#include "media/volume.h"
+#include "system/guard.h"
+#include "system/tools.h"
 
 namespace rules {
 

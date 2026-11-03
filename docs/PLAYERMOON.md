@@ -55,13 +55,13 @@ apps/PlayerMoon/plugins/downloader/
 ## Проверка
 
 - `build.cmd test`: тесты RadialMenu и 67 тестов PlayerMoon (1044 проверки в исходном наборе).
-- `cmake --build build-check --target pm_tests`, затем `build-check/player/pm_tests.exe`: интегрированная сборка тестов.
+- `cmake --build build/check --target pm_tests`, затем `build/check/player/pm_tests.exe`: интегрированная сборка тестов.
 - `tests/player_bridge_check.cpp`: ручная проверка на Windows через настоящий `media::Watcher`. Без аргументов только читает данные. `--exercise` дополнительно проверяет воспроизведение, паузу, перемотку, следующий и предыдущий трек; использовать с двумя отдельными тестовыми WAV с тишиной, а не с пользовательской очередью. Проверка адресуется только источнику `MoonDesk.PlayerMoon`.
 
 Команда сборки ручной проверки из корня проекта:
 
 ```
-g++ -std=c++17 -O2 -DNOMINMAX -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0A00 -I src tests/player_bridge_check.cpp src/desk/media.cpp src/core/text.cpp -static -lole32 -lshell32 -lpropsys -luuid -lshlwapi -o build-check/player_bridge_check.exe
+g++ -std=c++17 -O2 -DNOMINMAX -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0A00 -I src tests/player_bridge_check.cpp src/media/media.cpp src/core/text.cpp -static -lole32 -lshell32 -lpropsys -luuid -lshlwapi -o build/check/player_bridge_check.exe
 ```
 
 Папка Downloads/PlayerMoon и старый репозиторий не изменялись. Удалять удалённый репозиторий разумно после того, как импортированный код сохранён и в удалённом репозитории RadialMenu: локальный коммит сам по себе на GitHub не отправляется.

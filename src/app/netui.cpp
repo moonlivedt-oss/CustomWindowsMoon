@@ -13,10 +13,10 @@
 #include "core/fx.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "desk/boostcard.h"
-#include "desk/corners.h"
-#include "desk/share.h"
-#include "menu/menu.h"
+#include "cards/boostcard.h"
+#include "desktop/corners.h"
+#include "desktop/share.h"
+#include "ring/menu.h"
 #include "net/net.h"
 #include "net/speed.h"
 #include "net/wifi.h"
@@ -25,7 +25,7 @@
 #include "net/background.h"
 #include "net/vpnguard.h"
 #include "phone/phone.h"
-#include "tools/tools.h"
+#include "system/tools.h"
 
 namespace netui {
 

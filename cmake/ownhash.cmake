@@ -1,5 +1,5 @@
 # SHA-256 своих exe (RadialTools.exe, RadialShutUp.exe) - внутрь RadialMenu.exe: перед запуском он сверяет с ними
-# файлы рядом (tools/ownexe.cpp). Отметки в %APPDATA% может переписать любая программа пользователя, а то, что вшито в
+# файлы рядом (system/ownexe.cpp). Отметки в %APPDATA% может переписать любая программа пользователя, а то, что вшито в
 # сам RadialMenu.exe, - только вместе с ним. Хэш снимается после подписи (sign.cmake идёт в POST_BUILD этих целей).
 # Вызов: cmake -DTOOLS=<RadialTools.exe> -DSHUTUP=<RadialShutUp.exe> -DOUT=<файл .cpp> -P ownhash.cmake
 file(SHA256 "${TOOLS}" tools)

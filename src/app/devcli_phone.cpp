@@ -8,9 +8,9 @@
 #include "core/files.h"
 #include "core/themes.h"
 #include "core/config.h"
-#include "life/awake.h"
-#include "life/convert.h"
-#include "life/remind.h"
+#include "helpers/awake.h"
+#include "helpers/convert.h"
+#include "helpers/remind.h"
 #include "phone/phone.h"
 #include "phone/phone_internal.h"
 

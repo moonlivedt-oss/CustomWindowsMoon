@@ -1,10 +1,10 @@
 // «Состояние»: пропущенные карточки (Л10) - вопросы, ушедшие без нажатия, с теми же кнопками; заглушённые виды
-// карточек (Л11) - вернуть одной кнопкой. Данные - desk/cardlog.
+// карточек (Л11) - вернуть одной кнопкой. Данные - cards/cardlog.
 #include <windows.h>
 
 #include "core/usage.h"
 #include "core/usage_features.h"
-#include "desk/cardlog.h"
+#include "cards/cardlog.h"
 #include "studio/studio_internal.h"
 
 using namespace Gdiplus;

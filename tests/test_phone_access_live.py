@@ -1,6 +1,6 @@
 """Loopback integration: per-phone grants and expiry terminate an active download.
 
-Usage: python tests/test_phone_access_live.py build-check/RadialMenu.exe
+Usage: python tests/test_phone_access_live.py build/check/RadialMenu.exe
 Uses an isolated device database/config and no firewall rules.
 """
 import http.client

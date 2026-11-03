@@ -6,9 +6,9 @@
 #include <algorithm>
 #include <cmath>
 
-#include "app/toolsui.h"
+#include "system/ui/toolsui.h"
 #include "core/bg.h"
-#include "tools/winget.h"
+#include "system/winget.h"
 #include "core/elevate.h"
 #include "core/files.h"
 #include "core/fx.h"

@@ -9,12 +9,12 @@
 #include <vector>
 
 #include "app/devcli_internal.h"
-#include "app/toolsui.h"
+#include "system/ui/toolsui.h"
 #include "core/files.h"
 #include "core/text.h"
 #include "net/net.h"
-#include "tools/mft_detail.h"
-#include "tools/tools.h"
+#include "system/mft_detail.h"
+#include "system/tools.h"
 
 namespace devcli {
 

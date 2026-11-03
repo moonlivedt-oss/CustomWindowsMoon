@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-#include "app/worksets.h"
+#include "ring/worksets.h"
 #include "core/files.h"
 #include "core/macro.h"
 #include "core/text.h"

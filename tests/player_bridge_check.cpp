@@ -1,5 +1,5 @@
 // Manual Windows integration check. Run only with a disposable silent WAV in PlayerMoon.
-#include "desk/media.h"
+#include "media/media.h"
 #include <cstdio>
 #include <string>
 #include <cstring>
