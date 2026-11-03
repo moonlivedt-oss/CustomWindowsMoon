@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // Переход между экраном блокировки и столом: окно поверх всего, таймеры, сон и пробуждение.
 #include "desk/lockscreen.h"
 
@@ -174,6 +175,9 @@ void Reveal::Push(BYTE alpha) {
 }
 
 void Reveal::Open() {
+    usage::Hit(L"lock_reveal");
+    if (portal_) usage::Hit(L"lock_portal");
+    if (waitWake_) usage::Hit(L"wake_portal");
     KillTimer(wnd_, kWakeTimer);
     KillTimer(wnd_, kInputTimer);
     waitWake_ = false;
@@ -196,6 +200,7 @@ void Reveal::Intro() {
     if (!enabled_ || !bootPortal_ || fx::Game() || state_ != IDLE || !Prepare()) return;
     AimAtCursor();
     state_ = INTRO;
+    usage::Hit(L"boot_portal");
     t0_ = GetTickCount64();
     Push(0);
     SetTimer(wnd_, kTimer, 15, nullptr);

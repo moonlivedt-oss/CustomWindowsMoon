@@ -1,9 +1,11 @@
+#include "core/usage.h"
 // «Телефон рядом», пульт: экран ПК кадрами JPEG (кадр уходит, когда картинка поменялась), касание в точку экрана,
 // сочетания клавиш, окна (список, вперёд, свернуть, закрыть), операции с файлами в открытых папках ПК.
 // Экран - только при phone_screen, файлы - только при phone_files; всё сделанное - в журнал.
 #include <winsock2.h>
 #include <objidl.h>
 #include <gdiplus.h>
+#include <oleacc.h>
 #include <shellapi.h>
 
 #include <algorithm>
@@ -104,6 +106,60 @@ std::string Frame(const RECT& mon, int maxW, int quality, uint32_t& hash) {
     return out;
 }
 
+// Ждёт ли ПК текста: в окне впереди мигает курсор ввода. Обычные окна и Office ставят системную каретку
+// (GetGUIThreadInfo); Chrome, Edge и Electron её не ставят, но отдают каретку для экранной лупы (MSAA OBJID_CARET) -
+// без включения всего дерева специальных возможностей, которое замедлило бы браузер. Ответ - раз в 300 мс на всех.
+// fx, fy - где каретка на мониторе (доли), чтобы телефон мог подвинуть увеличенную картинку к полю.
+bool TextCaret(const RECT& mon, double& fx, double& fy) {
+    static SRWLOCK lock = SRWLOCK_INIT;
+    static ULONGLONG at = 0;
+    static bool on = false;
+    static POINT pt{};
+    ULONGLONG now = GetTickCount64();
+    AcquireSRWLockExclusive(&lock);
+    if (now - at > 300) {
+        at = now;
+        on = false;
+        HWND fg = GetForegroundWindow();
+        GUITHREADINFO gti{sizeof(gti)};
+        if (fg && GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gti)) {
+            if (gti.hwndCaret && !IsRectEmpty(&gti.rcCaret)) {
+                pt = {gti.rcCaret.left, gti.rcCaret.bottom};
+                on = ClientToScreen(gti.hwndCaret, &pt) != FALSE;
+            } else {
+                HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                IAccessible* acc = nullptr;
+                if (SUCCEEDED(AccessibleObjectFromWindow(gti.hwndFocus ? gti.hwndFocus : fg, (DWORD)OBJID_CARET,
+                                                         IID_IAccessible, (void**)&acc)) &&
+                    acc) {
+                    VARIANT self;
+                    VariantInit(&self);
+                    self.vt = VT_I4;
+                    self.lVal = CHILDID_SELF;
+                    VARIANT st;
+                    VariantInit(&st);
+                    long x = 0, y = 0, cx = 0, cy = 0;
+                    bool hidden = SUCCEEDED(acc->get_accState(self, &st)) && st.vt == VT_I4 &&
+                                  (st.lVal & (STATE_SYSTEM_INVISIBLE | STATE_SYSTEM_OFFSCREEN));
+                    if (!hidden && SUCCEEDED(acc->accLocation(&x, &y, &cx, &cy, self)) && (cx > 0 || cy > 0)) {
+                        pt = {x, y + cy};
+                        on = true;
+                    }
+                    acc->Release();
+                }
+                if (SUCCEEDED(co)) CoUninitialize();
+            }
+        }
+    }
+    bool res = on;
+    POINT p = pt;
+    ReleaseSRWLockExclusive(&lock);
+    double w = std::max<LONG>(1, mon.right - mon.left), h = std::max<LONG>(1, mon.bottom - mon.top);
+    fx = std::clamp((p.x - mon.left) / w, 0.0, 1.0);
+    fy = std::clamp((p.y - mon.top) / h, 0.0, 1.0);
+    return res && p.x >= mon.left && p.x < mon.right && p.y >= mon.top && p.y < mon.bottom;
+}
+
 void Screen(Conn& cn, const Request& r) {
     {
         Lock l;
@@ -113,21 +169,30 @@ void Screen(Conn& cn, const Request& r) {
     int maxW = atoi(Q(r, "w").c_str()), quality = atoi(Q(r, "q").c_str());
     uint32_t last = (uint32_t)strtoul(Q(r, "h").c_str(), nullptr, 10), hash = 0;
     std::string jpg;
-    // кадр уходит, когда картинка поменялась; не поменялась за 1,5 с - тот же кадр (телефон знает, что связь жива)
-    for (int i = 0; i < 12 && !Stopping(); ++i) {
-        g_screenAt = GetTickCount64();
+    ULONGLONG shot = 0;
+    // кадр уходит, как только картинка поменялась (проверка раз в 40 мс: видео и прокрутка идут плавнее, чем при
+    // 120); не поменялась за ~1,5 с - тот же кадр (телефон знает, что связь жива)
+    for (int i = 0; i < 36 && !Stopping(); ++i) {
+        g_screenAt = shot = GetTickCount64();
         uint32_t h = 0;
         std::string f = Frame(mon, maxW ? maxW : 1280, quality ? quality : 60, h);
-        if (h != last || i == 11) {
+        if (h != last || i == 35) {
             jpg = std::move(f);
             hash = h;
             break;
         }
-        Sleep(120);
+        Sleep(40);
     }
+    double fx = 0, fy = 0;
+    bool text = InputAllowed() && TextCaret(mon, fx, fy);
+    char caret[64];
+    snprintf(caret, sizeof(caret), "%d;%.4f;%.4f", text ? 1 : 0, fx, fy);
+    // X-T - когда снят кадр: телефон держит два запроса сразу и выбрасывает кадр, пришедший позже более свежего
     Reply(cn, 200, "image/jpeg", jpg,
           "X-Frame: " + std::to_string(hash) + "\r\nX-Screen: " + std::to_string(mon.right - mon.left) + "x" +
-              std::to_string(mon.bottom - mon.top) + "\r\n");
+              std::to_string(mon.bottom - mon.top) + "\r\nX-T: " + std::to_string(shot) + "\r\nX-Input: " + caret +
+              "\r\n");
+    if (!cn.close && !jpg.empty() && hash != last) usage::Hit(L"phone_screen");
 }
 
 void Click(const std::string& b) {
@@ -136,7 +201,7 @@ void Click(const std::string& b) {
         in[0].type = in[1].type = INPUT_MOUSE;
         in[0].mi.dwFlags = dn;
         in[1].mi.dwFlags = up;
-        SendInput(2, in, sizeof(INPUT));
+        if (SendInput(2, in, sizeof(INPUT)) == 2) usage::Hit(L"phone_input");
     };
     if (b == "r")
         press(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP);
@@ -159,7 +224,7 @@ void Keys(const std::vector<WORD>& vk) {
         i.ki.dwFlags = KEYEVENTF_KEYUP;
         in.push_back(i);
     }
-    SendInput((UINT)in.size(), in.data(), sizeof(INPUT));
+    if (!in.empty() && SendInput((UINT)in.size(), in.data(), sizeof(INPUT)) == in.size()) usage::Hit(L"phone_input");
 }
 
 bool ShellOp(UINT func, const std::wstring& from, const std::wstring& to, bool recycle) {
@@ -218,7 +283,7 @@ void Fs(Conn& cn, const Request& r) {
         ok = ShellOp(op == "copy" ? FO_COPY : FO_MOVE, src, dst, false);
         what = (op == "copy" ? L"скопировано: " : L"перемещено: ") + src + L" -> " + dst;
     }
-    if (ok) Post(EV_NOTE, what);
+    if (ok) { usage::Hit(L"phone_files"); Post(EV_NOTE, what); }
     Text(cn, ok ? 200 : 500, ok ? "ok" : "не вышло (файл занят или нет прав?)");
 }
 

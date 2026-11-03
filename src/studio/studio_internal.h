@@ -199,6 +199,16 @@ enum Id {
     ID_NET_DNS_TEST,
     ID_NET_ADMIN,
     ID_NET_WATCH,
+    ID_NET_SECURITY,
+    ID_NET_CHANGES,
+    ID_NET_VPN_WATCH,
+    ID_NET_VPN_BLOCK,
+    ID_NET_VPN_CURRENT,
+    ID_NET_VPN_ADD,
+    ID_NET_VPN_CLEAR,
+    ID_NET_VPN_SETUP,
+    ID_NET_VPN_OFF,
+    ID_NET_GENTLE,
     ID_NET_EXIT,
     ID_NET_GAME,
     ID_NET_SPEED_AUTO,
@@ -814,6 +824,11 @@ private:
     void CleanSceneIn(const RectF& r);
     bool netWasBusy_ = false;
     ULONGLONG netDoneAt_ = 0;  // когда пришёл итог проверки: узлы схемы загораются по очереди
+    // шар связи в «Состоянии» (art\net\*.png) по сторожу связи: 0 есть, 1 медленно, 2 нет, 3 через VPN; -1 не знаем
+    void NetOrb(const RectF& r);
+    int netOrb_ = -1, netOrbWas_ = -1;
+    ULONGLONG netOrbAt_ = 0, netProbeAt_ = 0;     // смена шара (для плавного перехода), последняя учтённая проба
+    std::vector<std::pair<int, int>> netProbes_;  // последние 10 проб сторожа: шар и пинг
     // живые сцены части 2 (studio_live.cpp): сеть, порты, автозагрузка, память, батарея, версии
     scene::RouteScene routeScene_;
     scene::PortsScene portsScene_;

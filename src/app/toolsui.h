@@ -35,6 +35,7 @@ void OnJob(WPARAM wp, LPARAM lp);
 void Tick();  // карточка и раз в 10 минут - проверка места на дисках
 void Shutdown();
 void OnModes(bool game, bool dev);  // игровой режим и Unreal: в игре карточки молчат, после Unreal - хвосты
+void OnDisplay(bool on);            // экран погас или зажёгся: при погасшем слежка реже
 
 // Где искать мусор проектов: папки из колец (radial.cfg) и обычные места проектов (source/repos, Unreal Projects).
 std::vector<std::wstring> ProjectRoots(const Config& cfg);

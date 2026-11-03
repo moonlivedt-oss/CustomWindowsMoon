@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "desk/snip.h"
 
 #include <dwmapi.h>
@@ -295,6 +296,7 @@ void SnipCard::Demo() {
 }
 
 void SnipCard::Show() {
+    usage::Hit(L"snip_card");
     Open(kShowMs, true);
     // превью по пропорциям снимка: широкий - ниже, высокий - уже; уменьшено заранее,
     // кадр рисуется быстро

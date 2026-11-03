@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "app/toolsui_internal.h"
 
 #include <map>
@@ -593,6 +594,8 @@ void OnModes(bool game, bool dev) {
     g_dev = dev;
 }
 
+void OnDisplay(bool on) { g_screenOff = !on; }
+
 void CloseHeavy(const tools::HeavyApp& a) {
     RunJob(L"Закрываю " + NoExe(a.name), [a](const tools::Log& log, std::wstring& res) {
         tools::AppClose c = tools::CloseApp(a, 5000, log);
@@ -701,6 +704,7 @@ void OnJob(WPARAM wp, LPARAM lp) {
     if (wp == kDiskTag) {
         std::unique_ptr<DiskMsg> m((DiskMsg*)lp);
         if (g_busy) return;
+        usage::Hit(L"tools_disk_warn");
         std::wstring root = m->root;
         Ask(
             L"Мало места на " + root.substr(0, 2),
@@ -866,10 +870,12 @@ void Tick() {
         if (due || projDue || sysDue) RefreshScan();
     }
     // «Защита»: первый раз через 4 минуты после старта (подписи считаются долго), дальше раз в полчаса; не в игре
-    if (!g_game && now - g_started > kSecDelay && (!g_secAt || now - g_secAt > 30 * 60 * 1000) && !HeavyWait(L"sec"))
+    // и не при открытом Unreal - подписи читают exe с диска, пока идут шейдеры и сборка
+    if (!g_game && !g_dev && now - g_started > kSecDelay && (!g_secAt || now - g_secAt > 30 * 60 * 1000) && !HeavyWait(L"sec"))
         RefreshSecurity();
-    // недельные проверки: через 10 минут после старта, потом раз в 6 часов смотрим, не пора ли; от батареи - ждут
-    if (now - g_weeklyCheck > (g_weeklyCheck == g_started ? kWeeklyDelay : 6 * 3600 * 1000) && !HeavyWait(L"weekly")) {
+    // недельные проверки: через 10 минут после старта, потом раз в 6 часов смотрим, не пора ли; от батареи, в игре
+    // и в Unreal - ждут
+    if (!g_game && !g_dev && now - g_weeklyCheck > (g_weeklyCheck == g_started ? kWeeklyDelay : 6 * 3600 * 1000) && !HeavyWait(L"weekly")) {
         g_weeklyCheck = now;
         Weekly();
     }

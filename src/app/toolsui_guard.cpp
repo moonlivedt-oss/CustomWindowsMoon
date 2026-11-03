@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // Сторожа процессов (свой поток, раз в 5 с, низкий приоритет): тихий баланс процессора (И12), «не спать, пока
 // работает» (И13), карточка, когда долгая команда закончилась (И14). Решения - tools/guard (под тестами), здесь
 // снимки, приоритеты, запрет сна и очередь для основного потока (карточки и журнал показывает Tick).
@@ -125,6 +126,7 @@ DWORD WINAPI GuardLoop(void*) {
         bal.Feed(now, procs, cores, on && UserActive(), protect, lo, re);
         for (const auto& a : lo)
             if (SetPrio(a.pid, NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS)) {
+                usage::Hit(L"cpu_balance");
                 lowered.insert(a.pid);
                 AcquireSRWLockExclusive(&g_guardLock);
                 g_guardNotes.push_back(L"Баланс: " + a.name + L" ел " + std::to_wstring((int)(a.share * 100)) +
@@ -186,7 +188,8 @@ DWORD WINAPI GuardLoop(void*) {
         std::wstring awake = c.noSleep ? guard::KeepAwake(procs, c.noSleepApps) : L"";
         if (!awake.empty() != awakeOn) {
             awakeOn = !awake.empty();
-            SetThreadExecutionState(awakeOn ? ES_CONTINUOUS | ES_SYSTEM_REQUIRED : ES_CONTINUOUS);
+            if (SetThreadExecutionState(awakeOn ? ES_CONTINUOUS | ES_SYSTEM_REQUIRED : ES_CONTINUOUS) && awakeOn)
+                usage::Hit(L"no_sleep");
         }
 
         // ---- долгие команды ----
@@ -337,10 +340,11 @@ void GuardTick() {
         std::wstring name = NoExe(d.name);
         autos::Note(L"Долгая команда: " + name + (fail ? L" упала" : L" закончилась") + L" за " + Minutes(d.ms));
         if (g_busy) continue;  // карточка занята делом - хватит журнала
-        g_card.Show(BoostCard::DONE, name + (fail ? L": упало за " : L": готово за ") + Minutes(d.ms),
+
+        { if (g_card.Show(BoostCard::DONE, name + (fail ? L": упало за " : L": готово за ") + Minutes(d.ms),
                     fail ? L"Код выхода " + std::to_wstring((int)d.code) + L". Подробности - в окне, где запускали."
                          : L"Закончилось, пока вы были в другом окне.",
-                    Theme(), 15000, fail ? Toast::G_FAIL : Toast::G_OK);
+                    Theme(), 15000, fail ? Toast::G_FAIL : Toast::G_OK)) usage::Hit(L"long_watch"); }
     }
 }
 

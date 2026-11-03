@@ -12,6 +12,7 @@
 #include "life/convert.h"
 #include "life/remind.h"
 #include "phone/phone.h"
+#include "phone/phone_internal.h"
 
 namespace devcli {
 
@@ -71,6 +72,7 @@ int PhoneServe(int seconds, const std::wstring& snap, const std::vector<std::wst
         phone::OpenPage();
     else
         phone::Offer(files);
+    if (snap == L"-" && GetEnvironmentVariableW(L"RADIAL_PHONE_LOCAL", nullptr, 0)) phone::detail::Card().Hide();
     WriteOut(L"phone_out.txt", phone::Url() + L"\n" + phone::SecureUrl() + L"\n");  // вторая строка - https
     bool shot = snap.empty() || snap == L"-";
     for (ULONGLONG start = GetTickCount64(), until = start + (ULONGLONG)seconds * 1000; GetTickCount64() < until;) {

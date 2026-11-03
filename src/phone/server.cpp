@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // «Телефон рядом»: HTTP-сервер на время передачи. Свой поток принимает соединения, каждое - в своём потоке (не
 // больше 24 сразу); соединение живёт между запросами (keep-alive), пока клиент не закроет или 30 с тишины. Без ключа
 // в пути ничего не отдаётся: /<ключ сессии>/... или /d/<ключ запомненного телефона>/...
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <ctime>
 
 #include "core/text.h"
 #include "phone/phone_internal.h"
@@ -25,6 +27,17 @@ SOCKET g_listen = INVALID_SOCKET, g_listenTls = INVALID_SOCKET;
 SRWLOCK g_lsLock = SRWLOCK_INIT;
 int g_lsPort = 0, g_lsTls = 0;      // порты последней привязки: при смене адреса - те же, если свободны
 thread_local Tls* t_tls = nullptr;  // соединение по https (каждое соединение - в своём потоке)
+thread_local Conn* t_connection = nullptr;
+thread_local bool t_bulk = false;
+thread_local size_t t_pacedBytes = 0;
+struct Client {
+    std::string key;
+    std::shared_ptr<std::atomic<bool>> revoked;
+};
+SRWLOCK g_clientsLock = SRWLOCK_INIT;
+std::map<SOCKET, Client> g_clients;
+std::atomic<bool> g_gentle{true}, g_pauseAutomatic{false};
+std::atomic<unsigned> g_pace{0};
 HANDLE g_thread = nullptr;
 std::atomic<bool> g_stop{false};
 std::atomic<int> g_conns{0};
@@ -64,6 +77,8 @@ const char* Reason(int code) {
             return "Length Required";
         case 413:
             return "Payload Too Large";
+        case 429:
+            return "Too Many Requests";
         case 416:
             return "Range Not Satisfiable";
         case 500:
@@ -86,7 +101,25 @@ std::string FilesJson() {  // под замком
     return j + "]";
 }
 
-void Poll(Conn& cn, const Request& r) {
+// Можно ли этому телефону управлять и что мешает - страница показывает это на вкладках-пультах заранее, а не
+// всплывашкой после нажатия: ok, ask (ждём «Разрешить» на ПК), new (ещё не спрашивали), denied, https (управление
+// только на защищённой странице), off (выключено в настройках RadialMenu)
+std::string ControlWord(const Conn& cn, const std::string& devKey, int tlsPort) {
+    if (!InputAllowed()) return "off";
+    if (!cn.tls && tlsPort) return "https";
+    switch (ControlState(devKey, cn.ip)) {
+        case 1:
+            return "ok";
+        case 2:
+            return "ask";
+        case -1:
+            return "denied";
+        default:
+            return "new";
+    }
+}
+
+void Poll(Conn& cn, const Request& r, const std::string& devKey) {
     Seen();
     long long since = -1;
     auto it = r.query.find("seq");
@@ -98,22 +131,43 @@ void Poll(Conn& cn, const Request& r) {
         }
         Sleep(150);
     }
+    int tls = 0;
+    {
+        Lock l;
+        tls = S().tlsPort;
+    }
+    std::string ctl = ControlWord(cn, devKey, tls);  // ControlState берёт замок сам - до общего замка ниже
     std::string j;
     {
         Lock l;
         S().seen = GetTickCount64();
+        bool fileGrant = devKey.empty(), screenGrant = devKey.empty();
+        if (!devKey.empty()) {
+            auto d = S().deviceAccess.find(devKey);
+            if (d == S().deviceAccess.end() || DeviceStale(d->second, (long long)time(nullptr))) {
+                cn.close = true;
+                return;
+            }
+            fileGrant = d->second.files;
+            screenGrant = d->second.screen;
+        }
         std::vector<std::pair<std::string, long long>> z;
         for (const Offered& f : S().files) z.push_back({ZipName(f.name), f.size});
         j = "{\"seq\":" + std::to_string(S().seq) + ",\"clip\":" + phone::Json(S().clip) +
-            ",\"img\":" + std::to_string(S().clipImg) + ",\"files\":" + FilesJson() +
+            ",\"img\":" + std::to_string(S().clipImg) + ",\"files\":" + (fileGrant ? FilesJson() : "[]") +
             ",\"zip\":" + (z.size() > 1 && ZipFits(z) ? "true" : "false") +
             ",\"input\":" + (InputAllowed() ? "true" : "false") +
-            ",\"screen\":" + (ScreenAllowed() ? "true" : "false") + ",\"fs\":" + (FilesAllowed() ? "true" : "false") +
+            ",\"screen\":" + (ScreenAllowed() && screenGrant ? "true" : "false") +
+            ",\"screenGrant\":" + (!devKey.empty() && screenGrant ? "true" : "false") +
+            ",\"bulkPause\":" + (AutomaticTransferPaused() ? "true" : "false") +
+            ",\"fs\":" + (FilesAllowed() && fileGrant ? "true" : "false") +
             ",\"paired\":" + (S().standing ? "true" : "false") + ",\"tls\":" + std::to_string(S().tlsPort) +
-            ",\"sec\":" + (cn.tls ? "true" : "false") + ",\"find\":" + std::to_string(S().findSeq) + ",\"links\":[";
+            ",\"sec\":" + (cn.tls ? "true" : "false") + ",\"ctl\":\"" + ctl +
+            "\",\"find\":" + std::to_string(S().findSeq) + ",\"links\":[";
         for (size_t k = 0; k < S().links.size(); ++k) j += (k ? "," : "") + phone::Json(S().links[k]);
         j += "],\"shares\":[";
         std::vector<std::wstring> roots = ShareRoots();
+        if (!fileGrant) roots.clear();
         for (size_t k = 0; k < roots.size(); ++k)
             j += (k ? "," : "") + phone::Json(roots[k].substr(roots[k].find_last_of(L'\\') + 1));
         j += "]}";
@@ -137,7 +191,11 @@ size_t KeyPrefix(const std::string& path, std::string* devKey) {
     int device = -1;
     size_t pre = MatchKey(path, S().token, S().devices, &device);
     devKey->clear();
-    if (pre && device >= 0) *devKey = S().devices[device];
+    if (pre && device >= 0) {
+        *devKey = S().devices[device];
+        auto d = S().deviceAccess.find(*devKey);
+        if (d == S().deviceAccess.end() || DeviceStale(d->second, (long long)time(nullptr))) return 0;
+    }
     return pre;
 }
 
@@ -163,6 +221,29 @@ void Handle(Conn& cn, const Request& r) {
         return Text(cn, 404, "нет");
     }
     std::string base = r.path.substr(0, pre), rest = r.path.substr(pre);
+    t_bulk = rest == "/up" || rest == "/share" || rest == "/get" || rest == "/zip" || rest == "/zipdir" ||
+             rest.compare(0, 3, "/f/") == 0;
+    t_pacedBytes = 0;
+    if (device) {
+        Lock l;
+        auto d = S().deviceAccess.find(devKey);
+        if (d == S().deviceAccess.end() || !DevicePathAllowed(d->second, rest, (long long)time(nullptr))) {
+            cn.close = true;
+            return Text(cn, 403, "это действие запрещено в разрешениях телефона на ПК или срок доступа истёк");
+        }
+        AcquireSRWLockExclusive(&g_clientsLock);
+        g_clients[cn.c] = {devKey, cn.revoked};
+        ReleaseSRWLockExclusive(&g_clientsLock);
+    }
+    if (cn.revoked->load()) {
+        cn.close = true;
+        return;
+    }
+    if (rest == "/up" && r.query.count("kind") && r.query.at("kind") == "photo" && AutomaticTransferPaused()) {
+        cn.close = true;
+        return Reply(cn, 429, "text/plain; charset=utf-8", "Фоновая передача отложена: батарея или стоимость сети.",
+                     "Retry-After: 60\r\n");
+    }
     if (device) DeviceSeen(devKey);
     if (!device) {  // ключ сессии (QR): только с адреса первого телефона и тех, кого пустили на ПК
         bool ok, denied, ask = false;
@@ -206,7 +287,10 @@ void Handle(Conn& cn, const Request& r) {
         // подменивший адрес телефона ими бы управлял. Есть https - только там
         if (!cn.tls && tlsPort)
             return Text(cn, 403, "управление, экран и файлы - только на защищённой странице (https)");
-        int ok = ControlCheck(devKey, cn.ip);
+        // /fs сюда не входит: «открыть» запускает файл на ПК (в том числе только что загруженный с телефона),
+        // поэтому, кроме права на файлы, всегда нужно подтверждённое на ПК управление
+        bool separateGrant = device && (rest == "/screen" || rest == "/mons");
+        int ok = separateGrant ? 1 : ControlCheck(devKey, cn.ip);
         if (ok < 0) return Text(cn, 403, "управление с этого телефона запрещено на ПК");
         if (ok == 0) return Text(cn, 403, "разрешите управление на ПК: карточка справа внизу экрана");
         if (rest != "/screen" && rest != "/mons") g_ctlAt = GetTickCount64();
@@ -214,12 +298,25 @@ void Handle(Conn& cn, const Request& r) {
     if (rest.empty()) return Reply(cn, 301, "", "", "Location: " + base + "/\r\n");
     if (rest == "/" && (r.method == "GET" || r.method == "HEAD")) {
         Seen();
+        // страница по http проверяет, поставлен ли уже сертификат: пробный запрос на https этого же ПК (и только его)
+        std::string connect = "connect-src 'self'";
+        auto host = r.headers.find("host");
+        if (!cn.tls && tlsPort && host != r.headers.end()) {
+            std::string h = host->second.substr(0, host->second.rfind(':'));
+            if (!h.empty() && h.size() < 64 &&
+                h.find_first_not_of("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-") ==
+                    std::string::npos)
+                connect += " https://" + h + ":" + std::to_string(tlsPort);
+        }
         return Reply(cn, 200, "text/html; charset=utf-8", PageHtml(),
-                     "Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self'; "
-                     "worker-src 'self'; manifest-src 'self'; "
-                     "style-src 'unsafe-inline'; script-src 'unsafe-inline'\r\n");
+                     "Content-Security-Policy: default-src 'self'; " + connect +
+                         "; img-src 'self' blob: data:; media-src 'self'; "
+                         "worker-src 'self'; manifest-src 'self'; "
+                         "style-src 'unsafe-inline'; script-src 'unsafe-inline'\r\n");
     }
-    if (rest == "/poll") return Poll(cn, r);
+    if (rest == "/poll") return Poll(cn, r, devKey);
+    // «Попросить разрешение» со страницы: вопрос на ПК задала проверка выше; сюда доходит, только если уже можно
+    if (rest == "/ctlask" && r.method == "POST") return Text(cn, 200, "ok");
     if (rest == "/clip" && r.method == "POST") return ClipIn(cn, r);
     if (HandleFiles(cn, r, rest) || HandleMore(cn, r, rest) || HandleRemote(cn, r, rest) || HandleShare(cn, r, rest) ||
         HandleExtra(cn, r, rest) || HandleApp(cn, r, rest))
@@ -229,6 +326,7 @@ void Handle(Conn& cn, const Request& r) {
 
 DWORD WINAPI ConnThread(void* p) {
     Conn cn;
+    t_connection = &cn;
     {
         std::unique_ptr<Accepted> a((Accepted*)p);
         cn.c = a->s;
@@ -274,8 +372,12 @@ DWORD WINAPI ConnThread(void* p) {
     }
     TlsClose(t_tls);
     t_tls = nullptr;
+    AcquireSRWLockExclusive(&g_clientsLock);
+    g_clients.erase(cn.c);
     shutdown(cn.c, SD_SEND);
     closesocket(cn.c);
+    ReleaseSRWLockExclusive(&g_clientsLock);
+    t_connection = nullptr;
     AcquireSRWLockExclusive(&g_gateLock);
     if (--g_perIp[cn.ip] <= 0) g_perIp.erase(cn.ip);
     ReleaseSRWLockExclusive(&g_gateLock);
@@ -338,11 +440,35 @@ DWORD WINAPI AcceptLoop(void*) {
 
 }  // namespace
 
+void ServerRevoke(const std::string& key) {
+    AcquireSRWLockExclusive(&g_clientsLock);
+    for (auto& p : g_clients)
+        if (p.second.key == key) {
+            p.second.revoked->store(true);
+            shutdown(p.first, SD_BOTH);
+        }
+    ReleaseSRWLockExclusive(&g_clientsLock);
+}
+
+bool AutomaticTransferPaused() { return g_gentle && g_pauseAutomatic; }
+void PaceTransfer(size_t bytes) {
+    if (!g_gentle || !t_bulk) return;
+    t_pacedBytes += bytes;
+    if (t_pacedBytes < 256 * 1024) return;
+    unsigned delay = g_pace.load();
+    t_pacedBytes %= 256 * 1024;
+    if (delay) { usage::Hit(L"transfer_gentle"); Sleep(delay); }
+}
+
 std::atomic<bool>& Stopping() { return g_stop; }
 
 int NetRecv(UINT_PTR c, char* buf, int n) { return t_tls ? TlsRecv(t_tls, buf, n) : recv(c, buf, n, 0); }
 
 int Conn::Read(char* buf, int n) {
+    if (revoked->load()) {
+        close = true;
+        return -1;
+    }
     if (bodyLeft <= 0) return 0;
     int k = 0;
     if (!in.empty()) {
@@ -358,12 +484,16 @@ int Conn::Read(char* buf, int n) {
     }
     bodyLeft -= k;
     g_recv += k;
+    PaceTransfer((size_t)k);
     return k;
 }
 
 bool SendAll(UINT_PTR c, const char* p, size_t n) {
+    if (t_connection && t_connection->revoked->load()) return false;
+    PaceTransfer(n);
     if (t_tls) {
         for (size_t at = 0; at < n;) {  // кусками, чтобы скорость на карточке шла ровно
+            if (t_connection && t_connection->revoked->load()) return false;
             size_t len = std::min<size_t>(n - at, 1 << 20);
             if (!TlsSend(t_tls, p + at, len)) return false;
             at += len;
@@ -372,6 +502,7 @@ bool SendAll(UINT_PTR c, const char* p, size_t n) {
         return true;
     }
     while (n > 0) {
+        if (t_connection && t_connection->revoked->load()) return false;
         int k = send(c, p, (int)std::min<size_t>(n, 1 << 20), 0);
         if (k <= 0) return false;
         p += k;
@@ -504,3 +635,11 @@ void ServerStop() {
 }
 
 }  // namespace phone::detail
+
+namespace phone {
+void TransferPolicy(bool gentle, unsigned delayMs, bool pauseAutomatic) {
+    detail::g_gentle = gentle;
+    detail::g_pace = std::min(200u, delayMs);
+    detail::g_pauseAutomatic = pauseAutomatic;
+}
+}  // namespace phone

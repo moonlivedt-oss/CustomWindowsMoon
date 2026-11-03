@@ -21,6 +21,9 @@ struct Config;
 
 namespace phone {
 
+// Вызывать в потоке окна: после сна/смены адреса ускорить проверку сервера для знакомого телефона.
+void NetworkChanged();
+
 inline constexpr UINT WM_PHONE = WM_APP + 76;  // событие сервера (wp - что, lp - строка в куче или 0)
 
 // --- в программе ---
@@ -42,9 +45,13 @@ struct KnownPhone {
     std::string key;
     std::wstring name;
     long long added = 0, seen = 0;  // unix, с
+    bool control = false, screen = false, files = false;
+    long long expires = 0;
 };
 std::vector<KnownPhone> KnownPhones();
 void ForgetPhone(const std::string& key);
+bool SetPhoneAccess(const KnownPhone& phone);
+void TransferPolicy(bool gentle, unsigned delayMs, bool pauseAutomatic);
 // действия для углов и кольца: найти телефон (страница звенит), на телефон - то, что в буфере ПК (файлы
 // Проводника, ссылка или текст)
 void Find();
@@ -224,12 +231,15 @@ struct DeviceRec {
     long long added = 0;   // когда запомнен (unix, с)
     long long seen = 0;    // когда заходил последний раз
     bool control = false;  // управление (тачпад, клавиатура, экран) с него разрешено на ПК
+    bool screen = false, files = true;
+    long long expires = 0;  // unix, 0 — постоянный; гостевой ключ истекает даже при активном соединении
 };
 inline constexpr long long kDeviceDays = 60;  // не заходил столько дней - ключ забывается сам
 // строки «ключ, имя, запомнен, заходил, управление» через табуляцию; чужие ключи и повторы - прочь
 std::vector<DeviceRec> ParseDevices(const std::string& text);
 std::string DevicesText(const std::vector<DeviceRec>& list);
 bool DeviceStale(const DeviceRec& d, long long now);
+bool DevicePathAllowed(const DeviceRec& d, const std::string& path, long long now);
 
 // Пути, если телефон не в этой сети: по порядку - что предложить первым
 enum Way { WAY_PHONE_HOTSPOT, WAY_PC_HOTSPOT, WAY_BLUETOOTH };

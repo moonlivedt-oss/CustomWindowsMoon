@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // Режимы со стороны программы: свёрнутая игра (Г2), «запомнить игру» (Г1), память в режиме разработки (Р1).
 #include "app/app_internal.h"
 
@@ -99,6 +100,7 @@ void GameBackTick(ULONGLONG now) {
     bool was = g_gameFocus.back;
     bool back = g_gameFocus.Want(now, g_game.GameInFront(), fg == GetCurrentProcessId());
     if (back == was) return;
+    if (back) usage::Hit(L"game_back");
     fx::SetGame(!back);
     llmouse::Suspend(!back);
     UpdateTrayTip();
@@ -116,6 +118,7 @@ void GameLearnOffer(ULONGLONG playedMs) {
     g_modeCard.yesLabel = L"Это игра";
     g_modeCard.noLabel = L"Не игра";
     g_modeCard.onYes = [exe] {
+        usage::Hit(L"game_learn");
         ClearLabels();
         EditConfig([&](Config& c) { c.games += (c.games.empty() ? L"" : L"|") + exe; });
         g_modeCard.Show(BoostCard::DONE, L"«" + exe + L"» - в списке игр",
@@ -220,10 +223,11 @@ void DevMemTick(ULONGLONG now) {
         OfferBoost(false, L"для " + g_dev.Reason());
     };
     g_modeCard.onNo = [] { ClearLabels(); };
-    g_modeCard.Show(BoostCard::OFFER, L"Память почти кончилась: " + std::to_wstring(m.dwMemoryLoad) + L"%",
+
+    { if (g_modeCard.Show(BoostCard::OFFER, L"Память почти кончилась: " + std::to_wstring(m.dwMemoryLoad) + L"%",
                     g_dev.Reason() + L" скоро начнёт писать в подкачку и замедлится." +
                         (who.empty() ? L"" : L" Больше всего занимают: " + who + L"."),
-                    CurrentTheme(g_cfg), 30000, Toast::G_WARN);
+                    CurrentTheme(g_cfg), 30000, Toast::G_WARN)) usage::Hit(L"dev_mem"); }
 }
 
 void ModeFlowTick(ULONGLONG now) {

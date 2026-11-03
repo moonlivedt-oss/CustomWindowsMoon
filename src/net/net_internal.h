@@ -16,7 +16,7 @@ void InitSockets();
 int TcpConnectMs(const std::wstring& host, int port, int timeoutMs);
 Proxy ReadProxy();
 std::vector<Adapter> ReadAdapters();
-bool HttpGet(const wchar_t* host, const wchar_t* path, int timeoutMs, std::string* body, int* status);
+bool HttpGet(const wchar_t* host, const wchar_t* path, int timeoutMs, std::string* body, int* status, bool allowRedirects = true);
 
 struct StaleRoute {
     std::wstring prefix, adapter;

@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // Яркость по программе: основной поток замечает смену программы впереди, свой поток читает и ставит яркость.
 #include <objbase.h>
 #include <shlobj.h>
@@ -99,7 +100,7 @@ DWORD WINAPI Worker(void*) {
                         SaveRules({{plan.Active(), plan.rules[plan.Active()]}}));
         }
         int set = plan.OnApp(exe, cur);
-        if (set >= 0) brightness::Set(mon, set);
+        if (set >= 0 && set != cur && brightness::Set(mon, set)) usage::Hit(L"bright_by_app");
     }
     CoUninitialize();
     return 0;

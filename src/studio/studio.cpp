@@ -41,30 +41,30 @@ struct GroupPage {
 };
 struct Group {
     const wchar_t* name;
-    const wchar_t* own;  // свой значок группы (icons\rail-*.png), пока его нет - общий
+    const wchar_t* own;  // свой значок группы (icons\studio\*.png - стеклянный набор), пока его нет - общий
     const wchar_t* icon;
     GroupPage pages[3];
     int count;
 };
 const Group kGroups[] = {
     {L"Обзор",
-     L"rail-home.png",
+     L"studio\\today.png",
      L"hub.png",
      {{PAGE_STATE, L"Состояние"}, {PAGE_AUTO, L"Автоматика"}, {PAGE_HOME, L"Разделы"}},
      3},
     {L"Кольца",
-     L"rail-rings.png",
+     L"studio\\rings.png",
      L"apps.png",
      {{PAGE_RINGS, L"Кольца"}, {PAGE_APPS, L"Программы"}, {PAGE_THEMES, L"Темы"}},
      3},
     {L"Стол",
-     L"rail-desk.png",
+     L"studio\\look.png",
      L"desktop.png",
      {{PAGE_DESK, L"Углы и панель"}, {PAGE_STYLE, L"Красота"}, {PAGE_SYSTEM, L"Система"}},
      3},
-    {L"Сервис", L"rail-tools.png", L"tools-box.png", {{PAGE_NET, L"Сеть"}, {PAGE_TOOLS, L"Утилиты"}}, 2},
+    {L"Сервис", L"studio\\netphone.png", L"tools-box.png", {{PAGE_NET, L"Сеть"}, {PAGE_TOOLS, L"Утилиты"}}, 2},
     {L"Настройки",
-     L"rail-behavior.png",
+     L"studio\\settings.png",
      L"editor.png",
      {{PAGE_BEHAVIOR, L"Поведение"}, {PAGE_AIDS, L"Помощники"}, {PAGE_KEYS, L"Клавиши"}},
      3},
@@ -639,6 +639,10 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         }
     } else
         GoPage((Page)page);
+    if (const char* tour = getenv("RADIAL_TOUR")) {  // RADIAL_TOUR=0..3 - снять шаг знакомства поверх раздела
+        ov_ = OV_TOUR;
+        tourStep_ = std::clamp(atoi(tour), 0, 3);
+    }
     if (page == PAGE_RINGS) tab_ = std::clamp(tab, 0, 2);
     // RADIAL_JOURNAL=n - снять с открытым журналом и отличиями n-й резервной копии (с 1; 0 - без отличий)
     if (const wchar_t* jr = _wgetenv(L"RADIAL_JOURNAL")) {

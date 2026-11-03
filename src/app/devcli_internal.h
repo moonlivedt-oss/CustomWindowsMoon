@@ -31,6 +31,7 @@ struct Gdip {
 
 // devcli_net.cpp
 int NetDiag();
+int NetSecurityDiag();
 int SpeedDiag();
 // devcli_tools.cpp
 int ToolsDiag();

@@ -29,7 +29,7 @@ public:
     enum Mode { OFFER, WORKING, DONE, RESTORE };
     // holdMs - сколько висеть (0 - по виду карточки: вопрос дольше, итог коротко);
     // glyph - знак слева (G_NONE - по виду и словам: «не получилось» -> крестик и т.п.)
-    void Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs = 0,
+    bool Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs = 0,
               Glyph glyph = G_NONE);
     Mode CurrentMode() const { return mode_; }
     void ExpandMore() {  // раскрыть «Подробнее» (снимки --card-snap)

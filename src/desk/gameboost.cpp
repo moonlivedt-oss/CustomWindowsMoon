@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "desk/gameboost.h"
 
 #include <dxgi.h>
@@ -445,6 +446,7 @@ DWORD WINAPI Loop(void*) {
         if (game && islc && freeMb < 1024 && standbyMb > 1024 && now - lastPurge > 120000 && boost::PurgeTaskExists()) {
             lastPurge = now;
             if (boost::RunPurgeAreas({L"StandbyList"})) {
+                usage::Hit(L"boost_islc");
                 Sleep(1500);
                 AcquireSRWLockExclusive(&g_lock);
                 if (g_sessOn[0]) g_sess[0].purges++;

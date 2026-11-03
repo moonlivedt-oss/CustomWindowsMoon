@@ -352,6 +352,7 @@ void WindowFx::Wheel(HWND w, int delta) {
         return;
     }
     if (next == 255 && !states_[w].pinned) states_.erase(w);
+    usage::Hit(L"win_fx");
     Show(w, K_ALPHA, (int)std::lround(next * 100 / 255.0), L"Непрозрачность", Title(w));
 }
 
@@ -381,6 +382,7 @@ void WindowFx::TogglePin(HWND w) {
     s.pinned = true;
     DWORD c = theme_.ac;
     DwmSetWindowAttribute(w, kBorderAttr, &c, sizeof(c));
+    usage::Hit(L"win_fx");
     Show(w, K_PIN, 0, L"Поверх всех окон", Title(w));
 }
 

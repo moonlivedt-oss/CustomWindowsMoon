@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "app/autos.h"
 #include "life/tidy.h"
 
@@ -7,6 +8,7 @@
 #include <set>
 
 #include "app/autostart.h"
+#include "app/powerpick.h"
 #include "core/bg.h"
 #include "core/elevate.h"
 #include "core/config.h"
@@ -42,6 +44,10 @@ unsigned g_downloadsGen = 0;    // растёт под g_lock при каждо�
 SRWLOCK g_lock = SRWLOCK_INIT;  // список Загрузок пишется из потоков
 std::wstring g_power, g_repair;
 bool g_powerHeld = false;  // режим питания вернули отменой (Л3): сами не трогаем до смены источника питания
+// нагрузка процессора для режима питания: меряем, только пока идёт игра или редактор на зарядке
+powerpick::Load g_load;
+ULONGLONG g_loadAt = 0, g_cpuIdle = 0, g_cpuAll = 0;
+bool g_powerSet = false;  // «производительность» поставили мы - при выходе вернуть сбалансированный
 
 ThemeInfo Theme() { return CurrentTheme(*g_cfg); }
 
@@ -143,6 +149,7 @@ void DailyBackup() {
     swprintf(name, 64, L"radial-%04d-%02d-%02d_%02d-%02d-%02d.cfg", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
              t.wSecond);
     if (!CopyFileW(g_cfgPath.c_str(), (dir + L"\\" + name).c_str(), FALSE)) return;
+    usage::Hit(L"auto_backup");
     // как у студии: 10 последних с датой в имени
     all.insert(all.begin(), name);
     int kept = 0;
@@ -224,6 +231,7 @@ void ScanDl(bool offer) {
 }
 
 void Recycle(std::vector<std::wstring> paths) {
+    if (!paths.empty()) usage::Hit(L"auto_downloads");
     bg::Run([list = std::move(paths)] {
         ULONGLONG bytes = 0;
         for (const std::wstring& f : list) {
@@ -246,12 +254,12 @@ void ApplyPower(const wchar_t* why) {
         g_power.clear();
         return;
     }
-    bool battery = tools::OnBattery(), heavy = g_game || g_dev;
-    tools::PowerMode want = battery ? (heavy ? tools::POWER_BALANCED : tools::POWER_SAVER)
-                                    : (heavy ? tools::POWER_BEST : tools::POWER_BALANCED);
-    std::wstring reason = std::wstring(battery ? L"от батареи" : L"на зарядке") + (g_game  ? L", игра"
-                                                                                   : g_dev ? L", Unreal"
-                                                                                           : L"");
+    bool battery = tools::OnBattery(), heavy = g_game || g_dev, busy = heavy && g_load.busy;
+    powerpick::Mode pick = powerpick::Pick(battery, heavy, busy);
+    tools::PowerMode want = pick == powerpick::SAVER  ? tools::POWER_SAVER
+                            : pick == powerpick::BEST ? tools::POWER_BEST
+                                                      : tools::POWER_BALANCED;
+    std::wstring reason = powerpick::Reason(battery, g_game, g_dev, busy);
     g_power = std::wstring(tools::PowerModeName(want)) + L" (" + reason + L")";
     if (g_powerHeld) {
         g_power = L"как вернули вручную - до смены питания";
@@ -259,9 +267,35 @@ void ApplyPower(const wchar_t* why) {
     }
     tools::PowerMode was = tools::GetPowerMode();
     if (was == want) return;
-    if (tools::SetPowerMode(want))
+    if (tools::SetPowerMode(want)) {
+        usage::Hit(L"auto_power");
+        g_powerSet = want == tools::POWER_BEST;
         Note(L"Питание: " + std::wstring(tools::PowerModeName(want)) + L" - " + reason + (why ? why : L""),
              was == tools::POWER_UNKNOWN ? L"" : tools::UndoPack(L"power", {std::to_wstring((int)was)}));
+    }
+}
+
+// Доля занятого процессора с прошлого замера (0..1); первый замер - 0.
+double CpuShare() {
+    FILETIME fi, fk, fu;
+    if (!GetSystemTimes(&fi, &fk, &fu)) return 0;
+    auto v = [](const FILETIME& f) { return ((ULONGLONG)f.dwHighDateTime << 32) | f.dwLowDateTime; };
+    ULONGLONG idle = v(fi), all = v(fk) + v(fu);  // время ядра включает простой
+    double share = g_cpuAll && all > g_cpuAll ? 1.0 - double(idle - g_cpuIdle) / double(all - g_cpuAll) : 0;
+    g_cpuIdle = idle, g_cpuAll = all;
+    return share < 0 ? 0 : share;
+}
+
+// Раз в 5 с, только в игре или редакторе на зарядке: занят процессор - максимум, простаивает - баланс.
+void PowerLoadTick(ULONGLONG now) {
+    if (!g_cfg->autoPower || !(g_game || g_dev) || g_powerHeld || tools::OnBattery()) {
+        if (g_loadAt) g_load.Reset(), g_loadAt = g_cpuAll = 0;
+        return;
+    }
+    if (g_loadAt && now - g_loadAt < 5000) return;
+    g_loadAt = now;
+    bool was = g_load.busy;
+    if (g_load.Want(now, CpuShare()) != was) ApplyPower(nullptr);
 }
 
 // ---------------- самовосстановление ----------------
@@ -327,6 +361,7 @@ void Repair() {
                     Theme(), 20000, Toast::G_WARN);
     }
     if (!done.empty()) {
+        usage::Hit(L"auto_repair");
         std::wstring list;
         for (const std::wstring& d : done) list += (list.empty() ? L"" : L", ") + d;
         if (!Digest(L"Восстановлено: " + list, L""))
@@ -405,9 +440,10 @@ void DigestTick() {
         if (g_openStudio) g_openStudio(11, L"");  // «Автоматика»: журнал целиком
     };
     g_card.onNo = nullptr;
+
     g_card.kind = L"-";  // сам дайджест не глушится и в пропущенные не идёт
-    g_card.Show(BoostCard::OFFER, L"За день: " + Plural((int)items.size(), L"событие", L"события", L"событий"), sub,
-                Theme(), 30000, Toast::G_INFO);
+    { if (g_card.Show(BoostCard::OFFER, L"За день: " + Plural((int)items.size(), L"событие", L"события", L"событий"), sub,
+                Theme(), 30000, Toast::G_INFO)) usage::Hit(L"digest"); }
 }
 
 void Note(const std::wstring& text, const std::wstring& undo) {
@@ -596,6 +632,7 @@ void OnModes(bool game, bool dev) {
     if (game == g_game && dev == g_dev) return;
     g_game = game;
     g_dev = dev;
+    if (!game && !dev) g_load.Reset();
     ApplyPower(nullptr);
 }
 
@@ -604,6 +641,7 @@ void Tick() {
     g_card.Tick();
     DigestTick();
     ULONGLONG now = GetTickCount64();
+    PowerLoadTick(now);
     // самовосстановление: через 45 с после старта, дальше раз в 15 минут
     if (now - g_repairCheck > (g_repairCheck == g_started ? 45000ull : 15 * 60 * 1000ull)) {
         g_repairCheck = now;
@@ -623,8 +661,10 @@ void Tick() {
         int last = _wtoi(Get(L"report_day").c_str());
         if ((!last || Today() - last >= 7) && t.wHour >= g_cfg->digestHour && !g_dev) MakeReport();
     }
-    // тихая чистка по расписанию: раз в неделю (проверяем раз в час, первый раз через 3 минуты)
-    if (g_cfg->autoClean && now - g_cleanCheck > (g_cleanCheck == g_started ? 3 * 60 * 1000ull : 3600 * 1000ull)) {
+    // тихая чистка по расписанию: раз в неделю (проверяем раз в час, первый раз через 3 минуты); не в Unreal (диск
+    // занят шейдерами) и только от сети - неделя подождёт пару часов, а от батареи обход диска будит процессор зря
+    if (g_cfg->autoClean && !g_dev && !tools::OnBattery() &&
+        now - g_cleanCheck > (g_cleanCheck == g_started ? 3 * 60 * 1000ull : 3600 * 1000ull)) {
         g_cleanCheck = now;
         int last = _wtoi(Get(L"clean_day").c_str());
         if (!last || Today() - last >= 7) RunClean(L"раз в неделю", true);
@@ -645,7 +685,8 @@ void Tick() {
                 }
     }
     // Загрузки: раз в неделю разобрать и спросить (проверяем раз в час, первый раз через 5 минут)
-    if (g_cfg->autoDownloads && now - g_dlCheck > (g_dlCheck == g_started ? 5 * 60 * 1000ull : 3600 * 1000ull)) {
+    if (g_cfg->autoDownloads && !g_dev &&
+        now - g_dlCheck > (g_dlCheck == g_started ? 5 * 60 * 1000ull : 3600 * 1000ull)) {
         g_dlCheck = now;
         int last = _wtoi(Get(L"downloads_day").c_str());
         if (!last || Today() - last >= 7) ScanDl(true);
@@ -669,6 +710,7 @@ void OnJob(WPARAM, LPARAM lp) {
             return;
         }
         case Msg::CLEAN_DONE:
+            if (m->silent && m->bytes) usage::Hit(L"auto_clean");
             Put(L"clean_day", std::to_wstring(Today()));
             Put(L"clean_freed", std::to_wstring(m->bytes));
             Note(L"Тихая чистка (" + m->text + L"): освобождено " + tools::Bytes(m->bytes) +
@@ -733,6 +775,7 @@ void OnJob(WPARAM, LPARAM lp) {
             g_card.yesLabel = L"Открыть";
             g_card.noLabel = L"Понятно";
             g_card.onYes = [png] {
+                usage::Hit(L"auto_report");
                 g_card.yesLabel.clear();
                 g_card.noLabel.clear();
                 ShellExecuteW(nullptr, L"open", png.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -782,6 +825,11 @@ std::wstring BackupStatus() {
            (what.empty() ? L"" : L", последняя копия: " + what);
 }
 
-void Shutdown() { g_card.Destroy(); }
+void Shutdown() {
+    // «производительность» ставили мы - не оставлять её Windows после выхода (вентиляторы ASUS шумят и без нагрузки)
+    if (g_cfg && g_powerSet && !g_powerHeld && tools::GetPowerMode() == tools::POWER_BEST)
+        tools::SetPowerMode(tools::OnBattery() ? tools::POWER_SAVER : tools::POWER_BALANCED);
+    g_card.Destroy();
+}
 
 }  // namespace autos

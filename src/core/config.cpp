@@ -228,6 +228,14 @@ bool LoadConfig(const std::wstring& file, Config& out) {
                 cfg.speedAuto = ParseBool(val);
             else if (key == L"net_watch")
                 cfg.netWatch = ParseBool(val);
+            else if (key == L"net_security")
+                cfg.netSecurity = ParseBool(val);
+            else if (key == L"net_changes") cfg.netChanges = ParseBool(val);
+            else if (key == L"net_vpn_watch") cfg.netVpnWatch = ParseBool(val);
+            else if (key == L"net_vpn_block") cfg.netVpnBlock = ParseBool(val);
+            else if (key == L"transfer_gentle") cfg.transferGentle = ParseBool(val);
+            else if (key == L"net_vpn_route") cfg.netVpnRoute = val;
+            else if (key == L"net_vpn_apps") cfg.netVpnApps = val;
             else if (key == L"net_exit")
                 cfg.netExit = ParseBool(val);
             else if (key == L"net_game")
@@ -590,6 +598,13 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"# сеть: net_watch - следить за интернетом (при обрыве карточка «Починить?»), net_exit - сообщать о смене\n"
          L"# выходного узла, net_game - при запуске игры проверить маршрут и пинг, net_interval - период проверки, с\n";
     o << L"net_watch = " << (c.netWatch ? 1 : 0) << L"\n";
+    o << L"net_security = " << (c.netSecurity ? 1 : 0) << L"\n";
+    o << L"net_changes = " << (c.netChanges ? 1 : 0) << L"\n";
+    o << L"net_vpn_watch = " << (c.netVpnWatch ? 1 : 0) << L"\n";
+    o << L"net_vpn_block = " << (c.netVpnBlock ? 1 : 0) << L"\n";
+    o << L"net_vpn_route = " << c.netVpnRoute << L"\n";
+    o << L"net_vpn_apps = " << c.netVpnApps << L"\n";
+    o << L"transfer_gentle = " << (c.transferGentle ? 1 : 0) << L"\n";
     o << L"net_exit = " << (c.netExit ? 1 : 0) << L"\n";
     o << L"net_game = " << (c.netGame ? 1 : 0) << L"\n";
     o << L"net_interval = " << c.netInterval << L"\n";

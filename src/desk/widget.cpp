@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "desk/widget.h"
 
 #include <shlwapi.h>
@@ -339,6 +340,7 @@ void MediaWidget::Toast() {
     if (skipFull_ && corners::FullscreenOn(hm, mi.rcMonitor)) return;
     UINT dx = 96, dy = 96;
     GetDpiForMonitor(hm, MDT_EFFECTIVE_DPI, &dx, &dy);
+    usage::Hit(L"media_toast");
     mode_ = M_MINI;
     SetScale(dx / 96.0);
     mon_ = mi.rcMonitor;
@@ -351,6 +353,7 @@ void MediaWidget::Toast() {
 }
 
 void MediaWidget::Open(POINT pt, const RECT& mon) {
+    usage::Hit(L"media");
     UINT dx = 96, dy = 96;
     GetDpiForMonitor(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &dx, &dy);
     bool fromMini = mode_ == M_MINI && slide_ > 0;

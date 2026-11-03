@@ -2,6 +2,7 @@
 // Общее для частей «Телефона рядом»: сессия (под замком - сервер живёт в своих потоках), сервер, карточка с QR.
 #include <atomic>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,7 @@ struct Session {
     long long clipImg = 0;             // её номер (0 - картинки нет)
     bool standing = false;             // запомненный телефон: сервер ждёт постоянно, без карточки и QR
     std::vector<std::string> devices;  // ключи запомненных телефонов (/d/<ключ>/)
+    std::map<std::string, DeviceRec> deviceAccess;
     std::string caDer;                 // свой корневой сертификат (отдаётся телефону как MoonDesk-CA.crt)
     int tlsPort = 0;                   // порт https (0 - только http)
     int findSeq = 0;                   // «найти телефон»: растёт - страница звенит
@@ -117,10 +119,13 @@ void DeviceSeen(const std::string& key);          // запомненный те
 // управление с телефона (ключ запомненного; пусто - по QR, тогда по адресу): 1 - разрешено, 0 - спросили на ПК,
 // ждём, -1 - запрещено
 int ControlCheck(const std::string& devKey, uint32_t ip);
+// То же без вопроса (для /poll: страница показывает, что мешает): -1 запрещено, 0 не спрашивали, 1 можно, 2 ждём ответа
+int ControlState(const std::string& devKey, uint32_t ip);
 extern std::atomic<ULONGLONG> g_ctlAt;  // когда телефон последний раз управлял (тачпад, клавиатура, кольцо)
 
 // Соединение (сервер держит его открытым между запросами): что уже пришло и не разобрано, сколько тела осталось
 struct Conn {
+    std::shared_ptr<std::atomic<bool>> revoked = std::make_shared<std::atomic<bool>>(false);
     UINT_PTR c = ~(UINT_PTR)0;  // SOCKET (winsock2.h сюда не тянем: его надо включать раньше windows.h)
     std::string in;
     long long bodyLeft = 0;
@@ -130,6 +135,9 @@ struct Conn {
     int Read(char* buf, int n);  // тело текущего запроса: сначала из in, потом из сокета; 0 - всё, -1 - обрыв
 };
 bool SendAll(UINT_PTR c, const char* p, size_t n);
+void ServerRevoke(const std::string& key);  // закрыть уже активные сокеты этого телефона
+bool AutomaticTransferPaused();
+void PaceTransfer(size_t bytes);
 int NetRecv(UINT_PTR c, char* buf, int n);  // recv или расшифровка, если соединение по https
 
 // HTTPS (tls.cpp): Schannel поверх сокета; сертификат - phone/cert
@@ -163,6 +171,8 @@ std::wstring UniquePath(const std::wstring& dir, const std::wstring& name);  // 
 void MarkFromInternet(const std::wstring& path);                             // Zone.Identifier
 const char* ServiceWorkerJs();                                               // web/ (cmake/embed.cmake)
 const char* ManifestJson();
+// Картинки страницы (web/img: шаги настройки, пустые вкладки) - тоже из exe; nullptr - такой нет
+const unsigned char* WebImage(const std::string& name, size_t* len);
 // камера телефона (camera.cpp): кадр JPEG из потока сервера; false - окно камеры на ПК закрыли (start - открыть снова)
 bool CamFrame(std::string jpg, bool start);
 void CamShow();  // в основном потоке (EV_CAM): окно «Камера телефона» и новый кадр в нём

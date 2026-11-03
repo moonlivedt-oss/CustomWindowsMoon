@@ -15,6 +15,7 @@
 #include "core/perf.h"
 #include "core/text.h"
 #include "tools/tools.h"
+#include "net/vpnguard.h"
 
 namespace net {
 
@@ -27,7 +28,7 @@ const wchar_t* const kJobKeys[kJobs] = {
     L"dns-auto",    L"fw-restore",    L"adapter",   L"deep",   L"disk-health", L"syspath-clean", L"net-top",
     L"power",       L"restore-point", L"path-acl",  L"repair", L"wu-reset",    L"unbreak",       L"defender-offline",
     L"vhd-compact", L"sys-clean",     L"mft-sizes", L"giants", L"net-cut",     L"net-uncut",     L"sys-item",
-    L"privacy",     L"charge-limit"};
+    L"privacy",     L"charge-limit", L"vpn-guard-setup", L"vpn-guard-tick", L"vpn-guard-off"};
 
 std::wstring ResultFile() { return elevate::DataDir() + L"\\job-result.txt"; }
 
@@ -200,7 +201,8 @@ void WatchLeft(Job j, const std::wstring& head, ULONGLONG until) {
 
 void SetLeftDone(std::function<void(Job, bool, const std::wstring&)> fn) { g_onLeftDone = std::move(fn); }
 
-bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* cancel) {
+bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* cancel, bool unattended) {
+    if (Stopped(cancel)) return false;
     if (j < 0 || j >= kJobs) return false;
     // одно задание за раз: зовут из разных потоков (студия, кольцо, недельная проверка, подсчёт MFT), а задание в
     // реестре и журнал у задачи одни - второе затёрло бы первое, и первый ждал бы ответа до тайм-аута
@@ -235,7 +237,9 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* can
     // задачу уже не пускал антивирус: не ставить её заново после каждой пересборки, а сразу одно окно UAC.
     // Заметные задания (elevate::ConsentJob) - всегда через окно UAC: задачей их могла бы запустить любая программа
     bool consent = elevate::ConsentJob(kJobKeys[j]);
+    if (Stopped(cancel)) return false;
     bool blocked = consent || elevate::Blocked(elevate::TASK_NET);
+    if (unattended && (blocked || !AdminReadyNow())) return log(L"Фоновая защита ожидает настроенного помощника с правами."), false;
     if (!blocked && !AdminReadyNow()) {
         log(elevate::TaskExists(elevate::TASK_NET)
                 ? L"Помощник с правами устарел или стоит не там - обновляю его, Windows спросит разрешение."
@@ -251,6 +255,7 @@ bool RunAdmin(Job j, const Log& log, int timeoutMs, const std::atomic<bool>* can
     elevate::Put(L"NetJob", std::wstring(kJobKeys[j]) + L" " + nonce);
     if (consent) log(L"Это действие - только с подтверждением: Windows спросит разрешение.");
     if (blocked || !elevate::Run(elevate::TASK_NET)) {
+        if (unattended) return log(L"Фоновая задача защиты не запустилась; проверьте права в студии."), false;
         if (!blocked) {
             elevate::SetBlocked(elevate::TASK_NET, true);
             log(L"Задача с правами не запускается (похоже, её не пускает антивирус) - дальше каждое такое действие "
@@ -512,6 +517,9 @@ bool Job_(Job j, const Log& log) {
             log(lines);
             return lines.rfind(L"@mftok", 0) == 0;
         }
+        case JOB_VPN_GUARD_SETUP: return VpnGuardJob(1, log);
+        case JOB_VPN_GUARD_TICK: return VpnGuardJob(0, log);
+        case JOB_VPN_GUARD_OFF: return VpnGuardJob(2, log);
         case JOB_NET_CUT:
         case JOB_NET_UNCUT: {
             // путь присылает обычный процесс: проверяем заново - полный путь к существующему exe, не Windows и не мы

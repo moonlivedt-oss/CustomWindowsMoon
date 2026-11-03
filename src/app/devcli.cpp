@@ -783,6 +783,8 @@ bool Run(int& exitCode) {
         exitCode = SpeedDiag();
     } else if (Has(args, L"--net-diag")) {
         exitCode = NetDiag();
+    } else if (Has(args, L"--net-security")) {
+        exitCode = NetSecurityDiag();
     } else if (Has(args, L"--lock-apply")) {
         exitCode = LockApply();
     } else if (Has(args, L"--game-test")) {

@@ -1,3 +1,4 @@
+#include "core/night.h"
 #include "menu/menu.h"
 
 #include <shlobj.h>
@@ -502,6 +503,12 @@ void RadialMenu::Start(bool live) {
     EnsureHexGlass();
     Render();
     if (!live) return;
+    if (cfg_->blur) usage::Hit(L"blur");
+    if (cfg_->sounds) usage::Hit(L"sounds");
+    if (cfg_->accentAuto) usage::Hit(L"accent_auto");
+    if (cfg_->dayTint) usage::Hit(L"day_tint");
+    if (cfg_->hexGlass) usage::Hit(L"hex_glass");
+    if (night::On()) usage::Hit(L"night");
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetTimer(hwnd_, kTimer, 10, nullptr);

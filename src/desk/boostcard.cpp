@@ -56,7 +56,7 @@ void BoostCard::Closed() {
     InfoGone();
 }
 
-void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs,
+bool BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs,
                      Glyph glyph) {
     std::wstring k = kind.empty() ? cardlog::KindOf(title) : kind;
     kind.clear();
@@ -70,7 +70,7 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
     bool info = mode == DONE && !result && k != L"-";
     if (info && cardlog::Muted(k)) {  // заглушённое сообщение: не выезжает, только в вечерний дайджест
         cardlog::ToDigest(title, sub);
-        return;
+        return false;
     }
     if (info && k != infoKind_) seen_ = false;  // то же сообщение обновилось - прочитанное остаётся прочитанным
     info_ = info;
@@ -90,7 +90,7 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
         m.onNo = onNo;
         cardlog::Record(std::move(m));
         cardlog::ToDigest(title, sub);
-        return;
+        return false;
     }
     asked_ = ask;
     askKind_ = k;
@@ -139,6 +139,7 @@ void BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
                : mode == WORKING ? 90000
                                  : 16000;
     Open(hold);
+    return Visible();
 }
 
 Color BoostCard::Tone() const {

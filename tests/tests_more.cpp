@@ -36,6 +36,7 @@
 #include "app/resume.h"
 #include "app/afterwork.h"
 #include "app/gameprep.h"
+#include "app/powerpick.h"
 #include "core/usage.h"
 #include "app/focus.h"
 #include "desk/appvol.h"
@@ -59,6 +60,10 @@ std::wstring TempFile(const wchar_t* name) {
 
 void TestConfigRoundTrip() {
     Config c;
+    c.netSecurity = false;
+    c.netChanges = false; c.netVpnWatch = true; c.netVpnBlock = true; c.transferGentle = false;
+    c.netVpnRoute = L"Test tunnel";
+    c.netVpnApps = L"D:\\Apps\\a.exe|D:\\Apps\\b.exe";
     Item g;
     g.name = L"Settings";  // группа с именем служебного раздела
     g.path = L"C:\\";
@@ -82,6 +87,9 @@ void TestConfigRoundTrip() {
     CHECK(SaveConfig(file, c));
     Config back;
     CHECK(LoadConfig(file, back));
+    CHECK(!back.netSecurity);  // отключение фоновой защиты сохраняется при перезапуске
+    CHECK(!back.netChanges && back.netVpnWatch && back.netVpnBlock && !back.transferGentle);
+    CHECK(back.netVpnRoute == c.netVpnRoute && back.netVpnApps == c.netVpnApps);
     CHECK(back.left.size() == 2 && back.right.size() == 1);
     if (back.left.size() == 2) {
         CHECK(back.left[0].name == L"Settings");
@@ -1184,6 +1192,29 @@ void TestAfterWork() {
 }
 
 // Подготовка к игре (Л21): мешает - строками, кнопка - самое полезное (обновления важнее Steam), нечему - молчим
+// Режим питания по нагрузке: открытый, но простаивающий Unreal на зарядке - не максимум (шумели вентиляторы)
+void TestPowerPick() {
+    using namespace powerpick;
+    CHECK(Pick(false, false, false) == BALANCED);  // одна зарядка максимум не включает
+    CHECK(Pick(false, true, false) == BALANCED);   // редактор открыт, но простаивает
+    CHECK(Pick(false, true, true) == BEST);
+    CHECK(Pick(true, false, false) == SAVER && Pick(true, true, true) == BALANCED);
+    CHECK(Reason(false, false, true, false) == L"на зарядке, Unreal, простаивает");
+    CHECK(Reason(false, true, false, true) == L"на зарядке, игра, нагрузка");
+    CHECK(Reason(true, true, false, true) == L"от батареи, игра" && Reason(false, false, false, true) == L"на зарядке");
+    Load l;
+    CHECK(!l.Want(1000, 0.9));                 // миг нагрузки - ещё не максимум
+    CHECK(!l.Want(10000, 0.9));
+    CHECK(l.Want(16000, 0.5));                 // 15 с подряд выше порога
+    CHECK(l.Want(20000, 0.05) && l.Want(100000, 0.05));  // простой меньше полутора минут - держим
+    CHECK(l.Want(110000, 0.15));               // между порогами - держим, отсчёт простоя заново
+    CHECK(l.Want(150000, 0.05) && l.Want(239000, 0.05));
+    CHECK(!l.Want(240000, 0.05));              // 90 с подряд простоя - снова баланс
+    CHECK(!l.Want(241000, 0.9) && !l.Want(250000, 0.2) && !l.Want(260000, 0.9));  // провал прерывает отсчёт
+    l.Reset();
+    CHECK(!l.busy && !l.highSince && !l.lowSince);
+}
+
 void TestGamePrep() {
     gameprep::In in;
     gameprep::Out o;
@@ -1353,6 +1384,7 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestResume();
     TestAfterWork();
     TestGamePrep();
+    TestPowerPick();
     TestFocus();
     TestProjVer();
     TestPlanLaunch();

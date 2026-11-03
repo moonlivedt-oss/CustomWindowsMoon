@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "desk/battery.h"
 
 #include <shellscalingapi.h>
@@ -192,6 +193,9 @@ void BatteryGlow::Paint(float pulse, float wave) {
     DeleteObject(dib);
     DeleteDC(mem);
     ReleaseDC(nullptr, scr);
-    if (!IsWindowVisible(wnd_)) ShowWindow(wnd_, SW_SHOWNOACTIVATE);
+    if (!IsWindowVisible(wnd_)) {
+        ShowWindow(wnd_, SW_SHOWNOACTIVATE);
+        usage::Hit(L"battery_glow");
+    }
     SetWindowPos(wnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
 }

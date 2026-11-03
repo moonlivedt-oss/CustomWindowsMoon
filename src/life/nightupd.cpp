@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // Обновление программ ночью: когда можно, сам проход winget в фоне, итог в файл и утренняя карточка.
 #include <shlobj.h>
 
@@ -98,6 +99,10 @@ void Pass(std::wstring skip, bool accept) {
         ULONGLONG t0 = GetTickCount64();
         int code = tools::RunCapture(cmd, out, 15 * 60000);
         if (GetTickCount64() - t0 >= 15 * 60000ull - 1000) code = -1;
+        if (code == 0) {
+            usage::Hit(L"winget_night");
+            if (accept) usage::Hit(L"winget_accept");
+        }
         Result r{u.name, u.id, code, L""};
         r.why = Why(code, out);
         res.push_back(r);

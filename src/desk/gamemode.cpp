@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "desk/gamemode.h"
 
 #include <algorithm>
@@ -206,6 +207,7 @@ bool GameMode::Detect(const Config& cfg, std::wstring& name) {
             it->second.path = ProcessPath(fsPid);
             found = true;
             name = fsExe;
+            usage::Hit(L"game_fullscreen");
             gamePath_ = guessPath_ = it->second.path;  // после игры - предложить запомнить (game_learn)
         }
     }
@@ -323,15 +325,17 @@ void GameMode::Update(const Config& cfg, bool want) {
 }
 
 void GameMode::Enter(const Config& cfg) {
+    if (!sw_.manual && cfg.gameAuto) usage::Hit(L"game_auto");
     // лёгкая игра: Windows и обои не трогаем
     changedAnim_ = !light_ && cfg.gameWinAnim && WindowsAnimationsOn();
     changedTransp_ = !light_ && cfg.gameTransparency && ReadTransparency() != 0;
     pausedWallpaper_ = !light_ && cfg.gameWallpaper ? WallpaperEngine() : L"";
     // сначала записать, что меняем: если программа упадёт, при запуске всё вернётся
     SaveState(changedAnim_, changedTransp_, pausedWallpaper_);
-    if (changedAnim_) SetWindowsAnimations(false);
-    if (changedTransp_) WriteTransparency(0);
+    if (changedAnim_) { SetWindowsAnimations(false); usage::Hit(L"game_win_anim"); }
+    if (changedTransp_) { WriteTransparency(0); usage::Hit(L"game_transparency"); }
     WallpaperControl(pausedWallpaper_, L"pause");
+    if (!pausedWallpaper_.empty()) usage::Hit(L"game_wallpaper");
 }
 
 void GameMode::Leave() {

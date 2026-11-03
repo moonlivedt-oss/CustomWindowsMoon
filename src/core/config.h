@@ -153,6 +153,9 @@ struct Config {
     bool devWatch = true;      // в Unreal: видеопамять, шейдеры, сборки UBT - сообщать
     // сеть: сторож связи, смена выходного узла, проверка маршрута игры
     bool netWatch = true;   // следить за интернетом и предлагать починку при обрыве
+    bool netSecurity = true;  // локальные фоновые проверки брандмауэра и шифрования Wi-Fi
+    bool netChanges = true, netVpnWatch = false, netVpnBlock = false, transferGentle = true;
+    std::wstring netVpnRoute, netVpnApps;  // выбранный туннель; полные пути exe через |
     bool netExit = true;    // сообщать, когда выходной узел (страна) сменился
     bool netGame = true;    // при запуске игры проверить, идёт ли она через туннель, и пинг
     int netInterval = 20;   // раз во сколько секунд проверять связь

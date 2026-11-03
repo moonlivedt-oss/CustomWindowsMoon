@@ -1,3 +1,5 @@
+#include "core/usage.h"
+#include <atomic>
 // Режим показа экрана: свои окна - мимо захвата экрана, уведомления молчат.
 #include "desk/share.h"
 
@@ -15,6 +17,7 @@ namespace share {
 std::function<void(bool on)> onChange;
 
 namespace {
+std::atomic<bool> g_maskUsed{false};
 
 const Config* g_cfg = nullptr;
 ModeSwitch g_sw;
@@ -90,7 +93,9 @@ void CoverAll(DWORD affinity) {
             GetWindowThreadProcessId(w, &pid);
             if (pid == GetCurrentProcessId() && !GetParent(w)) {
                 DWORD cur = 0;
-                if (!GetWindowDisplayAffinity(w, &cur) || cur != (DWORD)lp) SetWindowDisplayAffinity(w, (DWORD)lp);
+                if (!GetWindowDisplayAffinity(w, &cur) || cur != (DWORD)lp) {
+                    if (SetWindowDisplayAffinity(w, (DWORD)lp) && lp) usage::Hit(L"share_hide");
+                }
             }
             return TRUE;
         },
@@ -99,7 +104,9 @@ void CoverAll(DWORD affinity) {
 
 void Set(bool on) {
     if (on == g_on) return;
+    g_maskUsed = false;
     g_on = g_sw.on = on;
+    if (on && !g_sw.manual && g_cfg && g_cfg->shareAuto) usage::Hit(L"share_auto");
     gboost::QuietFor(L'p', on);
     CoverAll(Affinity());
     if (onChange) onChange(on);
@@ -118,7 +125,9 @@ std::wstring Mask(const std::wstring& s) {
     AcquireSRWLockShared(&g_wordsLock);
     words.insert(words.end(), g_words.begin(), g_words.end());
     ReleaseSRWLockShared(&g_wordsLock);
-    return MaskText(s, profiles, words);
+    auto masked = MaskText(s, profiles, words);
+    if (masked != s && !g_maskUsed.exchange(true)) usage::Hit(L"share_mask");
+    return masked;
 }
 
 void HideWords(const std::vector<std::wstring>& words) {
@@ -154,7 +163,7 @@ const std::wstring& Reason() { return g_reason; }
 DWORD Affinity() { return g_on && (!g_cfg || g_cfg->shareHide) ? 0x11 /* WDA_EXCLUDEFROMCAPTURE */ : WDA_NONE; }
 
 void Cover(HWND w) {
-    if (g_on && w) SetWindowDisplayAffinity(w, Affinity());
+    if (g_on && w && SetWindowDisplayAffinity(w, Affinity()) && Affinity()) usage::Hit(L"share_hide");
 }
 
 void Shutdown() {

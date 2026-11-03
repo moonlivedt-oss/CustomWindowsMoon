@@ -344,11 +344,12 @@ void PollWork() {
 
     FILETIME ft = FileTime(g_cfgPath);
     if (CompareFileTime(&g_cfgTime, &ft) != 0) Reload();
-    if (g_cfg.desktopOnly && !IsDesktopForeground()) return;
-    if (g_cfg.skipFullscreen && IsFullscreenForeground(mon, r)) return;
+    if (g_cfg.desktopOnly && !IsDesktopForeground()) { usage::Hit(L"desktop_only"); return; }
+    if (g_cfg.skipFullscreen && IsFullscreenForeground(mon, r)) { usage::Hit(L"skip_fullscreen"); return; }
 
     MaskAlt();
     g_menu.Show(&g_cfg, pt, r, left, MonitorDpi(mon));
+    if (inner && g_menu.IsOpen()) usage::Hit(L"inner_edges");
 }
 
 // Курсор у края монитора (40 px): там углы, кольца и панель «Сейчас играет» - отклик нужен быстрый.
@@ -593,7 +594,7 @@ void OnDevMode(bool on) {
     NoteMode(L"Режим разработки", on, g_dev.Reason(), g_devSince);
     StatMode(modestats::DEV, on);
     UpdateTrayTip();
-    autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
+    autos::OnModes(g_game.On(), on);  // питание: в Unreal под нагрузкой - производительность
     toolsui::OnModes(g_game.On(), on);
     netui::Dev(on);
     // видеокарту проверяем только у редактора из dev_apps (рендер Blender и так на чём выбран в нём самом)
@@ -607,7 +608,7 @@ void OnDevMode(bool on) {
             chips.push_back(L"Шейдеры");
             chips.push_back(L"Сборки UBT");
         }
-        if (g_cfg.autoPower && !tools::OnBattery()) chips.push_back(L"Питание: максимум");
+        if (g_cfg.autoPower && !tools::OnBattery()) chips.push_back(L"Питание: по нагрузке");
         if (g_cfg.devBoost && !g_game.On() && !g_dev.Busy()) OfferBoost(false, L"для " + g_dev.Reason());
         g_avHintAt = GetTickCount64() + 90000;
     } else {
@@ -637,7 +638,7 @@ void OnGameMode(bool on) {
         llmouse::Suspend(on);  // перехват мыши снят: каждое движение мыши не ходит через нас
     }
     if (!on) heavy = false;
-    autos::OnModes(on, g_dev.On());  // питание: в игре - производительность
+    autos::OnModes(on, g_dev.On());  // питание: в игре под нагрузкой - производительность
     toolsui::OnModes(on, g_dev.On());
     UpdateTrayTip();
     // Boost: во время игры таймер и приоритеты, при запуске - предложить
@@ -654,18 +655,18 @@ void OnGameMode(bool on) {
         if (g_cfg.boostEco) {
             int n = gboost::GameFirst(g_game.GamePids(), Split(g_cfg.boostKeepFast, L'|'), s.guarded);
             chips.push_back(L"Игре высокий приоритет");
-            if (n) chips.push_back(L"Фон в экономии: " + std::to_wstring(n));
+            if (n) { usage::Hit(L"boost_eco"); chips.push_back(L"Фон в экономии: " + std::to_wstring(n)); }
         }
         if (g_cfg.boostQuiet) {
             gboost::QuietFor(L'g', true);
-            if (gboost::QuietOn()) chips.push_back(L"Уведомления молчат");
+            if (gboost::QuietOn()) { usage::Hit(L"boost_quiet"); chips.push_back(L"Уведомления молчат"); }
         }
         if (McBegin()) chips.push_back(L"Prism усыплён");
         bool battery = tools::OnBattery();
-        if (g_cfg.autoPower) chips.push_back(battery ? L"От батареи: баланс" : L"Питание: максимум");
+        if (g_cfg.autoPower) chips.push_back(battery ? L"От батареи: баланс" : L"Питание: по нагрузке");
         gboost::SetGame(true, g_game.GamePids(), GameExe(), g_game.Reason(), g_cfg.boostIslc);
         if (g_cfg.boostOffer) OfferBoost(false);
-        GamePrep();  // Л21: обновления, загрузки, батарея - одной карточкой
+        GamePrep();        // Л21: обновления, загрузки, батарея - одной карточкой
         GameGuessOffer();  // по догадке - сразу дать сказать «не игра»
     } else {
         bool quiet = gboost::QuietOn();
@@ -1218,8 +1219,11 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_POWERBROADCAST:
             if (wp == PBT_POWERSETTINGCHANGE) {
                 auto* s = reinterpret_cast<POWERBROADCAST_SETTING*>(lp);
-                if (s && IsEqualGUID(s->PowerSetting, GUID_CONSOLE_DISPLAY_STATE) && s->DataLength >= 4)
-                    g_reveal.OnDisplay(*reinterpret_cast<DWORD*>(s->Data) == 1);
+                if (s && IsEqualGUID(s->PowerSetting, GUID_CONSOLE_DISPLAY_STATE) && s->DataLength >= 4) {
+                    DWORD state = *reinterpret_cast<DWORD*>(s->Data);
+                    g_reveal.OnDisplay(state == 1);
+                    toolsui::OnDisplay(state != 0);  // 2 - притушен, за компьютером ещё сидят
+                }
                 if (s && IsEqualGUID(s->PowerSetting, GUID_ACDC_POWER_SOURCE)) autos::OnPower();
             } else {
                 g_reveal.OnPower(wp);
@@ -1284,6 +1288,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     Gdiplus::GdiplusStartup(&gdipToken, &gsi, nullptr);
 
     g_inst = inst;
+    if (devcli::HasFlag(L"--after-crash")) usage::Hit(L"crash_restart");
     // SHA-256 своего exe - сейчас, пока файл рядом тот, что запущен: с ним сверяется помощник с правами
     bg::Run([] { elevate::SelfHash(); }, THREAD_PRIORITY_BELOW_NORMAL);
     g_game.Recover();  // если прошлый запуск упал в игровом режиме - вернуть анимации, прозрачность, обои
@@ -1490,7 +1495,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     });
     palette::AddRunner(L"l|", [](const std::wstring& dir) { toolsui::LaunchProject(dir); });
     corners::SetClip([] {
-        usage::Hit(L"cliphist");
         cliphist::ShowRing(g_menu);
     });
     palette::AddSource([](std::vector<Item>& out) {

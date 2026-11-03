@@ -5,6 +5,39 @@ import java.net.URLEncoder
 
 // Чистая логика без Android (под тестами app/src/test): ссылка с ПК, форма, пакет Wake-on-LAN, звонки, фото.
 object Pure {
+    fun autoTransferAllowed(gentle: Boolean, charging: Boolean, metered: Boolean, pcPause: Boolean): Boolean =
+        !gentle || (charging && !metered && !pcPause)
+
+    // Монотонное время (elapsedRealtime), чтобы перевод часов не остановил переподключение.
+    class Reconnect {
+        private var failures = 0
+        private var searchedAt: Long? = null
+        // В чужой Wi-Fi (работа, кафе) ПК нет: каждый пустой поиск удваивает паузу до часа, иначе телефон весь день
+        // перебирал бы 254 адреса раз в 2 минуты. Новая сеть или связь с ПК - снова 2 минуты.
+        private var searchGap = SEARCH_MIN
+
+        fun networkChanged() { failures = 0; searchGap = SEARCH_MIN }
+        fun connected() { failures = 0; searchGap = SEARCH_MIN }
+        fun failed(): Long {
+            val delay = minOf(60000L, 2000L shl minOf(failures, 5))
+            failures = minOf(failures + 1, 6)
+            return delay
+        }
+
+        // Сначала повторить сохранённый адрес: ПК мог только просыпаться. Поиск не чаще раза в 2 минуты,
+        // в том числе при серии смен сети; вызов только когда у телефона есть адрес локальной сети.
+        fun searchDue(now: Long): Boolean {
+            if (failures < 2 || searchedAt?.let { now - it < searchGap } == true) return false
+            if (searchedAt != null) searchGap = minOf(searchGap * 2, SEARCH_MAX)
+            searchedAt = now
+            return true
+        }
+
+        companion object {
+            const val SEARCH_MIN = 120000L
+            const val SEARCH_MAX = 3600000L
+        }
+    }
 
     // Адрес запомненного телефона: https://192.168.0.5:8800/d/<ключ>/
     data class Base(val host: String, val port: Int, val path: String) {
@@ -46,6 +79,25 @@ object Pure {
         // адрес - из разобранных чисел, а не строкой из ссылки
         val host = m.groupValues[2].split('.').joinToString(".") { it.toInt().toString() }
         return Base(host, port, m.groupValues[4] + "/")
+    }
+
+    // Роутер выдал ПК другой адрес - где его искать: остальные адреса той же /24, что у телефона, кроме самого телефона
+    // и прежнего адреса ПК. Только домашние сети (lanHost): в чужой сети приложение никого не перебирает
+    fun subnetHosts(mine: String, skip: String): List<String> {
+        if (!lanHost(mine)) return emptyList()
+        val p = mine.split('.')
+        val prefix = "${p[0]}.${p[1]}.${p[2]}."
+        return (1..254).map { prefix + it }.filter { it != mine && it != skip }
+    }
+
+    // Окно «Экран ПК» показывает страницу ПК и больше ничего: переход внутри - только https на тот же адрес, порт и под
+    // тот же ключ (base - адрес из настроек, со слешем в конце). Остальное (ссылка на сайт, другой ключ) - мимо окна
+    fun insidePc(base: String, url: String): Boolean {
+        val b = try { java.net.URI(base) } catch (_: Exception) { return false }
+        val u = try { java.net.URI(url) } catch (_: Exception) { return false }
+        val path = u.rawPath ?: return false
+        return u.scheme == "https" && b.scheme == "https" && u.host == b.host && u.port == b.port &&
+            u.rawUserInfo == null && !path.contains("..") && path.startsWith(b.rawPath ?: return false)
     }
 
     // Отпечаток корневого сертификата ПК для сверки глазами: первые 12 байт SHA-256 DER - 6 групп по 4 знака hex,

@@ -2,6 +2,7 @@
 // Всё долгое идёт в своём потоке (NetJob), страница только смотрит на результат.
 #include <windows.h>
 #include <shellapi.h>
+#include <commdlg.h>
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +13,8 @@
 #include "core/text.h"
 #include "gfx/draw.h"
 #include "net/net.h"
+#include "net/vpnguard.h"
+#include "core/elevate.h"
 #include "studio/studio_internal.h"
 #include "studio/studio_layout.h"
 
@@ -78,6 +81,94 @@ void Studio::NetCheck() {
     });
 }
 
+// Живой шар связи по сторожу (netui::State): картинка art\net\*.png, пинг крупно, страна выхода или туннель,
+// и точки последних проб. Смена состояния - растворением одного шара в другом, «есть связь» - мягкое дыхание.
+void Studio::NetOrb(const RectF& r) {
+    const UiColors& c = ui.C();
+    net::Light l = netui::State();
+    if (Demo())  // снимки: RADIAL_NETORB=0..3 - есть / медленно / нет / VPN
+        if (const char* d = getenv("RADIAL_NETORB")) {
+            static const ULONGLONG demoAt = GetTickCount64() - 9000;  // одна проба, а не новая в каждом кадре
+            int k = std::clamp(atoi(d), 0, 3);
+            l.known = true, l.online = k != 2, l.tunnel = k == 3, l.pingMs = k == 1 ? 240 : k == 3 ? 61 : 24;
+            l.country = L"NL", l.route = k == 3 ? L"happ-tun" : L"", l.probedAt = demoAt;
+        }
+    int now = !l.known ? -1 : !l.online ? 2 : l.tunnel ? 3 : l.pingMs > 150 ? 1 : 0;
+    ULONGLONG t = GetTickCount64();
+    if (now != netOrb_) {
+        netOrbWas_ = netOrb_;
+        netOrb_ = now;
+        netOrbAt_ = t;
+    }
+    if (l.known && l.probedAt && l.probedAt != netProbeAt_) {  // новая проба сторожа - точка в ленту
+        netProbeAt_ = l.probedAt;
+        netProbes_.push_back({now, l.online ? l.pingMs : -1});
+        if (netProbes_.size() > 10) netProbes_.erase(netProbes_.begin());
+    }
+    static const wchar_t* const kFile[] = {L"online.png", L"slow.png", L"offline.png", L"vpn.png"};
+    auto orbColor = [&](int k) {
+        return k == 0 ? Color(255, 120, 205, 160) : k == 1 ? c.warn : k == 2 ? c.accent : c.accent2;
+    };
+    float side = std::min(ui.S(116), r.Height);
+    RectF o(r.X + ui.S(8), r.Y + ui.S(8), side, side);  // сверху: свечение не выходит за край карточки
+    float mix = fx::Game() ? 1.0f : std::min(1.0f, (float)((t - netOrbAt_) / fx::Dur(450)));
+    if (now >= 0) {
+        // дыхание и свечение под шаром - эллипс, сам шар не масштабируется (картинка кэшируется по размеру)
+        float breath = now == 0 ? 0.5f + 0.5f * std::sin((float)(t % 4000) / 4000.0f * 6.2832f) : 1.0f;
+        SolidBrush glow(WithAlpha(orbColor(now), (BYTE)((now == 2 ? 26 : 34 + 30 * breath) * mix)));
+        float g = side * (0.04f + 0.03f * breath);
+        ui.G().FillEllipse(&glow, o.X - g, o.Y - g, o.Width + 2 * g, o.Height + 2 * g);
+    }
+    if (netOrbWas_ >= 0 && mix < 1)
+        if (Bitmap* b = Img(ExeDir() + L"\\art\\net\\" + kFile[netOrbWas_], 256))
+            ui.Picture(b, o, 0, true, (BYTE)(255 * (1 - mix)));
+    if (Bitmap* b = Img(ExeDir() + L"\\art\\net\\" + kFile[now < 0 ? 0 : now], 256))
+        ui.Picture(b, o, 0, true, (BYTE)((now < 0 ? 90 : 255) * mix));
+    if (!fx::Game() && (mix < 1 || now == 0 || now == 2)) RepaintIn(mix < 1 ? 16 : 66);
+
+    float tx = o.X + side + ui.S(16), tw = r.X + r.Width - tx;
+    std::wstring big, line, sub, ago;
+    Color bigC = c.text;
+    switch (now) {
+        case -1:
+            big = L"…";
+            line = L"Сторож ещё не проверял связь";
+            break;
+        case 2:
+            big = L"Нет связи";
+            bigC = c.accent;
+            line = L"Интернет не отвечает";
+            break;
+        default:
+            big = l.pingMs >= 0 ? std::to_wstring(l.pingMs) + L" мс" : L"есть связь";
+            bigC = l.pingMs < 0 || l.pingMs < 80 ? Color(255, 120, 205, 160) : l.pingMs <= 150 ? c.text : c.warn;
+            line = now == 3   ? L"через туннель " + l.route
+                   : now == 1 ? L"медленно: пинг выше 150 мс"
+                              : L"связь в порядке";
+            if (!l.country.empty()) sub = L"выход: " + net::CountryName(l.country);
+    }
+    if (now >= 0 && l.probedAt) {
+        ULONGLONG sec = (t - l.probedAt) / 1000;
+        ago = L"проверено " + (sec < 60 ? std::to_wstring(sec) + L" с" : std::to_wstring(sec / 60) + L" мин") + L" назад";
+    }
+    if (sub.empty()) std::swap(sub, ago);  // без страны выхода - время пробы строкой выше
+    float ty = o.Y;
+    ui.Text(big, RectF(tx, ty, tw, ui.S(34)), bigC, 22, true);
+    ui.Text(line, RectF(tx, ty + ui.S(36), tw, ui.S(20)), c.text, 12);
+    if (!sub.empty()) ui.Text(sub, RectF(tx, ty + ui.S(56), tw, ui.S(18)), c.muted, 11);
+    if (!ago.empty()) ui.Text(ago, RectF(tx, ty + ui.S(74), tw, ui.S(18)), c.faint, 11);
+    // последние пробы сторожа: точки по цвету шара, свежая - справа и крупнее
+    float dy = ty + ui.S(100), d = ui.S(7), gap = ui.S(5);
+    for (size_t i = 0; i < netProbes_.size(); ++i) {
+        bool last = i + 1 == netProbes_.size();
+        float s = last ? d + ui.S(3) : d;
+        SolidBrush br(netProbes_[i].first < 0 ? c.border : orbColor(netProbes_[i].first));
+        ui.G().FillEllipse(&br, tx + i * (d + gap) - (s - d) / 2, dy - (s - d) / 2, s, s);
+    }
+    if (netProbes_.empty())
+        ui.Text(L"точки проб появятся здесь", RectF(tx, dy - ui.S(5), tw, ui.S(16)), c.faint, 10.5f);
+}
+
 void Studio::NetPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
@@ -125,6 +216,15 @@ void Studio::NetPage(const RectF& r) {
         RouteLive(RectF(b.X, b.Y + ui.S(34), b.Width, routeH), busy);
         float by = b.Y + ui.S(46) + routeH;
         float bw = ui.S(170);
+        // справа под схемой - живой шар связи; совет ниже не залезает под него
+        RectF orb(b.X + b.Width - ui.S(330), by - ui.S(6), ui.S(330), b.Y + b.Height - by + ui.S(6));
+        NetOrb(orb);
+        RectF noteB(b.X, b.Y, b.Width - ui.S(340), b.Height);
+        if (netOrb_ == 2) {  // связи нет - «Починить умно» мягко пульсирует, туда и смотреть
+            float p = 0.5f + 0.5f * std::sin((float)(GetTickCount64() % 1600) / 1600.0f * 6.2832f);
+            RectF fr(b.X + bw + ui.S(10) - ui.S(3), by - ui.S(3), bw + ui.S(6), ui.S(42));
+            ui.Stroke(fr, WithAlpha(c.accent, (BYTE)(60 + 140 * p)), ui.S(11), ui.S(2));
+        }
         if (ui.Button(ID_NET_CHECK, RectF(b.X, by, bw, ui.S(36)), busy ? L"Проверяю" : L"Проверить", Kind::Secondary,
                       L"", busy) &&
             !busy)
@@ -145,9 +245,9 @@ void Studio::NetPage(const RectF& r) {
                 });
         }
         if (netReport_ && netReport_->fix != net::FIX_NONE)
-            note(b, 3.2f + routeGrow, L"Совет: " + netReport_->fixLabel + L". " + netReport_->fixReason, c.text);
+            note(noteB, 3.2f + routeGrow, L"Совет: " + netReport_->fixLabel + L". " + netReport_->fixReason, c.text);
         else if (netReport_)
-            note(b, 3.2f + routeGrow, L"Всё в порядке, чинить нечего.", c.muted);
+            note(noteB, 3.2f + routeGrow, L"Всё в порядке, чинить нечего.", c.muted);
     });
 
     // --- скорость и Wi-Fi: живые карточки (studio_net_live.cpp) ---
@@ -279,7 +379,7 @@ void Studio::NetPage(const RectF& r) {
     });
 
     // --- сторож ---
-    card(L"Сторож", 5.6f, [&](const RectF& b) {
+    card(L"Сторож", 6.6f, [&](const RectF& b) {
         toggle(row(b, 0, L"Следить за интернетом"), ID_NET_WATCH, cfg.netWatch);
         toggle(row(b, 1, L"Сообщать о смене выходного узла"), ID_NET_EXIT, cfg.netExit);
         toggle(row(b, 2, L"Проверять сеть при запуске игры"), ID_NET_GAME, cfg.netGame);
@@ -292,14 +392,140 @@ void Studio::NetPage(const RectF& r) {
             cfg.netInterval = sel == 0 ? 10 : sel == 1 ? 20 : 60;
             Save();
         }
-        note(b, 5,
+        toggle(row(b, 5, L"Следить за безопасностью сети"), ID_NET_SECURITY, cfg.netSecurity);
+        note(b, 6,
              L"Пропал интернет - справа снизу карточка с причиной и кнопкой починки, сама сеть не сбрасывается. "
-             L"Скорость меряется, пока компьютер простаивает, - так копится сравнение «через туннель / напрямую». "
+             L"Безопасность: брандмауэр Windows и открытая/устаревшая Wi-Fi, без изменения настроек. "
+             L"Автозамер скорости — только на безлимитном подключении. "
              L"Кольцо со всеми действиями - на углу (Стол - Углы, действие «Кольцо сети»).",
              c.muted);
     });
 
     // --- прокси-процессы ---
+    auto guard = netui::State();
+    card(L"Защита и фоновые передачи", 3.3f, [&](const RectF& b) {
+        toggle(row(b, 0, L"Наблюдать за DNS, прокси и hosts"), ID_NET_CHANGES, cfg.netChanges);
+        toggle(row(b, 1, L"Бережные передачи с телефоном"), ID_NET_GENTLE, cfg.transferGentle);
+        note(b, 2,
+             L"Настройки сравниваются с локальной базой после двух одинаковых наблюдений. "
+             L"Бережный режим снижает скорость при росте задержки и откладывает автоматические фото на батарее/лимите.",
+             c.muted);
+    });
+    card(L"Ожидаемый VPN", 8.9f, [&](const RectF& b) {
+        auto rr = cols.Row(b, 0, cfg.netVpnRoute.empty() ? L"Туннель ещё не выбран" : cfg.netVpnRoute, 0.55f);
+        if (ui.Button(ID_NET_VPN_CURRENT, RectF(rr.GetRight() - ui.S(180), rr.Y + ui.S(4), ui.S(180), ui.S(36)),
+                      L"Текущий туннель")) {
+            if (!guard.tunnel || guard.route.empty())
+                Toast(L"Сейчас нет подтверждённого маршрута через туннель");
+            else {
+                Change();
+                cfg.netVpnRoute = guard.route;
+                cfg.netVpnWatch = true;
+                cfg.netVpnBlock = false;
+                Save();
+            }
+        }
+        toggle(row(b, 1, L"Сообщать о потере выбранного туннеля"), ID_NET_VPN_WATCH, cfg.netVpnWatch);
+        toggle(row(b, 2, L"Блокировать выбранные программы"), ID_NET_VPN_BLOCK, cfg.netVpnBlock);
+        rr = cols.Row(b, 3, L"Программ: " + std::to_wstring(Split(cfg.netVpnApps, L'|').size()), 0);
+        if (ui.Button(ID_NET_VPN_ADD, RectF(rr.X, rr.Y + ui.S(4), rr.Width * .55f, ui.S(36)), L"Добавить программу…"))
+            Defer([this] {
+                wchar_t file[32768]{};
+                OPENFILENAMEW of{sizeof(of)};
+                of.hwndOwner = wnd;
+                of.lpstrFile = file;
+                of.nMaxFile = 32768;
+                of.lpstrFilter = L"Программы (*.exe)\0*.exe\0\0";
+                of.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+                if (GetOpenFileNameW(&of)) {
+                    if (Split(cfg.netVpnApps, L'|').size() >= 16) return Toast(L"Можно выбрать до 16 программ");
+                    auto why = tools::CutRefuse(file);
+                    if (!why.empty()) return Toast(why);
+                    Change();
+                    cfg.netVpnApps += (cfg.netVpnApps.empty() ? L"" : L"|") + std::wstring(file);
+                    cfg.netVpnBlock = false;
+                    Save();
+                }
+            });
+        if (ui.Button(ID_NET_VPN_CLEAR, RectF(rr.X + rr.Width * .58f, rr.Y + ui.S(4), rr.Width * .42f, ui.S(36)),
+                      L"Очистить список")) {
+            Change();
+            cfg.netVpnApps.clear();
+            cfg.netVpnBlock = false;
+            Save();
+        }
+        rr = row(b, 4, L"");
+        if (ui.Button(ID_NET_VPN_SETUP, RectF(rr.X, rr.Y + ui.S(4), rr.Width, ui.S(36)), L"Разрешить список (UAC)")) {
+            auto route = cfg.netVpnRoute, apps = cfg.netVpnApps;
+            NetRun(L"Разрешение защиты VPN", [route, apps](const net::Log& log, NetJob&) {
+                elevate::Put(L"VpnGuardRoute", route);
+                elevate::Put(L"VpnGuardApps", apps);
+                return net::RunAdmin(net::JOB_VPN_GUARD_SETUP, log);
+            });
+        }
+        rr = row(b, 5, L"");
+        if (ui.Button(ID_NET_VPN_OFF, RectF(rr.X, rr.Y + ui.S(4), rr.Width, ui.S(36)),
+                      L"Выключить и снять блокировки")) {
+            Change();
+            cfg.netVpnBlock = false;
+            Save();
+            NetRun(L"Снятие блокировок VPN",
+                   [](const net::Log& log, NetJob&) { return net::RunAdmin(net::JOB_VPN_GUARD_OFF, log); });
+        }
+        note(b, 6, netui::VpnBlockStatus(), c.muted);
+        note(b, 7,
+             L"Проверяется маршрут к 1.1.1.1, а не каждый пакет: до обнаружения смены возможен прямой трафик. "
+             L"После сбоя приложения правила могут остаться — снимите их кнопкой выше. Чужие правила не удаляются.",
+             c.muted);
+    });
+    auto vpnApps = Split(cfg.netVpnApps, L'|');
+    if (!vpnApps.empty())
+        card(L"Программы защиты VPN", (float)vpnApps.size(), [&](const RectF& b) {
+            for (size_t i = 0; i < vpnApps.size(); ++i) {
+                auto app = vpnApps[i];
+                auto rr = cols.Row(b, (float)i, app.substr(app.find_last_of(L'\\') + 1), .65f);
+                ui.Tip(24600 + (int)i, app);
+                if (ui.Button(24600 + (int)i, RectF(rr.GetRight() - ui.S(110), rr.Y + ui.S(4), ui.S(110), ui.S(36)),
+                              L"Убрать")) {
+                    Change();
+                    cfg.netVpnApps.clear();
+                    for (size_t k = 0; k < vpnApps.size(); ++k)
+                        if (k != i) cfg.netVpnApps += (cfg.netVpnApps.empty() ? L"" : L"|") + vpnApps[k];
+                    cfg.netVpnBlock = false;
+                    Save();
+                }
+            }
+        });
+    card(L"Состояние защиты", 8.5f, [&](const RectF& b) {
+        auto age = [](ULONGLONG t) {
+            return t ? std::to_wstring((GetTickCount64() - t) / 1000) + L" с назад" : std::wstring(L"ещё не проверено");
+        };
+        auto status = [&](unsigned bits) {
+            if (!cfg.netSecurity) return std::wstring(L"выключено пользователем");
+            if ((guard.securityKnown & bits) != bits) return std::wstring(L"не удалось проверить");
+            if ((guard.securityObserved & bits) && !(guard.securityRisks & bits))
+                return std::wstring(L"перепроверяется");
+            return guard.securityRisks & bits ? std::wstring(L"есть риск") : std::wstring(L"проверено");
+        };
+        cols.Row(b, 0, L"Брандмауэр Windows: " + status(1), .95f);
+        cols.Row(b, 1, L"Шифрование Wi-Fi: " + status(6), .95f);
+        cols.Row(b, 2, L"Последняя проверка: " + age(guard.securityChecked), .95f);
+        const wchar_t* names[] = {L"DNS", L"Прокси", L"hosts"};
+        for (unsigned i = 0; i < 3; ++i)
+            cols.Row(b, 3 + (float)i,
+                     std::wstring(names[i]) + L": " +
+                         (!cfg.netChanges                   ? L"выключено пользователем"
+                          : guard.settingsKnown & (1u << i) ? L"проверено"
+                                                            : L"не удалось проверить"),
+                     .95f);
+        cols.Row(b, 6, L"Настройки сети: " + age(guard.settingsChecked), .95f);
+        cols.Row(b, 7,
+                 !cfg.netVpnWatch  ? L"VPN: выключено пользователем"
+                 : !guard.vpnKnown ? L"VPN: не удалось проверить"
+                 : guard.vpnLost   ? L"VPN: есть риск"
+                                   : L"VPN: проверено",
+                 .95f);
+    });
     ULONGLONG now = GetTickCount64();
     if (now - netProcsAt_ > 3000) {
         netProcs_ = net::ProxyProcesses();
@@ -372,17 +598,21 @@ void Studio::NetPage(const RectF& r) {
 
     // --- история ---
     if (now - netHistAt_ > 5000) {
-        netHist_ = net::History(12);
+        netHist_ = net::History(40);
         netHistAt_ = now;
     }
-    card(L"История", 1.0f, [&](const RectF& b) {
+    card(L"История", std::max(1.0f, (float)netHist_.size() * 1.1f), [&](const RectF& b) {
         if (netHist_.empty()) {
             note(b, 0, L"Пока пусто: здесь будут обрывы, починки, смены выхода и проверки игр.", c.muted);
             return;
         }
-        std::wstring s;
-        for (const auto& [t, text] : netHist_) s += (s.empty() ? L"" : L"\n") + t + L"   " + text;
-        note(b, 0, s, c.muted);
+        for (size_t i = 0; i < netHist_.size(); ++i) {
+            auto entry = netHist_[i];
+            auto rr = cols.Row(b, (float)i * 1.1f, entry.first + L"   " + entry.second, .72f);
+            if (ui.Button(24500 + (int)i, RectF(rr.GetRight() - ui.S(110), rr.Y + ui.S(4), ui.S(110), ui.S(36)),
+                          L"Подробнее"))
+                Defer([entry] { netui::HistoryDetail(entry.first + L"\n" + entry.second); });
+        }
     });
 
     pageContentH_ = cols.Height();

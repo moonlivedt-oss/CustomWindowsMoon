@@ -8,6 +8,53 @@ import org.junit.Test
 
 class PureTest {
     @Test
+    fun automaticTransfersWaitForPowerBudgetAndPc() {
+        assertTrue(Pure.autoTransferAllowed(true, true, false, false))
+        assertTrue(!Pure.autoTransferAllowed(true, false, false, false))
+        assertTrue(!Pure.autoTransferAllowed(true, true, true, false))
+        assertTrue(!Pure.autoTransferAllowed(true, true, false, true))
+        assertTrue(!Pure.autoTransferAllowed(true, false, true, true))
+        assertTrue(Pure.autoTransferAllowed(false, false, true, true)) // пользователь отключил бережный режим
+    }
+    @Test
+    fun reconnectBacksOffAndNetworkReturnRetriesQuickly() {
+        val retry = Pure.Reconnect()
+        assertTrue(!retry.searchDue(0))
+        assertEquals(2000L, retry.failed())
+        assertTrue(!retry.searchDue(1000))  // сначала повтор старого адреса, а не сканирование
+        assertEquals(4000L, retry.failed())
+        assertTrue(retry.searchDue(2000))
+        assertTrue(!retry.searchDue(2001))
+        assertEquals(8000L, retry.failed())
+        repeat(10) { retry.failed() }
+        assertEquals(60000L, retry.failed())
+        retry.networkChanged()
+        assertEquals(2000L, retry.failed())  // возврат Wi-Fi сбрасывает минутное ожидание
+        retry.failed()
+        assertTrue(!retry.searchDue(121999))  // серия событий сети не запускает новый поиск
+        assertTrue(retry.searchDue(122000))
+        retry.connected()
+        assertTrue(!retry.searchDue(300000))
+        assertEquals(2000L, retry.failed())
+    }
+
+    @Test
+    fun searchInForeignWifiSlowsDownToHourly() {
+        val retry = Pure.Reconnect()
+        retry.failed(); retry.failed()
+        var t = 0L
+        assertTrue(retry.searchDue(t))
+        for (gap in listOf(120000L, 240000L, 480000L, 960000L, 1920000L, 3600000L, 3600000L)) {
+            assertTrue(!retry.searchDue(t + gap - 1))
+            t += gap
+            assertTrue(retry.searchDue(t))
+        }
+        retry.networkChanged()  // пришли домой - снова быстро
+        retry.failed(); retry.failed()
+        assertTrue(retry.searchDue(t + 120000))
+    }
+
+    @Test
     fun link() {
         val b = Pure.parseLink("https://192.168.0.5:8801/d/AbCdEf_-12345678/")!!
         assertEquals("https://192.168.0.5:8801/d/AbCdEf_-12345678/", b.url)
@@ -115,6 +162,30 @@ class PureTest {
         assertTrue(Pure.hasCode("Одноразовый ключ 7731"))
         assertTrue(!Pure.hasCode("Встретимся у входа в 18"))
         assertTrue(Pure.skipApp("com.beemdevelopment.aegis", "Aegis", Pure.skipDefault))
+    }
+
+    @Test
+    fun subnet() {
+        val h = Pure.subnetHosts("192.168.0.209", "192.168.0.216")
+        assertEquals(252, h.size)  // 1..254 без телефона и прежнего адреса ПК
+        assertTrue("192.168.0.17" in h && "192.168.0.1" in h && "192.168.0.254" in h)
+        assertTrue("192.168.0.209" !in h && "192.168.0.216" !in h && "192.168.0.0" !in h && "192.168.0.255" !in h)
+        assertTrue(Pure.subnetHosts("8.8.8.8", "").isEmpty())  // не домашняя сеть - не ищем
+    }
+
+    @Test
+    fun insidePc() {
+        val base = "https://192.168.0.5:8800/d/AbCdEf_-12345678/"
+        assertTrue(Pure.insidePc(base, base))
+        assertTrue(Pure.insidePc(base, base + "#screen"))
+        assertTrue(Pure.insidePc(base, base + "ca.crt"))
+        assertTrue(!Pure.insidePc(base, "http://192.168.0.5:8780/d/AbCdEf_-12345678/"))   // не https
+        assertTrue(!Pure.insidePc(base, "https://192.168.0.6:8800/d/AbCdEf_-12345678/"))  // другой ПК
+        assertTrue(!Pure.insidePc(base, "https://192.168.0.5:8801/d/AbCdEf_-12345678/"))  // другой порт
+        assertTrue(!Pure.insidePc(base, "https://192.168.0.5:8800/d/Other_key_123456/"))   // другой ключ
+        assertTrue(!Pure.insidePc(base, "https://192.168.0.5:8800/d/AbCdEf_-12345678/../x"))
+        assertTrue(!Pure.insidePc(base, "https://evil.example/"))
+        assertTrue(!Pure.insidePc(base, "javascript:alert(1)"))
     }
 
     @Test

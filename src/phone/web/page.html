@@ -60,7 +60,7 @@ summary::-webkit-details-marker{display:none}summary:before{content:"+ "}details
 flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:14px}
 .ov video,.ov img,.ov audio{max-width:100%;max-height:78vh;border-radius:14px}.ov .row{width:100%;max-width:520px;margin-top:12px}
 #sheet{justify-content:flex-end;padding:0}#sheetbox{width:100%;max-width:520px;background:var(--card);border:1px solid var(--line);
-border-bottom:0;border-radius:24px 24px 0 0;padding:16px 16px calc(16px + var(--safe))}
+border-bottom:0;border-radius:24px 24px 0 0;padding:16px 16px calc(16px + var(--safe));max-height:92dvh;overflow-y:auto;overscroll-behavior:contain}
 #sheetbox button{width:100%;margin:5px 0}#sheetbox p{margin:4px 0 10px}
 .more{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.more button{margin:0!important;min-height:84px;flex-direction:column}
 /* вкладки снизу - под большой палец */
@@ -104,6 +104,41 @@ select{width:100%;min-height:48px;border-radius:14px;border:1px solid var(--line
 .stat small{color:var(--mut);font-size:12px;display:block}.stat b{font-size:19px;font-weight:650;display:block;margin:2px 0}
 .stat .bar{margin-top:6px}label.sw{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--mut);margin-top:12px}
 label.sw input{width:22px;height:22px;accent-color:var(--ac)}
+/* вкладка, которой пока нельзя управлять: что мешает и одна кнопка, которая это снимает; пульт под ней приглушён */
+.gate{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:22px 18px;margin:0 0 12px;
+border-radius:var(--r);background:linear-gradient(160deg,#2a1a24,#1a1620);border:1px solid #e0414f55}
+.gate b{font-size:17px;font-weight:650}.gate p{margin:0;color:#d9cfe0;font-size:14px;line-height:1.45;max-width:420px}
+.gate button,.gate .btn{width:100%;max-width:340px}.gate .art{width:min(220px,60vw)}
+.gicon{width:52px;height:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;background:#e0414f26;color:var(--ac2)}
+.gicon svg{width:28px;height:28px}
+.locked>:not(.gate){opacity:.3;pointer-events:none;filter:grayscale(.6)}
+.wait{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #ffffff40;border-top-color:var(--ac2);
+animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px}@keyframes spin{to{transform:rotate(360deg)}}
+/* экран ПК: жесты на картинке, во весь экран - боком, без шапки и вкладок */
+#scrwrap{position:relative;overflow:hidden;border-radius:12px;background:#000;touch-action:none;user-select:none;-webkit-user-select:none;min-height:120px}
+#scr{display:block;width:100%;transform-origin:0 0;will-change:transform;-webkit-user-drag:none;pointer-events:none}
+#scrtop{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:2}
+#scrtop button{min-height:0;width:42px;height:42px;padding:0;border-radius:12px;background:#000000a6;font-size:18px;border:1px solid #ffffff22}
+#scrkbbtn{background:var(--ac)!important;animation:pulse 1.4s ease-in-out infinite}@keyframes pulse{50%{box-shadow:0 0 0 8px #e0414f33}}
+#scrmedia{display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap;padding:8px;background:#120f16}
+#scrmedia button{min-height:44px;padding:6px 12px;font-size:15px;white-space:nowrap}#scrmedia small{flex-basis:100%;text-align:center;color:var(--mut);font-size:12px;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#scrkb{position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px}
+body.scrfull{overflow:hidden}
+body.scrfull #scrwrap{position:fixed;inset:0;z-index:40;border-radius:0;display:flex;align-items:center;justify-content:center}
+body.scrfull #scr{width:auto;height:auto;max-width:100vw;max-height:100vh}
+body.scrfull #scrmedia{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);background:#000000b8;border-radius:18px;
+flex-wrap:nowrap;z-index:2;max-width:96vw}body.scrfull #scrmedia small{display:none}
+/* настройка по шагам */
+#setupchip{min-height:0;padding:3px 10px;margin-top:4px;font-size:12px;border-radius:99px;background:#e0414f26;color:#ffc9cf}
+.steps{display:flex;gap:6px;justify-content:center;margin:2px 0 14px}.steps i{width:28px;height:5px;border-radius:3px;background:var(--line)}
+.steps i.done{background:var(--ok)}.steps i.cur{background:linear-gradient(90deg,var(--ac),var(--ac2))}
+.step{text-align:center}.step h3{margin:6px 0 8px;font-size:20px;font-weight:650}.step p{margin:0 0 12px;color:#d9cfe0;line-height:1.45}
+.step .art{display:block;width:min(260px,70vw);margin:0 auto 6px;border-radius:18px}
+.step small{display:block;color:var(--mut);font-size:13px;margin-bottom:6px}
+.path{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin:4px 0 14px}
+.path span{background:#120f16;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px}
+.path em{color:var(--mut);font-style:normal;align-self:center}
 .hide{display:none!important}
 /* удобство: планшет и ПК - колонка по центру; вырезы экрана сбоку; видимый фокус; без лишнего движения */
 body{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
@@ -118,10 +153,11 @@ background:#3a1219;border:1px solid #e0414f66;color:#ffd5d9;font-size:14px;line-
 /* телефон боком (геймпад, слайды): шапка и вкладки ужимаются, кнопки - по высоте экрана */
 @media (orientation:landscape) and (max-height:520px){header{position:static;padding-top:6px;padding-bottom:6px}
 header small{display:none}#tabs button{min-height:44px;flex-direction:row;font-size:12px}#tabs svg{width:20px;height:20px}
-:root{--nav:52px}.dpad,.abxy{--c:min(17vh,72px)}#pad{height:calc(100dvh - 190px);min-height:160px}
+:root{--nav:52px}.gate .art,.step .art{display:none}.gate{padding:14px 18px}.dpad,.abxy{--c:min(17vh,72px)}#pad{height:calc(100dvh - 190px);min-height:160px}
 .slidenav button{min-height:44vh}.page{max-width:none}#gpad{max-width:760px;margin:0 auto}}
 </style></head><body>
-<header><div><b>Компьютер рядом</b><small id="sub">телефон как пульт и передача файлов</small></div><span id="st" role="status">на связи</span></header>
+<header><div><b>Компьютер рядом</b><small id="sub">телефон как пульт и передача файлов</small>
+<button id="setupchip" class="hide" onclick="setupOpen()"></button></div><span id="st" role="status">на связи</span></header>
 <p id="off" class="hide" role="alert">Нет связи с ПК. Проверьте, что телефон в той же Wi-Fi сети, а ноутбук не спит -
 страница переподключится сама.</p>
 
@@ -144,7 +180,8 @@ header small{display:none}#tabs button{min-height:44px;flex-direction:row;font-s
 
 <div data-p="pad" class="page hide"><div id="pad">Палец - курсор. Касание - щелчок, двумя пальцами - правый щелчок,
 двумя пальцами вверх-вниз - прокрутка, задержать палец - перетаскивание.</div>
-<div class="mbtn"><button onclick="inp('c&b=l')">Левая</button><button onclick="inp('c&b=r')">Правая</button></div>
+<div class="mbtn"><button onclick="inp('c&b=l')">Левая</button><button id="padhelp" aria-label="Подсказка по жестам"
+style="flex:0 0 56px;color:var(--mut);font-weight:700">?</button><button onclick="inp('c&b=r')">Правая</button></div>
 <div class="row mt"><input id="kb" class="in" style="flex:3" placeholder="печатать на ПК" enterkeyhint="send" autocomplete="off">
 <button class="p" onclick="typeKb()" style="flex:1">Ввод</button></div>
 <label class="sw"><input type="checkbox" id="live" checked> Печатать сразу (буквы появляются на ПК по мере набора, голосовой ввод тоже)</label>
@@ -155,12 +192,25 @@ header small{display:none}#tabs button{min-height:44px;flex-direction:row;font-s
 <p class="hint" id="padoff"></p></div>
 
 <div data-p="screen" class="page hide"><section style="padding:8px"><p class="hint" id="scrmsg" style="margin:4px 6px 8px"></p>
-<img id="scr" alt="" style="width:100%;border-radius:12px;display:block;-webkit-user-select:none;user-select:none">
-<div class="row mt"><button id="tapmode">Касание: щелчок</button><button onclick="scrQ()" id="qbtn">Чётче</button></div>
+<div id="scrwrap"><img id="scr" alt="" draggable="false">
+<div id="scrtop"><button id="scrkbbtn" class="hide" onclick="scrKeyboard(true)" aria-label="Клавиатура">⌨</button>
+<button id="scrmode" onclick="scrMode()" aria-label="Режим касания">👆</button>
+<button id="scrfullbtn" onclick="scrFullToggle()" aria-label="Во весь экран">⛶</button></div>
+<div id="scrmedia" class="hide"><button onclick="scrSeek(-1)" aria-label="Назад 10 секунд">−10</button>
+<button class="p" onclick="cmd('play')" aria-label="Пауза или воспроизведение">⏯</button>
+<button onclick="scrSeek(1)" aria-label="Вперёд 10 секунд">+10</button>
+<button onclick="key('f')" aria-label="Во весь экран на ПК">⛶ ПК</button>
+<button onclick="cmd('vol-')" aria-label="Тише">−</button><button onclick="cmd('vol+')" aria-label="Громче">+</button>
+<small id="scrmtitle"></small></div>
+<input id="scrkb" autocomplete="off" autocapitalize="off" enterkeyhint="send" aria-label="Текст на ПК"></div>
+<div class="row mt"><button id="tapmode">Касание: щелчок</button><button onclick="scrQ()" id="qbtn">Обычно</button>
+<button class="p" onclick="scrFull(true)">Во весь экран</button></div>
 <div class="grid mt"><button onclick="combo('copy')">Копировать</button><button onclick="combo('paste')">Вставить</button>
 <button onclick="combo('alttab')">Alt+Tab</button><button onclick="combo('back')">Назад</button><button onclick="combo('refresh')">Обновить</button>
-<button onclick="combo('win')">Пуск</button></div><p class="hint">Касание - щелчок в эту точку (режим меняется кнопкой),
-долгое касание - правый щелчок, двумя пальцами - увеличить. Печатать и прокручивать - вкладка «Тачпад».</p></section></div>
+<button onclick="combo('win')">Пуск</button></div><p class="hint">Касание - щелчок в эту точку, долгое касание - правый
+щелчок, двумя пальцами - прокрутка, развести пальцы - увеличить (увеличенное двигается пальцем). 👆 - щелчок в точку
+или 🖱 - тачпад поверх картинки. Нужен текст на ПК - сама откроется клавиатура (в браузере - кнопка ⌨). Пока на ПК
+играет видео или музыка, снизу - перемотка, пауза и громкость.</p></section></div>
 
 <div data-p="files" class="page hide">
 <section id="get" hidden><h2>С компьютера</h2><div id="files"></div>
@@ -174,19 +224,14 @@ header small{display:none}#tabs button{min-height:44px;flex-direction:row;font-s
 <input type="file" id="fscan" accept="image/*" capture="environment">
 <div id="up"></div><p class="hint">Фото и видео - в «Изображения\Телефон\дата снимка», файлы - в Загрузки, скан -
 в «Изображения\Телефон\Сканы», а распознанный текст - в буфер ПК. Оборвался Wi-Fi - продолжит с места обрыва.</p></section>
-<section id="secbox" class="hide"><h2>Защищённая страница</h2>
-<p class="hint" style="margin-top:0">Нужна для «Поделиться - на ПК», камеры и установки страницы как приложения. Один раз:</p>
-<ol class="hint"><li>Скачайте сертификат этого ПК:
-<a class="btn" href="ca.crt" download="MoonDesk-CA.crt" style="min-height:38px;padding:6px 12px">MoonDesk-CA.crt</a></li>
-<li>Настройки - Безопасность - Шифрование и учётные данные - Установить сертификат - Сертификат ЦС, выберите файл
-из Загрузок. На Samsung: Настройки - Безопасность и конфиденциальность - Другие параметры безопасности - Установить
-из памяти устройства - Сертификат ЦС. В сведениях о сертификате SHA-256 должен начинаться с «Отпечатка ПК» на карточке компьютера (без пробелов): иначе сертификат подменили по дороге - не ставьте его.</li><li>Откройте защищённую страницу и уже там нажмите «Запомнить этот телефон».</li></ol>
-<div class="row"><a class="btn p" id="secgo">Открыть защищённую страницу</a></div></section>
+<section id="setupcard" class="hide"><h2>Настройка</h2><div class="steps" id="setupsteps"></div>
+<p class="hint" id="setuptxt" style="margin-top:0"></p>
+<div class="row"><button class="p" onclick="setupOpen()" id="setupgo">Продолжить настройку</button></div></section>
 <section id="appbox" class="hide"><h2>Поделиться - на ПК</h2><p class="hint" id="apphint" style="margin-top:0"></p>
 <div class="row"><button class="p hide" id="install">Установить как приложение</button></div></section>
 <section id="linkbox" class="hide"><h2>Ссылки с компьютера</h2><div id="links"></div>
 <div class="row mt"><button onclick="linksClear()">Убрать</button></div></section>
-<section id="pairbox"><h2>Без QR в следующий раз</h2><div class="row"><button id="pair">Запомнить этот телефон</button><a class="btn hide" id="appgo">Подключить приложение</a></div>
+<section id="pairbox" class="hide"><h2>Без QR в следующий раз</h2><div class="row"><button id="pair">Запомнить этот телефон</button><a class="btn hide" id="appgo">Подключить приложение</a></div>
 <p class="hint" id="pairhint">Страница получит постоянный адрес - добавьте её в закладки или на главный экран.</p></section>
 </div>
 
@@ -320,7 +365,9 @@ links(j.links||[]);
 var p=$('pc');if(j.clip){p.textContent=j.clip;p.className=''}else{p.textContent='пока пусто';p.className='empty'}
 var im=$('pcimg'),sv=$('pcsave');if(j.img){var u='clipimg?n='+j.img;if(im.dataset.u!=u){im.src=u;im.dataset.u=u}
 im.classList.remove('hide');sv.href=u;sv.classList.remove('hide')}else{im.classList.add('hide');sv.classList.add('hide')}
-$('padoff').textContent=j.input?'':'Тачпад выключен в настройках RadialMenu (phone_input).';secure(j);state.fs=j.fs;state.screen=j.screen;
+$('padoff').textContent='';secure(j);state.fs=j.fs;state.screen=j.screen;state.ctl=j.ctl||'ok';
+if(!isSec&&j.tls&&state.certOk===undefined)certProbe();gates();setupChip();if(state.setupOpen)setupRender();
+if(state.pendingFull&&state.ctl=='ok'&&j.screen){state.pendingFull=0;scrFull(true)}
 $('fsrow').classList.toggle('hide',!(j.fs&&cur.r>=0));
 if(location.pathname.indexOf('/d/')==0){$('pair').classList.add('hide');$('appgo').href='moondesk://pair?u='+
 encodeURIComponent(location.origin+location.pathname);$('appgo').classList.remove('hide');$('pairhint').textContent=
@@ -390,7 +437,7 @@ function menu(i){var it=state.items[i],p=itemPath(i),b=function(t,f){return'<but
 $('sheetbox').innerHTML='<p style="text-align:center">'+esc(it.n)+'</p>'+b('Открыть на ПК',"sheetDo('open',"+i+")")+
 b('Копировать',"sheetDo('copy',"+i+")")+b('Переместить',"sheetDo('move',"+i+")")+b('Переименовать',"sheetDo('rename',"+i+")")+
 b('В Корзину',"sheetDo('delete',"+i+")")+b('Отмена',"closeSheet()");$('sheet').classList.remove('hide')}
-function closeSheet(){$('sheet').classList.add('hide')}
+function closeSheet(){$('sheet').classList.add('hide');state.setupOpen=0}
 function sheetDo(op,i){closeSheet();var it=state.items[i],p=itemPath(i),base='op='+op+'&r='+cur.r+'&p='+p;
 if(op=='copy'||op=='move'){clip={op:op,r:cur.r,p:p,n:it.n};showPaste();toast('Откройте папку и нажмите «Вставить сюда»');return}
 if(op=='rename'){var n=prompt('Новое имя',it.n);if(n&&n!=it.n)fs(base+'&name='+encodeURIComponent(n));return}
@@ -400,21 +447,80 @@ if(on)$('pastebtn').textContent=(clip.op=='copy'?'Скопировать сюд�
 $('pastebtn').onclick=function(){if(!clip)return;var c=clip;clip=null;showPaste();
 fs('op='+c.op+'&r='+c.r+'&p='+c.p+'&tr='+cur.r+'&tp='+rel())};
 function mkdir(){var n=prompt('Имя новой папки','Новая папка');if(n)fs('op=mkdir&r='+cur.r+'&p='+rel()+'&name='+encodeURIComponent(n))}
-// экран ПК
-var scrHash=0,scrOn=false,scrQual=50,tapMode='l',scrUrl=null;
-function scrQ(){scrQual=scrQual==50?80:scrQual==80?30:50;$('qbtn').textContent=scrQual==80?'Чётче: да':scrQual==30?'Быстрее':'Чётче'}
+// экран ПК: два запроса кадра сразу (новый кадр не ждёт, пока дойдёт прошлый), жесты, клавиатура, видео
+function isApp(){return !!window.MoonApp}  // страница внутри приложения «Компьютер рядом» (там - своё окно во весь экран)
+var scrHash=0,scrWorkers=0,scrT=0,scrQual=1,tapMode='l',scrUrl=null,scrTouch=false,scrText=false,scrTextOff=0,scrAuto=false;
+var QUAL=[{n:'Быстрее',w:1280,q:45},{n:'Обычно',w:1600,q:55},{n:'Чётче',w:2560,q:80}];
+function scrQ(){scrQual=(scrQual+1)%3;$('qbtn').textContent=QUAL[scrQual].n}
 $('tapmode').onclick=function(){tapMode=tapMode=='l'?'d':tapMode=='d'?'n':'l';
 this.textContent='Касание: '+(tapMode=='l'?'щелчок':tapMode=='d'?'двойной щелчок':'только навести')};
-async function screenLoop(){if(scrOn)return;scrOn=true;var w=Math.min(2560,Math.round(Math.max(screen.width,screen.height)*(devicePixelRatio||1)));
-while(state.tab=='screen'&&!document.hidden){try{var r=await fetch('screen?m=0&w='+w+'&q='+scrQual+'&h='+scrHash,{cache:'no-store'});
+function screenLoop(){while(scrWorkers<2){scrWorkers++;scrWorker()}scrMediaLoop()}
+async function scrWorker(){try{while(state.tab=='screen'&&!document.hidden){try{var o=QUAL[scrQual],
+w=Math.min(o.w,Math.round(Math.max(screen.width,screen.height)*(devicePixelRatio||1)));
+var r=await fetch('screen?m=0&w='+w+'&q='+o.q+'&h='+scrHash,{cache:'no-store'});
 if(r.status==403){$('scrmsg').textContent=await r.text();await sleep(3000);continue}if(!r.ok)throw 0;$('scrmsg').textContent='';
-var hh=r.headers.get('X-Frame');var b=await r.blob();if(hh!=String(scrHash)){scrHash=hh;var u=URL.createObjectURL(b);$('scr').src=u;
-if(scrUrl)URL.revokeObjectURL(scrUrl);scrUrl=u}}catch(e){$('scrmsg').textContent='Нет связи';await sleep(2000)}}scrOn=false}
+var t=+(r.headers.get('X-T')||0),hh=r.headers.get('X-Frame'),ti=r.headers.get('X-Input'),b=await r.blob();
+if(t&&t<scrT)continue;scrT=t;scrInput(ti);  // этот кадр старше уже показанного (второй запрос обогнал) - мимо
+if(hh!=String(scrHash)){scrHash=hh;var u=URL.createObjectURL(b);$('scr').src=u;if(scrUrl)URL.revokeObjectURL(scrUrl);scrUrl=u}}
+catch(e){$('scrmsg').textContent='Нет связи';await sleep(2000)}}}finally{scrWorkers--}}
 document.addEventListener('visibilitychange',function(){if(!document.hidden&&state.tab=='screen')screenLoop()});
-function tapAt(e,b){var im=$('scr'),r=im.getBoundingClientRect();var x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
-post('tap?m=0&x='+x.toFixed(4)+'&y='+y.toFixed(4)+'&b='+b).then(function(r){if(r.status==403)denied(r,'Выключено на ПК')})}
-$('scr').addEventListener('click',function(e){tapAt(e,tapMode)});
-$('scr').addEventListener('contextmenu',function(e){e.preventDefault();tapAt(e,'r')});
+// ПК ждёт текста (мигает курсор ввода): в приложении клавиатура открывается сама, в браузере - кнопка ⌨ (браузер
+// открывает клавиатуру только по нажатию). Курсор пропал больше чем на 1,5 с - сама открытая клавиатура прячется
+function scrInput(h){if(!h)return;var on=h.charAt(0)=='1';
+if(on){scrTextOff=0;if(!scrText){scrText=true;$('scrkbbtn').classList.remove('hide');if(isApp()&&state.ctl=='ok')scrKeyboard(false)}}
+else if(scrText){if(!scrTextOff)scrTextOff=Date.now();else if(Date.now()-scrTextOff>1500){scrText=false;$('scrkbbtn').classList.add('hide');
+if(scrAuto){scrAuto=false;$('scrkb').blur();if(isApp())MoonApp.hideKeyboard()}}}}
+function scrKeyboard(user){var k=$('scrkb');k.value='';skPrev='';k.focus({preventScroll:true});scrAuto=!user;if(isApp())MoonApp.showKeyboard()}
+// набранное уходит на ПК сразу: разница с прошлым значением поля (стёртое - Backspace), Enter - Enter
+var skPrev='';$('scrkb').addEventListener('input',function(){var v=this.value,o=skPrev,i=0;while(i<v.length&&i<o.length&&v[i]==o[i])i++;
+var back=o.length-i,add=v.slice(i);skPrev=v;for(var k=0;k<back;k++)tq(function(){return key('back')});if(add)tq(function(){return post('type',add)});
+if(v.length>200){this.value='';skPrev=''}});
+$('scrkb').addEventListener('keydown',function(e){if(e.key=='Enter'){e.preventDefault();tq(function(){return key('enter')});this.value='';skPrev=''}
+else if(e.key=='Backspace'&&!this.value)tq(function(){return key('back')})});
+// жесты: касание - щелчок в точку (или 🖱 - тачпад), долгое - правый щелчок, двумя пальцами - прокрутка или увеличение
+var scrZ=1,scrX=0,scrY=0,pts={},sg=null;
+function scrApply(){var im=$('scr'),w=im.offsetWidth,h=im.offsetHeight;scrZ=Math.min(5,Math.max(1,scrZ));
+scrX=Math.min(0,Math.max(w-w*scrZ,scrX));scrY=Math.min(0,Math.max(h-h*scrZ,scrY));
+im.style.transform=scrZ>1?'translate('+scrX+'px,'+scrY+'px) scale('+scrZ+')':''}
+function scrReset(){scrZ=1;scrX=scrY=0;scrApply()}
+function tapAt(cx,cy,b){var r=$('scr').getBoundingClientRect();if(cx<r.left||cx>r.right||cy<r.top||cy>r.bottom||!r.width)return;
+post('tap?m=0&x='+((cx-r.left)/r.width).toFixed(4)+'&y='+((cy-r.top)/r.height).toFixed(4)+'&b='+b).then(function(r){if(r.status==403)denied(r,'Выключено на ПК')})}
+function scrMode(){scrTouch=!scrTouch;$('scrmode').textContent=scrTouch?'🖱':'👆';toast(scrTouch?'Тачпад поверх экрана':'Касание - щелчок в точку')}
+var SW=$('scrwrap');
+SW.addEventListener('pointerdown',function(e){if(e.target.closest('button,input'))return;e.preventDefault();pts[e.pointerId]={x:e.clientX,y:e.clientY};
+var n=Object.keys(pts).length;if(n==1){sg={t0:Date.now(),x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,long:false,two:false};
+sg.lt=setTimeout(function(){if(sg&&!sg.moved&&!sg.two){sg.long=true;buzz(30);if(scrTouch)inp('c&b=r');else tapAt(sg.x0,sg.y0,'r')}},500)}
+else if(n==2&&sg){clearTimeout(sg.lt);var p=Object.values(pts);sg.two=true;sg.d0=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1;sg.z0=scrZ;
+sg.mx=(p[0].x+p[1].x)/2;sg.my=(p[0].y+p[1].y)/2;sg.zoom=sg.scroll=false;sg.t2=Date.now()}});
+SW.addEventListener('pointermove',function(e){if(!pts[e.pointerId]||!sg)return;e.preventDefault();pts[e.pointerId]={x:e.clientX,y:e.clientY};var p=Object.values(pts);
+if(sg.two){if(p.length<2)return;var d=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y),mx=(p[0].x+p[1].x)/2,my=(p[0].y+p[1].y)/2;
+if(!sg.zoom&&!sg.scroll){if(Math.abs(d/sg.d0-1)>0.12)sg.zoom=true;else if(Math.abs(my-sg.my)>14&&scrZ==1)sg.scroll=true}
+if(sg.zoom){var im=$('scr'),r=im.getBoundingClientRect(),bl=r.left-scrX,bt=r.top-scrY,px=(sg.mx-bl-scrX)/scrZ,py=(sg.my-bt-scrY)/scrZ;
+scrZ=Math.min(5,Math.max(1,sg.z0*d/sg.d0));scrX=mx-bl-px*scrZ;scrY=my-bt-py*scrZ;scrApply()}
+else if(sg.scroll)acc.w+=-(my-sg.my)*6;else if(scrZ>1){scrX+=mx-sg.mx;scrY+=my-sg.my;scrApply()}
+sg.mx=mx;sg.my=my;return}
+var dx=e.clientX-sg.lx,dy=e.clientY-sg.ly;sg.lx=e.clientX;sg.ly=e.clientY;
+if(!sg.moved&&Math.hypot(e.clientX-sg.x0,e.clientY-sg.y0)>8){sg.moved=true;clearTimeout(sg.lt)}if(!sg.moved)return;
+if(scrTouch){var sp=Math.hypot(dx,dy),k=1.4+Math.min(sp,40)*0.08;acc.x+=dx*k;acc.y+=dy*k}else if(scrZ>1){scrX+=dx;scrY+=dy;scrApply()}});
+function scrUp(e){if(!pts[e.pointerId])return;delete pts[e.pointerId];if(!sg)return;var left=Object.keys(pts).length;
+if(sg.two){if(!left){if(!sg.zoom&&!sg.scroll&&Date.now()-sg.t2<350){if(scrTouch)inp('c&b=r');else tapAt(sg.mx,sg.my,'r')}sg=null}return}
+clearTimeout(sg.lt);if(!sg.moved&&!sg.long&&Date.now()-sg.t0<400){if(scrTouch)inp('c&b=l');else tapAt(sg.x0,sg.y0,tapMode)}sg=null}
+SW.addEventListener('pointerup',scrUp);SW.addEventListener('pointercancel',function(e){delete pts[e.pointerId];if(sg)clearTimeout(sg.lt);sg=null});
+SW.addEventListener('contextmenu',function(e){e.preventDefault()});
+// во весь экран: в браузере - Fullscreen и поворот боком (только по нажатию), в приложении окно и так во весь экран
+function scrFull(on){document.body.classList.toggle('scrfull',on);scrReset();$('scrfullbtn').textContent=on?'✕':'⛶';
+if(on&&!isApp()&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen({navigationUI:'hide'}).then(function(){
+if(screen.orientation&&screen.orientation.lock)screen.orientation.lock('landscape').catch(function(){})}).catch(function(){});
+if(!on){if(document.fullscreenElement)document.exitFullscreen().catch(function(){});try{screen.orientation.unlock()}catch(e){}
+if(isApp()&&state.appScreen)MoonApp.close()}}
+function scrFullToggle(){scrFull(!document.body.classList.contains('scrfull'))}
+document.addEventListener('fullscreenchange',function(){if(!document.fullscreenElement&&!isApp()&&document.body.classList.contains('scrfull'))scrFull(false)});
+// что играет на ПК - пауза, перемотка, громкость прямо под экраном
+async function scrMediaLoop(){if(state.smLoop)return;state.smLoop=1;while(state.tab=='screen'&&!document.hidden){
+try{var j=await (await fetch('media',{cache:'no-store'})).json();state.sm=j;$('scrmedia').classList.toggle('hide',!j.has);
+if(j.has)$('scrmtitle').textContent=(j.t||'')+(j.a?' - '+j.a:'')+(j.app?' · '+j.app:'')}catch(e){}await sleep(2000)}state.smLoop=0}
+function scrSeek(d){var j=state.sm;if(j&&j.seek&&j.end){j.pos=Math.max(0,Math.min(j.end,j.pos+d*10000));post('mediacmd?c=seek&t='+Math.round(j.pos))}
+else key(d<0?'left':'right')}  // плеер без перемотки по сеансу (YouTube в браузере) - стрелками
 function combo(k){post('combo?k='+k).then(function(r){if(r.status==403)denied(r,'Тачпад выключен на ПК');else if(!r.ok)toast('Не вышло')})}
 // окна
 function wins(){fetch('wins').then(function(r){if(r.status==403)throw 1;return r.json()}).then(function(l){var h='';
@@ -456,8 +562,7 @@ if(isSec&&isDev){var ml=document.createElement('link');ml.rel='manifest';ml.href
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(function(){})}
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();bip=e;$('install').classList.remove('hide')});
 $('install').onclick=function(){if(bip){bip.prompt();bip=null;this.classList.add('hide')}};
-function secure(j){state.tls=j.tls;if(!isSec&&j.tls){$('pairhint').textContent='Запомнить можно только на защищённой странице (https): постоянный адрес по обычному http видит любой в этой Wi-Fi.';$('secbox').classList.remove('hide');$('secgo').href='https://'+location.hostname+':'+j.tls+location.pathname}
-if(!isSec)return;$('appbox').classList.remove('hide');var app=matchMedia('(display-mode: standalone)').matches;
+function secure(j){state.tls=j.tls;if(!isSec)return;$('appbox').classList.remove('hide');var app=matchMedia('(display-mode: standalone)').matches;
 $('apphint').textContent=!isDev?'Сначала «Запомнить этот телефон» ниже: у приложения должен быть постоянный адрес.':app?
 'Приложение установлено. В любом приложении: Поделиться - «ПК рядом»: фото и видео лягут в «Изображения\\Телефон», файлы - в Загрузки, текст - в буфер ПК, ссылку можно открыть на ПК.':
 'Установите страницу как приложение: кнопка ниже или меню Chrome - «Добавить на главный экран». Потом в любом приложении: Поделиться - «ПК рядом».'}
@@ -479,7 +584,7 @@ $('camflip').onclick=function(){cam.face=cam.face=='environment'?'user':'environ
 $('camres').onclick=function(){cam.w=cam.w==640?1280:cam.w==1280?1920:640;this.textContent=cam.w;if(cam.on){camStop();camStart()}};
 $('camgo').onclick=function(){if(cam.on)camStop();else camStart()};
 async function camStart(){if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-$('cammsg').textContent='Камера работает только на защищённой странице (https): вкладка «Файлы» - «Защищённая страница».';return}
+$('cammsg').textContent='Камера работает только на защищённой странице (https).';setupOpen();return}
 try{cam.st=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:cam.face},width:{ideal:cam.w},
 height:{ideal:Math.round(cam.w*9/16)},frameRate:{ideal:30}}})}catch(e){$('cammsg').textContent='Камера не дана: '+e.name;return}
 var v=$('camv');v.srcObject=cam.st;try{await v.play()}catch(e){}cam.on=true;$('camgo').textContent='Выключить';camLoop()}
@@ -518,15 +623,18 @@ row.querySelector('span').textContent=a.n;if(!row.dataset.t||Date.now()-row.data
 box.querySelectorAll('.app').forEach(function(r){if(!keep[r.dataset.pid])r.remove()})}).catch(function(){})}
 // кольцо RadialMenu
 var ring=null,ringSide='r',ringPath=[];
-function ringLoad(){fetch('ring').then(function(r){return r.json()}).then(function(j){ring=j;
-if(!(j[ringSide]||[]).length)ringSide=(j.r||[]).length?'r':'l';$('ringside').classList.toggle('hide',!((j.r||[]).length&&(j.l||[]).length));ringPath=[];ringDraw()}).catch(function(){})}
+// список приходит всегда (открыть пункт - уже управление); не пришёл - сказать и дать повторить, а не пустая вкладка
+function ringLoad(){$('ringgrid').innerHTML='<p class="hint"><span class="wait"></span>Загружаю пункты кольца...</p>';
+fetch('ring',{cache:'no-store'}).then(function(r){if(!r.ok)throw r.status;return r.json()}).then(function(j){ring=j||{};
+if(!(ring[ringSide]||[]).length)ringSide=(ring.r||[]).length?'r':'l';$('ringside').classList.toggle('hide',!((ring.r||[]).length&&(ring.l||[]).length));ringPath=[];ringDraw()})
+.catch(function(){ring=null;$('ringgrid').innerHTML='<p class="hint">Не удалось получить пункты кольца с ПК.</p><button onclick="ringLoad()" style="width:100%">Повторить</button>'})}
 document.querySelectorAll('#ringside button').forEach(function(b){b.onclick=function(){ringSide=b.dataset.side;ringPath=[];ringDraw()}});
 function ringDraw(){var list=ring?ring[ringSide]||[]:[];ringPath.forEach(function(i){list=list[i].c||[]});
 document.querySelectorAll('#ringside button').forEach(function(b){b.className=b.dataset.side==ringSide?'p':''});
 var h=ringPath.length?'<button onclick="ringPath.pop();ringDraw()"><span class="lt">&lt;</span><span class="nm">Назад</span></button>':'';
 list.forEach(function(it,i){var ic=it.i?'<img src="ringicon?id='+it.id+'" alt="" onerror="this.outerHTML=\'<span class=lt>'+esc(it.n.charAt(0))+'</span>\'">':'<span class="lt">'+esc(it.n.charAt(0))+'</span>';
 h+='<button onclick="ringTap('+i+')">'+ic+'<span class="nm">'+esc(it.n)+'</span></button>'});
-$('ringgrid').innerHTML=h||'<p class="hint">В кольце нет пунктов, которые можно открыть с телефона.</p>'}
+$('ringgrid').innerHTML=h||'<p class="hint">В кольцах на ПК нет пунктов, которые можно открыть с телефона: программы, папки, файлы и действия появятся здесь, когда их добавят в кольцо в студии.</p><button onclick="ringLoad()" style="width:100%">Обновить</button>'}
 function ringTap(i){var list=ring[ringSide];ringPath.forEach(function(k){list=list[k].c});var it=list[i];
 if(it.k=='grp'){ringPath.push(i);ringDraw();return}
 post('ringrun?id='+it.id).then(function(r){if(r.ok){toast('Открыто на ПК: '+it.n);buzz(20)}else r.text().then(toast)}).catch(function(){toast('Нет связи')})}
@@ -539,7 +647,7 @@ if(!air.on||!e.rotationRate)return;var now=performance.now(),dt=air.last?Math.mi
 var r=e.rotationRate,G=air.g,n=Math.hypot(G[0],G[1],G[2])||9.8;
 var yaw=((r.beta||0)*G[0]+(r.gamma||0)*G[1]+(r.alpha||0)*G[2])/n,pitch=r.beta||0;// поворот вокруг вертикали и наклон вверх-вниз
 var sp=Math.hypot(yaw,pitch),k=14+Math.min(sp,200)*0.12;acc.x+=-yaw*dt*k;acc.y+=-pitch*dt*k;air.moved+=sp*dt});
-$('air').addEventListener('pointerdown',function(e){e.preventDefault();if(!window.isSecureContext){$('airmsg').textContent='Нужна защищённая страница (https): вкладка «Файлы» - «Защищённая страница».';return}
+$('air').addEventListener('pointerdown',function(e){e.preventDefault();if(!window.isSecureContext){$('airmsg').textContent='Нужна защищённая страница (https).';setupOpen();return}
 air.on=true;air.t0=Date.now();air.moved=0;air.last=0;this.classList.add('on')});
 ['pointerup','pointercancel','pointerleave'].forEach(function(ev){$('air').addEventListener(ev,function(){if(!air.on)return;air.on=false;this.classList.remove('on');
 if(ev=='pointerup'&&Date.now()-air.t0<300&&air.moved<4)inp('c&b=l')})});
@@ -577,12 +685,84 @@ function autoClip(){if(!$('autoclip').checked||!window.isSecureContext||!navigat
 navigator.clipboard.readText().then(function(t){var last=null;try{last=localStorage.getItem('clipLast')}catch(e){}
 if(!t||t==last||t==$('pc').textContent)return;try{localStorage.setItem('clipLast',t)}catch(e){}
 post('clip',t).then(function(r){if(r.ok)toast('Скопированное на телефоне - в буфере ПК')})}).catch(function(){})}
+// ---------- что мешает управлять: сказать на самой вкладке, а не всплывашкой после нажатия ----------
+// state.ctl с ПК (/poll): ok, ask (ждём «Разрешить»), new (не спрашивали), denied, https (только на защищённой), off
+var CTL_TABS=['remote','pad','screen','wins','ring','slides','game'];
+function secUrl(){return 'https://'+location.hostname+':'+state.tls+location.pathname}
+function art(n){return '<img class="art" src="img/'+n+'.webp" alt="" onerror="this.remove()">'}
+function gateHtml(t){var c=state.ctl,b,p,a='',ic=I.lock;
+if(t=='screen'&&state.screenGrant)c='ok';
+if(c=='ok'&&t=='screen'&&!state.screen){b='Экран ПК выключен';p='В студии RadialMenu: Обзор - «Телефон рядом» - «Экран ПК на телефоне».'}
+else if(c=='ok')return '';
+else if(c=='https'){b='Нужна защищённая страница';p='Управлять ПК можно только по защищённому соединению: так нажатия и набранный текст не увидит никто в этой Wi-Fi.';
+a=state.certOk?'<a class="btn p" href="'+secUrl()+'">Открыть защищённую страницу</a>':'<button class="p" onclick="setupOpen()">Настроить - пара минут</button>'}
+else if(c=='new'){b='Нужно разрешение на ПК';p='Один раз нажмите «Разрешить» на компьютере - и пульт заработает.';ic=I.pad;
+a='<button class="p" onclick="ctlAsk()">Попросить разрешение</button>'}
+else if(c=='ask'){b='Ждём ответа на ПК';p='<span class="wait"></span>Карточка «Разрешить управление?» - справа внизу экрана компьютера.';ic=I.pad}
+else if(c=='denied'){b='Управление запрещено';p='На ПК нажали «Запретить». Чтобы спросить снова, закройте передачу на ПК и откройте её заново.'}
+else{b='Выключено на ПК';p='В студии RadialMenu: Обзор - «Телефон рядом» - «Тачпад и клавиатура с телефона».'}
+return art('gate')+'<div class="gicon"><svg viewBox="0 0 24 24">'+ic+'</svg></div><b>'+b+'</b><p>'+p+'</p>'+a}
+function gates(){CTL_TABS.forEach(function(t){var pg=document.querySelector('[data-p="'+t+'"]');if(!pg)return;
+var g=pg.querySelector(':scope>.gate');if(!g){g=document.createElement('div');g.className='gate hide';pg.insertBefore(g,pg.firstChild)}
+var h=gateHtml(t);if(g.dataset.h!==h){g.dataset.h=h;g.innerHTML=h}g.classList.toggle('hide',!h);pg.classList.toggle('locked',!!h)})}
+function ctlAsk(){state.ctl='ask';gates();if(state.setupOpen)setupRender();
+post('ctlask').then(function(r){if(r.ok){state.ctl='ok';return}return r.text().then(function(t){
+state.ctl=/запрещено/.test(t)?'denied':/https/.test(t)?'https':'ask'})}).catch(function(){toast('Нет связи')})
+.then(function(){gates();if(state.setupOpen)setupRender()})}
+// сертификат уже стоит? Пробный запрос на https этого ПК: доверенный сертификат - ответ есть, нет - ошибка соединения
+function certProbe(){if(isSec||!state.tls||state.probing)return;state.probing=1;
+fetch(secUrl(),{method:'HEAD',mode:'no-cors',cache:'no-store'}).then(function(){state.certOk=true},function(){state.certOk=false})
+.then(function(){state.probing=0;gates();setupChip();if(state.setupOpen)setupRender()})}
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&!isSec&&state.tls)certProbe()});  // вернулись из настроек телефона
+// ---------- настройка по шагам: по одному шагу, сделанное отмечается само ----------
+function steps(){var s=[];if(state.tls){s.push({id:'cert',done:isSec||!!state.certOk});s.push({id:'secure',done:isSec});s.push({id:'pair',done:isDev})}
+if(state.ctl&&state.ctl!='off')s.push({id:'ctl',done:state.ctl=='ok'});return s}
+function stepNow(){var s=steps();for(var i=0;i<s.length;i++)if(!s[i].done)return{s:s,i:i};return{s:s,i:-1}}
+function bars(s,i){return s.map(function(x,k){return '<i class="'+(x.done?'done':k==i?'cur':'')+'"></i>'}).join('')}
+function setupChip(){var n=stepNow(),later=false;try{later=sessionStorage.getItem('setupLater')=='1'}catch(e){}
+$('setupchip').classList.toggle('hide',n.i<0||later);if(n.i>=0)$('setupchip').textContent='Настроить: шаг '+(n.i+1)+' из '+n.s.length+' ›';
+var c=$('setupcard');c.classList.toggle('hide',!n.s.length);$('setupsteps').innerHTML=bars(n.s,n.i);
+$('setuptxt').textContent=n.i<0?'Всё настроено: телефон запомнен, управление разрешено.':'Осталось шагов: '+(n.s.length-n.i)+'. По одному, пара минут.';
+$('setupgo').textContent=n.i<0?'Подробнее':'Продолжить настройку'}
+function setupOpen(){state.setupOpen=1;try{sessionStorage.removeItem('setupLater')}catch(e){}setupRender(1);$('sheet').classList.remove('hide');
+clearInterval(state.probeT);state.probeT=setInterval(function(){if(!state.setupOpen||$('sheet').classList.contains('hide')){clearInterval(state.probeT);state.setupOpen=0;return}
+if(stepNow().s[stepNow().i]&&stepNow().s[stepNow().i].id=='cert')certProbe()},3000)}
+function setupLater(){state.setupOpen=0;try{sessionStorage.setItem('setupLater','1')}catch(e){}closeSheet();setupChip()}
+// force - открыть; иначе обновить, только если на листе сейчас настройка (тот же лист у «Ещё», файлов, поиска телефона)
+function setupRender(force){if(!force&&!$('sheetbox').querySelector('.step'))return;var n=stepNow(),id=n.i<0?'done':n.s[n.i].id,h='<div class="step"><div class="steps">'+bars(n.s,n.i)+'</div>'+art('setup-'+id);
+if(n.i>=0)h+='<small>Шаг '+(n.i+1)+' из '+n.s.length+'</small>';
+if(id=='cert'){var sam=/SM-|samsung/i.test(navigator.userAgent),path=sam?['Настройки','Безопасность и конфиденциальность','Другие параметры безопасности','Установить из памяти устройства','Сертификат ЦС']
+:['Настройки','Безопасность','Шифрование и учётные данные','Установить сертификат','Сертификат ЦС'];
+h+='<h3>Сертификат этого ПК</h3><p>Один раз - и страница станет защищённой: заработают управление, камера и «Поделиться - на ПК».</p>'+
+'<a class="btn p" href="ca.crt" download="MoonDesk-CA.crt" style="width:100%">1. Скачать сертификат</a>'+
+'<p style="margin:14px 0 6px">2. Поставьте его в настройках телефона'+(sam?' (Samsung)':'')+':</p><div class="path">'+
+path.map(function(x){return '<span>'+x+'</span>'}).join('<em>›</em>')+'</div>'+
+'<small>Выберите файл MoonDesk-CA.crt из Загрузок. В сведениях о сертификате SHA-256 должен начинаться так же, как «Отпечаток ПК» на карточке компьютера. Не совпал - не ставьте.</small>'+
+'<p style="margin-top:10px">'+(state.probing?'<span class="wait"></span>Проверяю...':'Вернитесь сюда - страница сама увидит сертификат.')+'</p>'+
+'<button onclick="certProbe()" style="width:100%">Проверить сейчас</button>'}
+else if(id=='secure')h+='<h3>Сертификат на месте</h3><p>Откройте защищённую страницу - настройка продолжится там.</p><a class="btn p" href="'+secUrl()+'" style="width:100%">Открыть защищённую страницу</a>';
+else if(id=='pair')h+='<h3>Запомнить этот телефон</h3><p>Страница получит постоянный адрес: QR больше не нужен, а разрешение на управление сохранится.</p>'+
+'<button class="p" onclick="$(\'pair\').click()" style="width:100%">Запомнить</button><small style="margin-top:8px">Подтвердите на ПК: карточка «Запомнить телефон?»</small>';
+else if(id=='ctl'){h+='<h3>Разрешить управление</h3>';var c=state.ctl;
+h+=c=='ask'?'<p><span class="wait"></span>Нажмите «Разрешить» на карточке справа внизу экрана ПК.</p>':c=='denied'?'<p>На ПК нажали «Запретить». Закройте передачу на ПК и откройте её снова, чтобы спросить заново.</p>':
+'<p>Тачпад, пульт, экран и окна ПК работают после вашего «Разрешить» на компьютере. Спросим один раз.</p><button class="p" onclick="ctlAsk()" style="width:100%">Попросить разрешение</button>'}
+else{h+='<h3>Всё готово</h3><p>'+(isDev?'Телефон запомнен - открывайте эту страницу из закладки или с главного экрана.':'Можно пользоваться.')+'</p>';
+if(isDev)h+='<small>Уведомления, SMS и звонки на ПК - в приложении «Компьютер рядом»:</small><a class="btn" href="moondesk://pair?u='+encodeURIComponent(location.origin+location.pathname)+'" style="width:100%">Подключить приложение</a>'}
+h+='</div><button onclick="'+(id=='done'?'state.setupOpen=0;closeSheet()':'setupLater()')+'" style="width:100%;margin-top:12px">'+(id=='done'?'Готово':'Позже')+'</button>';
+$('sheetbox').innerHTML=h}
+// тачпад: подсказка по жестам - пока не попробовали, дальше по «?»
+try{if(localStorage.getItem('padSeen')=='1')pad.classList.add('used')}catch(e){}
+pad.addEventListener('touchstart',function(){try{localStorage.setItem('padSeen','1')}catch(e){}},{passive:true});
+$('padhelp').onclick=function(){pad.classList.toggle('used')};
 // запомнить телефон
-$('pair').onclick=function(){if(!isSec&&state.tls){toast('Сначала откройте защищённую страницу');$('secbox').scrollIntoView();return}var n=(navigator.userAgentData&&navigator.userAgentData.platform)||'телефон';
+$('pair').onclick=function(){if(!isSec&&state.tls){setupOpen();return}var n=(navigator.userAgentData&&navigator.userAgentData.platform)||'телефон';
 var m=/\(([^)]+)\)/.exec(navigator.userAgent);if(m)n=m[1].split(';').pop().trim()||n;
 toast('Подтвердите на экране ПК: «Запомнить»');post('pair',n).then(function(r){if(!r.ok)return r.text().then(function(t){toast(t||'Не вышло');return{}});return r.json()}).then(function(j){if(j.url){toast('Запомнен');location.replace(j.url)}}).catch(function(){toast('Не вышло')})};
 (function(){var t=null;try{t=localStorage.getItem('tab')}catch(e){}tab(t&&document.querySelector('[data-p="'+t+'"]')?t:'remote')})();
 shareResult();
+// приложение открыло страницу сразу на экране ПК (кнопка «Экран ПК»): во весь экран - когда ясно, что можно управлять,
+// иначе видна плашка, что мешает
+if(location.hash=='#screen'){history.replaceState(null,'',location.pathname);state.appScreen=isApp();state.pendingFull=1;tab('screen')}
 autoClip();
 poll();
 </script></body></html>

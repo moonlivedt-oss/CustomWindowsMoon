@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include "net/net.h"
+#include "net/watch.h"
 
 struct Config;
 struct Item;
@@ -15,6 +16,9 @@ class BoostCard;
 class RadialMenu;
 
 namespace netui {
+net::Light State();
+std::wstring VpnBlockStatus();
+void HistoryDetail(const std::wstring& text);
 
 inline constexpr UINT WM_NET_EVENT = WM_APP + 61;  // событие сторожа или проверки игры: lParam - net::Event*
 inline constexpr UINT WM_NET_JOB = WM_APP + 62;    // ход действия: lParam - строка журнала или итог

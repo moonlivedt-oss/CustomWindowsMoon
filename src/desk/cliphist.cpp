@@ -232,6 +232,7 @@ void OnUpdate() {
     if (!e.text.empty()) {
         std::wstring kind = g_cfg->clipSecrets ? secrets::Kind(e.text) : L"";
         if (!kind.empty()) {
+            usage::Hit(L"clip_secrets");
             // секрет: не запоминаем, через минуту стираем, если буфер с тех пор не меняли
             ++g_skipped;
             g_wipeSeq = seq;

@@ -17,7 +17,7 @@ bool InsideDir(const std::wstring& path, const std::wstring& dir) {
 
 bool ConsentJob(const std::wstring& key) {
     for (const wchar_t* k :
-         {L"deep", L"repair", L"wu-reset", L"defender-offline", L"adapter", L"giants", L"sys-item", L"net-cut"})
+           {L"deep", L"repair", L"wu-reset", L"defender-offline", L"adapter", L"giants", L"sys-item", L"net-cut", L"vpn-guard-setup"})
         if (key == k) return true;
     return false;
 }

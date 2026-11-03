@@ -13,7 +13,10 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
@@ -35,6 +38,27 @@ class MainActivity : Activity() {
     private lateinit var col: LinearLayout  // куда добавляются строки: корень или текущая карточка
     private val switches = mutableMapOf<String, Switch>()
     private var asking: String? = null  // для какого переключателя спросили разрешения
+    private lateinit var pcName: TextView
+    private lateinit var acts: LinearLayout       // «Экран ПК» и «Пульт» - когда ПК на связи
+    private lateinit var wakeBox: LinearLayout    // «Разбудить ПК» - когда подключён, но не отвечает
+    private lateinit var changeBtn: LinearLayout  // «Подключить другой ПК» - открывает поле ссылки
+    private lateinit var connectBox: LinearLayout // поле ссылки и «Подключить»
+    private var connectOpen = false
+    private var msg = ""
+    private var msgUntil = 0L
+
+    private fun say(s: String) {
+        msg = s
+        msgUntil = SystemClock.elapsedRealtime() + 10000
+        status.text = s
+    }
+    private val ui = Handler(Looper.getMainLooper())
+    private val tick = object : Runnable {  // ПК уснул или проснулся - карточка меняется сама, пока приложение открыто
+        override fun run() {
+            refresh()
+            ui.postDelayed(this, 3000)
+        }
+    }
 
     // те же цвета, что у страницы «Телефона рядом» и темы «Багровое поле» на ПК
     private object C {
@@ -69,13 +93,14 @@ class MainActivity : Activity() {
     private fun hint(s: String, top: Int = 0) = text(s, 13f, top, C.MUT)
 
     // карточка с подписью сверху (как section на странице); строки дальше идут в неё
-    private fun card(title: String, root: LinearLayout) {
+    private fun card(title: String?, root: LinearLayout) {
         col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = round(C.CARD, 20, C.LINE)
             setPadding(dp(16), dp(14), dp(16), dp(14))
         }
         root.addView(col, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        if (title == null) return
         text(title.uppercase(), 12f, 0, C.MUT).apply {
             letterSpacing = 0.08f
             typeface = Typeface.DEFAULT_BOLD
@@ -98,6 +123,50 @@ class MainActivity : Activity() {
             setOnClickListener { onClick() }
             col.addView(this, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         }
+
+    // кусок карточки, который можно прятать целиком; строки внутри block идут в него
+    private fun group(parent: LinearLayout, block: () -> Unit): LinearLayout {
+        val g = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        parent.addView(g, LinearLayout.LayoutParams(-1, -2))
+        col = g
+        block()
+        col = parent
+        return g
+    }
+
+    // кнопки в ряд, поровну
+    private fun row(block: () -> Unit) {
+        val parent = col
+        val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        parent.addView(r, LinearLayout.LayoutParams(-1, -2))
+        col = r
+        block()
+        col = parent
+        for (i in 0 until r.childCount)
+            r.getChildAt(i).layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                topMargin = dp(8)
+                if (i > 0) marginStart = dp(8)
+            }
+    }
+
+    // значок слева от подписи кнопки (картинки из drawable-nodpi - приводим к 26 dp)
+    private fun icon(b: Button, res: Int) {
+        val d = getDrawable(res) ?: return
+        d.setBounds(0, 0, dp(26), dp(26))
+        b.setCompoundDrawablesRelative(d, null, null, null)
+        b.compoundDrawablePadding = dp(8)
+        b.setPadding(dp(14), 0, dp(14), 0)
+    }
+
+    private fun wake() {
+        Thread {
+            val n = Wol.wake(this)
+            ClipActivity.say(
+                applicationContext,
+                if (n > 0) "Сигнал отправлен" else "ПК ещё не сказал свой MAC: подключитесь, пока он включён по проводу",
+            )
+        }.start()
+    }
 
     @SuppressLint("UseSwitchCompatOrMaterialCode")
     private fun switch(key: String, title: String, hint: String) {
@@ -125,6 +194,9 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(20), dp(16), dp(32))
+            // фокус при открытии - на самой странице: иначе его брало поле списка внизу, и экран открывался прокрученным
+            isFocusableInTouchMode = true
+            descendantFocusability = LinearLayout.FOCUS_BEFORE_DESCENDANTS
         }
         col = root
         // ключ к ПК не попадает в снимок «Недавних»; касания сквозь чужое окно поверх (подсунуть «Подключить») - мимо
@@ -134,27 +206,49 @@ class MainActivity : Activity() {
             setBackgroundColor(C.BG)
             addView(root)
         })
-        text("Компьютер рядом", 26f).typeface = Typeface.DEFAULT_BOLD
-        status = text("", 14f, 6).apply {
-            background = round(C.CARD, 99, C.LINE)
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            compoundDrawablePadding = dp(8)
-        }
-        (status.layoutParams as LinearLayout.LayoutParams).apply {
-            width = -2
-            topMargin = dp(6)
-        }
+        root.requestFocus()
+        // Шапка - одна строка: главное на экране - сам ПК, а не название приложения
+        text("Компьютер рядом", 15f, 0, C.MUT).typeface = Typeface.DEFAULT_BOLD
 
-        card("Компьютер", root)
+        // Сначала - сам ПК: имя, строкой ниже - на связи ли, дальше главное, что с ним можно сделать.
+        // Поле ссылки - только когда оно нужно
+        card(null, root)
+        pcName = text("", 24f).apply { typeface = Typeface.DEFAULT_BOLD }
+        status = text("", 14f, 0, C.MUT).apply { compoundDrawablePadding = dp(8) }
+        // картинка состояния - полосой под именем: на связи, не отвечает, не подключён. Невысокая, чтобы кнопки
+        // оставались на первом экране
         waiting = ImageView(this).apply {
             setImageResource(R.drawable.app_empty)
-            adjustViewBounds = true
-            contentDescription = "ПК ещё не подключён"
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = round(C.CARD2, 16)
+            clipToOutline = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        col.addView(waiting, LinearLayout.LayoutParams(-1, -2).apply {
-            topMargin = dp(4)
-            bottomMargin = dp(8)
+        col.addView(waiting, LinearLayout.LayoutParams(-1, dp(150)).apply {
+            topMargin = dp(8)
+            bottomMargin = dp(4)
         })
+        val hero = col
+        acts = group(hero) {
+            row {
+                icon(button("Экран ПК", primary = true) { RemoteActivity.open(this, screen = true) }, R.drawable.ic_screen)
+                icon(button("Пульт") { RemoteActivity.open(this, screen = false) }, R.drawable.ic_remote)
+            }
+            hint("Экран ПК - во весь экран и боком: касание - щелчок, клавиатура открывается сама, кнопки громкости " +
+                "телефона - громкость ПК. Пульт - вся страница «Телефона рядом» без установки сертификата.", 4)
+        }
+        wakeBox = group(hero) {
+            button("Разбудить ПК", primary = true) { wake() }
+            hint("Спит, телефон в другой сети или на ПК домашняя Wi-Fi помечена «общественной» (там будет карточка).", 4)
+        }
+        changeBtn = group(hero) {
+            button("Подключить другой ПК") {
+                connectOpen = true
+                refresh()
+            }
+        }
+        connectBox = group(hero) {}
+        col = connectBox
         link = EditText(this).apply {
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
             hint = "https://адрес-ПК:8800/d/..."
@@ -206,19 +300,12 @@ class MainActivity : Activity() {
         switch("sms", "SMS", "Кроме банков из списка ниже и кодов (если «Коды подтверждения» выключены)")
         switch("calls", "Звонки", "Кто звонит и пропущенные")
         switch("photos", "Новые фото и видео", "Снятое камерой - в «Изображения\\Телефон\\дата», когда ПК на связи")
+        switch("gentleTransfer", "Бережная отправка фото", "Автоматически — на зарядке, без лимитной сети, когда ПК готов. После паузы продолжим с того же места")
         switch("clip", "Буфер ПК - на телефон", "Скопировали на ПК - можно вставлять на телефоне")
 
         card("Действия", root)
         button("Буфер телефона - на ПК") { startActivity(ClipActivity.own(this)) }
-        button("Разбудить ПК") {
-            Thread {
-                val n = Wol.wake(this)
-                ClipActivity.say(
-                    applicationContext,
-                    if (n > 0) "Сигнал отправлен" else "ПК ещё не сказал свой MAC: подключитесь, пока он включён по проводу",
-                )
-            }.start()
-        }
+        button("Разбудить ПК") { wake() }
         button("Не усыплять приложение") { noSleep() }
 
         card("Если что-то не включается", root)
@@ -262,7 +349,7 @@ class MainActivity : Activity() {
         i.data = null  // поворот экрана не должен спросить ещё раз
         val b = Pure.parseLink(data.toString())
         if (b == null) {
-            status.text = "Ссылка не из вашей сети - не подключаю"
+            say("Ссылка не из вашей сети - не подключаю")
             return
         }
         link.setText(Pure.shownLink(b.url))
@@ -282,7 +369,12 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        refresh()
+        ui.post(tick)
+    }
+
+    override fun onPause() {
+        ui.removeCallbacks(tick)
+        super.onPause()
     }
 
     private fun listenerOn(): Boolean =
@@ -291,11 +383,26 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         val pc = prefs.pc.ifEmpty { "ПК" }
-        waiting.visibility = if (Link.connected(this)) View.GONE else View.VISIBLE
+        val connected = Link.connected(this)
+        fun show(v: View, on: Boolean) {
+            v.visibility = if (on) View.VISIBLE else View.GONE
+        }
+        pcName.text = if (connected) pc else "Подключите свой ПК"
+        show(acts, connected && LinkService.online)
+        show(wakeBox, connected && !LinkService.online)
+        show(connectBox, !connected || connectOpen)
+        show(changeBtn, connected && !connectOpen)
+        val pic = if (!connected) R.drawable.app_empty else if (LinkService.online) R.drawable.app_online else R.drawable.app_offline
+        if (waiting.tag != pic) {  // раз в 3 с - только если поменялось, без лишней перерисовки
+            waiting.tag = pic
+            waiting.setImageResource(pic)
+        }
+        // сообщение о подключении («Подключаю...», ошибка) держится 10 с, потом - снова короткое состояние
         status.text = when {
-            !Link.connected(this) -> "ПК не подключён"
-            LinkService.online -> "Подключено: $pc на связи"
-            else -> "Подключено: $pc сейчас не на связи (спит или другая сеть)"
+            SystemClock.elapsedRealtime() < msgUntil -> msg
+            !connected -> "не подключён"
+            LinkService.online -> "на связи"
+            else -> "не отвечает"
         }
         // точка слева: зелёная - на связи, багровая - нет
         val dot = GradientDrawable().apply {
@@ -304,12 +411,15 @@ class MainActivity : Activity() {
             setSize(dp(8), dp(8))
         }
         status.setCompoundDrawablesRelativeWithIntrinsicBounds(dot, null, null, null)
-        if (Link.connected(this) && link.text.isEmpty()) link.setText(Pure.shownLink(prefs.base))
+        // адрес мог смениться сам (Link.relocate) - поле показывает нынешний, пока его не правят руками
+        val shown = Pure.shownLink(prefs.base)
+        if (connected && !connectOpen && link.text.toString() != shown) link.setText(shown)
         switches["notes"]?.isChecked = prefs.notes && listenerOn()
         switches["codes"]?.isChecked = prefs.codes
         switches["sms"]?.isChecked = prefs.sms && granted(Manifest.permission.RECEIVE_SMS)
         switches["calls"]?.isChecked = prefs.calls && granted(Manifest.permission.READ_PHONE_STATE)
         switches["photos"]?.isChecked = prefs.photos && mediaGranted()
+        switches["gentleTransfer"]?.isChecked = prefs.gentleTransfer
         switches["clip"]?.isChecked = prefs.clip
     }
 
@@ -342,6 +452,7 @@ class MainActivity : Activity() {
                 prefs.photos = on
             }
             "clip" -> prefs.clip = on
+            "gentleTransfer" -> prefs.gentleTransfer = on
         }
     }
 
@@ -363,7 +474,7 @@ class MainActivity : Activity() {
             requestPermissions(need.toTypedArray(), 2)
             return
         }
-        if (on && key == "photos") LinkService.start(this)
+        if ((on && key == "photos") || key == "gentleTransfer") LinkService.start(this)
         refresh()
     }
 
@@ -381,16 +492,16 @@ class MainActivity : Activity() {
     private fun pair(s: String) {
         val b = Pure.parseLink(s)
         if (b == null) {
-            status.text = "Это не ссылка запомненного телефона (нужна вида https://адрес:8800/d/ключ/)"
+            say("Это не ссылка запомненного телефона (нужна вида https://адрес:8800/d/ключ/)")
             return
         }
-        status.text = "Подключаю..."
+        say("Подключаю...")
         Thread {
             try {
                 val der = Link.probe(b)
                 runOnUiThread { confirm(b, der, s) }
             } catch (e: Exception) {
-                runOnUiThread { status.text = "Не подключилось: " + (e.message ?: e.javaClass.simpleName) }
+                runOnUiThread { say("Не подключилось: " + (e.message ?: e.javaClass.simpleName)) }
             }
         }.start()
     }
@@ -415,10 +526,10 @@ class MainActivity : Activity() {
             .setView(tail)
             .setPositiveButton("Подключить") { _, _ ->
                 if (!Pure.fingerprintTail(fp, tail.text.toString())) {
-                    status.text = "Не подключено: последние знаки отпечатка не совпали с карточкой ПК"
+                    say("Не подключено: последние знаки отпечатка не совпали с карточкой ПК")
                     return@setPositiveButton
                 }
-                status.text = "Подключаю..."
+                say("Подключаю...")
                 val switched = prefs.base != null && prefs.base != b.url
                 Thread {
                     val msg = try {
@@ -427,18 +538,19 @@ class MainActivity : Activity() {
                             runOnUiThread { for (k in listOf("notes", "codes", "sms", "calls", "photos", "clip")) set(k, false) }
                         }
                         LinkService.start(this)
+                        connectOpen = false
                         "Подключено: " + pc.ifEmpty { "ПК" }
                     } catch (e: Exception) {
                         "Не подключилось: " + (e.message ?: e.javaClass.simpleName)
                     }
                     runOnUiThread {
                         refresh()
-                        status.text = msg
+                        say(msg)
                         link.setText(Pure.shownLink(prefs.base ?: s))
                     }
                 }.start()
             }
-            .setNegativeButton("Нет") { _, _ -> status.text = "Не подключено: отпечаток не совпал" }
+            .setNegativeButton("Нет") { _, _ -> say("Не подключено: отпечаток не совпал") }
             .setCancelable(false)
             .show()
     }

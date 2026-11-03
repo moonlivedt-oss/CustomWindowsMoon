@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // Громкость по программам (Л36): звуковые сеансы устройства по умолчанию раз в 4 с, свой поток (MTA).
 #include <windows.h>
 #include <audiopolicy.h>
@@ -135,7 +136,7 @@ DWORD WINAPI Loop(void*) {
         first = false;
         for (const auto& [pid, level] : p.set)
             for (const Live& l : live)
-                if (l.s.pid == pid) l.v->SetMasterVolume(level, nullptr);
+                if (l.s.pid == pid && SUCCEEDED(l.v->SetMasterVolume(level, nullptr))) usage::Hit(L"app_volume");
         if (!p.save.empty()) {
             AcquireSRWLockExclusive(&g_lock);
             for (const auto& [exe, level] : p.save) g_saved[exe] = level;

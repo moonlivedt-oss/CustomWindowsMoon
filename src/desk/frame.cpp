@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "desk/frame.h"
 
 #include <dwmapi.h>
@@ -182,6 +183,8 @@ void WindowFrame::Foreground(HWND w) {
         prev_ = active_;
     }
     active_ = w;
+    if (frame_) usage::Hit(L"window_frame");
+    if (captions_) usage::Hit(L"window_captions");
     t0_ = GetTickCount64();
     Tick();
     if (animating_ || fx::Game()) return;

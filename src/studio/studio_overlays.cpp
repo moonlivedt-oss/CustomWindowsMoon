@@ -57,32 +57,43 @@ void Studio::TourOverlay(float w, float h) {
     ui.Fill(RectF(0, 0, w, h), Color(170, 0, 0, 0));
     ui.Hover(ID_OV_BG, RectF(0, 0, w, h));
     struct Step {
+        const wchar_t* picture;  // art\tour\*.jpg - широкая картинка сверху; нет файла - талисман
         const wchar_t* mascot;
         const wchar_t* title;
         const wchar_t* text;
     } steps[] = {
-        {L"mascot-wave.webp", L"Привет! Это Radial Studio",
-         L"Здесь настраивается всё: кольца у краёв экрана, углы, сеть, утилиты. Начни с «Обзора» - там главное "
-         L"плитками."},
-        {L"mascot-point.webp", L"Пять групп",
+        {L"1-alt-edge.jpg", L"mascot-wave.webp", L"Привет! Это Radial Studio",
+         L"Кольцо открывается так: зажми Alt и доведи курсор до левого или правого края экрана. А здесь "
+         L"настраивается всё: кольца, углы, сеть, утилиты. Начни с «Обзора» - там главное плитками."},
+        {L"3-studio.jpg", L"mascot-point.webp", L"Пять групп",
          L"Слева группы: Обзор, Кольца, Стол, Сервис, Настройки. Внутри группы - вкладки сверху: например, «Сеть» и "
          L"«Утилиты» в «Сервисе»."},
-        {L"mascot-surprised.webp", L"Темы",
+        {L"2-ring.jpg", L"mascot-surprised.webp", L"Темы",
          L"Тема красит и кольца, и саму студию. Двенадцать штук, включая цвет из обоев и свою палитру."},
-        {L"mascot-read.webp", L"Сохранять не нужно",
+        {L"", L"mascot-read.webp", L"Сохранять не нужно",
          L"Всё сохраняется само. Ошибся - «Отменить» внизу. «Показать меню» сразу открывает кольцо для проверки."},
     };
     const Step& s = steps[tourStep_];
-    RectF card((w - ui.S(600)) / 2, (h - ui.S(300)) / 2, ui.S(600), ui.S(300));
+    RectF card((w - ui.S(640)) / 2, (h - ui.S(500)) / 2, ui.S(640), ui.S(500));
     ui.Fill(card, c.card, ui.S(18));
-    ui.Stroke(card, c.accent, ui.S(18), ui.S(1.5f));
     ui.Hover(ID_OV_BG + 1, card);
-    ui.Icon(ExeDir() + L"\\icons\\" + s.mascot, RectF(card.X + ui.S(24), card.Y + ui.S(50), ui.S(170), ui.S(170)));
-    float tx = card.X + ui.S(214), tw = card.Width - ui.S(240);
-    ui.Text(L"Шаг " + std::to_wstring(tourStep_ + 1) + L" из 4", RectF(tx, card.Y + ui.S(34), tw, ui.S(20)), c.accent,
-            11.5f, true);
-    ui.Text(s.title, RectF(tx, card.Y + ui.S(56), tw, ui.S(32)), c.text, 18, true);
-    ui.Text(s.text, RectF(tx, card.Y + ui.S(96), tw, ui.S(110)), c.muted, 13, false, ui::Left, true);
+    // сверху картинка шага во всю ширину карточки (cover, скруглены только верхние углы)
+    RectF banner(card.X, card.Y, card.Width, ui.S(250));
+    Bitmap* pic = s.picture[0] ? Img(ExeDir() + L"\\art\\tour\\" + s.picture, 1280) : nullptr;
+    if (pic) {
+        ui.Picture(pic, banner, ui.S(18), false);
+    } else {
+        ui.Fill(banner, MixColor(c.card, c.accent, 0.08f), ui.S(18));
+        ui.Fill(RectF(banner.X, banner.Y + banner.Height - ui.S(18), banner.Width, ui.S(18)),
+                MixColor(c.card, c.accent, 0.08f));  // низ полосы прямой, как у картинки
+        ui.Icon(ExeDir() + L"\\icons\\" + s.mascot,
+                RectF(banner.X + (banner.Width - ui.S(190)) / 2, banner.Y + ui.S(30), ui.S(190), ui.S(190)));
+    }
+    ui.Stroke(card, c.accent, ui.S(18), ui.S(1.5f));
+    float tx = card.X + ui.S(28), tw = card.Width - ui.S(56), ty = banner.Y + banner.Height + ui.S(20);
+    ui.Text(L"Шаг " + std::to_wstring(tourStep_ + 1) + L" из 4", RectF(tx, ty, tw, ui.S(20)), c.accent, 11.5f, true);
+    ui.Text(s.title, RectF(tx, ty + ui.S(22), tw, ui.S(32)), c.text, 18, true);
+    ui.Text(s.text, RectF(tx, ty + ui.S(60), tw, ui.S(84)), c.muted, 13, false, ui::Left, true);
     float by = card.Y + card.Height - ui.S(62);
     bool last = tourStep_ == 3;
     if (ui.Button(ID_TOUR_NEXT, RectF(card.X + card.Width - ui.S(146), by, ui.S(122), ui.S(38)),
@@ -105,9 +116,11 @@ void Studio::TourOverlay(float w, float h) {
         cfg.tourDone = true;
         Save();
     }
+    // точки шагов - посередине между «Пропустить» и кнопками справа
+    float dots = card.X + card.Width / 2 - ui.S(25);
     for (int i = 0; i < 4; ++i) {
         SolidBrush b(i == tourStep_ ? c.accent : c.border);
-        ui.G().FillEllipse(&b, card.X + ui.S(84) + i * ui.S(14), card.Y + card.Height - ui.S(36), ui.S(8), ui.S(8));
+        ui.G().FillEllipse(&b, dots + i * ui.S(14), by + ui.S(15), ui.S(8), ui.S(8));
     }
 }
 

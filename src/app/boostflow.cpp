@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // Boost: что закрыть перед игрой и Unreal, итог, возврат закрытого, новости во время игры.
 #include "app/app_internal.h"
 
@@ -151,6 +152,8 @@ void ApplyPick(const std::vector<BoostPick::Row>& rows) {
         RunAfterBoost();
         return;
     }
+    if (g_game.On() && g_cfg.boostOffer) usage::Hit(L"boost_offer");
+    if (g_dev.On() && g_cfg.devBoost) usage::Hit(L"dev_boost");
     StartBoost(job);
 }
 
@@ -303,6 +306,7 @@ void OfferRestore() {
         names.push_back(n.size() > 4 ? n.substr(0, n.size() - 4) : n);
     }
     g_boostCard.onYes = [] {
+        usage::Hit(L"boost_restore");
         boost::Reopen(g_boostClosed);
         boost::ClearSession(BoostDir());
         g_boostClosed.clear();
@@ -324,7 +328,7 @@ void BoostAfterGame() {
     gboost::Restore(L'g');
     if (!g_dev.On()) gboost::Restore(L's');  // усыплённые для редактора спят, пока он открыт
     gboost::QuietFor(L'g', false);           // фокус и показ экрана держат тишину сами
-    if (g_cfg.boostAfter && s.purge) boost::RunPurge(s);
+    if (g_cfg.boostAfter && s.purge && boost::RunPurge(s)) usage::Hit(L"boost_after");
     OfferRestore();
 }
 
@@ -365,8 +369,8 @@ void SessionSummary(const gboost::Session& s, bool save) {
     else
         sub += L" Памяти хватало.";
     if (s.purges) sub += L" Кэш чистился " + Plural(s.purges, L"раз", L"раза", L"раз") + L".";
-    g_gbCard.Show(BoostCard::DONE, (s.game ? L"Сыграно " : L"В Unreal ") + Duration(s.ms) + L": " + s.name, sub,
-                  CurrentTheme(g_cfg), 16000, tight ? Toast::G_WARN : Toast::G_INFO);
+    { if (g_gbCard.Show(BoostCard::DONE, (s.game ? L"Сыграно " : L"В Unreal ") + Duration(s.ms) + L": " + s.name, sub,
+                  CurrentTheme(g_cfg), 16000, tight ? Toast::G_WARN : Toast::G_INFO) && save) usage::Hit(L"boost_summary"); }
 }
 
 bool WallpaperPaused(bool cfgFlag) { return cfgFlag && !gm::WallpaperEngine().empty(); }
@@ -436,6 +440,7 @@ void OnBoostNote(const gboost::Note& n) {
             if (editor) g_gbCard.onNo = [exe] { ModeMarkAsked(L"gpu:" + Lower(exe)); };  // «Не нужно» - не спрашивать
             g_gbCard.onYes = [exe, dg, editor] {
                 bool ok = gboost::PreferDiscrete(exe);
+                if (ok && !editor) usage::Hit(L"boost_gpu");
                 g_gbCard.Show(BoostCard::DONE, ok ? L"Готово" : L"Не получилось",
                               ok ? (editor ? L"После перезапуска редактор пойдёт на "
                                            : L"При следующем запуске игра пойдёт на ") +
@@ -459,11 +464,12 @@ void OnBoostNote(const gboost::Note& n) {
         }
         case gboost::EV_VRAM_HIGH:
             if (!g_cfg.devWatch) return;
-            g_gbCard.Show(BoostCard::DONE, L"Видеопамять: " + Size(n.a) + L" из " + Size(n.b),
+
+            { if (g_gbCard.Show(BoostCard::DONE, L"Видеопамять: " + Size(n.a) + L" из " + Size(n.b),
                           L"Unreal близок к «Out of video memory». Помогут Scalability пониже "
                           L"(Settings - Engine "
                           L"Scalability), один вьюпорт вместо двух и закрытое видео в браузере.",
-                          t, 20000, Toast::G_WARN);
+                          t, 20000, Toast::G_WARN)) usage::Hit(L"dev_watch"); }
             return;
         case gboost::EV_SHADERS_START: {
             if (!g_cfg.devWatch) return;
@@ -475,23 +481,26 @@ void OnBoostNote(const gboost::Note& n) {
             // начало само по себе не новость: карточка - только если что-то сделали (фон приглушён); итог придёт
             // карточкой EV_SHADERS_DONE, если компиляция шла заметно долго
             if (!eco) return;
-            g_gbCard.Show(BoostCard::DONE, L"Компилируются шейдеры",
+
+            usage::Hit(L"boost_eco");
+            { if (g_gbCard.Show(BoostCard::DONE, L"Компилируются шейдеры",
                           L"Работают " + Plural((int)n.a, L"процесс", L"процесса", L"процессов") +
                               L", фон приглушён до конца компиляции.",
-                          t, 5000, Toast::G_INFO);
+                          t, 5000, Toast::G_INFO)) usage::Hit(L"dev_watch"); }
             return;
         }
         case gboost::EV_SHADERS_DONE:
             gboost::Restore(L'c');
             if (!g_cfg.devWatch || n.a < 15) return;
-            g_gbCard.Show(BoostCard::DONE, L"Шейдеры готовы за " + MinSec(n.a),
+            { if (g_gbCard.Show(BoostCard::DONE, L"Шейдеры готовы за " + MinSec(n.a),
                           L"Больше всего работало " + Plural((int)n.b, L"процесс", L"процесса", L"процессов") + L".", t,
-                          7000, Toast::G_OK);
+                          7000, Toast::G_OK)) usage::Hit(L"dev_watch"); }
             return;
         case gboost::EV_BUILD_DONE:
             if (!g_cfg.devWatch) return;
+
             if (n.b > 0)
-                g_gbCard.Show(BoostCard::DONE, L"Сборка готова за " + MinSec(n.a), n.sub, t, 7000, Toast::G_OK);
+                { if (g_gbCard.Show(BoostCard::DONE, L"Сборка готова за " + MinSec(n.a), n.sub, t, 7000, Toast::G_OK)) usage::Hit(L"dev_watch"); }
             else if (!n.go.empty()) {  // Л31: место ошибки известно - открыть его в VS Code
                 std::wstring go = n.go;
                 g_gbCard.yesLabel = L"Открыть в VS Code";
@@ -501,10 +510,10 @@ void OnBoostNote(const gboost::Note& n) {
                     OpenCodeAt(&g_cfg, go);
                 };
                 g_gbCard.onNo = nullptr;
-                g_gbCard.Show(BoostCard::OFFER, L"Сборка не удалась", n.text, t, 30000, Toast::G_FAIL);
+                { if (g_gbCard.Show(BoostCard::OFFER, L"Сборка не удалась", n.text, t, 30000, Toast::G_FAIL)) usage::Hit(L"dev_watch"); }
             } else {
-                g_gbCard.Show(BoostCard::DONE, L"Сборка не удалась",
-                              n.text.empty() ? L"Подробности - в окне вывода." : n.text, t, 20000, Toast::G_FAIL);
+                { if (g_gbCard.Show(BoostCard::DONE, L"Сборка не удалась",
+                              n.text.empty() ? L"Подробности - в окне вывода." : n.text, t, 20000, Toast::G_FAIL)) usage::Hit(L"dev_watch"); }
             }
             return;
         case gboost::EV_PURGED:

@@ -19,6 +19,9 @@ import javax.net.ssl.X509TrustManager
 
 // Настройки приложения (что включено, адрес ПК, закреплённый сертификат, что уже отправлено)
 class Prefs(ctx: Context) {
+    var gentleTransfer: Boolean
+        get() = p.getBoolean("gentleTransfer", true)
+        set(v) = p.edit().putBoolean("gentleTransfer", v).apply()
     val p: SharedPreferences = ctx.applicationContext.getSharedPreferences("near", Context.MODE_PRIVATE)
     var base: String?  // адрес ПК с ключом запомненного телефона - под Vault (Android Keystore)
         get() = secret("base")
@@ -134,13 +137,14 @@ object Link {
             .generateCertificate(Base64.decode(it, Base64.NO_WRAP).inputStream()) as X509Certificate
     }
 
-    private fun open(url: String, pin: Pin, timeout: Int): HttpsURLConnection {
+    private fun open(url: String, pin: Pin, timeout: Int, connect: Int = 5000): HttpsURLConnection {
         val c = URL(url).openConnection() as HttpsURLConnection
         c.sslSocketFactory = factory(pin)
         c.setHostnameVerifier { _, _ -> true }  // адрес ПК меняется; подлинность - по корневому сертификату
-        c.connectTimeout = 5000
+        c.connectTimeout = connect
         c.readTimeout = timeout
         c.useCaches = false
+        c.instanceFollowRedirects = false  // ключ телефона и содержимое запросов не уходят на адрес из Location
         return c
     }
 
@@ -269,4 +273,79 @@ object Link {
     }
 
     fun connected(ctx: Context): Boolean = Prefs(ctx).base != null && Prefs(ctx).ca != null
+
+    // Адрес телефона в домашней Wi-Fi (IPv4) - от него ищется ПК, если тот сменил адрес
+    fun hasLan(ctx: Context): Boolean = myLanIp(ctx) != null
+
+    private fun myLanIp(ctx: Context): String? {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        for (n in cm.allNetworks) {
+            val caps = cm.getNetworkCapabilities(n) ?: continue
+            if (!caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
+                !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) continue
+            for (a in cm.getLinkProperties(n)?.linkAddresses ?: continue) {
+                val ip = a.address
+                if (ip is java.net.Inet4Address && Pure.lanHost(ip.hostAddress ?: "")) return ip.hostAddress
+            }
+        }
+        return null
+    }
+
+    // Роутер выдал ПК другой адрес, и прежний молчит: найти ПК в той же /24 по тому же ключу. Чужое устройство не
+    // пройдёт - сертификат должен быть подписан закреплённым корнем ПК, а ключ - подойти к /pcinfo. Нашли - новый адрес
+    // запоминается. Сразу https с короткими сроками, 64 адреса одновременно: простая проверка порта врёт, если на
+    // телефоне VPN-прокси (ByeByeDPI и подобные принимают любое соединение сами и рвут его только потом).
+    fun relocate(ctx: Context, current: () -> Boolean = { true }): Boolean {
+        val prefs = Prefs(ctx)
+        val originalBase = prefs.base ?: return false
+        val originalCa = prefs.ca ?: return false
+        val b = Pure.parseLink(originalBase) ?: return false
+        val ca = caOf(prefs) ?: return false
+        val mine = myLanIp(ctx) ?: return false
+        val found = java.util.concurrent.atomic.AtomicReference<Pair<String, String>?>()
+        val pool = Executors.newFixedThreadPool(64)
+        for (h in Pure.subnetHosts(mine, b.host)) pool.execute {
+            if (found.get() != null || !current()) return@execute
+            val url = Pure.Base(h, b.port, b.path).url
+            try {
+                val c = open(url + "pcinfo", Pin(ca), 2500, connect = 1500)
+                try {
+                    if (c.responseCode == 200) {
+                        val info = String(c.inputStream.use { readAll(it, 1 shl 16) }, Charsets.UTF_8)
+                        found.compareAndSet(null, url to info)
+                    }
+                } finally {
+                    c.disconnect()
+                }
+            } catch (_: Exception) {  // не наш сертификат или не тот ключ - мимо
+            }
+        }
+        pool.shutdown()
+        try {
+            pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            pool.shutdownNow()
+        }
+        val (url, info) = found.get() ?: return false
+        // Пользователь мог за время поиска отключить ПК или познакомиться с другим.
+        if (!current() || prefs.base != originalBase || prefs.ca != originalCa) return false
+        prefs.base = url
+        savePcInfo(ctx, info)
+        return true
+    }
+
+    // Окно «Экран ПК» (WebView): сертификат сервера, который показал ПК, - подписан ли он корнем этого ПК (тот же
+    // закреплённый сертификат, что у всех запросов приложения). Тогда страницу можно открыть без установки корня в
+    // Android
+    fun trusted(ctx: Context, leaf: X509Certificate?): Boolean {
+        val ca = caOf(Prefs(ctx)) ?: return false
+        if (leaf == null) return false
+        return try {
+            leaf.checkValidity()
+            leaf.verify(ca.publicKey)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 }

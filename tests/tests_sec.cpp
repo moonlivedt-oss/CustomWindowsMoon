@@ -39,6 +39,28 @@ void TestElevateHelper() {
 }
 
 void TestPhoneHttpsOnly() {
+    phone::DeviceRec guest;
+    guest.key = "guestkey12345678";
+    guest.added = guest.seen = 1000;
+    guest.expires = 4600;
+    guest.control = false; guest.screen = true; guest.files = false;
+    CHECK(phone::DevicePathAllowed(guest, "/screen", 4599));
+    CHECK(phone::DevicePathAllowed(guest, "/mons", 4599));
+    CHECK(!phone::DevicePathAllowed(guest, "/in", 4599));
+    CHECK(!phone::DevicePathAllowed(guest, "/fs", 4599));
+    CHECK(!phone::DevicePathAllowed(guest, "/f/0", 4599));
+    CHECK(!phone::DevicePathAllowed(guest, "/up", 4599));
+    CHECK(!phone::DevicePathAllowed(guest, "/poll", 4600));
+    guest.seen = 4599;
+    CHECK(phone::DeviceStale(guest, 4600));  // активность не продлевает гостевой срок
+    auto guests = phone::ParseDevices(phone::DevicesText({guest}));
+    CHECK(guests.size() == 1 && guests[0].screen && !guests[0].control && !guests[0].files && guests[0].expires == 4600);
+    auto legacy = phone::ParseDevices("legacykey12345678\tPhone\t1000\t1000\t1\n");
+    CHECK(legacy.size() == 1 && legacy[0].control && legacy[0].screen && legacy[0].files && !legacy[0].expires);
+    auto corrupt = phone::ParseDevices("guestkey12345678\tGuest\t1000\t1000\t0\t0\t0\tbroken\n");
+    CHECK(corrupt.size() == 1 && phone::DeviceStale(corrupt[0], 1000));
+    CHECK(elevate::ConsentJob(L"vpn-guard-setup"));
+    CHECK(!elevate::ConsentJob(L"vpn-guard-tick"));
     std::vector<std::string> dev = {"devkey0123456789", "otherkey9876543210"};
     int d = 5;
     CHECK(phone::MatchKey("/tok123/poll", "tok123", dev, &d) == 7 && d == -1);
@@ -96,8 +118,8 @@ void TestPhoneBadGate() {
     CHECK(!phone::SameKey(std::string("abc\0", 4), "abc"));
 
     // управление - только после «Разрешить» на ПК; буфер, файлы и пульт громкости - без вопроса
-    for (const char* c :
-         {"/in", "/type", "/combo", "/tap", "/screen", "/mons", "/wins", "/win", "/ringrun", "/fs", "/open", "/cmd"})
+    for (const char* c : {"/in", "/type", "/combo", "/tap", "/screen", "/mons", "/wins", "/win", "/ringrun", "/fs",
+                          "/open", "/cmd", "/ctlask"})
         CHECK(phone::ControlPath(c));
     for (const char* c : {"/poll", "/clip", "/up", "/", "/in/", "/innn", "/ring", "/pair", "/fsx"})
         CHECK(!phone::ControlPath(c));

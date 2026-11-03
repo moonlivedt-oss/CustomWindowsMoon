@@ -133,13 +133,14 @@ enum Job {
     JOB_SYS_ITEM,          // новая служба или драйвер: выключить / вернуть (HKCU SysItem, tools::SysItemRefuse)
     JOB_PRIVACY,           // приватность для всего компьютера (HKCU PrivacyJob: on|id, off|id, off|*)
     JOB_CHARGE_LIMIT,      // ноутбук ASUS: предел заряда (HKCU ChargeLimit: 40..100, через ATK WMI)
+    JOB_VPN_GUARD_SETUP, JOB_VPN_GUARD_TICK, JOB_VPN_GUARD_OFF,
     kJobs
 };
 bool AdminReady();     // задача есть - без ожидания, последний известный ответ (для интерфейса)
 bool AdminReadyNow();  // то же с проверкой на месте (schtasks, сотни мс) - только из фоновых потоков
 bool SetupAdmin();     // создать задачу (Windows спросит разрешение)
 // cancel - «Стоп»: перестать ждать (задание доработает само, следующее дождётся его конца), false
-bool RunAdmin(Job j, const Log& log, int timeoutMs = 90000, const std::atomic<bool>* cancel = nullptr);
+bool RunAdmin(Job j, const Log& log, int timeoutMs = 90000, const std::atomic<bool>* cancel = nullptr, bool unattended = false);
 // RadialMenu.exe --net-job: выполнить задание, уже с правами; consented - запущено через окно UAC (--consented):
 // без этого задания из elevate::ConsentJob не выполняются
 int AdminMain(bool consented);

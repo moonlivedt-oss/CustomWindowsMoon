@@ -1,5 +1,7 @@
 // Чем пользуются: счёт в памяти, файл %APPDATA%\MoonDesk\usage.tsv.
 #include <windows.h>
+#include <algorithm>
+#include <climits>
 
 #include "core/text.h"
 #include "core/usage.h"
@@ -29,7 +31,14 @@ void Read() {  // под g_lock
         ReadFile(f, raw.data(), (DWORD)raw.size(), &got, nullptr);
         CloseHandle(f);
         raw.resize(got);
-        g_data = Parse(Widen(raw));
+        Data loaded = Parse(Widen(raw));
+        // Hits made before the first snapshot/flush must survive lazy loading.
+        for (const auto& [key, pending] : g_data.rec) {
+            auto& r = loaded.rec[key];
+            r.last = (std::max)(r.last, pending.last);
+            r.count = pending.count > INT_MAX - r.count ? INT_MAX : r.count + pending.count;
+        }
+        g_data = std::move(loaded);
     }
     if (!g_data.since) {  // первый запуск со счётом: с сегодняшнего дня
         g_data.since = Today();
@@ -52,10 +61,9 @@ int Today() {
 void Hit(const wchar_t* key) {
     int today = Today();
     AcquireSRWLockExclusive(&g_lock);
-    Read();
     Rec& r = g_data.rec[key];
     r.last = today;
-    ++r.count;
+    if (r.count < INT_MAX) ++r.count;
     g_dirty = true;
     ReleaseSRWLockExclusive(&g_lock);
 }

@@ -1,3 +1,4 @@
+#include "core/usage.h"
 #include "desk/devmode.h"
 
 #include <tlhelp32.h>
@@ -148,6 +149,7 @@ void DevMode::SetManual(bool on, const Config& cfg) {
 void DevMode::Update(const Config& cfg, bool want) {
     if (want == on_) return;
     on_ = sw_.on = want;
+    if (want && !sw_.manual && cfg.devAuto) usage::Hit(L"dev_auto");
     if (on_)
         Enter(cfg);
     else
@@ -166,6 +168,7 @@ void DevMode::Enter(const Config& cfg) {
         CloseHandle(f);
     }
     gm::WallpaperControl(pausedWallpaper_, L"pause");
+    usage::Hit(L"dev_wallpaper");
 }
 
 void DevMode::Reapply(const Config& cfg) {

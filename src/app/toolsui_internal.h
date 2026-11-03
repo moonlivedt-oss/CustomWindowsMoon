@@ -136,6 +136,7 @@ extern tools::CommitInfo g_commit;
 extern double g_netDown, g_netUp;
 extern HANDLE g_watchStop, g_watchThread;
 extern std::atomic<bool> g_game;
+extern std::atomic<bool> g_screenOff;
 extern std::vector<std::wstring> g_launch;
 extern std::vector<tools::Contest> g_contests;  // Л7: дедлайны в «Важном» (собирается с кольцом)  // Л20: проекты
                                                 // сектора «Запустить» (собирается с кольцом)

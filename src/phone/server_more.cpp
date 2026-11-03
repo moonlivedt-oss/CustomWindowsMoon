@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // «Телефон рядом»: пульт, тачпад и клавиатура с телефона, «открыть на ПК», картинки буфера, запомнить телефон.
 #include <winsock2.h>
 
@@ -168,6 +169,7 @@ bool HandleMore(Conn& cn, const Request& r, const std::string& rest) {
             Text(cn, 400, "не понял");
             return true;
         }
+        usage::Hit(L"phone_input");
         Text(cn, 200, "ok");
         return true;
     }
