@@ -120,12 +120,25 @@ if ($Range) {
     }
 } elseif ($WorkTree) {
     CheckDiff (& git @git diff -U0 --no-color --text HEAD)
+    # git считает UTF-16 двоичным: в разнице такие файлы выглядят мусором, поэтому читаем их целиком
+    foreach ($f in (& git @git diff --name-only --diff-filter=d HEAD)) {
+        $p = Join-Path $root $f
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        $i = (Get-Item -LiteralPath $p)
+        if ($i.Length -lt 2 -or $i.Length -gt 4MB) { continue }
+        $s = [IO.File]::OpenRead($p); $b0 = $s.ReadByte(); $b1 = $s.ReadByte(); $s.Close()
+        if (($b0 -eq 0xFF -and $b1 -eq 0xFE) -or ($b0 -eq 0xFE -and $b1 -eq 0xFF)) {
+            $n = 0
+            foreach ($l in [IO.File]::ReadAllLines($p)) { $n++; Check ("{0}:{1}" -f $f, $n) $l }
+        }
+    }
     foreach ($f in (& git @git ls-files --others --exclude-standard)) {
         Check $f $f
         $p = Join-Path $root $f
         if ((Get-Item -LiteralPath $p).Length -gt 4MB) { continue }
         $n = 0
-        foreach ($l in [IO.File]::ReadAllLines($p, [Text.Encoding]::UTF8)) {
+        # без указания кодировки .NET сам узнаёт UTF-16 по BOM (desktop.ini, .reg), остальное читает как UTF-8
+        foreach ($l in [IO.File]::ReadAllLines($p)) {
             $n++
             Check ("{0}:{1}" -f $f, $n) $l
         }

@@ -243,3 +243,26 @@ TEST(LibraryHiddenCopySurvivesFolderRemoval) {
     CHECK(library.Tracks()[0].path.parent_path().filename() == "B" && library.Tracks()[0].copies.empty());
     CHECK(library.Tracks()[0].plays == 1);
 }
+
+TEST(PlaylistMoveKeepsCurrentAndShuffleOrder) {
+    pm::Playlist p = Make(5);
+    p.Select(1);
+    p.Move(1, 3);  // играющий трек уехал вниз - текущий индекс за ним
+    CHECK(p.Current() == 3 && p.At(3).path == "t1.mp3");
+    CHECK(p.At(1).path == "t2.mp3" && p.At(2).path == "t3.mp3");
+    p.Move(4, 0);
+    CHECK(p.At(0).path == "t4.mp3" && p.Current() == 4 && p.At(4).path == "t1.mp3");
+    p.Move(2, 2);
+    p.Move(-1, 2);
+    CHECK(p.Size() == 5);
+    // В перемешивании порядок обхода указывает на те же записи
+    pm::Playlist s = Make(6);
+    s.Seed(7);
+    s.SetShuffle(true);
+    std::vector<std::filesystem::path> before;
+    for (int i : s.Order()) before.push_back(s.At(i).path);
+    s.Move(0, 5);
+    std::vector<std::filesystem::path> after;
+    for (int i : s.Order()) after.push_back(s.At(i).path);
+    CHECK(before == after);
+}

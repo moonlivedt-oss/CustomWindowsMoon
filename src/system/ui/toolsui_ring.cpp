@@ -1,4 +1,5 @@
 // Кольцо «Утилиты»: из последнего подсчёта и слежки - пункты дисков, очистки, процессов, «Защиты», системы.
+#include "core/profile.h"
 #include "system/ui/toolsui_internal.h"
 
 #include <ctime>
@@ -1178,6 +1179,9 @@ std::vector<Item> RingItems(std::wstring& status) {
     badge(G_GUARD, danger ? danger : (int)g_finds.size(), danger ? L"!" + std::to_wstring(danger) : L"");
     badge(G_FIX, (int)tools::FindBroken().size());
     badge(G_SYSTEM, (int)!tools::PendingReboot().empty() + (int)!g_updates.failed.empty() + (int)g_devs.size());
+    // профиль прячет группы, но «Важное» остаётся целиком: опасная находка видна всем
+    for (int g = (int)groups.size() - 1; g >= 0; --g)
+        if (profile::Current() < profile::ToolsRingMin(g)) groups.erase(groups.begin() + g);
     groups.insert(groups.begin(), std::move(imp));
     ring = std::move(groups);
     if (sized && quickTotal + scan.ddcOld + bin > 0)

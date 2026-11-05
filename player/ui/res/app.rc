@@ -1,5 +1,5 @@
 // Ресурсы PlayerMoon: манифест и сведения о версии.
-// Значок приложения из тематического набора RadialMenu, несколько размеров.
+// Значок приложения - assets/icons/playermoon.png, собран в app.ico в размерах 16-256.
 #include <winver.h>
 
 1 24 "app.manifest"

@@ -7,6 +7,8 @@
 // сбрасываются при смене поколения устройства Renderer.
 
 #include <d2d1_1.h>
+
+#include "ui/gradient_cache.h"
 #include <d2d1effects.h>
 #include <wrl/client.h>
 
@@ -65,10 +67,13 @@ public:
 private:
     using Rgba = motion::Rgba;
     CoverCache placeholderArt_;
+    bool placeholderTried_ = false;
+    void LoadPlaceholder();
 
     // ----- ресурсы -----
     void EnsureResources(ID2D1DeviceContext* dc);
     ID2D1SolidColorBrush* Brush(const Rgba& c, float opacity = 1);
+    GradientCache gradients_;
     ComPtr<ID2D1GradientStopCollection> Stops(std::initializer_list<std::pair<float, Rgba>> stops);
     ComPtr<ID2D1LinearGradientBrush> Linear(D2D1_POINT_2F a, D2D1_POINT_2F b,
                                             std::initializer_list<std::pair<float, Rgba>> stops);

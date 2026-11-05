@@ -296,8 +296,8 @@ void Studio::ToolsPathTab(ToolsKit& tk) {
             }
         }
         y += ui.S(46);
+        if (toolsJob_) tk.Status(b, (y - b.Y) / tk.rowH, tk.Log(), c.muted);
         tk.Note(b, (y - b.Y) / tk.rowH,
-                (toolsJob_ ? tk.Log() + L"\n" : L"") +
                     L"Windows ищет программу сначала в системном PATH, потом в своём, и берёт первую найденную. "
                     L"Каждая правка сохраняет прежний PATH в бэкап.",
                 c.muted);

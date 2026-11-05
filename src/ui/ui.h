@@ -82,8 +82,11 @@ public:
     // живая сцена под курсором: каждое движение мыши над id - новый кадр (наведение, перетаскивание)
     void Track(int id) { track_.push_back(id); }
     float Scroll(int id, const RectF& view, float content);
+    float ScrollPos(int id) { return scroll_[id]; }
     void ScrollTo(int id, float v) { scroll_[id] = v; }  // плавно прокрутить (Scroll ограничит границами)
+    void ScrollChrome(int id);  // края и полоска поверх страницы: звать после неё
     void ResetScroll(int id) {
+        scrollHold_.erase(id);
         scroll_[id] = 0;
         scrollShown_[id] = 0;
     }
@@ -139,6 +142,17 @@ public:
     // подсказка при наведении: регистрируется в кадре, рисуется DrawTip после задержки
     void Tip(int id, const std::wstring& text);
     void DrawTip(float w, float h);
+    // карточка подробностей: если задержать курсор на рамке r, появляется заголовок, текст и «с чем связано».
+    // На соседнюю строку карточка переезжает сразу, без ожидания. Рисуется DrawDetail поверх всего
+    void Detail(const RectF& r, const std::wstring& title, const std::wstring& body,
+                const std::wstring& links = L"");
+    void DrawDetail(float w, float h);
+    bool DetailHot(const RectF& r) const;  // курсор над рамкой (для подсветки подписи)
+    void TrackHover(const RectF& r) { hoverTrack_.push_back(r); }  // кадр, когда курсор вошёл в рамку или вышел
+    void RowGlow(const RectF& r);  // плашка под строкой: одна на всех, перетекает к строке под курсором
+    void Spotlight(const RectF& r, float radius);  // пятно света за курсором и подсвеченная ближняя часть рамки
+    // подпись двух цветов: под плашкой on, вне её base - граница идёт ровно по краю плашки, как в PlayerMoon
+    void TextOver(const std::wstring& s, const RectF& r, Color base, Color on, const RectF& pill, float size, bool bold);
 
     // элементы
     // busy - дело идёт: вместо многоточия прыгают точки и по кнопке бежит блик
@@ -159,6 +173,9 @@ public:
     COLORREF FieldText() const { return RGB(c_.text.GetR(), c_.text.GetG(), c_.text.GetB()); }
     COLORREF FieldBack() const { return RGB(c_.field.GetR(), c_.field.GetG(), c_.field.GetB()); }
     void DropFocus();
+    // Звать после вывода кадра на экран: окно ввода, которое появилось или сдвинулось, рисуется сразу. Иначе
+    // родитель, перерисованный на каждом кадре анимации, забирает очередь WM_PAINT и текст поля пропадает
+    void FlushFields();
     void FocusField(int id, bool selectAll = true);
     bool FieldFocused(int id) const;
     bool EditFocused() const;
@@ -173,9 +190,13 @@ private:
         std::function<void(const std::wstring&)> onChange;
         bool used = false;
         RECT pos{};
+        // что уже отправлено окну: подсказка перерисовывает EDIT, слать её в каждом кадре нельзя
+        std::wstring cue;
+        HFONT font = nullptr;
     };
     Gdiplus::Font* Font(float size, bool bold);
     int HitAt(int x, int y) const;
+    void DetailMoved();
 
     HWND hwnd_ = nullptr;
     Gdiplus::Graphics* g_ = nullptr;
@@ -187,7 +208,22 @@ private:
     std::vector<std::pair<int, RectF>> scrollViews_, prevScrollViews_;
     int hot_ = 0, active_ = 0, clicked_ = 0, released_ = 0, rdown_ = 0, rclicked_ = 0, dbl_ = 0;
     bool hotChanged_ = false;
-    ULONGLONG hotSince_ = 0, lastFrame_ = 0;
+    ULONGLONG hotSince_ = 0, lastFrame_ = 0, frameNo_ = 0, glowFrame_ = 0, glowBorn_ = 0, scrollBusyUntil_ = 0;
+    struct ScrollInfo {
+        RectF view;
+        float content = 0, shown = 0;
+    };
+    std::map<int, ScrollInfo> scrollInfo_;
+    struct ScrollHold {
+        float content = 0;
+        ULONGLONG at = 0;
+    };
+    std::map<int, ScrollHold> scrollHold_;
+    int edgeId_ = 0;
+    bool edgeDown_ = false;
+    ULONGLONG edgeAt_ = 0, spotFrame_ = 0;
+    std::vector<RectF> hoverTrack_, prevHoverTrack_;
+    size_t hoverSig_ = 0;
     float dt_ = 0;
     std::map<int, float> anims_;
     struct Spring {
@@ -203,6 +239,15 @@ private:
     std::map<int, Wave> ripples_;      // откуда и когда нажали на элемент
     std::map<int, ULONGLONG> bursts_;  // когда щёлкнул переключатель
     std::map<int, std::wstring> tips_;
+    struct DetailReg {
+        RectF r;
+        std::wstring title, body, links;
+    };
+    std::vector<DetailReg> details_, prevDetails_;
+    DetailReg detailShown_;
+    std::wstring detailKey_;
+    ULONGLONG detailSince_ = 0, detailSeen_ = 0;
+    float detailAlpha_ = 0;
     bool down_ = false, repaint_ = false, suppress_ = false;
     POINT mouse_{-1, -1}, press_{};
     std::map<int, Edit> edits_;

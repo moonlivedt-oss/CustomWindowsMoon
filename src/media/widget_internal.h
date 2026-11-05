@@ -15,11 +15,17 @@ constexpr float kW = 452, kH = 164;   // карточка, до масштаба
 constexpr float kLyr = 260;           // на сколько карточка вырастает вверх под текст песни
 constexpr float kTW = 340, kTH = 78;  // маленькая карточка при смене трека
 constexpr float kM = 30;              // поля под тень
+constexpr float kRollL = 150;         // запас окна слева: оттуда приезжает пластинка
+constexpr float kRoll = 170;          // с какого расстояния она катится
+constexpr float kRec = 128;           // диаметр пластинки в большой карточке
+constexpr float kRecMini = 54;        // и в маленькой
 constexpr float kPad = 24;            // запас картинки тени вокруг карточки
 constexpr float kRadius = 22;
 constexpr float kLift = 18;     // насколько карточка поднимается над нижним краем
 constexpr float kEdgeGap = 80;  // у самых углов край не считается: там горячие углы
 constexpr ULONGLONG kDwell = 160, kLinger = 380, kToast = 3200, kVolShow = 1400;
+constexpr ULONGLONG kLaunchDwell = 500;  // показать нечего - запускаем плеер: это дороже карточки, поэтому ждём дольше
+constexpr ULONGLONG kMiniDwell = 200;    // столько курсор должен задержаться на маленькой карточке, чтобы раскрыть её
 
 std::wstring Clock(int64_t t);
 void RoundRect(Gdiplus::GraphicsPath& p, const Gdiplus::RectF& r, float rad);

@@ -5,10 +5,16 @@
 #include <roapi.h>
 #include <shlwapi.h>
 #include <winstring.h>
+#include <objidl.h>
+#include <gdiplus.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <memory>
 
 #include "core/bg.h"
+#include "helpers/snip.h"
 
 // Интерфейсы Windows.Media.Ocr и Windows.Graphics.Imaging описаны вручную, как в media.cpp:
 // заголовков WinRT в MinGW нет. Порядок методов - как в .idl из Windows SDK;
@@ -62,8 +68,22 @@ struct ILanguageFactory : IInspectable {
     virtual HRESULT STDMETHODCALLTYPE CreateLanguage(HSTRING tag, IInspectable** language) = 0;
 };
 
+struct OcrRect {
+    float x, y, w, h;
+};
+
+struct IOcrWord : IInspectable {
+    virtual HRESULT STDMETHODCALLTYPE get_BoundingRect(OcrRect*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_Text(HSTRING*) = 0;
+};
+
+struct IWordList : IInspectable {  // IVectorView<OcrWord>
+    virtual HRESULT STDMETHODCALLTYPE GetAt(UINT32, IOcrWord**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_Size(UINT32*) = 0;
+};
+
 struct IOcrLine : IInspectable {
-    virtual HRESULT STDMETHODCALLTYPE get_Words(void**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_Words(IWordList**) = 0;
     virtual HRESULT STDMETHODCALLTYPE get_Text(HSTRING*) = 0;
 };
 
@@ -145,15 +165,6 @@ bool Await(IAsyncOp* op, void* out, DWORD timeout = 8000) {
     return SUCCEEDED(op->GetResults(out));
 }
 
-// Строка точно русская: есть кириллические буквы, которых нет среди похожих на латиницу
-// (а, в, е, к, м, н, о, п, р, с, т, у, х, ь английский движок не различит с латинскими).
-bool Cyrillic(const std::wstring& s) {
-    static const wchar_t lookalike[] = L"авекмнопрстухьАВЕКМНОПРСТУХЬ";
-    for (wchar_t c : s)
-        if (c >= 0x0400 && c <= 0x04FF && !wcschr(lookalike, c)) return true;
-    return false;
-}
-
 template <class T>
 bool Factory(const wchar_t* cls, const IID& iid, T** out) {
     HSTRING h = nullptr;
@@ -178,9 +189,15 @@ struct Job {
     UINT msg;
 };
 
+// Окно могло закрыться, пока шло распознавание: тогда результат некому удалить
+void PostText(const Job* j, WPARAM failed, std::wstring text) {
+    auto* s = new std::wstring(std::move(text));
+    if (!PostMessageW(j->hwnd, j->msg, failed, (LPARAM)s)) delete s;
+}
+
 void JobWork(const Job* j) {
     if (!A().ok) {
-        PostMessageW(j->hwnd, j->msg, 1, (LPARAM) new std::wstring(L"OCR недоступен"));
+        PostText(j, 1, L"OCR недоступен");
         return;
     }
     A().roInit(RO_INIT_MULTITHREADED);
@@ -188,17 +205,15 @@ void JobWork(const Job* j) {
     std::wstring text = ocr::Recognize(j->png, &err);
     A().roUninit();
     bool failed = text.empty() && !err.empty();
-    PostMessageW(j->hwnd, j->msg, failed ? 1 : 0, (LPARAM) new std::wstring(failed ? err : text));
+    PostText(j, failed ? 1 : 0, failed ? err : text);
 }
 
-}  // namespace
-
-namespace ocr {
-
-std::wstring Recognize(const std::vector<uint8_t>& png, std::wstring* error) {
+// Картинка для движка и сами движки: основной по языку профиля и английский
+bool Prepare(const std::vector<uint8_t>& png, Ptr<IInspectable>& bitmap, Ptr<IOcrEngine>& main, Ptr<IOcrEngine>& en,
+             std::wstring* error) {
     auto fail = [&](const wchar_t* e) {
         if (error) *error = e;
-        return std::wstring();
+        return false;
     };
     if (!A().ok) return fail(L"OCR недоступен");
     IStream* raw = SHCreateMemStream(png.data(), (UINT)png.size());
@@ -207,7 +222,6 @@ std::wstring Recognize(const std::vector<uint8_t>& png, std::wstring* error) {
     HRESULT hr = A().overStream(raw, 0, IID_RandomAccessStream, (void**)&ras);
     raw->Release();
     if (FAILED(hr)) return fail(L"Картинка не открылась");
-
     Ptr<IDecoderStatics> dec;
     Ptr<IAsyncOp> op;
     Ptr<IInspectable> decoder;
@@ -218,33 +232,10 @@ std::wstring Recognize(const std::vector<uint8_t>& png, std::wstring* error) {
     if (FAILED(decoder->QueryInterface(IID_FrameWithSoftwareBitmap, (void**)&frame)))
         return fail(L"Картинка не открылась");
     Ptr<IAsyncOp> op2;
-    Ptr<IInspectable> bitmap;
-    // Bgra8 (87), с готовой прозрачностью (0): такой формат OCR берёт без вопросов
     if (FAILED(frame->GetSoftwareBitmapConvertedAsync(87, 0, &op2)) || !Await(op2.p, &bitmap))
         return fail(L"Картинка не открылась");
-
     Ptr<IOcrEngineStatics> statics;
     if (!Factory(L"Windows.Media.Ocr.OcrEngine", IID_OcrStatics, &statics)) return fail(L"OCR недоступен");
-    auto run = [&](IOcrEngine* engine) {
-        std::vector<std::wstring> out;
-        Ptr<IAsyncOp> op3;
-        Ptr<IOcrResult> result;
-        if (!engine || FAILED(engine->RecognizeAsync(bitmap.p, &op3)) || !Await(op3.p, &result) || !result) return out;
-        Ptr<ILineList> lines;
-        if (SUCCEEDED(result->get_Lines(&lines)) && lines) {
-            UINT32 n = 0;
-            lines->get_Size(&n);
-            for (UINT32 i = 0; i < n; ++i) {
-                Ptr<IOcrLine> line;
-                HSTRING h = nullptr;
-                if (SUCCEEDED(lines->GetAt(i, &line)) && line && SUCCEEDED(line->get_Text(&h))) out.push_back(Str(h));
-            }
-        }
-        return out;
-    };
-    // основной движок - по языку профиля (у тебя русский); английский - отдельно,
-    // потому что русский читает латиницу похожими буквами («Hello» -> «Непо»)
-    Ptr<IOcrEngine> main, en;
     statics->TryCreateFromUserProfileLanguages(&main);
     Ptr<ILanguageFactory> lf;
     Ptr<IInspectable> enLang;
@@ -255,17 +246,192 @@ std::wstring Recognize(const std::vector<uint8_t>& png, std::wstring* error) {
         A().del(tag);
     }
     if (!main && !en) return fail(L"В Windows не установлен язык для распознавания");
-    std::vector<std::wstring> a = run(main.p ? main.p : en.p),
-                              b = main.p && en.p ? run(en.p) : std::vector<std::wstring>();
-    std::wstring out;
-    for (size_t i = 0; i < a.size(); ++i) {
-        // строки обоих движков идут в одном порядке; если их число разное - доверяем основному
-        const std::wstring& line = b.size() == a.size() && !Cyrillic(a[i]) && !b[i].empty() ? b[i] : a[i];
-        if (!out.empty()) out += L"\r\n";
-        out += line;
+    return true;
+}
+
+// Строки движка с положением: рамка строки - по её словам
+void ReadLines(IOcrEngine* engine, IInspectable* bitmap, std::vector<ocr::Line>& out) {
+    Ptr<IAsyncOp> op;
+    Ptr<IOcrResult> result;
+    if (!engine || FAILED(engine->RecognizeAsync(bitmap, &op)) || !Await(op.p, &result) || !result) return;
+    Ptr<ILineList> lines;
+    if (FAILED(result->get_Lines(&lines)) || !lines) return;
+    UINT32 n = 0;
+    lines->get_Size(&n);
+    for (UINT32 i = 0; i < n; ++i) {
+        Ptr<IOcrLine> line;
+        Ptr<IWordList> words;
+        HSTRING h = nullptr;
+        if (FAILED(lines->GetAt(i, &line)) || !line || FAILED(line->get_Text(&h))) continue;
+        ocr::Line l;
+        l.text = Str(h);
+        if (SUCCEEDED(line->get_Words(&words)) && words) {
+            UINT32 count = 0;
+            words->get_Size(&count);
+            float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            bool any = false;
+            for (UINT32 k = 0; k < count; ++k) {
+                Ptr<IOcrWord> word;
+                OcrRect r{};
+                if (FAILED(words->GetAt(k, &word)) || !word || FAILED(word->get_BoundingRect(&r))) continue;
+                x0 = any ? std::min(x0, r.x) : r.x;
+                y0 = any ? std::min(y0, r.y) : r.y;
+                x1 = any ? std::max(x1, r.x + r.w) : r.x + r.w;
+                y1 = any ? std::max(y1, r.y + r.h) : r.y + r.h;
+                any = true;
+            }
+            l.x = x0;
+            l.y = y0;
+            l.w = x1 - x0;
+            l.h = y1 - y0;
+        }
+        out.push_back(std::move(l));
     }
-    if (out.empty()) return fail(L"Текста на снимке не нашлось");
+}
+
+void ReadWords(IOcrEngine* engine, IInspectable* bitmap, int& nextLine, std::vector<ocr::Word>& out) {
+    Ptr<IAsyncOp> op;
+    Ptr<IOcrResult> result;
+    if (!engine || FAILED(engine->RecognizeAsync(bitmap, &op)) || !Await(op.p, &result) || !result) return;
+    Ptr<ILineList> lines;
+    if (FAILED(result->get_Lines(&lines)) || !lines) return;
+    UINT32 n = 0;
+    lines->get_Size(&n);
+    for (UINT32 i = 0; i < n; ++i, ++nextLine) {
+        Ptr<IOcrLine> line;
+        Ptr<IWordList> words;
+        if (FAILED(lines->GetAt(i, &line)) || !line || FAILED(line->get_Words(&words)) || !words) continue;
+        UINT32 count = 0;
+        words->get_Size(&count);
+        for (UINT32 k = 0; k < count; ++k) {
+            Ptr<IOcrWord> word;
+            HSTRING h = nullptr;
+            OcrRect r{};
+            if (FAILED(words->GetAt(k, &word)) || !word || FAILED(word->get_BoundingRect(&r)) ||
+                FAILED(word->get_Text(&h)))
+                continue;
+            ocr::Word w;
+            w.text = Str(h);
+            w.x = r.x;
+            w.y = r.y;
+            w.w = r.w;
+            w.h = r.h;
+            w.line = nextLine;
+            out.push_back(std::move(w));
+        }
+    }
+}
+
+std::atomic<bool> g_enhance{true};
+
+// Подготовка картинки: увеличить мелкое, серый цвет и растяжка контраста. Не вышло - исходная как есть, масштаб 1.
+// scale - во сколько раз подготовленная больше исходной: координаты движка делятся на него.
+std::vector<uint8_t> Enhance(const std::vector<uint8_t>& png, float& scale) {
+    scale = 1;
+    if (!g_enhance) return png;
+    std::unique_ptr<Gdiplus::Bitmap> src = snipimg::FromPng(png);
+    if (!src) return png;
+    const int w = (int)src->GetWidth(), h = (int)src->GetHeight();
+    const float k = ocrtext::UpscaleFactor(w, h);
+    const int bw = std::max(1, (int)std::lround(w * k)), bh = std::max(1, (int)std::lround(h * k));
+    Gdiplus::Bitmap big(bw, bh, PixelFormat32bppRGB);
+    {
+        Gdiplus::Graphics g(&big);
+        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+        g.DrawImage(src.get(), Gdiplus::Rect(0, 0, bw, bh), 0, 0, w, h, Gdiplus::UnitPixel);
+    }
+    Gdiplus::Rect all(0, 0, bw, bh);
+    Gdiplus::BitmapData d{};
+    if (big.LockBits(&all, Gdiplus::ImageLockModeRead | Gdiplus::ImageLockModeWrite, PixelFormat32bppRGB, &d) != Gdiplus::Ok)
+        return png;
+    ocrtext::GrayContrast((uint32_t*)d.Scan0, bw, bh, d.Stride / 4);
+    big.UnlockBits(&d);
+    std::vector<uint8_t> out = snipimg::ToPng(&big);
+    if (out.empty()) return png;
+    scale = (float)bw / w;
     return out;
+}
+
+}  // namespace
+
+namespace ocr {
+
+void SetEnhance(bool on) { g_enhance = on; }
+
+bool RecognizeLines(const std::vector<uint8_t>& png, std::vector<Line>& out, std::wstring* error) {
+    float scale = 1;
+    std::vector<uint8_t> ready = Enhance(png, scale);
+    Ptr<IInspectable> bitmap;
+    Ptr<IOcrEngine> main, en;
+    if (!Prepare(ready, bitmap, main, en, error)) return false;
+    // основной движок - по языку профиля (у тебя русский); английский - отдельно,
+    // потому что русский читает латиницу похожими буквами («Hello» -> «Непо»)
+    std::vector<Line> a, b;
+    ReadLines(main.p ? main.p : en.p, bitmap.p, a);
+    if (main.p && en.p) ReadLines(en.p, bitmap.p, b);
+    out = ocrtext::MergeEngines(a, b);
+    for (Line& l : out) {
+        l.x /= scale;
+        l.y /= scale;
+        l.w /= scale;
+        l.h /= scale;
+    }
+    return true;
+}
+
+std::wstring Recognize(const std::vector<uint8_t>& png, std::wstring* error) {
+    std::vector<Line> lines;
+    if (!RecognizeLines(png, lines, error)) return L"";
+    std::wstring out = ocrtext::CleanText(lines);
+    if (out.empty() && error) *error = L"Текста на снимке не нашлось";
+    return out;
+}
+
+bool RecognizeWords(const std::vector<uint8_t>& png, std::vector<Word>& out, std::wstring* error) {
+    float scale = 1;
+    std::vector<uint8_t> ready = Enhance(png, scale);
+    Ptr<IInspectable> bitmap;
+    Ptr<IOcrEngine> main, en;
+    if (!Prepare(ready, bitmap, main, en, error)) return false;
+    int line = 0;
+    ReadWords(main.p, bitmap.p, line, out);
+    ReadWords(en.p, bitmap.p, line, out);
+    for (Word& w : out) {
+        w.x /= scale;
+        w.y /= scale;
+        w.w /= scale;
+        w.h /= scale;
+    }
+    return true;
+}
+
+void RecognizeWordsAsync(std::vector<uint8_t> png, void* hwnd, unsigned msg) {
+    auto j = std::make_shared<Job>(Job{std::move(png), (HWND)hwnd, msg});
+    bg::Run([j] {
+        auto* words = new std::vector<Word>();
+        bool ok = false;
+        if (A().ok) {
+            A().roInit(RO_INIT_MULTITHREADED);
+            ok = RecognizeWords(j->png, *words);
+            A().roUninit();
+        }
+        if (!PostMessageW(j->hwnd, j->msg, ok ? 0 : 1, (LPARAM)words)) delete words;
+    });
+}
+
+void RecognizeLinesAsync(std::vector<uint8_t> png, void* hwnd, unsigned msg) {
+    auto j = std::make_shared<Job>(Job{std::move(png), (HWND)hwnd, msg});
+    bg::Run([j] {
+        auto* lines = new std::vector<Line>();
+        bool ok = false;
+        if (A().ok) {
+            A().roInit(RO_INIT_MULTITHREADED);
+            ok = RecognizeLines(j->png, *lines);
+            A().roUninit();
+        }
+        if (!PostMessageW(j->hwnd, j->msg, ok ? 0 : 1, (LPARAM)lines)) delete lines;
+    });
 }
 
 void RecognizeAsync(std::vector<uint8_t> png, void* hwnd, unsigned msg) {

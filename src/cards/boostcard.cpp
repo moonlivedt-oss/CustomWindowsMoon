@@ -1,8 +1,11 @@
 #include "cards/boostcard.h"
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
 
 #include "cards/cardlog.h"
+#include "core/fx.h"
 #include "desktop/share.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -51,13 +54,109 @@ void BoostCard::Unanswered() {
     cardlog::Closed(askKind_, false);
 }
 
+void BoostCard::Enqueue(Later l) {
+    // то же сообщение второй раз не копится; больше восьми отложенных - самое старое уходит
+    later_.erase(std::remove_if(later_.begin(), later_.end(),
+                                [&](const Later& o) { return o.title == l.title && o.kind == l.kind; }),
+                 later_.end());
+    if (later_.size() >= 8) later_.erase(later_.begin());
+    later_.push_back(std::move(l));
+}
+
+void BoostCard::MenuChoose(int minutes, bool repeat) {
+    if (minutes <= 0) {  // выключить повтор: карточка остаётся на экране и дальше живёт как обычная
+        repeatMin_ = 0;
+        return;
+    }
+    // отложили - значит, отреагировали: в пропущенные и в счёт «не читают» это не идёт
+    seen_ = true;
+    if (asked_) {
+        asked_ = false;
+        cardlog::Closed(askKind_, true);
+    }
+    if (info_) {
+        info_ = false;
+        cardlog::Closed(infoKind_, true);
+    }
+    repeatMin_ = 0;
+    Later l;
+    l.due = GetTickCount64() + minutes * 60000ull;
+    l.repeatMin = repeat ? minutes : 0;
+    l.mode = mode_;
+    l.kind = infoKind_;
+    l.title = title_;
+    l.sub = sub_;
+    l.subHidden = subHidden_;
+    l.more = more_;
+    l.yes = yesLabel;
+    l.no = noLabel;
+    l.onYes = onYes;
+    l.onNo = onNo;
+    l.hold = holdUsed_;
+    l.glyph = glyph_;
+    l.meter = meter_;
+    Enqueue(std::move(l));
+}
+
+void BoostCard::MenuMuteKind() {
+    if (infoKind_ == L"-") return;
+    cardlog::Mute(infoKind_, true);
+    asked_ = info_ = false;
+    repeatMin_ = 0;
+    std::wstring k = infoKind_;
+    later_.erase(std::remove_if(later_.begin(), later_.end(), [&](const Later& o) { return o.kind == k; }), later_.end());
+}
+
+// Пора показать отложенное. Подождёт, пока эта карточка занята другим, и не лезет в игровой режим.
+void BoostCard::Idle(ULONGLONG now) {
+    if (later_.empty() || Visible() || fx::Game()) return;
+    for (size_t i = 0; i < later_.size(); ++i) {
+        if (now < later_[i].due) continue;
+        Later l = std::move(later_[i]);
+        later_.erase(later_.begin() + (long)i);
+        yesLabel = l.yes;
+        noLabel = l.no;
+        onYes = l.onYes;
+        onNo = l.onNo;
+        kind = l.kind;
+        more = l.more;
+        meter = l.meter;
+        refiring_ = true;
+        bool shown = Show(l.mode, l.title, l.sub, theme_, l.hold, l.glyph);
+        refiring_ = false;
+        if (shown) {
+            subHidden_ = l.subHidden;
+            repeatMin_ = l.repeatMin;
+            if (repeatMin_) cur_ = std::move(l);
+        }
+        return;
+    }
+}
+
 void BoostCard::Closed() {
+    if (repeatMin_ > 0) {
+        // ушла сама - вернётся через свой срок и не считается «не читают»; убрали руками - повтору конец
+        if (!ClosedByHand()) {
+            asked_ = info_ = false;
+            cur_.due = GetTickCount64() + repeatMin_ * 60000ull;
+            cur_.repeatMin = repeatMin_;
+            Enqueue(cur_);
+        }
+        repeatMin_ = 0;
+    }
     Unanswered();
     InfoGone();
 }
 
 bool BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs,
                      Glyph glyph) {
+    if (repeatMin_ > 0 && !refiring_) {  // на месте повторяющегося появляется другое: то вернётся в свой срок
+        asked_ = info_ = false;
+        cur_.due = GetTickCount64() + repeatMin_ * 60000ull;
+        cur_.repeatMin = repeatMin_;
+        Enqueue(cur_);
+        repeatMin_ = 0;
+    }
     std::wstring k = kind.empty() ? cardlog::KindOf(title) : kind;
     kind.clear();
     std::wstring moreText = std::move(more);
@@ -94,7 +193,10 @@ bool BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
     }
     asked_ = ask;
     askKind_ = k;
+    calmUpdate_ = Visible() && mode == WORKING && mode_ == WORKING;  // ход работы обновляется часто
     mode_ = mode;
+    meter_ = meter;
+    meter = -1;
     if (ask) {
         askYes_ = Label(true), askNo_ = Label(false);
         askOnYes_ = onYes, askOnNo_ = onNo;
@@ -138,6 +240,7 @@ bool BoostCard::Show(Mode mode, const std::wstring& title, const std::wstring& s
                : mode == DONE    ? 4500 + (int)std::min<size_t>(sub_.size(), 160) * 25
                : mode == WORKING ? 90000
                                  : 16000;
+    holdUsed_ = hold;
     Open(hold);
     return Visible();
 }
@@ -153,6 +256,39 @@ Color BoostCard::Tone() const {
         default:
             return ToColor(theme_.ac);
     }
+}
+
+// Главная кнопка говорит тем же цветом, что и знак: у ошибки - красная, у предупреждения - янтарная
+Color BoostCard::ButtonTone() const { return glyph_ == G_FAIL || glyph_ == G_WARN ? Tone() : ToColor(theme_.ac); }
+
+// Предупреждение дышит, а шкала колышется: достаточно кадра в 33 мс
+bool BoostCard::Animate(double) {
+    if (!Visible() || fx::Game() || (glyph_ != G_WARN && meter_ < 0)) return false;
+    ULONGLONG now = GetTickCount64();
+    if (now - lastPulse_ < 33) return false;
+    lastPulse_ = now;
+    return true;
+}
+
+// Жидкая шкала: наполняется при появлении, на конце - колышущаяся капля
+void BoostCard::DrawLevel(Graphics& g, const RectF& track, float level) const {
+    float rad = track.Height / 2;
+    GraphicsPath tp;
+    RoundRectPath(tp, track, rad);
+    SolidBrush back(Color(30, 255, 255, 255));
+    g.FillPath(&back, &tp);
+    float w = track.Width * std::clamp(level, 0.0f, 1.0f);
+    if (w <= 0) return;
+    Color tone = Tone();
+    GraphicsState st = g.Save();
+    g.SetClip(&tp, CombineModeIntersect);
+    LinearGradientBrush fill(PointF(track.X - 1, 0), PointF(track.X + std::max(w, 2.0f) + 1, 0), WithAlpha(tone, 170), tone);
+    g.FillRectangle(&fill, RectF(track.X, track.Y, w, track.Height));
+    float wave = 1 + 0.35f * (float)std::sin(GetTickCount64() / 190.0);
+    float hr = rad * 1.5f;
+    SolidBrush head(MixColor(tone, Color(255, 255, 255), 0.35));
+    g.FillEllipse(&head, track.X + w - hr, track.Y + track.Height / 2 - hr * wave, hr * 2, hr * 2 * wave);
+    g.Restore(st);
 }
 
 std::wstring BoostCard::Label(bool yes) const {
@@ -180,11 +316,12 @@ float BoostCard::BodyHeight(Graphics& g) {
         g.MeasureString(moreOpen_ ? L"Скрыть" : L"Подробнее", -1, &fS, PointF(0, 0), &m);
         linkW = m.Width / K + 22;
     }
-    if (mode_ == WORKING && progress >= 0) h += 12;  // полоска хода
+    if (mode_ == WORKING && progress >= 0) h += 14;  // полоска хода
+    if (meter_ >= 0) h += 16;                        // шкала уровня
     if (Buttons()) {
         float bh = 32, top = std::max(h + 12, 52.0f);
         float bw = ButtonWidth(g, Label(true)) / K, nw = ButtonWidth(g, Label(false)) / K;
-        RectF body(kM * K, kM * K, kW * K, 0);
+        RectF body = Body();
         float right = body.GetRight() - kPad * K;
         no_ = RectF(right - nw * K, body.Y + top * K, nw * K, bh * K);
         yes_ = StopButton() ? RectF() : RectF(no_.X - 8 * K - bw * K, no_.Y, bw * K, bh * K);
@@ -201,7 +338,8 @@ float BoostCard::BodyHeight(Graphics& g) {
         }
     } else {
         yes_ = no_ = RectF();
-        link_ = linkW > 0 ? RectF(kM * K + (kText - 8) * K, kM * K + (h + 6) * K, linkW * K, 26 * K) : RectF();
+        RectF body = Body();
+        link_ = linkW > 0 ? RectF(body.X + (kText - 8) * K, body.Y + (h + 6) * K, linkW * K, 26 * K) : RectF();
         if (linkW > 0) h += 32;
     }
     return std::max(h + kPad + 2, 70.0f);
@@ -210,8 +348,32 @@ float BoostCard::BodyHeight(Graphics& g) {
 void BoostCard::Paint(Graphics& g, const RectF& body) {
     if (Hovered()) seen_ = true;  // мышь подходила - сообщение читали
     float K = k();
-    Color fg = ToColor(theme_.fg), muted = ToColor(theme_.muted);
-    DrawGlyph(g, body.X + 35 * K, body.Y + 35 * K, glyph_, Tone());
+    Color fg = ToColor(theme_.fg), muted = ToColor(theme_.muted), tone = Tone();
+    // знак реагирует на важность: выпрыгивает, от него расходится круг; ошибка вздрагивает, предупреждение дышит
+    float gx = body.X + 35 * K, gy = body.Y + 35 * K;
+    float rp = Reveal(0.08f, 0.8f);
+    if (rp > 0 && rp < 1) {
+        float rr = (17 + 24 * (float)EaseOut(rp)) * K;
+        Pen ring(WithAlpha(tone, (BYTE)(170 * (1 - rp))), 1.6f * K);
+        g.DrawEllipse(&ring, gx - rr, gy - rr, rr * 2, rr * 2);
+    }
+    if (glyph_ == G_WARN && rp >= 1) {
+        float t = (GetTickCount64() % 1800) / 1800.0f, rr = (17 + 10 * t) * K;
+        Pen ring(WithAlpha(tone, (BYTE)(110 * (1 - t))), 1.4f * K);
+        g.DrawEllipse(&ring, gx - rr, gy - rr, rr * 2, rr * 2);
+    }
+    float shake = Reveal(0.12f, 0.45f);
+    float dx = glyph_ == G_FAIL && shake > 0 && shake < 1 ? (float)std::sin(shake * 28) * (1 - shake) * 4.5f * K : 0;
+    float pop = 0.4f + 0.6f * (float)EaseOutBack(Reveal(0, 0.5f), 2.0);
+    {
+        GraphicsState st = g.Save();
+        g.TranslateTransform(gx + dx, gy);
+        g.ScaleTransform(pop, pop);
+        g.TranslateTransform(-gx, -gy);
+        DrawFaded(g, RectF(gx - 20 * K, gy - 20 * K, 40 * K, 40 * K), Reveal(0, 0.12f),
+                  [&](Graphics& gg) { DrawGlyph(gg, gx, gy, glyph_, tone); });
+        g.Restore(st);
+    }
 
     float x0 = body.X + kText * K, tw = body.GetRight() - kPad * K - x0;
     Font fT(Family(), 14.5f * K, FontStyleRegular, UnitPixel);
@@ -222,12 +384,35 @@ void BoostCard::Paint(Graphics& g, const RectF& body) {
     sf.SetTrimming(StringTrimmingEllipsisCharacter);
     sf.SetLineAlignment(StringAlignmentCenter);
     SolidBrush tB(fg), mB(MixColor(muted, fg, 0.25));
-    g.DrawString(title_.c_str(), -1, &fT, RectF(x0, body.Y + kPad * K - 1 * K, tw - 26 * K, 22 * K), &sf, &tB);
+    // содержимое въезжает справа, одно за другим
+    auto rise = [&](float delay, const RectF& area, const std::function<void(Graphics&)>& paint) {
+        GraphicsState st = g.Save();
+        g.TranslateTransform(16 * K * (1 - (float)EaseOutBack(Reveal(delay, 0.5f), 1.3)), 0);
+        DrawFaded(g, area, Reveal(delay, 0.2f), paint);
+        g.Restore(st);
+    };
+    // повторяющееся сообщение говорит об этом рядом с заголовком
+    float titleW = tw - 56 * K;
+    if (repeatMin_ > 0) {
+        std::wstring every = repeatMin_ == 60 ? std::wstring(L"каждый час") : L"каждые " + std::to_wstring(repeatMin_) + L" мин";
+        Font fR(&fam, 10.5f * K, FontStyleRegular, UnitPixel);
+        RectF m;
+        g.MeasureString(every.c_str(), -1, &fR, PointF(0, 0), &m);
+        RectF er(x0 + titleW - m.Width, body.Y + kPad * K - 1 * K, m.Width + 2 * K, 22 * K);
+        SolidBrush eb(tone);
+        g.DrawString(every.c_str(), -1, &fR, er, &sf, &eb);
+        titleW -= m.Width + 6 * K;
+    }
+    RectF titleR(x0, body.Y + kPad * K - 1 * K, titleW, 22 * K);
+    rise(0.08f, titleR, [&](Graphics& gt) { gt.DrawString(title_.c_str(), -1, &fT, titleR, &sf, &tB); });
     if (!sub_.empty()) {
-        StringFormat wf;
-        wf.SetTrimming(StringTrimmingEllipsisWord);
+        RectF subR(x0, body.Y + (kPad + 25) * K, tw, subH_ + 1);
         const std::wstring& shown = subHidden_.empty() || Hovered() ? sub_ : subHidden_;
-        g.DrawString(shown.c_str(), -1, &fS, RectF(x0, body.Y + (kPad + 25) * K, tw, subH_ + 1), &wf, &mB);
+        rise(0.14f, subR, [&](Graphics& gt) {
+            StringFormat wf;
+            wf.SetTrimming(StringTrimmingEllipsisWord);
+            gt.DrawString(shown.c_str(), -1, &fS, subR, &wf, &mB);
+        });
     }
     if (!more_.empty() && moreOpen_ && moreH_ > 0) {  // «Подробнее»: черта и объяснение под текстом
         float y = body.Y + (kPad + 25 + 8) * K + subH_;
@@ -266,14 +451,20 @@ void BoostCard::Paint(Graphics& g, const RectF& body) {
     }
     if (mode_ == WORKING && progress >= 0) {  // полоска хода под текстом
         float y = body.Y + (kPad + 25 + 6) * K + subH_ + (moreH_ > 0 ? moreH_ + 10 * K : 0);
-        RectF track(x0, y, tw, 4 * K);
-        SolidBrush back(MixColor(muted, ToColor(theme_.bg), 0.6)), fill(Tone());
-        g.FillRectangle(&back, track);
-        g.FillRectangle(&fill, RectF(track.X, track.Y, track.Width * std::min(1.0f, progress), track.Height));
+        DrawLevel(g, RectF(x0, y, tw, 5 * K), progress);
+    }
+    if (meter_ >= 0) {  // шкала наливается при появлении
+        float y = body.Y + (kPad + 25 + 6) * K + subH_ + (moreH_ > 0 ? moreH_ + 10 * K : 0);
+        float fillT = Reveal(0.2f, 0.8f), e = fillT * fillT * (3 - 2 * fillT);
+        DrawLevel(g, RectF(x0, y, tw, 7 * K), meter_ * e);
     }
     if (Buttons()) {
-        if (!StopButton()) DrawButton(g, yes_, Label(true), true, H_YES);
-        DrawButton(g, no_, Label(false), false, H_NO);
+        RectF btns = no_;
+        if (!StopButton()) RectF::Union(btns, yes_, no_);
+        rise(0.22f, Grow(btns, 3 * K), [&](Graphics& gb) {
+            if (!StopButton()) DrawButton(gb, yes_, Label(true), true, H_YES);
+            DrawButton(gb, no_, Label(false), false, H_NO);
+        });
     }
 }
 
@@ -293,6 +484,7 @@ void BoostCard::Click(int id) {
         Invalidate();  // высота пересчитается
         return;
     }
+    if (id == H_YES || id == H_NO) repeatMin_ = 0;  // ответили кнопкой - повторять больше незачем
     if ((id == H_YES || (id == H_NO && !StopButton())) && asked_) {
         // ответили: «да» или вторая кнопка со своим действием - это действие, «Не сейчас» без него - нет
         if (id == H_YES || onNo) {
@@ -329,4 +521,23 @@ void BoostCard::Click(int id) {
         return;
     }
     if (id == H_BODY && mode_ == DONE) Dismiss();  // итог убирается кликом
+}
+
+void BoostCard::DemoRightClick() { SendMessageW(Wnd(), WM_RBUTTONUP, 0, 0); }
+
+void BoostCard::DemoClickMenu(int row, int index) {
+    RectF r = MenuRect((row ? H_M_REPEAT : H_M_LATER) + index);
+    LPARAM lp = MAKELPARAM((int)(r.X + r.Width / 2), (int)(r.Y + r.Height / 2));
+    SendMessageW(Wnd(), WM_LBUTTONDOWN, MK_LBUTTON, lp);
+    SendMessageW(Wnd(), WM_LBUTTONUP, 0, lp);
+}
+
+void BoostCard::DemoClickYes() {
+    LPARAM lp = MAKELPARAM((int)(yes_.X + yes_.Width / 2), (int)(yes_.Y + yes_.Height / 2));
+    SendMessageW(Wnd(), WM_LBUTTONDOWN, MK_LBUTTON, lp);
+    SendMessageW(Wnd(), WM_LBUTTONUP, 0, lp);
+}
+
+void BoostCard::DemoFastForward() {
+    for (Later& l : later_) l.due = 0;
 }

@@ -268,7 +268,7 @@ void BuildFailed(const std::wstring& exe, const std::wstring& dir) {
     if (g_busy) return;
     Ask(
         L"Сборка не удалась: " + proj,
-        L"cmake --build " + leaf + L" закончился с ошибкой. Найти первую ошибку? Упавшее соберётся ещё раз в фоне.",
+        L"cmake --build " + leaf + L". Соберу упавшее ещё раз в фоне и покажу первую ошибку.",
         L"Найти ошибку", L"Не надо",
         [exe, dir] {
             g_card.Show(BoostCard::WORKING, L"Ищу ошибку", L"cmake --build " + dir, Theme());

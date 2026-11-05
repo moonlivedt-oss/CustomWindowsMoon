@@ -3,12 +3,13 @@
 python tools/build_identity.py          # generate and install
 python tools/build_identity.py --check  # verify generated assets
 """
-from pathlib import Path
 import argparse
 import html
 import json
 import math
 import shutil
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]

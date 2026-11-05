@@ -167,8 +167,8 @@
         "textScale": {
           "description": "Размер текста",
           "type": "number",
-          "minimum": 0.85,
-          "maximum": 1.25
+          "minimum": 0.8,
+          "maximum": 2
         },
         "titleWeight": {
           "description": "Жирность названия",

@@ -53,7 +53,7 @@ void Studio::SystemPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Система",
-           L"Чтобы Windows выглядела одной темой с кольцами: значки, Пуск, курсор и мелочи.");
+           L"Windows в цветах темы");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -129,7 +129,7 @@ void Studio::SystemPage(const RectF& r) {
             L"Берётся тема из мода Resource Redirect, сиреневые папки становятся графитовыми, рисунки на них - "
             L"цвета акцента.";
         if (iconJob_ && iconJob_->done) s = iconJob_->message + (iconJob_->ok ? L". Готово - жми «Применить»." : L"");
-        note(b, 2, 2, s, iconJob_ && iconJob_->done && !iconJob_->ok ? c.warn : c.muted);
+        cols.Status(b, 2, s, iconJob_ && iconJob_->done && !iconJob_->ok ? c.warn : c.muted);
     });
 
     // центр уведомлений

@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "cards/toast.h"
 
@@ -24,6 +25,9 @@ public:
     // Тайна в тексте (код из SMS): пока мышь не над карточкой, вместо неё точки - код не прочтёт тот, кто смотрит на
     // экран или его запись. Задаётся перед Show, сбрасывается каждым Show.
     std::wstring secret;
+    // Уровень 0..1: под текстом наливается жидкая шкала («Память на пределе»); -1 - без неё. Задаётся перед Show,
+    // сбрасывается каждым Show.
+    float meter = -1;
 
     void Create(HINSTANCE inst);
     enum Mode { OFFER, WORKING, DONE, RESTORE };
@@ -32,6 +36,14 @@ public:
     bool Show(Mode mode, const std::wstring& title, const std::wstring& sub, const ThemeInfo& theme, int holdMs = 0,
               Glyph glyph = G_NONE);
     Mode CurrentMode() const { return mode_; }
+    // для проверки меню настоящими сообщениями окна (--card-snap later-sim)
+    void DemoRightClick();
+    void DemoClickMenu(int row, int index);
+    void DemoClickYes();
+    void DemoExpire() { Hold(1); }
+    void DemoFastForward();
+    int LaterCount() const { return (int)later_.size(); }
+    int RepeatMinutes() const { return repeatMin_; }
     void ExpandMore() {  // раскрыть «Подробнее» (снимки --card-snap)
         moreOpen_ = !more_.empty();
         Invalidate();
@@ -39,11 +51,34 @@ public:
 
 private:
     enum { H_YES = H_USER, H_NO, H_MORE };
+    // Отложенное сообщение: всё, чтобы показать его снова с теми же кнопками. Живёт до выхода из программы.
+    struct Later {
+        ULONGLONG due = 0;
+        int repeatMin = 0;
+        Mode mode = DONE;
+        std::wstring kind, title, sub, subHidden, more, yes, no;
+        std::function<void()> onYes, onNo;
+        int hold = 0;
+        Glyph glyph = G_NONE;
+        float meter = -1;
+    };
+    void Enqueue(Later l);
+    bool HasMenu() const override { return mode_ != WORKING; }
+    bool MenuRepeat() const override { return true; }
+    bool MenuMute() const override { return infoKind_ != L"-"; }
+    int MenuRepeatActive() const override { return repeatMin_; }
+    void MenuChoose(int minutes, bool repeat) override;
+    void MenuMuteKind() override;
+    void Idle(ULONGLONG now) override;
     float BodyHeight(Gdiplus::Graphics& g) override;
     void Paint(Gdiplus::Graphics& g, const Gdiplus::RectF& body) override;
     int HitContent(const Gdiplus::PointF& p) const override;
     void Click(int id) override;
     bool Busy() const override { return mode_ == WORKING; }
+    bool LiquidMotion() const override { return true; }
+    bool Animate(double dtMs) override;
+    Gdiplus::Color ButtonTone() const override;
+    void DrawLevel(Gdiplus::Graphics& g, const Gdiplus::RectF& track, float level) const;
     void Closed() override;
     void Unanswered();  // вопрос ушёл без нажатия: в пропущенные и в счёт закрытий
     void InfoGone();    // сообщение без кнопок ушло: не читали (мышь не подходила) - в счёт закрытий, читали - с нуля
@@ -64,6 +99,12 @@ private:
     std::wstring title_, sub_, more_;
     std::wstring subHidden_;  // sub_ с тайной под точками (пусто - тайны нет)
     bool moreOpen_ = false;
-    float subH_ = 0, moreH_ = 0;
+    std::vector<Later> later_;
+    Later cur_;              // показанное повторяющееся: снимок, а не живые поля (их мог переписать следующий вопрос)
+    int repeatMin_ = 0;      // показанное повторяется каждые столько минут
+    bool refiring_ = false;  // Show вызван из Idle
+    int holdUsed_ = 0;
+    float subH_ = 0, moreH_ = 0, meter_ = -1;
+    ULONGLONG lastPulse_ = 0;
     Gdiplus::RectF yes_, no_, link_;  // кнопки и ссылка «Подробнее» в координатах окна (считаются при раскладке)
 };

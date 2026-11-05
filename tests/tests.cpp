@@ -700,6 +700,8 @@ void TestMore(void (*check)(bool, const char*, int));   // tests_more.cpp
 void TestLife(void (*check)(bool, const char*, int));   // tests_life.cpp
 void TestSec(void (*check)(bool, const char*, int));    // tests_sec.cpp
 void TestIconCatalog(void (*check)(bool, const char*, int));  // test_icon_catalog.cpp
+void TestTranslate(void (*check)(bool, const char*, int));    // test_translate.cpp
+void TestProfile(void (*check)(bool, const char*, int));      // test_profile.cpp
 
 int wmain() {
     {
@@ -786,6 +788,8 @@ int wmain() {
     TestLife(Check);
     TestSec(Check);
     TestIconCatalog(Check);
+    TestTranslate(Check);
+    TestProfile(Check);
     TestParseCleanLine();
     TestTempRemovable();
     TestWalk();

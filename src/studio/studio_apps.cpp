@@ -97,7 +97,7 @@ void Studio::AppsPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Кольца программ",
-           L"Открыли кольцо над программой - первым сектором идут её команды: сочетания, макросы, файлы.");
+           L"Команды программы первым сектором кольца");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();

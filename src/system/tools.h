@@ -489,6 +489,14 @@ struct BrowserExt {
     int rights = 0;
     bool store = true;  // обновляется из магазина браузера
 };
+enum ExtLevel { EXT_V_NONE, EXT_V_SITES, EXT_V_WIDE, EXT_V_DANGER };
+ExtLevel ExtVerdict(int rights, bool store);  // как подать в списке: все сайты, много прав, опасно
+struct ExtGroup {
+    BrowserExt e;
+    std::wstring where;  // «Chrome, Chrome (Profile 2)»
+    int copies = 1;
+};
+std::vector<ExtGroup> GroupExts(const std::vector<BrowserExt>& list);  // одно расширение в разных профилях - одной записью
 
 struct SecurityScan {
     std::vector<Suspect> procs, autos, hijacks;  // по убыванию счёта

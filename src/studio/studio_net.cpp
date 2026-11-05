@@ -173,7 +173,7 @@ void Studio::NetPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Сеть",
-           L"Проверка, починка и сторож связи. Прокси, туннели, остатки VPN - как NetworkDoctor, только внутри колец.");
+           L"Проверка, починка и сторож связи");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -354,7 +354,7 @@ void Studio::NetPage(const RectF& r) {
             for (size_t i = netJob_->log.size() > 6 ? netJob_->log.size() - 6 : 0; i < netJob_->log.size(); ++i)
                 s += L"\n" + netJob_->log[i];
             ReleaseSRWLockShared(&netJob_->lock);
-            note(b, 5.0f, s, c.muted);
+            cols.Status(b, 5.0f, s, c.muted);
             if (going) ui.BounceDots(b.X + titleW + ui.S(5), b.Y + 5.0f * rowH + ui.S(10), c.muted, ui.S(3));
         }
     });
@@ -396,7 +396,7 @@ void Studio::NetPage(const RectF& r) {
         note(b, 6,
              L"Пропал интернет - справа снизу карточка с причиной и кнопкой починки, сама сеть не сбрасывается. "
              L"Безопасность: брандмауэр Windows и открытая/устаревшая Wi-Fi, без изменения настроек. "
-             L"Автозамер скорости — только на безлимитном подключении. "
+             L"Автозамер скорости - только на безлимитном подключении. "
              L"Кольцо со всеми действиями - на углу (Стол - Углы, действие «Кольцо сети»).",
              c.muted);
     });
@@ -472,10 +472,10 @@ void Studio::NetPage(const RectF& r) {
             NetRun(L"Снятие блокировок VPN",
                    [](const net::Log& log, NetJob&) { return net::RunAdmin(net::JOB_VPN_GUARD_OFF, log); });
         }
-        note(b, 6, netui::VpnBlockStatus(), c.muted);
+        cols.Status(b, 6, netui::VpnBlockStatus(), c.muted);
         note(b, 7,
              L"Проверяется маршрут к 1.1.1.1, а не каждый пакет: до обнаружения смены возможен прямой трафик. "
-             L"После сбоя приложения правила могут остаться — снимите их кнопкой выше. Чужие правила не удаляются.",
+             L"После сбоя приложения правила могут остаться - снимите их кнопкой выше. Чужие правила не удаляются.",
              c.muted);
     });
     auto vpnApps = Split(cfg.netVpnApps, L'|');

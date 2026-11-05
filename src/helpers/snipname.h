@@ -15,5 +15,7 @@ std::wstring Context(const std::wstring& title, const std::wstring& exe);
 std::wstring FileName(const std::wstring& context, const SYSTEMTIME& t);
 // Куда: папка проекта (есть .git, package.json, CMakeLists.txt, .uproject...) - её «screenshots», иначе сама папка
 std::wstring TargetDir(const std::wstring& folder, bool isProject);
+// Размер превью: снимок виден целиком и вписан в рамку boxW x boxH, мелкий не растягивается
+void FitPreview(int shotW, int shotH, float boxW, float boxH, float& w, float& h);
 
 }  // namespace snipname

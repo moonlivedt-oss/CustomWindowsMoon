@@ -50,5 +50,10 @@ int RingBench(int ms);
 std::vector<Item> LifeRing(const std::wstring& what);  // кольца серии Ф/Ж/Е для --life-snap
 int PhoneServe(int seconds, const std::wstring& snap, const std::vector<std::wstring>& files);
 int CardSnap(const std::wstring& what, bool more, const std::wstring& out);
+int SnipTry(int secs);
+// --translate-try <кадр.png> <итог.txt> <текст> [fake|google]: настоящая карточка перевода, буфер не трогает
+int TranslateTry(const std::wstring& frame, const std::wstring& out, const std::wstring& text, bool fake, bool google);
+// --clip-ocr-try <картинка.png> <кадр.png> <итог.txt>: сектор кольца буфера и чтение текста с картинки в истории
+int ClipOcrTry(const std::wstring& image, const std::wstring& frame, const std::wstring& out);
 
 }  // namespace devcli

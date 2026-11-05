@@ -48,7 +48,7 @@ std::wstring AvatarFile() {
 void Studio::StylePage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(Column(in, ui.S(900)), L"Красота", L"Движение, окна и экран блокировки. В играх всё это само выключается.");
+    Header(Column(in, ui.S(900)), L"Красота", L"В играх выключается само");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -126,8 +126,8 @@ void Studio::StylePage(const RectF& r) {
             L"Не игры: никогда не включают режим, например blender.exe");
         ui.Tip(ID_GAME_SKIP, L"Не игры: эти программы никогда не включают игровой режим (маски через |)");
         std::wstring now = GameStatus();
+        if (!now.empty()) cols.Status(b, 10, L"Сейчас: " + now, c.muted);
         note(b, 10, 3,
-             (now.empty() ? L"" : L"Сейчас: " + now + L". ") +
                  L"Игрой считается программа из этих папок, всё в эксклюзивном полноэкранном режиме и (переключатель "
                  L"выше) окно на весь монитор, которое рисует через Direct3D, Vulkan или OpenGL, - не браузер, не "
                  L"плеер и не из «Не игр». "
@@ -160,8 +160,8 @@ void Studio::StylePage(const RectF& r) {
             },
             L"Только пока рендерят (грузят процессор), например blender.exe");
         std::wstring now = DevStatus();
+        if (!now.empty()) cols.Status(b, 7, L"Сейчас: " + now, c.muted);
         note(b, 7, 3,
-             (now.empty() ? L"" : L"Сейчас: " + now + L". ") +
                  L"Пока открыт редактор, обои стоят на паузе, а при его запуске можно закрыть лишнее (как перед "
                  L"игрой). Сообщу, когда видеопамять или память на пределе, редактор рисует на встроенной "
                  L"видеокарте, шейдеры готовы или сборка кончилась. Программы из второго поля включают режим, только "
@@ -190,8 +190,8 @@ void Studio::StylePage(const RectF& r) {
                 cfg.shareTitles = s;
             },
             L"Полоска показа из браузера: слова заголовка через |");
+        if (share::On()) cols.Status(b, 5, L"Сейчас: " + share::Reason(), c.muted);
         note(b, 5, 3,
-             (share::On() ? L"Сейчас: " + share::Reason() + L". " : std::wstring()) +
                  L"Пока идёт показ экрана, кольца, карточки и студию видите только вы - в OBS, Discord, Zoom и "
                  L"записи их нет; уведомления Windows молчат. Показ из браузера (Meet, Discord в браузере) и Teams "
                  L"узнаю по их полоске «... is sharing your screen». В кольцах и карточках вместо папки "
@@ -263,7 +263,7 @@ void Studio::StylePage(const RectF& r) {
             col = lockJob_->ok ? c.accent : c.warn;
             ReleaseSRWLockShared(&lockJob_->lock);
         }
-        note(b, 6, 3, s, col);
+        cols.Status(b, 6, s, col);
     });
 
     // сотовое стекло: общий стиль для углов, кольца, заряда и игрового режима; портал в других местах
@@ -351,7 +351,7 @@ void Studio::StylePage(const RectF& r) {
                    L"Когда при запуске игры или редактора предлагать закрыть лишнее.\n«Мало» - "
                    L"свободно меньше 4 ГБ или занято больше 80%; «Всегда» - при каждом запуске.");
         }
-        note(b, 6, 3, s, dir.empty() ? c.warn : c.muted);
+        cols.Status(b, 6, s, dir.empty() ? c.warn : c.muted);
     });
 
     // Boost во время игры: силы игре, тишина, слежка за памятью и видеокартой
@@ -369,8 +369,8 @@ void Studio::StylePage(const RectF& r) {
                      (int)(last[0].ms / 60000), last[0].peakUsedMb / 1024);
             hist = b2;
         }
+        if (!hist.empty()) cols.Status(b, 5, hist, c.muted);
         note(b, 5, 3,
-             hist +
                  L"Фон уходит на экономные ядра (EcoQoS), кэш чистится через задачу «Очистка кэша» выше. "
                  L"Кого не замедлять - boost_keep_fast в radial.cfg.",
              c.muted);
@@ -439,7 +439,7 @@ void Studio::StylePage(const RectF& r) {
                                L"Чёткий фон показывает её как есть, без матового стекла Windows; переход после входа "
                                L"подстраивается сам. После смены картинки нажми «Применить» в карточке выше."
                              : logonStatus_;
-        note(b, 3, 4, s, logonStatus_.empty() ? c.muted : c.accent);
+        cols.Status(b, 3, s, logonStatus_.empty() ? c.muted : c.accent);
     });
 
     float bottom = cols.Bottom();

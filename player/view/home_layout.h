@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "view/geometry.h"
 
 namespace view {
@@ -16,12 +17,13 @@ struct HomeLayout {
         mainW = end - mainX;
         search = {mainX, 58, mainW, 44};
         searchText = {mainX + 42, 69, mainW - 60, 22};
-        const float controlsLeft = std::max(320.f, size.w * .34f);
-        const float controlsRight = size.w - 200;
-        const float center = (controlsLeft + controlsRight) * .5f;
+        // Кнопки и полоса времени - по центру окна; ширина полосы ограничена так, чтобы слева
+        // оставалось место названию трека, а справа - громкости
+        const float center = size.w * .5f;
+        const float half = std::clamp(std::min(center - 300.f, size.w - 230.f - center) - 42.f, 120.f, 520.f);
         transport = {center - 126, bottom + 12, 252, 44};
-        seek = {controlsLeft + 42, bottom + 72, controlsRight - controlsLeft - 84, 20};
-        trackText = {94, bottom + 30, controlsLeft - 118, 48};
+        seek = {center - half, bottom + 72, half * 2, 20};
+        trackText = {94, bottom + 30, std::max(120.f, seek.x - 42 - 94 - 20), 48};
         volume = {size.w - 116, bottom + 45, 88, 22};
     }
 };

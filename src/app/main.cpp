@@ -44,6 +44,7 @@
 #include "system/auto/autos.h"
 #include "ring/selring.h"
 #include "system/ui/toolsui.h"
+#include "core/profile.h"
 #include "core/bg.h"
 #include "core/crash.h"
 #include "core/edgecheck.h"
@@ -79,6 +80,7 @@
 #include "modes/minecraft.h"
 #include "modes/modefx.h"
 #include "desktop/share.h"
+#include "cards/translatecard.h"
 #include "helpers/snip.h"
 #include "media/widget.h"
 #include "desktop/winfx.h"
@@ -149,6 +151,7 @@ void Reload() {
     if (g_menu.IsOpen()) return;  // меню держит указатели на старые пункты
     Config c;
     if (LoadConfig(g_cfgPath, c)) g_cfg = std::move(c);
+    profile::Load(g_cfg.profile);
     if (!g_themeOverride.empty()) g_cfg.theme = g_themeOverride;  // правило ещё держится
     g_cfgTime = FileTime(g_cfgPath);
     ApplyAccent();
@@ -159,6 +162,7 @@ void Reload() {
     g_media.Apply(g_cfg);
     g_winfx.Apply(g_cfg);
     g_snip.Apply(g_cfg);
+    translatecard::Apply(g_cfg);
     g_deskClick.SetEnabled(g_cfg.deskDouble);
     appvol::SetEnabled(g_cfg.appVolume);
     cursor::Apply(g_cfg);
@@ -254,6 +258,7 @@ void PollWork() {
     g_winfx.SetBlocked(g_menu.IsOpen() || fx::Game());  // Alt + мышь не мешает кольцу и игре
     g_battery.Tick(g_cfg);
     g_snip.Tick();
+    translatecard::Tick();
     g_boostCard.Tick();
     g_pick.Tick();
     g_gbCard.Tick();
@@ -769,30 +774,39 @@ void TrayMenu() {
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING | MF_DEFAULT, CMD_EDITOR, L"Редактор колец");
     AppendMenuW(m, MF_STRING, CMD_PALETTE, L"Поиск и команды...");
-    AppendMenuW(m, MF_STRING, CMD_WINDOWS, L"Открытые окна кольцом");
+    profile::Level who = profile::Current();
+    if (who >= profile::Dev) AppendMenuW(m, MF_STRING, CMD_WINDOWS, L"Открытые окна кольцом");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     std::wstring game = L"Игровой режим";
     if (g_game.On() && !g_game.Manual()) game += L": " + g_game.Reason();
     AppendMenuW(m, MF_STRING | (g_game.On() ? MF_CHECKED : 0), CMD_GAME, game.c_str());
     std::wstring dev = L"Режим разработки";
     if (g_dev.On() && !g_dev.Manual()) dev += L": " + g_dev.Reason();
-    AppendMenuW(m, MF_STRING | (g_dev.On() ? MF_CHECKED : 0), CMD_DEV, dev.c_str());
+    if (who >= profile::Dev || g_dev.On()) AppendMenuW(m, MF_STRING | (g_dev.On() ? MF_CHECKED : 0), CMD_DEV, dev.c_str());
     AppendMenuW(m, MF_STRING, CMD_BOOST, L"Освободить память...");
     std::wstring fs = focus::Status();
-    AppendMenuW(
-        m, MF_STRING | (focus::On() ? MF_CHECKED : 0), CMD_FOCUS,
-        (focus::On() ? fs + L" - закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут").c_str());
+    if (who >= profile::Dev || focus::On())
+        AppendMenuW(
+            m, MF_STRING | (focus::On() ? MF_CHECKED : 0), CMD_FOCUS,
+            (focus::On() ? fs + L" - закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут").c_str());
     std::wstring sh = L"Показ экрана: окна не видны в записи";
     if (share::On() && !share::Manual()) sh += L" (" + share::Reason() + L")";
-    AppendMenuW(m, MF_STRING | (share::On() ? MF_CHECKED : 0), CMD_SHARE, sh.c_str());
+    if (who >= profile::Dev || share::On()) AppendMenuW(m, MF_STRING | (share::On() ? MF_CHECKED : 0), CMD_SHARE, sh.c_str());
     // Л6: сон после работы - галочка у взведённого, в подписи - чего ждём
     afterwork::Mode aw = afterwork::Armed();
     std::wstring awWhy = aw == afterwork::OFF ? L"" : L" (" + afterwork::Status() + L")";
-    AppendMenuW(m, MF_STRING | (aw == afterwork::SLEEP ? MF_CHECKED : 0), CMD_AFTER_SLEEP,
-                (L"Усыпить, когда всё закончится" + (aw == afterwork::SLEEP ? awWhy : L"")).c_str());
-    AppendMenuW(m, MF_STRING | (aw == afterwork::SHUTDOWN ? MF_CHECKED : 0), CMD_AFTER_OFF,
-                (L"Выключить, когда всё закончится" + (aw == afterwork::SHUTDOWN ? awWhy : L"")).c_str());
+    if (who >= profile::Dev || aw != afterwork::OFF) {
+        AppendMenuW(m, MF_STRING | (aw == afterwork::SLEEP ? MF_CHECKED : 0), CMD_AFTER_SLEEP,
+                    (L"Усыпить, когда всё закончится" + (aw == afterwork::SLEEP ? awWhy : L"")).c_str());
+        AppendMenuW(m, MF_STRING | (aw == afterwork::SHUTDOWN ? MF_CHECKED : 0), CMD_AFTER_OFF,
+                    (L"Выключить, когда всё закончится" + (aw == afterwork::SHUTDOWN ? awWhy : L"")).c_str());
+    }
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    HMENU people = CreatePopupMenu();
+    for (int i = 0; i < profile::kCount; ++i)
+        AppendMenuW(people, MF_STRING | (profile::Chosen() && who == i ? MF_CHECKED : 0), CMD_PROFILE + i,
+                    profile::Name((profile::Level)i));
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)people, L"Профиль");
     HMENU service = CreatePopupMenu();
     AppendMenuW(service, MF_STRING, CMD_RESTORE_ALL, L"Вернуть всё как было");
     AppendMenuW(service, MF_STRING, CMD_RESET_WINDOWS, L"Вернуть окнам прозрачность и закрепление");
@@ -987,6 +1001,7 @@ void ShutdownAll() {
     gamepad::Stop();
     rules::Release();
     g_snip.Destroy();
+    translatecard::Destroy();
     cursor::Restore();
     RemoveTray();
     bg::Quit(1500);  // фоновые задачи видят Quitting() и не пишут в уже убранное; дольше выход не ждёт
@@ -1098,6 +1113,13 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 case CMD_DEV:
                     g_dev.SetManual(!g_dev.On(), g_cfg);  // выключили при открытом редакторе - до его закрытия
                     break;
+                case CMD_PROFILE:
+                case CMD_PROFILE + 1:
+                case CMD_PROFILE + 2:
+                    profile::Choose((profile::Level)(LOWORD(wp) - CMD_PROFILE));
+                    g_cfg.profile = profile::CurrentKey();
+                    SaveConfig(g_cfgPath, g_cfg);
+                    return 0;
                 case CMD_AUTOSTART:
                     SetAutostart(!AutostartOn());
                     break;
@@ -1340,6 +1362,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     SetEditorDevStatus([] { return g_dev.On() ? L"включён (" + g_dev.Reason() + L")" : std::wstring(L"выключен"); });
     g_snip.Create(inst);
     g_snip.Apply(g_cfg);
+    translatecard::Create(inst);
+    translatecard::Apply(g_cfg);
     // двойной клик по пустому столу: целое кольцо вокруг курсора
     g_deskClick.onDouble = [](POINT pt) {
         if (g_menu.IsOpen()) return;
@@ -1469,7 +1493,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_menu.focusStatus = [] { return focus::Status(); };
     palette::AddSource([](std::vector<Item>& out) {
         Item player;
-        player.name = L"PlayerMoon — открыть музыкальный плеер";
+        player.name = L"PlayerMoon - открыть музыкальный плеер";
         player.path = L"pm|open";
         player.icon = L"icons/music.png";
         player.special = 3;

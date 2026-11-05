@@ -37,7 +37,8 @@ constexpr int kToolsRow = 1;  // строка о yt-dlp и ffmpeg
 constexpr int kActPaste = 1, kActFolder = 2, kActLogin = 3;
 // Кнопки строк
 constexpr int kActCancel = 1, kActPlay = 2, kActShow = 3, kActRemove = 4, kActRetry = 5;
-constexpr int kActGetYtdlp = 11, kActBinFolder = 12, kActRecheck = 13, kActGetFfmpeg = 14, kActUpdate = 15;
+constexpr int kActGetYtdlp = 11, kActBinFolder = 12, kActRecheck = 13, kActGetFfmpeg = 14, kActUpdate = 15,
+              kActInstall = 16;
 // Пункты меню
 constexpr int kMenuShow = 1, kMenuChangeFolder = 2;
 
@@ -62,10 +63,17 @@ bool FileExists(const std::wstring& p) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-// Программа: сначала в bin плагина, потом в PATH
-std::wstring FindTool(const std::wstring& binDir, const wchar_t* exe) {
-    const std::wstring local = binDir + L"\\" + exe;
-    if (FileExists(local)) return local;
+std::wstring EnvPath(const wchar_t* name) {
+    wchar_t buf[MAX_PATH * 2];
+    const DWORD n = GetEnvironmentVariableW(name, buf, MAX_PATH * 2);
+    return n > 0 && n < MAX_PATH * 2 ? std::wstring(buf, n) : std::wstring();
+}
+
+// Программа: bin плагина, папка установки одной кнопкой, ссылки winget, потом PATH.
+// winget дописывает PATH только новым процессам, поэтому его папку смотрим сами.
+std::wstring FindTool(const std::vector<std::wstring>& dirs, const wchar_t* exe) {
+    for (const auto& dir : dirs)
+        if (!dir.empty() && FileExists(dir + L"\\" + exe)) return dir + L"\\" + exe;
     wchar_t buf[MAX_PATH * 2];
     const DWORD n = SearchPathW(nullptr, exe, nullptr, MAX_PATH * 2, buf, nullptr);
     return n > 0 && n < MAX_PATH * 2 ? std::wstring(buf, n) : std::wstring();
@@ -73,7 +81,7 @@ std::wstring FindTool(const std::wstring& binDir, const wchar_t* exe) {
 
 struct Job {
     enum class State { Waiting, Running, Done, Error, Cancelled };
-    enum class Kind { Download, Probe, Update };
+    enum class Kind { Download, Probe, Update, Install };
     int row = 0;
     Kind kind = Kind::Download;
     std::string url;
@@ -86,6 +94,8 @@ struct Job {
     std::string speed;
     bool converting = false;
     bool partial = false;
+    bool needsTools = false;  // ждёт установки yt-dlp, фоновому потоку ещё не отдано
+    bool needYtdlp = false, needFfmpeg = false;  // для Kind::Install: что скачать
     std::set<std::string> skipped;
     int item = 0, items = 0;
     std::vector<std::string> files;
@@ -104,7 +114,7 @@ struct Msg {
 
 struct Plugin {
     const PmHost* host = nullptr;
-    std::wstring pluginDir, binDir, dataDir;
+    std::wstring pluginDir, binDir, dataDir, toolsDir;  // toolsDir - запасная папка установки
     std::string outDir;   // UTF-8
     std::string browser;  // "", firefox, chrome, edge
     std::wstring ytdlp, ffmpeg;
@@ -112,6 +122,10 @@ struct Plugin {
     int yandex = -1;  // поддержка Яндекс Музыки в этой сборке yt-dlp: -1 неизвестно
     bool probing = false;
     bool warned = false;  // напоминание о правах уже показано
+    // Установка одной кнопкой (поток окна)
+    bool installing = false;
+    std::string installStep, installError;
+    double installPercent = -1;
 
     std::vector<Job> jobs;  // только поток окна
     int nextRow = 100;
@@ -167,7 +181,7 @@ void SaveSettings(const Plugin& p) {
 // Запустить yt-dlp и отдавать строки вывода. Процесс - в объекте задания: отмена и выход
 // плеера убивают и его, и запущенный им ffmpeg.
 int RunTool(Plugin& p, const std::wstring& exe, const std::vector<std::string>& args, int row,
-            void (*onLine)(Plugin&, int, const std::string&), bool* cancelled) {
+            void (*onLine)(Plugin&, int, const std::string&), bool* cancelled, bool splitCr = false) {
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE readEnd = nullptr, writeEnd = nullptr;
     if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) return -1;
@@ -212,7 +226,8 @@ int RunTool(Plugin& p, const std::wstring& exe, const std::vector<std::string>& 
     while (ReadFile(readEnd, buf, sizeof(buf), &got, nullptr) && got > 0) {
         pending.append(buf, got);
         size_t nl;
-        while ((nl = pending.find('\n')) != std::string::npos) {
+        // curl рисует полосу прогресса через \r без перевода строки
+        while ((nl = pending.find_first_of(splitCr ? "\r\n" : "\n")) != std::string::npos) {
             onLine(p, row, pending.substr(0, nl));
             pending.erase(0, nl + 1);
         }
@@ -245,6 +260,47 @@ void PostLine(Plugin& p, int row, const std::string& line) {
     p.host->post(p.host->ctx, &OnUiMessage, m);
 }
 
+void PostStep(Plugin& p, const std::string& step) {
+    p.host->post(p.host->ctx, &OnUiMessage, new Msg{&p, kToolsRow, false, 0, false, {}, "PMSTEP|" + step});
+}
+
+std::wstring System32(const wchar_t* exe) {
+    wchar_t dir[MAX_PATH];
+    const UINT n = GetSystemDirectoryW(dir, MAX_PATH);
+    return n > 0 && n < MAX_PATH ? std::wstring(dir, n) + L"\\" + exe : std::wstring(exe);
+}
+
+// Скачать недостающие программы в папку job.url. Файлы пишутся с .part и переименовываются
+// только целыми: оборванная загрузка не должна выглядеть готовой программой.
+int RunInstall(Plugin& p, const Job& job, bool* cancelled) {
+    const std::string dir = job.url;
+    const std::wstring wdir = Wide(dir), curl = System32(L"curl.exe"), tar = System32(L"tar.exe");
+    if (!FileExists(curl)) return -2;
+    CreateDirectoryW(wdir.c_str(), nullptr);
+    if (job.needYtdlp) {
+        PostStep(p, "Скачиваю yt-dlp");
+        const std::wstring part = wdir + L"\\yt-dlp.exe.part";
+        const int code = RunTool(p, curl, dl::CurlArgs(dl::kYtdlpUrl, Utf8(part)), job.row, &PostLine, cancelled, true);
+        if (code != 0 || *cancelled) {
+            DeleteFileW(part.c_str());
+            return code ? code : 1;
+        }
+        if (!MoveFileExW(part.c_str(), (wdir + L"\\yt-dlp.exe").c_str(), MOVEFILE_REPLACE_EXISTING)) return -3;
+    }
+    if (job.needFfmpeg) {
+        PostStep(p, "Скачиваю ffmpeg для MP3, около 200 МБ");
+        const std::wstring zip = wdir + L"\\ffmpeg.zip.part";
+        int code = RunTool(p, curl, dl::CurlArgs(dl::kFfmpegUrl, Utf8(zip)), job.row, &PostLine, cancelled, true);
+        if (code == 0 && !*cancelled) {
+            PostStep(p, "Распаковываю ffmpeg");
+            code = RunTool(p, tar, dl::FfmpegUnpackArgs(Utf8(zip), dir), job.row, &PostLine, cancelled);
+        }
+        DeleteFileW(zip.c_str());
+        if (code != 0 || *cancelled) return code ? code : 1;
+    }
+    return 0;
+}
+
 void WorkerLoop(Plugin* pp) {
     Plugin& p = *pp;
     for (;;) {
@@ -265,6 +321,11 @@ void WorkerLoop(Plugin* pp) {
         else if (job.kind == Job::Kind::Update) args = {"-U"};
         else args = dl::BuildArgs(job.url, o);
         bool cancelled = false;
+        if (job.kind == Job::Kind::Install) {
+            const int result = RunInstall(p, job, &cancelled);
+            p.host->post(p.host->ctx, &OnUiMessage, new Msg{&p, job.row, true, result, cancelled, {}, "install"});
+            continue;
+        }
         int code = RunTool(p, exe, args, job.row, &PostLine, &cancelled);
         if (job.kind == Job::Kind::Probe && code == 0) {
             // Вторым шагом - есть ли в этой сборке Яндекс Музыка
@@ -311,25 +372,40 @@ void ShowToolsRow(Plugin& p) {
     PmPageRow r{};
     r.id = kToolsRow;
     r.progress = -1;
-    std::string sub;
-    if (p.ytdlp.empty()) {
-        static const PmAction acts[3] = {{kActGetYtdlp, "Скачать"}, {kActBinFolder, "Папка bin"}, {kActRecheck, "Проверить"}};
-        r.title = "Нужна программа yt-dlp";
-        r.subtitle = "Положите yt-dlp.exe в папку bin плагина или выполните: winget install yt-dlp";
-        r.state = PM_ROW_ERROR;
-        r.actions = acts;
-        r.actionCount = 3;
-    } else if (p.ffmpeg.empty()) {
-        static const PmAction acts[3] = {{kActGetFfmpeg, "Скачать"}, {kActBinFolder, "Папка bin"}, {kActRecheck, "Проверить"}};
-        r.title = "Нужен ffmpeg для MP3";
-        r.subtitle = "Без него сохраняется исходный m4a/opus; воспроизведение зависит от кодеков Windows. Для MP3 установите ffmpeg.";
+    static std::string sub;
+    static std::string status;
+    status.clear();
+    if (p.installing) {
+        r.title = "Готовлю загрузчик - это нужно один раз";
+        sub = p.installStep.empty() ? std::string("Подключаюсь к GitHub") : p.installStep;
+        if (p.installPercent >= 0) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.0f%%", p.installPercent);
+            status = buf;
+        }
+        r.subtitle = sub.c_str();
+        r.status = status.c_str();
+        r.progress = p.installPercent < 0 ? 0 : static_cast<float>(p.installPercent / 100);
+        r.state = PM_ROW_ACTIVE;
+        r.actionCount = 0;
+    } else if (p.ytdlp.empty() || p.ffmpeg.empty()) {
+        static const PmAction acts[3] = {
+            {kActInstall, "Установить автоматически"}, {kActBinFolder, "Папка bin"}, {kActRecheck, "Проверить снова"}};
+        r.title = p.ytdlp.empty() ? "Загрузчику нужны yt-dlp и ffmpeg" : "Для MP3 не хватает ffmpeg";
+        sub = p.installError.empty()
+                  ? std::string(p.ytdlp.empty() ? "Нажмите «Установить автоматически» - программы скачаются с GitHub "
+                                                  "в папку плеера, ничего не ставится в систему."
+                                                : "Без ffmpeg треки сохраняются как m4a. «Установить автоматически» "
+                                                  "добавит его в папку плеера.")
+                  : "Не получилось: " + p.installError + ". Можно положить yt-dlp.exe и ffmpeg.exe в папку bin вручную.";
+        r.subtitle = sub.c_str();
         r.state = PM_ROW_ERROR;
         r.actions = acts;
         r.actionCount = 3;
     } else {
         static const PmAction acts[1] = {{kActUpdate, "Обновить yt-dlp"}};
         static std::string title;
-        title = p.version.empty() ? std::string("yt-dlp готов") : "yt-dlp " + p.version + " готов";
+        title = p.version.empty() ? std::string("Загрузчик готов") : "Загрузчик готов · yt-dlp " + p.version;
         sub = p.probing ? "Проверяю поддержку сервисов..."
               : p.yandex == 1 ? "YouTube Music, YouTube и Яндекс Музыка поддерживаются"
               : p.yandex == 0 ? "Яндекс Музыки нет в этой версии yt-dlp - обновите её"
@@ -359,7 +435,7 @@ void ShowJob(Plugin& p, const Job& j) {
     int count = 1;
     switch (j.state) {
         case Job::State::Waiting:
-            status = "В очереди";
+            status = j.needsTools ? "Жду установки yt-dlp" : "В очереди";
             state = PM_ROW_WAITING;
             break;
         case Job::State::Running: {
@@ -399,8 +475,11 @@ void ShowJob(Plugin& p, const Job& j) {
 }
 
 void CheckTools(Plugin& p) {
-    p.ytdlp = FindTool(p.binDir, L"yt-dlp.exe");
-    p.ffmpeg = FindTool(p.binDir, L"ffmpeg.exe");
+    const std::wstring local = EnvPath(L"LOCALAPPDATA");
+    const std::vector<std::wstring> dirs = {p.binDir, p.toolsDir,
+                                            local.empty() ? local : local + L"\\Microsoft\\WinGet\\Links"};
+    p.ytdlp = FindTool(dirs, L"yt-dlp.exe");
+    p.ffmpeg = FindTool(dirs, L"ffmpeg.exe");
     p.version.clear();
     p.yandex = -1;
     p.probing = !p.ytdlp.empty();
@@ -410,6 +489,57 @@ void CheckTools(Plugin& p) {
         probe.row = kToolsRow;
         probe.kind = Job::Kind::Probe;
         Enqueue(p, probe);
+    }
+}
+
+void ShowJob(Plugin& p, const Job& j);
+
+// Папка для установки: bin рядом с плагином, если туда можно писать, иначе данные плагина
+std::wstring InstallDir(const Plugin& p) {
+    CreateDirectoryW(p.binDir.c_str(), nullptr);
+    const std::wstring probe = p.binDir + L"\\.write-test";
+    const HANDLE h = CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                 FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return p.toolsDir;
+    CloseHandle(h);
+    return p.binDir;
+}
+
+void StartInstall(Plugin& p) {
+    if (p.installing || (!p.ytdlp.empty() && !p.ffmpeg.empty())) return;
+    Job install;
+    install.row = kToolsRow;
+    install.kind = Job::Kind::Install;
+    install.url = Utf8(InstallDir(p));
+    install.needYtdlp = p.ytdlp.empty();
+    install.needFfmpeg = p.ffmpeg.empty();
+    p.installing = true;
+    p.installStep.clear();
+    p.installError.clear();
+    p.installPercent = -1;
+    ShowToolsRow(p);
+    Enqueue(p, install);
+}
+
+// Установка закончилась: ссылки, что ждали yt-dlp, уходят в очередь или получают ошибку
+void FinishInstall(Plugin& p, int code, bool cancelled) {
+    p.installing = false;
+    p.installPercent = -1;
+    if (cancelled) p.installError = "установка прервана";
+    else if (code == -2) p.installError = "в этой Windows нет curl.exe";
+    else if (code != 0 && p.installError.empty()) p.installError = "нет связи с GitHub или нет места на диске";
+    CheckTools(p);
+    if (code == 0 && !cancelled) p.Toast(p.ytdlp.empty() ? "Программы скачаны, но не найдены" : "Загрузчик готов");
+    for (auto& j : p.jobs) {
+        if (!j.needsTools) continue;
+        j.needsTools = false;
+        if (p.ytdlp.empty()) {
+            j.state = Job::State::Error;
+            j.error = "Нет yt-dlp: " + (p.installError.empty() ? std::string("установка не удалась") : p.installError);
+        } else {
+            Enqueue(p, j);
+        }
+        ShowJob(p, j);
     }
 }
 
@@ -431,9 +561,15 @@ void AddUrl(Plugin& p, const std::string& url) {
     j.row = p.nextRow++;
     j.url = url;
     j.source = dl::DetectSource(url);
+    // Нет yt-dlp - ставим его сами, ссылка подождёт
+    j.needsTools = p.ytdlp.empty();
     p.jobs.push_back(j);
     ShowJob(p, j);
-    Enqueue(p, j);
+    if (!j.needsTools) Enqueue(p, j);
+    else if (!p.installing) {
+        p.Toast("Сначала один раз скачаю yt-dlp и ffmpeg, потом начну загрузку");
+        StartInstall(p);
+    }
 }
 
 void OnUiMessage(void* data) {
@@ -441,6 +577,30 @@ void OnUiMessage(void* data) {
     Plugin& p = *m->plugin;
     if (m->row == kToolsRow) {
         // Проверка или обновление yt-dlp
+        if (m->raw == "install" && m->finished) {
+            FinishInstall(p, m->exitCode, m->cancelled);
+            delete m;
+            return;
+        }
+        if (p.installing && !m->finished) {
+            const std::string& line = m->raw;
+            if (line.rfind("PMSTEP|", 0) == 0) {
+                p.installStep = line.substr(7);
+                p.installPercent = -1;
+            } else if (const double pct = dl::CurlPercent(line); pct >= 0) {
+                if (static_cast<int>(pct) == static_cast<int>(p.installPercent)) {
+                    delete m;
+                    return;
+                }
+                p.installPercent = pct;
+            } else if (line.rfind("curl:", 0) == 0) {
+                p.installError = line.substr(5);
+                while (!p.installError.empty() && p.installError.front() == ' ') p.installError.erase(0, 1);
+            }
+            ShowToolsRow(p);
+            delete m;
+            return;
+        }
         if (!m->finished) {
             const std::string line = m->raw;
             if (p.version.empty() && !line.empty() && line[0] >= '0' && line[0] <= '9')
@@ -553,8 +713,7 @@ void OnPageAction(void* self, int pageId, int rowId, int actionId) {
             char buf[8192];
             const int n = p.host->clipboardText(p.host->ctx, buf, sizeof(buf));
             const auto urls = dl::ExtractUrls(n > 0 ? std::string(buf, static_cast<size_t>(n)) : std::string());
-            if (p.ytdlp.empty()) p.Toast("Сначала установите yt-dlp — раздел инструментов подскажет как");
-            else if (urls.empty()) p.Toast("Ссылка не найдена. Вставьте адрес трека, альбома или плейлиста.");
+            if (urls.empty()) p.Toast("Ссылка не найдена. Вставьте адрес трека, альбома или плейлиста.");
             else {
                 // Напоминание о правах - один раз за запуск
                 if (!p.warned) {
@@ -588,6 +747,7 @@ void OnPageAction(void* self, int pageId, int rowId, int actionId) {
             p.host->openPath(p.host->ctx, Utf8(p.binDir).c_str());
         }
         if (actionId == kActRecheck) CheckTools(p);
+        if (actionId == kActInstall) StartInstall(p);
         if (actionId == kActUpdate && !p.ytdlp.empty()) {
             Job up;
             up.row = kToolsRow;
@@ -676,6 +836,7 @@ extern "C" PM_PLUGIN_EXPORT int PlayerMoonPluginInit(const PmHost* host, PmPlugi
     p->pluginDir = ModuleDir();
     p->binDir = p->pluginDir + L"\\bin";
     p->dataDir = Wide(host->dataDir(host->ctx));
+    p->toolsDir = p->dataDir + L"\\bin";
     LoadSettings(*p);
     CreateDirectoryW(Wide(p->outDir).c_str(), nullptr);
     // yt-dlp - программа на Python: просим вывод в UTF-8 независимо от кодовой страницы консоли
@@ -688,8 +849,8 @@ extern "C" PM_PLUGIN_EXPORT int PlayerMoonPluginInit(const PmHost* host, PmPlugi
     plugin->shutdown = &Shutdown;
 
     host->pageCreate(host->ctx, kPage, "Загрузки",
-                     "Скопируйте в браузере ссылку на трек, альбом или плейлист YouTube Music, YouTube или "
-                     "Яндекс Музыки и нажмите «Вставить ссылку»");
+                     "Скопируйте ссылку на трек, альбом или плейлист и нажмите «Скачать» - "
+                     "ссылка возьмётся из буфера обмена сама");
     ShowHeader(*p);
     host->addMenuItem(host->ctx, kMenuShow, "Загрузки");
     host->addMenuItem(host->ctx, kMenuChangeFolder, "Загрузки: выбрать папку...");

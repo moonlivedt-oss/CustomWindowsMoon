@@ -3,9 +3,11 @@
 
 #include <shellapi.h>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
+#include "cards/translatecard.h"
 #include "core/bg.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -23,6 +25,7 @@ namespace {
 
 constexpr wchar_t kClass[] = L"MoonRadialSelRing";
 constexpr UINT WM_SEL_READY = WM_APP + 1;  // lParam - Got*
+constexpr UINT WM_SEL_TRANSLATE_DEMO = WM_APP + 2;  // для проверки: карточка перевода на готовой фразе, буфер не трогает
 
 const Config* g_cfg = nullptr;
 RadialMenu* g_menu = nullptr;
@@ -231,12 +234,13 @@ Item Act(const std::wstring& name, const wchar_t* icon, const std::wstring& key,
 
 void Run(const std::wstring& key) {
     const std::wstring& t = g_text;
-    bool ru = HasCyrillic(t);
     if (key == L"search") {
         Open(L"https://www.google.com/search?q=" + UrlEncode(Short(t, 300)));
     } else if (key == L"translate") {
-        Open(L"https://translate.google.com/?sl=auto&tl=" + std::wstring(ru ? L"en" : L"ru") + L"&op=translate&text=" +
-             UrlEncode(t.substr(0, 4000)));
+        // на этом компьютере; переводчик в браузере - только если человек сам нажмёт его на карточке
+        std::function<void(std::wstring)> replace;
+        if (!g_fromClip) replace = [](std::wstring r) { Replace(r); };
+        translatecard::Ask(t.substr(0, 8000), std::move(replace));
     } else if (key == L"url") {
         std::wstring u = tools::SafeUrl(Trim(t));
         if (!u.empty()) Open(u);
@@ -297,7 +301,8 @@ std::vector<Item> RingFor(const std::wstring& t) {
     }
     ring.push_back(Act(L"Найти", L"search.png", L"search", L"Поиск в интернете: «" + Short(t, 60) + L"»"));
     ring.push_back(Act(L"Перевести", L"web.png", L"translate",
-                       HasCyrillic(t) ? L"Переводчик: с русского на английский" : L"Переводчик: на русский"));
+                       HasCyrillic(t) ? L"С русского на английский, на этом компьютере"
+                                      : L"На русский, на этом компьютере"));
     Item text = Act(L"Текст", L"editor.png", L"", L"Раскладка, регистр, пробелы");
     std::wstring fixed = FixLayout(t);
     text.children.push_back(Act(put + L"Раскладка: " + Short(fixed, 18), L"keys.png", L"put:layout",
@@ -344,6 +349,10 @@ LRESULT CALLBACK Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         std::unique_ptr<Got> got((Got*)lp);
         g_busy = false;
         Show(*got);
+        return 0;
+    }
+    if (msg == WM_SEL_TRANSLATE_DEMO) {
+        translatecard::Ask(L"The installer could not find the required file. Please check your connection and try again.");
         return 0;
     }
     return DefWindowProcW(h, msg, wp, lp);

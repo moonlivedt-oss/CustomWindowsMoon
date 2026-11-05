@@ -203,6 +203,43 @@ TEST(EngineCrossfadeStartsNextEarly) {
     e.Shutdown();
 }
 
+// Трек, выбранный руками посреди перехода, звучит сразу: нарастание относилось к прошлому следующему
+TEST(EngineManualTrackDuringCrossfadeIsNotFadedIn) {
+    const auto dir = tests::TempDir("crossfade_manual");
+    tests::WriteBytes(dir / "a.wav", tests::MakeWav(1.0, 48000));
+    tests::WriteBytes(dir / "b.wav", tests::MakeWav(1.0, 48000));
+    tests::WriteBytes(dir / "c.wav", tests::MakeWav(3.0, 48000));
+    pm::Engine e;
+    CHECK(e.Start({true, 48000}, [] {}));
+    e.SetCrossfade(0.45);  // через 0.15 с после смены нарастание дало бы лишь половину громкости
+    e.SetTrack(pm::OpenDecoder(dir / "a.wav", 2, 48000), 0);
+    e.QueueNext(pm::OpenDecoder(dir / "b.wav", 2, 48000), 1.f, true);
+    e.Play();
+    const auto start = std::chrono::steady_clock::now();
+    auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
+    bool switched = false;
+    while (!switched && elapsed() < 3) {
+        e.Service();
+        switched = e.TakeSwitched();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(switched);
+    // Переход идёт; выбираем другой трек
+    e.SetTrack(pm::OpenDecoder(dir / "c.wav", 2, 48000), 0);
+    const auto chosen = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - chosen < std::chrono::milliseconds(150)) {
+        e.Service();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    std::vector<float> recent(2400);
+    const size_t got = e.CopyRecentMono(recent.data(), recent.size());
+    float peak = 0;
+    for (size_t i = 0; i < got; ++i) peak = std::max(peak, std::fabs(recent[i]));
+    CHECK(got > 0);
+    CHECK(peak > .25f);  // синус 12000/32768 = 0.37 на полной громкости
+    e.Shutdown();
+}
+
 TEST(PlayerGaplessAndQueueEdits) {
     const auto dir = tests::TempDir("player_gapless");
     for (const char* n : {"1.wav", "2.wav", "3.wav", "4.wav"}) tests::WriteBytes(dir / n, tests::MakeWav(0.15));

@@ -62,6 +62,8 @@ public:
     void Pause();
     void Seek(uint64_t frame);
     void SetVolume(float volume);  // 0..1, применяется плавно (без щелчков)
+    // Караоке: 0 - как записано, 1 - голос из центра убран (басы остаются). Плавно, без щелчков
+    void SetKaraoke(float amount);
 
     bool IsPlaying() const;      // намерение: нажат ли «пуск»
     bool DeviceRunning() const;  // работает ли аудиопоток (на паузе после затухания - нет)
@@ -77,6 +79,7 @@ public:
 
     // Последние n моно-сэмплов (для визуализатора). Возвращает сколько скопировано.
     size_t CopyRecentMono(float* dst, size_t n) const;
+    uint64_t TapWritten() const;
 
 private:
     struct Impl;

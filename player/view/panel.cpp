@@ -224,7 +224,7 @@ std::string PlayerView::TooltipFor(Elem e, Point p) const {
         case Elem::Seek:
         case Elem::MiniSeek: return snap.duration > 0 ? FormatClock(SliderValueAt(e, p.x) * snap.duration) : "";
         case Elem::PlBtn: return playlistOpen ? "Скрыть плейлист" : "Плейлист";
-        case Elem::TbSettings: return "Меню";
+        case Elem::TbSettings: return "Настройки";
         case Elem::TbMini: return "Мини-режим";
         case Elem::TbMinimize: return "Свернуть";
         case Elem::TbClose: return "Закрыть";

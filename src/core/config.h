@@ -69,6 +69,8 @@ struct Config {
     COLORREF customBg = RGB(27, 20, 32), customAccent = RGB(255, 122, 107), customAccent2 = RGB(232, 96, 140),
              customGold = RGB(255, 211, 110);
     bool tourDone = false;  // тур по студии уже показан
+    std::wstring profile;   // simple, dev, expert; пусто - ещё не выбирали (core/profile)
+    int profileAsk = 0;     // 1 - экран профилей при каждом открытии студии
     // горячие углы: левый верхний, правый верхний, левый нижний, правый нижний;
     // значение - действие (desktop, tasks, screen_off...) или путь к программе, пусто - ничего
     std::wstring corners[4] = {L"", L"", L"desktop", L"tasks"};
@@ -202,6 +204,7 @@ struct Config {
     bool clipHistory = true;  // история буфера: последние тексты и картинки
     bool clipSecrets = true;  // токены, ключи и номера карт не запоминать, из буфера стирать
     int clipSecretSec = 60;   // через сколько секунд стирать секрет из буфера
+    bool translateGoogle = false;  // перевод: разрешить Google там, где локально нельзя; текст уходит наружу
     bool winDrag = true;      // Alt + левая - тащить окно за любое место, Alt + правая - размер
     bool cpuBalance = true;   // тихий баланс процессора: фоновым обжорам - пониже приоритет
     bool noSleep = true;      // не спать, пока идёт сборка, загрузка или копирование

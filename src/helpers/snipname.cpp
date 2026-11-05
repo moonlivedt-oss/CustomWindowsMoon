@@ -1,6 +1,7 @@
 // Скриншот в работу: имя и папка снимка (без окон и файлов, под тестами).
 #include "helpers/snipname.h"
 
+#include <algorithm>
 #include <cwctype>
 
 namespace snipname {
@@ -69,6 +70,16 @@ std::wstring TargetDir(const std::wstring& folder, bool isProject) {
     std::wstring f = folder;
     while (f.size() > 3 && f.back() == L'\\') f.pop_back();
     return isProject ? f + L"\\screenshots" : f;
+}
+
+void FitPreview(int shotW, int shotH, float boxW, float boxH, float& w, float& h) {
+    if (shotW <= 0 || shotH <= 0) {
+        w = boxW, h = boxH;
+        return;
+    }
+    float s = std::min({boxW / shotW, boxH / shotH, 1.0f});
+    w = std::max(2.0f, shotW * s);  // полоска в пару пикселей всё равно должна быть видна
+    h = std::max(2.0f, shotH * s);
 }
 
 }  // namespace snipname

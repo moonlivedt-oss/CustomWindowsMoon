@@ -1,8 +1,10 @@
 #include "core/player.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <system_error>
+#include <thread>
 
 #include "core/text.h"
 
@@ -56,17 +58,30 @@ void Player::Shutdown() {
 
 int Player::LoadFiles(const std::vector<std::filesystem::path>& files, bool append) {
     std::vector<PlaylistEntry> tracks;
-    for (const auto& f : files) {
-        if (!IsSupportedAudio(f)) continue;
-        TagInfo tags;
-        PlaylistEntry e{f, {}};
-        if (ReadTags(f, tags, false)) {
-            e.meta.title = tags.title;
-            e.meta.artist = tags.artist;
-            e.meta.album = tags.album;
-            e.meta.duration = tags.duration;
+    for (const auto& f : files)
+        if (IsSupportedAudio(f)) tracks.push_back({f, {}});
+    // Почти всё время здесь - ожидание открытия файлов, поэтому большой плейлист читается в несколько потоков.
+    // Порядок треков задан заранее; каждый поток пишет только в свою запись.
+    std::atomic<size_t> next{0};
+    auto work = [&] {
+        for (size_t i = next++; i < tracks.size(); i = next++) {
+            TagInfo tags;
+            if (!ReadTags(tracks[i].path, tags, false)) continue;
+            TrackMeta& meta = tracks[i].meta;
+            meta.title = tags.title;
+            meta.artist = tags.artist;
+            meta.album = tags.album;
+            meta.duration = tags.duration;
         }
-        tracks.push_back(std::move(e));
+    };
+    if (tracks.size() >= 16) {
+        const size_t count = std::clamp<size_t>(std::thread::hardware_concurrency(), 1, 8);
+        std::vector<std::thread> pool;
+        for (size_t t = 1; t < count; ++t) pool.emplace_back(work);
+        work();
+        for (auto& t : pool) t.join();
+    } else {
+        work();
     }
     return LoadTracks(tracks, append);
 }
@@ -284,6 +299,12 @@ void Player::Remove(int index) {
 
 void Player::PlayNext(int index) {
     playlist_.PlayNext(index);
+    now_.index = playlist_.Current();
+    if (engine_.HasTrack()) PreloadNext();
+}
+
+void Player::Move(int from, int to) {
+    playlist_.Move(from, to);
     now_.index = playlist_.Current();
     if (engine_.HasTrack()) PreloadNext();
 }

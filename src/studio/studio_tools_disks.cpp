@@ -385,7 +385,7 @@ void Studio::ToolsDiskTab(ToolsKit& tk) {
                 return true;
             });
         if (toolsJob_ && toolsJob_->title != L"Что занимает место")
-            tk.Note(b, (y + ui.S(48) - b.Y) / tk.rowH, tk.Log(), c.muted);
+            tk.Status(b, (y + ui.S(48) - b.Y) / tk.rowH, tk.Log(), c.muted);
     });
 }
 

@@ -1,5 +1,7 @@
 #include "gfx/draw.h"
 
+#include <cmath>
+
 #include <algorithm>
 #include <vector>
 
@@ -110,4 +112,27 @@ void RoundRectPath(GraphicsPath& p, const RectF& r, float rad) {
     p.AddArc(r.X + r.Width - d, r.Y + r.Height - d, d, d, 0, 90);
     p.AddArc(r.X, r.Y + r.Height - d, d, d, 90, 90);
     p.CloseFigure();
+}
+
+void DrawFaded(Graphics& g, const RectF& area, float alpha, const std::function<void(Graphics&)>& paint) {
+    if (alpha <= 0.004f) return;
+    if (alpha >= 0.996f) {
+        paint(g);
+        return;
+    }
+    int w = (int)std::ceil(area.Width) + 2, h = (int)std::ceil(area.Height) + 2;
+    if (w <= 0 || h <= 0) return;
+    Bitmap layer(w, h, PixelFormat32bppPARGB);
+    {
+        Graphics lg(&layer);
+        lg.SetSmoothingMode(g.GetSmoothingMode());
+        lg.SetPixelOffsetMode(g.GetPixelOffsetMode());
+        lg.SetTextRenderingHint(g.GetTextRenderingHint());
+        lg.TranslateTransform(-area.X, -area.Y);
+        paint(lg);
+    }
+    ColorMatrix cm = {{{1, 0, 0, 0, 0}, {0, 1, 0, 0, 0}, {0, 0, 1, 0, 0}, {0, 0, 0, alpha, 0}, {0, 0, 0, 0, 1}}};
+    ImageAttributes ia;
+    ia.SetColorMatrix(&cm);
+    g.DrawImage(&layer, RectF(area.X, area.Y, (REAL)w, (REAL)h), 0, 0, (REAL)w, (REAL)h, UnitPixel, &ia);
 }

@@ -267,7 +267,7 @@ def blobs(
     main.sort(key=lambda m: (m[1] + m[3]) / 2)
     rows, row = [], []
     for m in main:
-        if row and (m[1] + m[3]) / 2 > max((r[3] for r in row)):
+        if row and (m[1] + m[3]) / 2 > max(r[3] for r in row):
             rows.append(row)
             row = []
         row.append(m)

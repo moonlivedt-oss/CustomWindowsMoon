@@ -404,13 +404,23 @@ void Studio::ToolsPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Утилиты",
-           L"PATH и переменные, диски, автозагрузка, порты. Быстрые действия - в кольце утилит на углу.");
+           L"Быстрые действия - в кольце утилит на углу");
     RectF tabs(Column(in, ui.S(900)).X, in.Y + ui.S(58), std::min(in.Width, ui.S(840)), ui.S(38));
-    int tab = toolsTab_;
-    if (ui.Segmented(ID_TOOLS_TAB, tabs,
-                     {L"PATH", L"Диски", L"Автозагрузка", L"Порты", L"Процессы", L"Версии", L"Защита", L"Приватность"},
-                     tab)) {
-        toolsTab_ = tab;
+    // вкладки этого профиля; открытая по ссылке из кольца видна всегда
+    const wchar_t* const kTabs[] = {L"PATH",     L"Диски",  L"Автозагрузка", L"Порты",
+                                    L"Процессы", L"Версии", L"Защита",       L"Приватность"};
+    std::vector<std::wstring> tabNames;
+    std::vector<int> tabOf;
+    int tab = 0;
+    for (int i = 0; i < 8; ++i)
+        if (i == toolsTab_ || profile::Effective() >= profile::ToolsTabMin(i)) {
+            if (i == toolsTab_) tab = (int)tabOf.size();
+            tabNames.push_back(kTabs[i]);
+            tabOf.push_back(i);
+        }
+    if (ui.Segmented(ID_TOOLS_TAB, tabs, tabNames, tab)) {
+        toolsTab_ = tabOf[tab];
+        pageAt_ = GetTickCount64();
         toolsAt_ = 0;
         ui.ResetScroll(ID_PAGE_SCROLL);
     }
@@ -728,171 +738,8 @@ void Studio::ToolsPage(const RectF& r) {
                 ui.Tip(ID_TOOLS_WG + (int)i, u.id);
             }
         });
-    } else if (toolsTab_ == 6) {                // ---------------- защита ----------------
-        if (secView_.running) RepaintIn(1000);  // итог проверки придёт сам
-        std::vector<tools::FindKind> kinds;
-        for (const tools::Suspect& s : secView_.finds)
-            if (std::find(kinds.begin(), kinds.end(), s.kind) == kinds.end()) kinds.push_back(s.kind);
-        std::sort(kinds.begin(), kinds.end());
-        if (secKind_ > (int)kinds.size()) secKind_ = 0;
-        std::vector<size_t> shown;
-        for (size_t i = 0; i < secView_.finds.size() && shown.size() < 60; ++i)
-            if (!secKind_ || secView_.finds[i].kind == kinds[secKind_ - 1]) shown.push_back(i);
-        float findH = lineH * 1.6f;
-        wide(L"Находки", (shown.size() * findH + ui.S(kinds.size() > 1 ? 104 : 58)) / rowH, [&](const RectF& b) {
-            std::wstring head = secView_.running ? std::wstring(L"Проверяю: подписи, места запуска, автозапуск...")
-                                : !secView_.checked
-                                    ? std::wstring(L"Ещё не проверялось")
-                                    : L"Проверено " +
-                                          Plural(secView_.processes, L"программа", L"программы", L"программ") + L" и " +
-                                          Plural(secView_.autoruns, L"запись", L"записи", L"записей") + L" автозапуска";
-            ui.Text(head, RectF(b.X, b.Y, b.Width - ui.S(390), ui.S(36)), c.muted, 11.5f);
-            if (secView_.ignored &&
-                ui.Button(ID_TOOLS_SEC_UNHIDE, RectF(b.X + b.Width - ui.S(386), b.Y, ui.S(190), ui.S(36)),
-                          L"Показать скрытые " + std::to_wstring(secView_.ignored))) {
-                toolsui::ClearIgnored();
-                refresh();
-            }
-            if (ui.Button(ID_TOOLS_SEC_RESCAN, RectF(b.X + b.Width - ui.S(186), b.Y, ui.S(186), ui.S(36)),
-                          secView_.running   ? L"Проверяю"
-                          : secView_.checked ? L"Проверить заново"
-                                             : L"Проверить",
-                          Kind::Primary, L"", secView_.running) &&
-                !secView_.running) {
-                toolsui::SecurityRescan();
-                secView_.running = true;
-                refresh();
-            }
-            float y = b.Y + ui.S(48);
-            if (kinds.size() > 1) {
-                std::vector<std::wstring> labels{L"Все"};
-                for (tools::FindKind k : kinds) {  // в фильтре - первое слово: «задача», «расширение»
-                    std::wstring n = toolsui::FindKindName(k);
-                    labels.push_back(n.substr(0, n.find(L' ')));
-                }
-                int sel = secKind_;
-                RectF fr(b.X, y, std::min(b.Width, ui.S(118) * labels.size()), ui.S(34));
-                if (ui.Segmented(ID_TOOLS_SEC_KIND, fr, labels, sel)) secKind_ = sel;
-                y += ui.S(46);
-            }
-            if (shown.empty()) {
-                ui.Text(secView_.checked
-                            ? L"Ничего странного: всё запущенное и автозапуск подписаны или лежат на своих "
-                              L"местах."
-                            : L"Первая проверка идёт в фоне - подписи считаются до минуты.",
-                        RectF(b.X, y, b.Width, lineH), c.muted, 11.5f);
-                y += lineH;
-            }
-            for (size_t n = 0; n < shown.size(); ++n) {
-                const tools::Suspect& s = secView_.finds[shown[n]];
-                RectF rr(b.X - ui.S(6), y, b.Width + ui.S(12), findH);
-                bool hot = rowHot(rr);
-                if (hot) ui.Fill(rr, WithAlpha(c.cardHi, 170), ui.S(6));
-                bool danger = s.score >= 6;
-                // значок вида находки (сертификат, брандмауэр, служба...), рядом - насколько серьёзно
-                ui.Icon(ExeDir() + L"\\icons\\" + toolsui::FindKindIcon(s.kind),
-                        RectF(b.X + ui.S(2), y + ui.S(6), ui.S(32), ui.S(32)));
-                ui.Text(danger ? L"опасно" : L"странно", RectF(b.X + ui.S(40), y + ui.S(2), ui.S(70), ui.S(22)),
-                        danger ? c.warn : c.gold, 11, true);
-                float tx = b.X + ui.S(116), tw = b.Width - ui.S(116) - (hot ? ui.S(250) : 0);
-                std::wstring name = Ellip(s.name, 60);
-                float nw = std::min(tw, ui.Measure(name, 12, true) + ui.S(12));
-                ui.Text(name, RectF(tx, y + ui.S(2), nw, ui.S(22)), c.text, 12, true);
-                ui.Text(toolsui::FindKindName(s.kind), RectF(tx + nw, y + ui.S(3), std::max(0.0f, tw - nw), ui.S(22)),
-                        c.faint, 10.5f);
-                ui.Text(Ellip(s.why + (s.path.empty() ? L"" : L". " + s.path), 150),
-                        RectF(tx, y + ui.S(23), tw, ui.S(22)), c.muted, 10.5f);
-                if (hot) {
-                    float bx = b.X + b.Width - ui.S(244);
-                    if (ui.Button(ID_TOOLS_SEC + (int)n * 2, RectF(bx, y + ui.S(8), ui.S(130), ui.S(28)), L"Что делать",
-                                  Kind::Primary))
-                        toolsui::SecurityAct(s);
-                    if (ui.Button(ID_TOOLS_SEC + (int)n * 2 + 1,
-                                  RectF(bx + ui.S(138), y + ui.S(8), ui.S(106), ui.S(28)), L"Это моё")) {
-                        toolsui::IgnoreFind(s);
-                        Toast(L"Больше не показываю: " + s.name);
-                        refresh();
-                        break;
-                    }
-                }
-                y += findH;
-            }
-        });
-        // расширения браузеров по правам (Н4): всё, что нашла «Защита», доступ к входам и паролям - сверху
-        std::vector<size_t> extShown;
-        int extRisky = 0;
-        for (const tools::BrowserExt& e : secView_.exts) extRisky += tools::ExtRisk(e.rights) >= 4;
-        for (size_t i = 0; i < secView_.exts.size() && extShown.size() < 40; ++i)
-            if (!extKind_ || tools::ExtRisk(secView_.exts[i].rights) >= 4) extShown.push_back(i);
-        std::wstring extIcon = ExeDir() + L"\\icons\\tools-extension.png";
-        if (GetFileAttributesW(extIcon.c_str()) == INVALID_FILE_ATTRIBUTES)
-            extIcon = ExeDir() + L"\\icons\\tools-shield.png";
-        wide(L"Расширения браузеров", (std::max<size_t>(extShown.size(), 1) * findH + ui.S(58)) / rowH,
-             [&](const RectF& b) {
-                 std::wstring head =
-                     !secView_.checked ? std::wstring(L"Появятся после проверки")
-                     : secView_.exts.empty()
-                         ? std::wstring(L"Расширений с особыми правами нет")
-                         : Plural((int)secView_.exts.size(), L"расширение", L"расширения", L"расширений") +
-                               L" с правами, к входам и паролям (буфер, куки, программы): " + std::to_wstring(extRisky);
-                 ui.Text(head, RectF(b.X, b.Y, b.Width - ui.S(250), ui.S(36)), c.muted, 11.5f);
-                 int sel = extKind_;
-                 if (ui.Segmented(ID_TOOLS_EXT_KIND, RectF(b.X + b.Width - ui.S(240), b.Y, ui.S(240), ui.S(34)),
-                                  {L"Все", L"Опасные"}, sel))
-                     extKind_ = sel;
-                 float y = b.Y + ui.S(48);
-                 if (extShown.empty())
-                     ui.Text(extKind_ ? L"Опасных нет: ни одно расширение не читает входы, буфер и куки сразу на всех "
-                                        L"сайтах."
-                                      : L"Chrome, Edge, Brave и Яндекс: расширения с доступом к сайтам и данным.",
-                             RectF(b.X, y, b.Width, lineH), c.muted, 11.5f);
-                 for (size_t n = 0; n < extShown.size(); ++n) {
-                     const tools::BrowserExt& e = secView_.exts[extShown[n]];
-                     RectF rr(b.X - ui.S(6), y, b.Width + ui.S(12), findH);
-                     bool hot = rowHot(rr);
-                     if (hot) ui.Fill(rr, WithAlpha(c.cardHi, 170), ui.S(6));
-                     int risk = tools::ExtRisk(e.rights);
-                     ui.Icon(extIcon, RectF(b.X + ui.S(2), y + ui.S(6), ui.S(32), ui.S(32)));
-                     if (risk >= 2)
-                         ui.Text(risk >= 4 ? L"опасно" : L"все сайты",
-                                 RectF(b.X + ui.S(40), y + ui.S(2), ui.S(74), ui.S(22)), risk >= 4 ? c.warn : c.gold,
-                                 11, true);
-                     float tx = b.X + ui.S(116), tw = b.Width - ui.S(116) - (hot ? ui.S(200) : 0);
-                     std::wstring name = Ellip(e.name, 60);
-                     float nw = std::min(tw, ui.Measure(name, 12, true) + ui.S(12));
-                     ui.Text(name, RectF(tx, y + ui.S(2), nw, ui.S(22)), c.text, 12, true);
-                     ui.Text(e.browser + (e.profile.empty() ? L"" : L", " + e.profile) +
-                                 (e.store ? L"" : L", не из магазина"),
-                             RectF(tx + nw, y + ui.S(3), std::max(0.0f, tw - nw), ui.S(22)), e.store ? c.faint : c.gold,
-                             10.5f);
-                     ui.Text(Ellip(tools::ExtRightsText(e.rights), 150), RectF(tx, y + ui.S(23), tw, ui.S(22)), c.muted,
-                             10.5f);
-                     if (hot && ui.Button(ID_TOOLS_EXT + (int)n,
-                                          RectF(b.X + b.Width - ui.S(192), y + ui.S(8), ui.S(192), ui.S(28)),
-                                          L"Открыть в браузере", Kind::Primary)) {
-                         tools::BrowserExt copy = e;
-                         Defer([copy] { toolsui::OpenExtension(copy); });
-                     }
-                     y += findH;
-                 }
-             });
-        bool signReady = tools::CodeSigningReady();
-        wide(L"Подпись своих exe", 1.5f, [&](const RectF& b) {
-            ui.Text(signReady
-                        ? L"Сертификат MoonRadial Local есть: сборка подписывает RadialMenu.exe и RadialTools.exe. "
-                          L"Чужой файл с этой подписью «Защита» считает подделкой."
-                        : L"Своим сертификатом сборка подпишет RadialMenu.exe и RadialTools.exe - у Kaspersky "
-                          L"меньше поводов, помощник с правами сверяет подпись. Сертификат доверен только у вас.",
-                    RectF(b.X + ui.S(52), b.Y, b.Width - ui.S(272), ui.S(52)), c.muted, 11.5f, false, ui::Left, true);
-            ui.Icon(ExeDir() + L"\\icons\\tools-sign.png", RectF(b.X, b.Y + ui.S(4), ui.S(40), ui.S(40)));
-            if (!signReady &&
-                ui.Button(ID_TOOLS_SIGN, RectF(b.X + b.Width - ui.S(206), b.Y + ui.S(6), ui.S(206), ui.S(36)),
-                          L"Настроить подпись", Kind::Secondary, L"", busy) &&
-                !busy)
-                ToolsRun(L"Подпись", [](const tools::Log& l, ToolsJob&) { return tools::SetupCodeSigning(l); });
-            if (toolsJob_ && toolsJob_->title == L"Подпись")
-                ui.Text(log(), RectF(b.X, b.Y + ui.S(52), b.Width, ui.S(40)), c.faint, 10.5f);
-        });
+    } else if (toolsTab_ == 6) {  // ---------------- защита ----------------
+        ToolsGuardTab(kit);
     }
 
     pageContentH_ = cols.Height();

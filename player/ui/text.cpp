@@ -89,13 +89,19 @@ IDWriteTextFormat* TextSystem::Format(const TextSpec& spec) {
 
 ComPtr<IDWriteTextLayout> TextSystem::Layout(const std::wstring& text, const TextSpec& spec, float width,
                                              float height) {
-    wchar_t head[128];
-    swprintf(head, 128, L"%.2f|%.0f|%d|%d|%d|%.2f|%d|%d|%d|%.1f|%.1f|", spec.size, spec.weight, spec.display ? 1 : 0,
-             static_cast<int>(spec.align), spec.upper ? 1 : 0, spec.spacing, spec.ellipsis ? 1 : 0,
-             spec.tabular ? 1 : 0, spec.wrap ? 1 : 0, width, height);
-    const std::wstring key = head + text;
-    auto it = layouts_.find(key);
+    // Ключ без форматирования чисел: кэш спрашивают сотни раз за кадр. Точность прежняя - сотые и десятые доли
+    const long head[] = {std::lround(spec.size * 100),
+                         std::lround(spec.weight),
+                         (spec.display ? 1 : 0) | (spec.upper ? 2 : 0) | (spec.ellipsis ? 4 : 0) | (spec.tabular ? 8 : 0) | (spec.wrap ? 16 : 0),
+                         static_cast<long>(spec.align),
+                         std::lround(spec.spacing * 100),
+                         std::lround(width * 10),
+                         std::lround(height * 10)};
+    layoutKey_.assign(reinterpret_cast<const wchar_t*>(head), std::size(head) * (sizeof(long) / sizeof(wchar_t)));
+    layoutKey_ += text;
+    const auto it = layouts_.find(layoutKey_);
     if (it != layouts_.end()) return it->second;
+    const std::wstring key = layoutKey_;
     if (layouts_.size() > 512) layouts_.clear();  // кэш не растёт бесконечно
 
     IDWriteTextFormat* format = Format(spec);

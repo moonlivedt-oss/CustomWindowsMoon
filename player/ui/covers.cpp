@@ -56,10 +56,15 @@ ID2D1Bitmap1* CoverCache::Get(uint64_t serial, ID2D1DeviceContext* dc, uint64_t 
     Entry& e = it->second;
     if (!e.bitmap || e.generation != generation) {
         e.bitmap.Reset();
+        if (!e.image) {
+            entries_.erase(it);
+            return nullptr;
+        }
         D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
             D2D1_BITMAP_OPTIONS_NONE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
         if (FAILED(dc->CreateBitmapFromWicBitmap(e.image.Get(), &props, &e.bitmap))) return nullptr;
         e.generation = generation;
+        if (!keepPixels_) e.image.Reset();
     }
     return e.bitmap.Get();
 }

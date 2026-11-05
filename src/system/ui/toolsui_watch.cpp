@@ -1,5 +1,6 @@
 // Слежка раз в минуту (свой поток) и что с ней делает основной поток: карточки о новом автозапуске, утечках,
 // нехватке памяти, итог видеокарты после игры.
+#include "system/explain.h"
 #include "system/ui/toolsui_internal.h"
 
 #include <map>
@@ -506,11 +507,12 @@ void TryProactive() {
     }
     if (c.limit && c.total * 100 >= c.limit * 90 && (!g_commitWarned || now - g_commitWarned > 6 * 3600 * 1000ull)) {
         g_commitWarned = now;
+        g_card.meter = (float)((double)c.total / (double)c.limit);
+        g_askMore = L"Подкачка сейчас " + tools::Bytes(tools::PagefileBytes()) + L". " + explain::Action(L"pagefile");
         Ask(
             L"Память на пределе",
-            L"Занято " + tools::Bytes(c.total) + L" из " + tools::Bytes(c.limit) + L" (память и подкачка " +
-                tools::Bytes(tools::PagefileBytes()) +
-                L"). Дальше программы начнут падать, Unreal - при сборке шейдеров.",
+            L"Занято " + tools::Bytes(c.total) + L" из " + tools::Bytes(c.limit) +
+                L", вместе с подкачкой. Дальше программы начнут падать, Unreal - при сборке шейдеров.",
             L"Что закрыть", L"Подкачка", [] { MemoryOffer(L"память на пределе", {}, true); }, [] { OpenPagefile(); },
             40000, Toast::G_WARN);
         return;

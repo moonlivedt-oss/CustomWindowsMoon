@@ -1,6 +1,7 @@
 #include "core/usage.h"
 #include "system/ui/toolsui_internal.h"
 
+#include <cwctype>
 #include <map>
 
 #include "core/perf.h"
@@ -456,7 +457,9 @@ void OnSecurity() {
     ReleaseSRWLockShared(&g_secLock);
     for (const tools::Suspect& s : all) {
         if (s.score < kDangerScore || !g_secWarned.insert(FindKey(s)).second) continue;
-        g_card.Show(BoostCard::DONE, L"Защита: " + s.name, s.why + L". Подробнее - кольцо «Утилиты», «Защита».",
+        std::wstring why = s.why;
+        if (!why.empty()) why[0] = (wchar_t)towupper(why[0]);  // причина - обрывок фразы, а здесь с неё начинается текст
+        g_card.Show(BoostCard::DONE, L"Защита: " + s.name, why + L". Подробнее - кольцо «Утилиты», «Защита».",
                     Theme(), 30000, Toast::G_WARN);
         return;
     }

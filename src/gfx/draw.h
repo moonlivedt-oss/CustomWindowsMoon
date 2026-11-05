@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 
 #include <windows.h>
 #include <objidl.h>
@@ -19,8 +20,8 @@ inline double EaseOutBack(double t, double over = 1.4) {
 }
 inline double Rad(double deg) { return deg * kPi / 180.0; }
 
-Gdiplus::FontFamily* Family();                          // Segoe UI Semibold, если есть, иначе Segoe UI
-void BoxBlur(uint32_t* px, int w, int h, int radius);   // три прохода - почти гауссово размытие
+Gdiplus::FontFamily* Family();                         // Segoe UI Semibold, если есть, иначе Segoe UI
+void BoxBlur(uint32_t* px, int w, int h, int radius);  // три прохода - почти гауссово размытие
 // Уменьшение в factor раз усреднением блоков; результат непрозрачный (alpha 255).
 void Downscale(const uint32_t* src, int w, int h, uint32_t* dst, int dw, int dh, int factor);
 // Билинейное растяжение непрозрачной картинки; dstStride - в пикселях.
@@ -35,3 +36,7 @@ Gdiplus::RectF Intersect(const Gdiplus::RectF& a, const Gdiplus::RectF& b);
 bool Inside(const Gdiplus::RectF& in, const Gdiplus::RectF& out);  // in целиком внутри out
 // Скруглённый прямоугольник в путь (радиус не больше половины меньшей стороны).
 void RoundRectPath(Gdiplus::GraphicsPath& p, const Gdiplus::RectF& r, float radius);
+// Нарисовать группу целиком с прозрачностью alpha: paint рисует как обычно, area - куда он попадает.
+// При alpha 1 рисует сразу, без промежуточной картинки.
+void DrawFaded(Gdiplus::Graphics& g, const Gdiplus::RectF& area, float alpha,
+               const std::function<void(Gdiplus::Graphics&)>& paint);

@@ -173,10 +173,20 @@ void CheckCerts(std::vector<Suspect>& out) {
             sp.where = st.where;
             sp.path = name;
             sp.score = st.loc == CERT_SYSTEM_STORE_CURRENT_USER ? 4 : 3;
-            sp.why = std::wstring(L"незнакомый корневой сертификат (с ") + since +
-                     L"): тот, у кого есть его ключ, может подменять сайты и подписывать программы так, что Windows "
-                     L"им доверяет. Свои сертификаты разработки - нормально, остальные стоит убрать";
-            out.push_back(sp);
+            DWORD keyInfo = 0;
+            bool keyHere = CertGetCertificateContextProperty(c, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &keyInfo) != FALSE;
+            sp.score = keyHere ? 3 : sp.score;
+            sp.why = keyHere
+                         ? std::wstring(L"создан на этом компьютере (с ") + since +
+                               L"), его ключ лежит здесь. Если это ваш сертификат разработки - «Это моё». Если не "
+                               L"помните - уберите: ему Windows доверяет, как настоящему"
+                         : std::wstring(L"незнакомый корневой сертификат (с ") + since +
+                               L"): тот, у кого есть его ключ, может подменять сайты и подписывать программы так, что "
+                               L"Windows им доверяет. Свои сертификаты разработки - нормально, остальные стоит убрать";
+            // один и тот же корень в хранилищах пользователя и компьютера - одна находка
+            bool dup = false;
+            for (const Suspect& o : out) dup |= o.kind == FIND_CERT && o.name == sp.name;
+            if (!dup) out.push_back(sp);
         }
         CertCloseStore(s, 0);
     }
@@ -255,6 +265,14 @@ void CheckFirewall(std::vector<Suspect>& out) {
                     } else if (CheckSign(path, &s.signer) != SIGN_OK) {
                         s.score += 2;
                         s.why += L"; без подписи";
+                    }
+                    // Java из лаунчера Minecraft: разрешение нужно для игры по сети, и версий обычно несколько
+                    size_t mc = lp.find(L"\\.minecraft\\runtime\\");
+                    if (mc != std::wstring::npos && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                        size_t from = mc + wcslen(L"\\.minecraft\\runtime\\"), to = path.find(L'\\', from);
+                        s.name = L"Minecraft: " + path.substr(from, to == std::wstring::npos ? to : to - from);
+                        s.why = L"Java из лаунчера Minecraft принимает подключения из сети: это нужно для игры по "
+                                L"сети. Файл без подписи и лежит в папке пользователя. Если вы играете - «Это моё»";
                     }
                     bool dup = false;
                     for (const Suspect& o : out) dup |= o.kind == FIND_FW && !_wcsicmp(o.path.c_str(), path.c_str());

@@ -1,6 +1,7 @@
 #include "ui/app.h"
 #include "ui/workspace.h"
 #include "core/text.h"
+#include <algorithm>
 #include <cmath>
 
 namespace ui {
@@ -14,6 +15,7 @@ void App::OpenWorkspace(view::HomeModel::Page page) {
     workspaceNotice_.clear();
     LayoutHomeSearch();
     SetFocus(hwnd_);
+    PrefillDownload();
     Invalidate();
 }
 void App::EnterMini() {
@@ -29,97 +31,13 @@ void App::BuildWorkspace() {
     homeInput_.notice = workspaceNotice_;
     homeInput_.reducedMotion = systemReduce_ || reduceMotion_;
     homeInput_.downloadEnabled = false;
+    BuildPalette();
     if (home_.model.page < view::HomeModel::Plugins) return;
     auto add = [&](std::wstring title, std::wstring subtitle, std::vector<Home::Control> controls = {}) {
         homeInput_.cards.push_back({std::move(title), std::move(subtitle), {}, std::move(controls), -1, false});
     };
     if (home_.model.page == view::HomeModel::Settings) {
-        homeInput_.settingsSection = settingsSection_;
-        homeInput_.previewMini = previewMini_;
-        homeInput_.previewLarge = previewLarge_;
-        homeInput_.reducedMotion = systemReduce_ || reduceMotion_;
-        homeInput_.canUndo = settingsUndo_.has_value();
-        auto toggle = [&](std::wstring title, std::wstring hint, int command, bool on) {
-            add(std::move(title), std::move(hint), {{on ? L"Включено" : L"Выключено", command, on, true}});
-        };
-        if (settingsSection_ == 0) {
-            std::vector<Home::Control> themes;
-            const auto& ids = themes_.BuiltinIds();
-            for (size_t i = 0; i < ids.size() && i < size_t(RemoveFolderFirst - ThemeFirst); ++i) {
-                const auto* t = themes_.Builtin(ids[i]);
-                if (!t) continue;
-                const auto bg = t->settings.winColor, ac = t->settings.accent;
-                themes.push_back({Wide(t->name), ThemeFirst + (int)i, theme_.settings.skin == ids[i], false,
-                    D2D1::ColorF(bg.r, bg.g, bg.b), D2D1::ColorF(ac.r, ac.g, ac.b)});
-            }
-            add(L"Выберите настроение", L"Смотрите на плеер справа: это настоящее оформление, которое вы меняете.", themes);
-            homeInput_.cards.back().themeGallery = true;
-            add(L"Размер текста — " + std::to_wstring((int)std::lround(theme_.settings.textScale * 100)) + L"%",
-                L"Название и исполнитель в образце меняются сразу. Кнопки не перекрываются крупным текстом.",
-                {{L"Аа  Меньше", FontSmaller}, {L"Аа  Больше", FontLarger}});
-            add(L"Форма обложки", L"Квадратная, мягкая или круглая — результат сразу виден в образце.",
-                {{L"Квадрат", ShapeFirst, theme_.settings.coverShape == "square"},
-                 {L"Скругление", ShapeFirst + 1, theme_.settings.coverShape == "rounded"},
-                 {L"Круг", ShapeFirst + 2, theme_.settings.coverShape == "circle"}});
-            const char* colors[] = {"#ED647B", "#A78BFA", "#57C9C1", "#83B87D", "#F2B56B", "#79AEF2"};
-            const wchar_t* names[] = {L"Роза", L"Лаванда", L"Мята", L"Шалфей", L"Мёд", L"Небо"};
-            std::vector<Home::Control> accents;
-            for (int i = 0; i < 6; ++i) {
-                theme::Rgba ac; theme::ParseHexColor(colors[i], ac);
-                const auto bg = theme_.settings.winColor;
-                accents.push_back({names[i], AccentFirst + i,
-                    !theme_.settings.accentFromCover && theme::HexColor(theme_.settings.accent, false) == colors[i], false,
-                    D2D1::ColorF(bg.r, bg.g, bg.b), D2D1::ColorF(ac.r, ac.g, ac.b)});
-            }
-            add(L"Акцентный цвет", L"Цвет кнопок, полосы времени и волны. Выбор цвета отключает подбор из обложки.", accents);
-            homeInput_.cards.back().themeGallery = true;
-            toggle(L"Цвета из обложки", L"Плеер подбирает акцент к текущему альбому. В образце используется тот же трек.", AccentFromCover, theme_.settings.accentFromCover);
-            add(L"Подсветка обложки", L"Мягкое цветное свечение под изображением. Посмотрите на его края в образце.",
-                {{L"Без подсветки", AmbientFirst, theme_.settings.ambient == 0},
-                 {L"Мягкая", AmbientFirst + 1, theme_.settings.ambient > 0 && theme_.settings.ambient < .8},
-                 {L"Яркая", AmbientFirst + 2, theme_.settings.ambient >= .8}});
-            toggle(L"Музыкальная волна", L"Движение под обложкой. Здесь работает демонстрация, при воспроизведении волна следует музыке.", Visualizer, theme_.settings.vizStyle != "off");
-            add(L"Детализация волны — " + std::to_wstring((int)theme_.settings.vizBars) + L" полос",
-                L"Меньше полос — спокойнее силуэт. Больше — подробнее рисунок звука.", {{L"Меньше", VizLess}, {L"Больше", VizMore}});
-            std::vector<Home::Control> motion;
-            const wchar_t* motionNames[] = {L"Мягко", L"Пружинисто", L"Спокойно", L"Быстро", L"Плавно", L"Без анимаций"};
-            for (int i = 0; i < 6; ++i) motion.push_back({motionNames[i], MotionFirst + i, theme_.settings.motion == theme::MotionCharacters()[i].id});
-            add(L"Характер движения плеера", L"Меняет пружины и скорость переходов. Переключите «Плеер / Мини» справа, чтобы увидеть движение.", motion);
-            toggle(L"Меньше движения", L"Включите для спокойного интерфейса. Образец перестанет двигаться; музыка продолжит играть как обычно.", ReduceMotion, reduceMotion_);
-            add(L"Своя тема", L"Импортируйте оформление или сохраните свои цвета и размеры в файл.",
-                {{L"Импорт", workspace::ImportTheme}, {L"Экспорт", workspace::ExportTheme}});
-        } else if (settingsSection_ == 1) {
-            toggle(L"Выровнять громкость", L"Громкие и тихие треки ближе по уровню. Работает, если в файле есть метки ReplayGain.", Normalize, player_.Normalize());
-            {
-                const double cf = player_.Crossfade();
-                add(L"Плавный переход между треками",
-                    L"Конец трека затихает, следующий в это время нарастает. Треки одного альбома идут стыком, как записаны.",
-                    {{L"Стык", CrossfadeFirst, cf <= 0},
-                     {L"3 с", CrossfadeFirst + 1, cf > 0 && cf < 4.5},
-                     {L"6 с", CrossfadeFirst + 2, cf >= 4.5 && cf < 8},
-                     {L"10 с", CrossfadeFirst + 3, cf >= 8}});
-            }
-            toggle(L"Показывать, сколько осталось", L"Посмотрите на время под обложкой в образце. Выключено — полная длительность; включено — обратный отсчёт.", Remaining, view_.showRemaining);
-            toggle(L"Мини-плеер поверх окон", L"Мини-полоска останется видна поверх других программ. Обычный плеер это не затрагивает.", MiniTop, miniOnTop_);
-            add(L"Размер окна", L"Выберите реальный режим. Образец справа можно переключать, не закрывая настройки.",
-                {{L"Открыть плеер", Compact}, {L"Мини-полоска", Mini}});
-        } else if (settingsSection_ == 2) {
-            add(L"Ваша музыка", scanner_.Running() ? L"Ищем новые треки…" : L"Папки с музыкой. Файлы остаются на своих местах.",
-                {{L"Добавить папку", AddFolder}, {L"Пересканировать", Rescan}, {L"К библиотеке", OpenLibrary}});
-            toggle(L"Следить за папками", L"Новые файлы появляются в библиотеке автоматически, без ручного обновления.", AutoScan, library_.AutoScan());
-            toggle(L"Скрывать одинаковые файлы", L"Точные копии показываются один раз. Сравниваем содержимое, а не только название. Файлы не удаляются.", HideDuplicates, library_.HideDuplicates());
-            const auto& folders = library_.Folders();
-            // Each list owns a fixed command range (workspace.h); never let one spill into the next
-            for (size_t i = 0; i < folders.size() && i < size_t(PluginFirst - RemoveFolderFirst); ++i)
-                add(L"Музыкальная папка", folders[i].wstring(), {{L"Убрать из списка", RemoveFolderFirst + (int)i}});
-        } else {
-            add(L"Открыть музыку", L"Добавьте файлы или папку. Поддерживается перетаскивание в окно.",
-                {{L"Файлы", workspace::OpenFiles}, {L"Папка", OpenFolder}});
-            add(L"История", L"Посмотрите, что слушали чаще всего. Статистика хранится локально.", {{L"Итоги", Stats}});
-            add(L"PlayerMoon", L"Настройки применяются сразу. Последнее изменение можно отменить кнопкой под образцом.", {{L"Закрыть плеер", Exit}});
-            // всё выше - кнопками; клавиши запоминать не нужно, это лишь короткий путь для привыкших
-            add(L"Клавиши, если удобно", L"Необязательно: всё то же есть кнопками. Пробел — пауза, Ctrl+F — поиск, Ctrl+M — мини-полоска, Ctrl+H — главная или плеер.");
-        }
+        BuildSettings();
         return;
     }
     const auto& plugins = plugins_.Plugins();
@@ -133,7 +51,10 @@ void App::BuildWorkspace() {
                 {{p.enabled ? L"Выключить" : L"Включить", PluginFirst + (int)i, p.enabled}});
             homeInput_.cards.back().error = !p.error.empty();
         }
-        if (plugins.empty()) add(L"Плагины не найдены", L"Добавьте папку плагина с plugin.json и DLL в пользовательскую папку и перезапустите плеер.");
+        if (plugins.empty()) {
+            add(L"Плагины не найдены", L"Добавьте папку плагина с plugin.json и DLL в пользовательскую папку и перезапустите плеер.");
+            homeInput_.cards.back().illustration = Home::EmptyPlugins;
+        }
         // Plugin-defined menu entries remain available without the old nested menu.
         const auto& items = plugins_.MenuItems();
         for (size_t i = 0; i < items.size() && i < size_t(PageActionFirst - PluginMenuFirst); ++i)
@@ -146,10 +67,10 @@ void App::BuildWorkspace() {
     homeInput_.downloadText = value;
     homeInput_.downloadFocused = GetFocus() == downloadEdit_;
     SendMessageW(downloadEdit_, EM_GETSEL, (WPARAM)&homeInput_.downloadStart, (LPARAM)&homeInput_.downloadEnd);
-    add(L"Умная загрузка", L"Уже скачанные ID и повторы ссылок пропускаются. Обрывы продолжаются, недоступные треки не останавливают плейлист. Существующие файлы не перезаписываются.");
     if (!homeInput_.downloadEnabled) {
-        add(L"Загрузчик выключен", L"Включите штатный плагин «Загрузка музыки», чтобы проверить инструменты и управлять заданиями.",
-            {{L"Включить загрузчик", EnableDownloader, true}});
+        add(L"Три шага до музыки", L"1. Скопируйте ссылку в браузере.  2. Вернитесь сюда - она сама окажется в поле.  "
+                                   L"3. Нажмите «Скачать». Нужные программы плеер установит при первой загрузке.",
+            {{L"Подготовить заранее", EnableDownloader, true}});
         return;
     }
     const auto& pages = plugins_.Pages();
@@ -171,8 +92,9 @@ void App::BuildWorkspace() {
         for (size_t i = 0; i < menu.size() && i < size_t(PageActionFirst - PluginMenuFirst); ++i)
             if (menu[i].plugin == src.plugin && menu[i].id != 1)
                 controls.push_back({Wide(menu[i].title), PluginMenuFirst + (int)i, false});
-        add(L"Куда сохранять", L"Готовые треки появятся в библиотеке. Архив успешных загрузок хранится в папке музыки.", controls);
-        add(L"Вход для личного плейлиста", L"Список LM — «Мне нравится». Выберите браузер, где уже выполнен вход в YouTube Music. Пароль в PlayerMoon вводить не нужно.",
+        add(L"Куда сохранять", L"Готовые треки сразу появляются в библиотеке и очереди. Скачанное повторно не загружается, "
+                               L"оборванное продолжается, файлы не перезаписываются.", controls);
+        add(L"Личные плейлисты - по желанию", L"Нужно только для «Мне нравится» и закрытых списков: выберите браузер, где вы уже вошли в YouTube Music. Пароль вводить не нужно.",
             {{L"Без входа", BrowserNone, browserLabel == "Вход: нет"},
              {L"Firefox", BrowserFirefox, browserLabel == "Вход: Firefox"},
              {L"Chrome", BrowserChrome, browserLabel == "Вход: Chrome"},
@@ -183,22 +105,62 @@ void App::BuildWorkspace() {
             add(Wide(row.title), Wide(row.subtitle + (row.status.empty() ? "" : " · " + row.status)), controls);
             homeInput_.cards.back().progress = row.progress;
             homeInput_.cards.back().error = row.state == PM_ROW_ERROR;
+            homeInput_.cards.back().job = row.state;
+            homeInput_.cards.back().tools = row.id == 1;
             if (row.id != 1) {
                 auto job = std::move(homeInput_.cards.back());
                 homeInput_.cards.pop_back();
                 homeInput_.cards.insert(homeInput_.cards.begin(), std::move(job));
             }
         }
-        if (src.rows.empty()) add(L"Загрузок пока нет", Wide(src.emptyText));
+        if (src.rows.empty()) {
+            add(L"Загрузок пока нет", Wide(src.emptyText));
+            homeInput_.cards.back().illustration = Home::EmptyDownloads;
+        }
+        // Пока загрузчик не готов, его строка - первое, что видно на странице
+        for (const auto& row : src.rows) {
+            if (row.id != 1 || row.state == PM_ROW_DONE) continue;
+            auto it = std::find_if(homeInput_.cards.begin(), homeInput_.cards.end(),
+                                   [&](const Home::Card& c) { return c.title == Wide(row.title); });
+            if (it != homeInput_.cards.end()) std::rotate(homeInput_.cards.begin(), it, it + 1);
+        }
     }
 }
 void App::WorkspaceCommand(int command) {
     workspaceNotice_.clear();
-    if ((command >= ShapeFirst && command <= VizMore) || (command >= ThemeFirst && command < RemoveFolderFirst) || command == FontSmaller || command == FontLarger ||
-        command == Normalize || command == Remaining || command == MiniTop || command == ReduceMotion || command == AutoScan || command == HideDuplicates ||
-        (command >= CrossfadeFirst && command < CrossfadeFirst + 4))
-        settingsUndo_ = SettingsSnapshot{theme_, userTheme_, reduceMotion_, player_.Normalize(), view_.showRemaining,
-                                        miniOnTop_, library_.AutoScan(), library_.HideDuplicates(), player_.Crossfade()};
+    if ((command >= ShapeFirst && command <= VizMore) || (command >= ThemeFirst && command < RemoveFolderFirst) || command == FontSmaller ||
+        command == FontLarger || command == Normalize || command == Remaining || command == MiniTop || command == ReduceMotion ||
+        command == AutoScan || command == HideDuplicates || (command >= CrossfadeFirst && command < CrossfadeFirst + 4) ||
+        (command >= WindowFxFirst && command < WindowFxFirst + 7))
+        RememberSettings();
+    if (command >= ShortcutFirst && command < PresetFirst) {
+        capturingShortcut_ = capturingShortcut_ == command - ShortcutFirst ? -1 : command - ShortcutFirst;
+        SetFocus(hwnd_);
+        Invalidate();
+        return;
+    }
+    if (command >= WaveMoodFirst && command < WaveMoodFirst + 8) {
+        StartMoodWave(command - WaveMoodFirst);
+        return;
+    }
+    if (command == OpenDownloads) {
+        OpenWorkspace(view::HomeModel::Downloads);
+        return;
+    }
+    if (SettingsCommand(command)) {
+        MarkDirty();
+        Invalidate();
+        return;
+    }
+    if (command >= WindowFxFirst && command < WindowFxFirst + 7) {
+        windowFx_ = command - WindowFxFirst;
+        SaveHomePreferences();
+        // Показ на живом окне: вариант «своё» показывает переход в главную
+        PlayWindowEntrance(windowFx_ == 0 ? WindowForm::Compact : WindowForm::Unknown, WindowForm::Home);
+        MarkDirty();
+        Invalidate();
+        return;
+    }
     if (command >= CrossfadeFirst && command < CrossfadeFirst + 4) {
         const double seconds[] = {0, 3, 6, 10};
         player_.SetCrossfade(seconds[command - CrossfadeFirst]);
@@ -230,17 +192,6 @@ void App::WorkspaceCommand(int command) {
         case PreviewMini: previewMini_ = true; break;
         case PreviewFull: previewMini_ = false; break;
         case PreviewLarge: previewLarge_ = !previewLarge_; break;
-        case UndoSettings:
-            if (settingsUndo_) {
-                auto before = *settingsUndo_; settingsUndo_.reset();
-                userTheme_ = before.user; reduceMotion_ = before.reduce; miniOnTop_ = before.top;
-                view_.showRemaining = before.remaining; player_.SetNormalize(before.normalize);
-                player_.SetCrossfade(before.crossfade);
-                library_.SetAutoScan(before.autoScan); library_.SetHideDuplicates(before.hideDuplicates);
-                library_.Save(libraryPath_); RestartWatcher(); StartLibraryScan();
-                ApplyTheme(before.theme, false); ApplyTopmost();
-            }
-            break;
         case HideDuplicates:
             library_.SetHideDuplicates(!library_.HideDuplicates()); library_.Save(libraryPath_); StartLibraryScan(); break;
         case LikedMusic:
@@ -265,21 +216,19 @@ void App::WorkspaceCommand(int command) {
         case Remaining: view_.showRemaining = !view_.showRemaining; break;
         case MiniTop: miniOnTop_ = !miniOnTop_; ApplyTopmost(); break;
         case ReduceMotion: reduceMotion_ = !reduceMotion_; ApplyTheme(theme_, false); break;
-        case Compact: if (homeMode_) ToggleHome(); break;
+        case Compact: if (homeMode_) AnimatedToggleHome(); break;
         case Mini: EnterMini(); break;
         case workspace::OpenFiles: App::OpenFiles(false); break;
         case OpenFolder: App::OpenFiles(true); break;
         case workspace::ImportTheme: App::ImportTheme(); break;
         case workspace::ExportTheme: App::ExportTheme(); break;
         case PluginsFolder: OpenPluginsFolder(); break;
-        case EnableDownloader:
-            for (size_t i = 0; i < plugins_.Plugins().size(); ++i)
-                if (plugins_.Plugins()[i].id == "downloader" && !plugins_.Plugins()[i].enabled) TogglePlugin((int)i);
-            break;
+        case EnableDownloader: EnableDownloaderPlugin(); break;
         case SubmitDownload: {
+            // Пустое поле - берём ссылку из буфера обмена (её прочитает сам плагин)
             wchar_t value[8193]{}; GetWindowTextW(downloadEdit_, value, 8193);
             submittedDownload_ = text::WideToUtf8(value);
-            if (submittedDownload_.empty()) { workspaceNotice_ = L"Вставьте ссылку в поле перед скачиванием."; break; }
+            if (!EnableDownloaderPlugin()) { workspaceNotice_ = L"Загрузчик не запустился - загляните в раздел «Плагины»."; break; }
             bool sent = false;
             for (size_t i = 0; i < plugins_.Pages().size(); ++i) {
                 const auto& p = plugins_.Pages()[i];
@@ -288,17 +237,18 @@ void App::WorkspaceCommand(int command) {
                 }
             }
             submittedDownload_.clear();
-            if (!sent) workspaceNotice_ = L"Сначала включите плагин загрузчика.";
+            if (!sent) workspaceNotice_ = L"Загрузчик ещё запускается, нажмите «Скачать» ещё раз.";
+            else { SetWindowTextW(downloadEdit_, L""); prefillClipboard_ = GetClipboardSequenceNumber(); }
             break;
         }
         case FontSmaller:
         case FontLarger: {
             auto theme = theme_;
-            theme.settings.textScale = std::clamp(theme.settings.textScale + (command == FontLarger ? .1 : -.1), .8, 1.5);
+            theme.settings.textScale = std::clamp(theme.settings.textScale + (command == FontLarger ? .1 : -.1), .8, 2.0);
             userTheme_ = true; ApplyTheme(theme, false); break;
         }
-        case Exit: CloseWindow(); break;
-        case Stats: if (homeMode_) ToggleHome(); ShowStats(); break;
+        case Exit: QuitApp(); break;
+        case Stats: if (homeMode_) OpenStory(statsPeriod_); else ShowStats(); break;
         case OpenLibrary: home_.Navigate(view::HomeModel::Library); LayoutHomeSearch(); break;
         default:
             if (command >= PageActionFirst) {

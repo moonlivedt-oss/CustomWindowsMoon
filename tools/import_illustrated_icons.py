@@ -4,11 +4,12 @@ python tools/import_illustrated_icons.py crimson path/to/sheet.png
 python tools/import_illustrated_icons.py --check
 This is asset slicing, not a substitute for generative artwork.
 """
-from pathlib import Path
 import argparse
 import json
 import shutil
 from collections import deque
+from pathlib import Path
+
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]

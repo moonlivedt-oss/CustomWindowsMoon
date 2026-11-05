@@ -38,6 +38,7 @@ constexpr UINT kTrayId = 1;
 constexpr int kHotWindows = 1;    // Alt + ` - кольцо окон
 constexpr int kHotSelection = 7;  // Ctrl + Alt + Пробел - кольцо выделенного
 enum Cmd {
+    CMD_PROFILE = 90,  // +уровень профиля (core/profile)
     CMD_EDITOR = 100,
     CMD_EDIT,
     CMD_FOLDER,

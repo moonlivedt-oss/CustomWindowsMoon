@@ -89,7 +89,7 @@ add_dependencies(pm_theme pm_assets)
 
 # Состояние интерфейса без Win32: раскладки, виджеты, переходы режимов (проверяется тестами)
 add_library(pm_view STATIC view/layout.cpp view/motion_params.cpp view/widgets.cpp view/marquee.cpp view/svg_arc.cpp
-    view/visualizer.cpp view/player_view.cpp view/panel.cpp view/lyrics_panel.cpp)
+    view/visualizer.cpp view/player_view.cpp view/panel.cpp view/lyrics_panel.cpp view/liquid.cpp)
 target_include_directories(pm_view PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(pm_view PUBLIC pm_theme pm_core pm_motion)
 target_compile_options(pm_view PRIVATE ${PM_WARNINGS})
@@ -149,7 +149,7 @@ add_custom_command(TARGET pm_test_plugin_pages POST_BUILD
 add_executable(pm_tests tests/main.cpp tests/test_motion.cpp tests/test_json.cpp tests/test_theme.cpp
     tests/test_playlist.cpp tests/test_tags.cpp tests/test_fft.cpp tests/test_state.cpp tests/test_engine.cpp
     tests/test_view.cpp tests/test_plugins.cpp tests/test_downloader.cpp tests/test_lyrics.cpp tests/test_history.cpp
-    plugins/downloader/ytdlp.cpp tests/test_home.cpp)
+    plugins/downloader/ytdlp.cpp tests/test_home.cpp tests/test_karaoke.cpp)
 target_link_libraries(pm_tests PRIVATE pm_view pm_theme pm_core pm_motion)
 target_compile_options(pm_tests PRIVATE ${PM_WARNINGS})
 # GCC 13 даёт ложное срабатывание stringop-overflow на vector::push_back при -O3 в тестах,
@@ -177,16 +177,16 @@ if(WIN32)
     add_test(NAME pm_renderer_tests COMMAND pm_renderer_tests)
     add_executable(pm_settings_render_tests tests/test_settings_render_win.cpp
         ui/renderer.cpp ui/text.cpp ui/icons.cpp ui/covers.cpp ui/painter.cpp
-        ui/home.cpp ui/home_workspace.cpp ui/home_settings.cpp ui/settings_preview.cpp)
+        ui/home.cpp ui/home_workspace.cpp ui/home_settings.cpp ui/home_fx.cpp ui/home_drag.cpp ui/home_now.cpp ui/home_palette.cpp ui/home_story.cpp ui/home_liquid.cpp ui/home_magic.cpp ui/intro.cpp ui/settings_preview.cpp)
     target_compile_options(pm_settings_render_tests PRIVATE ${PM_WARNINGS})
     target_link_libraries(pm_settings_render_tests PRIVATE pm_view pm_theme pm_core pm_motion
         d2d1 dwrite dcomp d3d11 dxgi dxguid dwmapi windowscodecs ole32 oleaut32 uuid shell32
-        shlwapi user32 uxtheme advapi32 gdi32 runtimeobject shcore winhttp)
+        shlwapi user32 uxtheme advapi32 gdi32 runtimeobject shcore winhttp uiautomationcore)
     add_test(NAME pm_settings_render_tests COMMAND pm_settings_render_tests)
     add_executable(PlayerMoon WIN32 ${PM_UI_SOURCES} ui/res/app.rc)
     target_link_libraries(PlayerMoon PRIVATE pm_view pm_theme pm_core pm_motion
         d2d1 dwrite dcomp d3d11 dxgi dxguid dwmapi windowscodecs ole32 oleaut32 uuid shell32 shlwapi user32 uxtheme advapi32 gdi32
-        runtimeobject shcore winhttp)
+        runtimeobject shcore winhttp uiautomationcore)
     add_dependencies(PlayerMoon pm_plugin_history pm_plugin_downloader)
     target_compile_options(PlayerMoon PRIVATE ${PM_WARNINGS})
     target_link_options(PlayerMoon PRIVATE -municode)

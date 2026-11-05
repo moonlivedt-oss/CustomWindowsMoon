@@ -30,6 +30,30 @@ std::vector<std::string> JsonArrays(const std::string& js, const char* key) {
     return out;
 }
 
+// Текст массива "content_scripts": [...] целиком, со вложенными массивами (строки могут содержать скобки).
+std::string ContentScripts(const std::string& js) {
+    size_t a = js.find("\"content_scripts\"");
+    if (a == std::string::npos) return "";
+    size_t b = js.find('[', a);
+    if (b == std::string::npos) return "";
+    int depth = 0;
+    bool str = false;
+    for (size_t i = b; i < js.size(); ++i) {
+        char ch = js[i];
+        if (str) {
+            if (ch == '\\') ++i;
+            else if (ch == '"') str = false;
+        } else if (ch == '"') {
+            str = true;
+        } else if (ch == '[') {
+            ++depth;
+        } else if (ch == ']' && --depth == 0) {
+            return js.substr(b, i - b + 1);
+        }
+    }
+    return js.substr(b);
+}
+
 bool AllSitesPattern(const std::string& p) {
     return p == "<all_urls>" || p == "*://*/*" || p == "http://*/*" || p == "https://*/*" || p == "*://*/" ||
            p == "file:///*";
@@ -39,11 +63,16 @@ bool AllSitesPattern(const std::string& p) {
 
 int ExtRightsOf(const std::string& manifest) {
     int r = 0;
+    // optional_permissions не считаем: их расширение только может попросить, и браузер спросит пользователя.
+    // matches - только у content_scripts: в web_accessible_resources и externally_connectable тот же ключ значит
+    // «какие сайты могут обратиться к расширению», а не «что расширение читает»
     std::vector<std::string> all;
-    for (const char* k : {"permissions", "optional_permissions", "host_permissions", "matches"}) {
+    for (const char* k : {"permissions", "host_permissions"}) {
         std::vector<std::string> v = JsonArrays(manifest, k);
         all.insert(all.end(), v.begin(), v.end());
     }
+    std::vector<std::string> scripts = JsonArrays(ContentScripts(manifest), "matches");
+    all.insert(all.end(), scripts.begin(), scripts.end());
     for (const std::string& p : all) {
         if (AllSitesPattern(p)) r |= EXT_ALL_SITES;
         if (p == "clipboardRead") r |= EXT_CLIPBOARD;
@@ -87,6 +116,34 @@ int ExtRisk(int r) {
         if (r & bit) k += wide ? 2 : 1;
     if (r & (EXT_HISTORY | EXT_REQUESTS)) k += 1;
     return k;
+}
+
+// Права - ещё не опасность: расширение из магазина с широкими правами просто требует доверия. «Опасно» - только когда
+// широкие права у того, что поставлено мимо магазина.
+ExtLevel ExtVerdict(int rights, bool store) {
+    int risk = ExtRisk(rights);
+    if (risk < 2) return EXT_V_NONE;
+    if (!store) return EXT_V_DANGER;
+    return risk >= 4 ? EXT_V_WIDE : EXT_V_SITES;
+}
+
+std::vector<ExtGroup> GroupExts(const std::vector<BrowserExt>& list) {
+    std::vector<ExtGroup> out;
+    for (const BrowserExt& e : list) {
+        std::wstring place = e.browser + (e.profile.empty() ? L"" : L" (" + e.profile + L")");
+        ExtGroup* same = nullptr;
+        for (ExtGroup& g : out)
+            if (g.e.id == e.id) same = &g;
+        if (!same) {
+            out.push_back({e, place, 1});
+            continue;
+        }
+        same->where += L", " + place;
+        ++same->copies;
+        same->e.rights |= e.rights;  // версии в профилях бывают разные: показываем наибольшее
+        same->e.store = same->e.store && e.store;
+    }
+    return out;
 }
 
 }  // namespace tools

@@ -473,7 +473,7 @@ void PlayerView::OnWheel(Point p, float delta, double nowTime) {
         return;
     }
     if (!panel) return;
-    if (CurrentKind() == TabKind::Lyrics) lyrics.manualUntil = nowTime + 4.0;
+    if (CurrentKind() == TabKind::Lyrics) lyrics.manualUntil = nowTime + 4.0;  // 4 с после колеса строки не едут сами
     const float maxScroll = std::max(0.f, ContentHeight() - ListViewHeight());
     ShowScrollbar(true);
     // delta - доли «щелчка» колеса (120 единиц Windows = 1); щелчок = три строки

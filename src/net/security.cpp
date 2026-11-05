@@ -73,7 +73,7 @@ SecurityState ReadSecurity() {
 std::wstring SecurityAdvice(unsigned risks) {
     std::wstring text;
     if (risks & FIREWALL_OFF)
-        text += L"Брандмауэр Windows отключён для активного профиля сети. Проверьте «Безопасность Windows — "
+        text += L"Брандмауэр Windows отключён для активного профиля сети. Проверьте «Безопасность Windows - "
                 L"Брандмауэр и защита сети». Если используете сторонний межсетевой экран, проверьте его состояние. ";
     if (risks & WIFI_OPEN)
         text += L"У подключённой Wi-Fi нет шифрования радиоканала. Предпочтите защищённую сеть; используйте HTTPS. ";

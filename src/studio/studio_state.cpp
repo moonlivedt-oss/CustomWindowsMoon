@@ -14,6 +14,7 @@
 #include "modes/modestats.h"
 #include "system/ui/toolsui.h"
 #include "system/auto/weekreport.h"
+#include "core/profile.h"
 #include "core/bg.h"
 #include "core/elevate.h"
 #include "core/files.h"
@@ -239,7 +240,7 @@ void Studio::StatePage(const RectF& r) {
     if (working) RepaintIn(250);  // пока считается - изредка перерисовываемся, итог появится сам
 
     Header(col, L"Состояние",
-           L"Всё важное сейчас и что можно сделать в один клик. Подсчёт размеров: " +
+           L"Подсчёт размеров: " +
                (s.scanning ? std::wstring(L"идёт...") : Ago(s.at)));
     if (ui.Button(ID_STATE_REFRESH, RectF(col.GetRight() - ui.S(132), col.Y + ui.S(4), ui.S(132), ui.S(36)),
                   s.scanning ? L"Считаю" : L"Обновить", Kind::Secondary, L"", s.scanning)) {
@@ -338,7 +339,8 @@ void Studio::StatePage(const RectF& r) {
 
     // ---- пропущенные карточки (Л10) и заглушённые виды (Л11) ----
     if (float mh = MissedCards(x, y, w)) y += mh + gap;
-    if (float uh = UnusedFeatures(x, y, w)) y += uh + gap;
+    if (profile::Effective() >= profile::Dev)  // «Чем не пользуетесь» - про настройки, которых здесь не видно
+        if (float uh = UnusedFeatures(x, y, w)) y += uh + gap;
 
     // ---- важное сейчас (О4): те же дела, что в первом секторе кольца утилит, с кнопкой ----
     if (!stateImpAt_ || now - stateImpAt_ > 10000) {
@@ -995,7 +997,7 @@ void Studio::AutoPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Автоматика",
-           L"Что программа делает сама, чтобы не приходилось лезть и искать. Всё можно выключить.");
+           L"Что программа делает сама");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();

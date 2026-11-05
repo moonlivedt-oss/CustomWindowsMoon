@@ -164,6 +164,7 @@ const BoolKey kBoolKeys[] = {
     {L"gamepad", &Config::gamepad},
     {L"clip_history", &Config::clipHistory},
     {L"clip_secrets", &Config::clipSecrets},
+    {L"translate_google", &Config::translateGoogle},
     {L"win_drag", &Config::winDrag},
     {L"cpu_balance", &Config::cpuBalance},
     {L"no_sleep", &Config::noSleep},
@@ -208,6 +209,7 @@ const TextKey kTextKeys[] = {
     {L"folder_icon", &Config::folderIcon},
     {L"vscode", &Config::vscode},
     {L"terminal", &Config::terminal},
+    {L"profile", &Config::profile},
     {L"library", &Config::library},
 };
 const IntKey kIntKeys[] = {
@@ -217,7 +219,7 @@ const IntKey kIntKeys[] = {
     {L"max_children", &Config::maxChildren, 4, 24},    {L"volume", &Config::volume, 0, 100},
     {L"corner_delay", &Config::cornerDelay, 50, 2000}, {L"battery_low", &Config::batteryLow, 5, 50},
     {L"night_from", &Config::nightFrom, 0, 23},        {L"night_to", &Config::nightTo, 0, 23},
-    {L"cursor_size", &Config::cursorSize, 0, 128},
+    {L"cursor_size", &Config::cursorSize, 0, 128},     {L"profile_ask", &Config::profileAsk, 0, 1},
 };
 
 bool ApplySimpleKey(Config& cfg, const std::wstring& key, const std::wstring& val) {
@@ -416,6 +418,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     o << L"custom_accent2 = " << ColorText(c.customAccent2) << L"\n";
     o << L"custom_gold = " << ColorText(c.customGold) << L"\n";
     o << L"tour_done = " << (c.tourDone ? 1 : 0) << L"\n";
+    o << L"profile = " << c.profile << L"\n";
+    o << L"profile_ask = " << c.profileAsk << L"\n";
     o << L"# горячие углы (tl, tr, bl, br): desktop, tasks, start, screen_off, lock, screenshot, play, next, mute,\n"
          L"# keys:ctrl+shift+esc, путь к программе или пусто; corner2_ - двойной толчок в угол;\n"
          L"# wheel_ - колесо в углу: volume, brightness, track; corner_delay - сколько держать курсор в углу, мс\n";
@@ -584,6 +588,8 @@ bool SaveConfig(const std::wstring& file, const Config& c) {
     for (const std::wstring& r : c.rules) o << L"rule = " << r << L"\n";
     o << L"clip_secrets = " << (c.clipSecrets ? 1 : 0) << L"\n";
     o << L"clip_secret_sec = " << c.clipSecretSec << L"\n";
+    o << L"# translate_google - перевод: разрешить Google там, где локально нельзя (текст уходит на его серверы)\n";
+    o << L"translate_google = " << (c.translateGoogle ? 1 : 0) << L"\n";
     o << L"win_drag = " << (c.winDrag ? 1 : 0) << L"\n";
     o << L"# cpu_balance - фоновому процессу, что долго ест процессор, пока вы работаете, временно ниже приоритет;\n"
          L"# no_sleep - не уходить в сон, пока идёт что-то из no_sleep_apps; long_watch - карточка, когда команда из\n"

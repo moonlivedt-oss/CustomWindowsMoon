@@ -172,6 +172,18 @@ float Approach(float v, float target, float up, float down) {
     return v < target ? std::min(target, v + up) : std::max(target, v - down);
 }
 
+// пружина мелкими шагами: кадры приходят неровно
+void Spring(float& x, float& v, float target, float k, float c, double dt) {
+    int n = std::max(1, (int)std::ceil(dt / 0.004));
+    float h = (float)(dt / n);
+    for (int i = 0; i < n; ++i) {
+        v += (k * (target - x) - c * v) * h;
+        x += v * h;
+    }
+}
+
+float Lerp(float a, float b, float t) { return a + (b - a) * t; }
+
 }  // namespace
 
 void MediaWidget::Create(HINSTANCE inst) {
@@ -189,7 +201,10 @@ void MediaWidget::Create(HINSTANCE inst) {
 
 void MediaWidget::Apply(const Config& cfg) {
     theme_ = CurrentTheme(cfg);
-    if (!art_) accent_ = theme_.ac;
+    if (!hasArt_) {
+        accent_ = accentFrom_ = theme_.ac;
+        if (k_ > 0) SetArt();  // яблоко без обложки красится цветом темы
+    }
     toastOn_ = cfg.mediaToast;
     skipFull_ = cfg.skipFullscreen;
     if (cfg.media && !enabled_) {
@@ -201,45 +216,58 @@ void MediaWidget::Apply(const Config& cfg) {
         watch_.Stop();
         track_ = media::Track();
         open_ = false;
-        slide_ = 0;
+        slide_ = slideV_ = 0;
+        swap_ = 0;
+        haveNext_ = false;
         if (wnd_) ShowWindow(wnd_, SW_HIDE);
+        FreeFrame();
     }
     dirty_ = true;
 }
 
 void MediaWidget::Destroy() {
     watch_.Stop();
+    FreeFrame();
     if (wnd_ && IsWindow(wnd_)) DestroyWindow(wnd_);
     wnd_ = nullptr;
 }
 
+// Окно одного размера для обеих карточек: маленькая вырастает в большую на месте, с запасом слева под пластинку.
 SIZE MediaWidget::WindowSize() const {
     float k = (float)k_;
-    if (mode_ == M_MINI) return {(LONG)std::ceil((kTW + kM * 2) * k), (LONG)std::ceil((kTH + kM * 2) * k)};
-    return {(LONG)std::ceil((kW + kM * 2) * k), (LONG)std::ceil((kLyr + kH + kM * 2) * k)};
+    return {(LONG)std::ceil((kRollL + kW + kM * 2) * k), (LONG)std::ceil((kLyr + kH + kM * 2) * k)};
 }
 
 RectF MediaWidget::Body() const {
-    float k = (float)k_, m = kM * k;
-    if (mode_ == M_MINI) return RectF(m, m, kTW * k, kTH * k);
-    float ex = (float)EaseOut(expand_), grow = kLyr * k * ex;
-    return RectF(m, m + kLyr * k - grow, kW * k, kH * k + grow);
+    float k = (float)k_, mo = std::clamp(morph_, -0.04f, 1.06f);
+    float cx = (kM + kRollL + kW / 2) * k, bottom = (kM + kLyr + kH) * k;
+    float w = Lerp(kTW, kW, mo) * k, h = (Lerp(kTH, kH, mo) + kLyr * (float)EaseOut(expand_)) * k;
+    return RectF(cx - w / 2, bottom - h, w, h);
+}
+
+RectF MediaWidget::RecordRect() const {
+    float k = (float)k_, mo = std::clamp(morph_, 0.0f, 1.04f);
+    float bottom = (kM + kLyr + kH) * k, cx = (kM + kRollL + kW / 2) * k;
+    float fx = cx - kW * k / 2 + 18 * k, mx = cx - kTW * k / 2 + 12 * k;
+    float d = Lerp(kRecMini, kRec, mo) * k;
+    return RectF(Lerp(mx, fx, mo), bottom - Lerp(12, 18, mo) * k - d, d, d);
 }
 
 RectF MediaWidget::Rect(Hit h) const {
-    float k = (float)k_, m = kM * k;
+    float k = (float)k_, m = kM * k, mx = (kM + kRollL) * k;
     if (mode_ == M_MINI) {
-        if (h == H_COVER) return RectF(m + 12 * k, m + 12 * k, 54 * k, 54 * k);
-        if (h == H_TEXT) return RectF(m + 78 * k, m + 12 * k, (kTW - 92) * k, 54 * k);
+        float x0 = mx + (kW - kTW) / 2 * k, y0 = m + (kLyr + kH - kTH) * k;
+        if (h == H_COVER) return RecordRect();
+        if (h == H_TEXT) return RectF(x0 + 78 * k, y0 + 10 * k, (kTW - 92) * k, 58 * k);
         if (h == H_BODY) return Body();
         return RectF();
     }
     float by = m + kLyr * k;  // верх карточки без текста песни
-    float x0 = m + 166 * k, w = (kW - 166 - 22) * k;
+    float x0 = mx + 166 * k, w = (kW - 166 - 22) * k;
     float cx = x0 + w / 2;
     switch (h) {
         case H_COVER:
-            return RectF(m + 18 * k, by + 18 * k, 128 * k, 128 * k);
+            return RectF(mx + 18 * k, by + 18 * k, kRec * k, kRec * k);
         case H_TEXT:
             return RectF(x0, by + 16 * k, w, 70 * k);
         case H_BAR:
@@ -291,24 +319,80 @@ void MediaWidget::SetScale(double k) {
     shadowFull_ = Shadow(kW * kk, kH * kk, kPad * kk, kRadius * kk, blur, 150);
     shadowTall_ = Shadow(kW * kk, (kH + kLyr) * kk, kPad * kk, kRadius * kk, blur, 150);
     shadowMini_ = Shadow(kTW * kk, kTH * kk, kPad * kk, 18 * kk, blur, 140);
+    FreeFrame();
+    BuildDisc();
     SetArt();
+}
+
+// Пластинка рисуется один раз: бороздки круглые, а блик от лампы стоит на месте - вращается только яблоко.
+void MediaWidget::BuildDisc() {
+    float k = (float)k_, pad = 12 * k, d = kRec * k, r = d / 2, c = pad + r;
+    int size = (int)std::ceil(d + pad * 2);
+    disc_ = std::make_unique<Bitmap>(size, size, PixelFormat32bppPARGB);
+    Graphics g(disc_.get());
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    for (int i = 6; i >= 1; --i) {  // тень
+        SolidBrush sb(Color((BYTE)(14 + (6 - i) * 7), 0, 0, 0));
+        float e = i * 1.4f * k;
+        g.FillEllipse(&sb, c - r - e, c - r - e + 6 * k, d + 2 * e, d + 2 * e);
+    }
+    SolidBrush base(Color(255, 21, 17, 26));
+    g.FillEllipse(&base, c - r, c - r, d, d);
+    Pen groove(Color(255, 38, 32, 44), std::max(0.8f, 1.1f * k));
+    for (float gr = r - 2 * k; gr > r * 0.5f; gr -= 3 * k) g.DrawEllipse(&groove, c - gr, c - gr, gr * 2, gr * 2);
+    {
+        GraphicsPath clip;
+        clip.AddEllipse(c - r, c - r, d, d);
+        g.SetClip(&clip);
+        for (float mid : {-50.f, 130.f}) {  // две полосы блика напротив друг друга
+            for (float a = -26; a < 26; a += 2) {
+                float f = 1 - (a / 26) * (a / 26);
+                SolidBrush b(Color((BYTE)(44 * f), 255, 255, 255));
+                g.FillPie(&b, c - r, c - r, d, d, mid + a, 2.2f);
+            }
+        }
+        g.ResetClip();
+    }
+    Pen rim(Color(60, 255, 255, 255), 1 * k);
+    g.DrawEllipse(&rim, c - r + 0.5f, c - r + 0.5f, d - 1, d - 1);
 }
 
 void MediaWidget::SetArt() {
     artId_ = track_.artId;
-    art_.reset();
-    artSmall_.reset();
     artBg_.reset();
+    accentFrom_ = acMix_ >= 1 ? accent_ : accentFrom_;
+    acMix_ = 0;
     accent_ = theme_.ac;
-    if (track_.art.empty() || k_ <= 0) return;
-    art_ = Fit(track_.art, (int)std::lround(128 * k_), (int)std::lround(128 * k_));
-    artSmall_ = Fit(track_.art, (int)std::lround(54 * k_), (int)std::lround(54 * k_));
-    if (auto small = Fit(track_.art, 24, 24)) {
-        COLORREF c;
-        if (ArtAccent(small.get(), c)) accent_ = c;
+    hasArt_ = false;
+    layerDirty_ = true;
+    if (k_ <= 0) return;
+    int ld = (int)std::lround(kRec * 0.46 * k_);
+    std::unique_ptr<Bitmap> face;
+    if (!track_.art.empty()) {
+        face = Fit(track_.art, ld, ld);
+        if (auto small = Fit(track_.art, 24, 24)) {
+            COLORREF c;
+            if (ArtAccent(small.get(), c)) accent_ = c;
+        }
+        artBg_ = Fit(track_.art, 40, 40);  // крошечная копия: растянутая и размытая, она станет фоном
+        if (artBg_) BlurOpaque(artBg_.get(), 3);
+        hasArt_ = face != nullptr;
     }
-    artBg_ = Fit(track_.art, 40, 40);  // крошечная копия: растянутая и размытая, она станет фоном
-    if (artBg_) BlurOpaque(artBg_.get(), 3);
+    label_ = std::make_unique<Bitmap>(ld, ld, PixelFormat32bppPARGB);
+    Graphics g(label_.get());
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    GraphicsPath p;
+    p.AddEllipse(0, 0, ld, ld);
+    if (face) {
+        TextureBrush tb(face.get());
+        g.FillPath(&tb, &p);
+    } else {
+        LinearGradientBrush lb(PointF(0, 0), PointF((REAL)ld, (REAL)ld), ToColor(accent_), ToColor(theme_.glow));
+        g.FillPath(&lb, &p);
+        if (note_) g.DrawImage(note_.get(), RectF(ld * 0.24f, ld * 0.24f, ld * 0.52f, ld * 0.52f));
+    }
 }
 
 void MediaWidget::RequestLyrics() {
@@ -316,18 +400,61 @@ void MediaWidget::RequestLyrics() {
     fetch_.Request(track_.artist, track_.title, (int)(track_.end / 10000000), wnd_, WM_LYRICS);
 }
 
-void MediaWidget::OnTrack() {
-    track_ = watch_.Get();
+void MediaWidget::OnTrack() { FeedTrack(watch_.Get()); }
+
+void MediaWidget::FeedTrack(media::Track t) {
+    if (haveNext_) {  // старая пластинка ещё катится: новое подождёт её
+        next_ = std::move(t);
+        return;
+    }
+    if (t.id != lastTrackId_ && lastTrackId_ != 0 && open_ && mode_ == M_FULL && slide_ > 0.6f) {
+        next_ = std::move(t);
+        haveNext_ = true;
+        if (!swap_) BeginSwap();
+        return;
+    }
+    ApplyTrack(t);
+}
+
+void MediaWidget::ApplyTrack(const media::Track& t) {
+    track_ = t;
     if (track_.artId != artId_) SetArt();
     if (track_.id != lastTrackId_) {
         bool first = lastTrackId_ == 0;
         lastTrackId_ = track_.id;
         lyrPos_ = 0;
         plainOff_ = 0;
+        titleOff_ = 0;
+        titleW_ = -1;
         if (lyricsOn_) RequestLyrics();
         if (!first && track_.status == media::kPlaying) Toast();
     }
     dirty_ = true;
+}
+
+// Пластинка укатывается; новый трек покажем, когда она скроется (или вернём её, если трек так и не сменился).
+void MediaWidget::BeginSwap() {
+    swap_ = 1;
+    swapSince_ = GetTickCount64();
+    rxT_ = -kRoll;
+}
+
+void MediaWidget::Close() {
+    open_ = false;
+    closingSince_ = GetTickCount64();
+    rxT_ = -kRoll;
+    watch_.SetFast(false);
+}
+
+float MediaWidget::Rev(float delay, float dur) const {
+    if (fx::Game() || !revealAt_) return 1;
+    ULONGLONG now = GetTickCount64();
+    if (now < revealAt_) return 0;
+    return (float)Clamp01(((now - revealAt_) / fx::Dur(1000) - delay) / dur);
+}
+
+Color MediaWidget::Ac() const {
+    return acMix_ >= 1 ? ToColor(accent_) : MixColor(ToColor(accentFrom_), ToColor(accent_), EaseOut(acMix_));
 }
 
 void MediaWidget::Toast() {
@@ -341,13 +468,27 @@ void MediaWidget::Toast() {
     UINT dx = 96, dy = 96;
     GetDpiForMonitor(hm, MDT_EFFECTIVE_DPI, &dx, &dy);
     usage::Hit(L"media_toast");
+    ULONGLONG nowMs = GetTickCount64();
+    bool fresh = slide_ <= 0;
     mode_ = M_MINI;
     SetScale(dx / 96.0);
     mon_ = mi.rcMonitor;
-    SIZE sz = WindowSize();
-    pos_.x = (mon_.left + mon_.right) / 2 - sz.cx / 2;
-    pos_.y = mon_.bottom - (LONG)((kLift + kTH + kM) * k_);
-    toastUntil_ = GetTickCount64() + kToast;
+    pos_.x = (mon_.left + mon_.right) / 2 - (LONG)((kM + kRollL + kW / 2) * k_);
+    pos_.y = mon_.bottom - (LONG)((kLift + kLyr + kH + kM) * k_);
+    if (fresh) {
+        morph_ = morphV_ = 0;
+        slide_ = slideV_ = 0;
+        rx_ = -kRoll;
+        rxV_ = 0;
+        spin_ = 0;
+        needleAt_ = nowMs + (ULONGLONG)fx::Dur(300);
+        revealAt_ = nowMs + (ULONGLONG)fx::Dur(90);
+    }
+    rxT_ = 0;
+    layerDirty_ = true;
+    toastUntil_ = nowMs + kToast;
+    toastPt_ = pt;
+    miniOverSince_ = 0;
     open_ = true;
     watch_.SetFast(true);
 }
@@ -356,15 +497,32 @@ void MediaWidget::Open(POINT pt, const RECT& mon) {
     usage::Hit(L"media");
     UINT dx = 96, dy = 96;
     GetDpiForMonitor(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &dx, &dy);
-    bool fromMini = mode_ == M_MINI && slide_ > 0;
+    ULONGLONG now = GetTickCount64();
+    bool fromMini = mode_ == M_MINI && slide_ > 0, fresh = slide_ <= 0;
     mode_ = M_FULL;
     SetScale(dx / 96.0);
     mon_ = mon;
-    SIZE sz = WindowSize();
-    LONG m = (LONG)(kM * k_);
-    pos_.x = std::clamp(pt.x - sz.cx / 2, mon.left - m, std::max(mon.left - m, mon.right - sz.cx + m));
-    pos_.y = mon.bottom - (LONG)((kLift + kLyr + kH + kM) * k_);
-    if (fromMini) slide_ = 1;  // маленькая карточка уже на месте: большая просто сменяет её
+    if (!fromMini) {  // из маленькой карточки большая растёт на её же месте, а не прыгает к курсору
+        LONG mx = (LONG)((kM + kRollL) * k_), bw = (LONG)(kW * k_);
+        pos_.x = std::clamp(pt.x - mx - bw / 2, mon.left - mx, std::max(mon.left - mx, mon.right - mx - bw));
+        pos_.y = mon.bottom - (LONG)((kLift + kLyr + kH + kM) * k_);
+    }
+    if (fresh) {
+        morph_ = 1;
+        morphV_ = 0;
+        slide_ = slideV_ = 0;
+        rx_ = -kRoll;
+        rxV_ = 0;
+        spin_ = 0;
+        needleAt_ = now + (ULONGLONG)fx::Dur(560);
+        revealAt_ = now + (ULONGLONG)fx::Dur(110);
+    } else if (fromMini) {
+        spin_ += 240;  // рост подталкивает пластинку
+        revealAt_ = now + (ULONGLONG)fx::Dur(120);
+    } else {
+        needleAt_ = now + (ULONGLONG)fx::Dur(200);
+    }
+    rxT_ = 0;
     open_ = true;
     awaySince_ = 0;
     hot_ = H_NONE;
@@ -376,30 +534,35 @@ void MediaWidget::Open(POINT pt, const RECT& mon) {
 void MediaWidget::Tick(const Config& cfg, bool blocked) {
     if (!enabled_ || !wnd_) return;
     ULONGLONG now = GetTickCount64();
+    double dtRaw = std::min<double>(50, (double)(now - lastTick_));
+    lastTick_ = now;
+    double dt = dtRaw / fx::Dur(1000);  // секунды с поправкой на скорость движения
     POINT pt;
     GetCursorPos(&pt);
     RectF body = Body();
     LONG bl = pos_.x + (LONG)body.X, br = pos_.x + (LONG)body.GetRight(), bt = pos_.y + (LONG)body.Y;
 
     if (open_ && mode_ == M_MINI) {
-        // навели на маленькую карточку - раскрывается большая
-        if (slide_ > 0.6f && pt.x >= bl && pt.x <= br && pt.y >= bt && pt.y <= mon_.bottom) {
-            Open(pt, mon_);
-        } else if (now >= toastUntil_) {
-            open_ = false;
-            watch_.SetFast(false);
+        // задержались на маленькой карточке - раскрывается большая. Мимоходом не считается, и курсор, под которым
+        // она сама выехала, тоже: он должен сдвинуться
+        bool over = slide_ > 0.6f && pt.x >= bl && pt.x <= br && pt.y >= bt && pt.y <= mon_.bottom;
+        if (over && (pt.x != toastPt_.x || pt.y != toastPt_.y)) {
+            if (!miniOverSince_) miniOverSince_ = now;
+            if (now - miniOverSince_ >= kMiniDwell) Open(pt, mon_);
+        } else {
+            miniOverSince_ = 0;
+            if (now >= toastUntil_) Close();
         }
     } else if (open_) {
         // карточка держится, пока курсор над ней или под ней у края
         LONG pad = (LONG)(26 * k_);
         bool inside = pt.x >= bl - pad && pt.x <= br + pad && pt.y >= bt - pad && pt.y <= mon_.bottom + 2;
-        if (inside || GetCapture() == wnd_) {
+        if (inside || demoHold_ || GetCapture() == wnd_) {
             awaySince_ = 0;
         } else if (!awaySince_) {
             awaySince_ = now;
         } else if (now - awaySince_ > kLinger) {
-            open_ = false;
-            watch_.SetFast(false);
+            Close();
         }
     } else if (slide_ <= 0) {
         HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -412,7 +575,8 @@ void MediaWidget::Tick(const Config& cfg, bool blocked) {
         bool edge = pt.y >= r.bottom - 1 && pt.x > r.left + gap && pt.x < r.right - 1 - gap &&
                     !MonitorFromPoint({pt.x, r.bottom}, MONITOR_DEFAULTTONULL);
         bool buttons = (GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) & 0x8000;
-        if (!edge || blocked || buttons || (cfg.skipFullscreen && corners::FullscreenOn(mon, r))) {
+        if (!edge) edgeHold_ = false;
+        if (!edge || edgeHold_ || blocked || buttons || (cfg.skipFullscreen && corners::FullscreenOn(mon, r))) {
             edgeSince_ = 0;
         } else if (!edgeSince_) {
             edgeSince_ = now;
@@ -420,19 +584,107 @@ void MediaWidget::Tick(const Config& cfg, bool blocked) {
         } else if (now - edgeSince_ >= kDwell && track_.has && !track_.title.empty()) {
             edgeSince_ = 0;
             Open(pt, r);
+        } else if (now - edgeSince_ >= kLaunchDwell && !(track_.has && !track_.title.empty()) &&
+                   playermoon::Installed()) {
+            // Карточке нечего показать: плеер закрыт (или в нём нет трека) - запускаем его или выводим вперёд
+            edgeSince_ = 0;
+            edgeHold_ = true;
+            playermoon::Open(wnd_);
         }
     }
 
-    bool anim = false;
+    // другой трек: пока старая пластинка катится прочь, карточка показывает её
+    if (swap_) {
+        bool away = rx_ < -kRoll * 0.7f || now - swapSince_ > (ULONGLONG)fx::Dur(320);
+        if (haveNext_ && (away || !open_)) {
+            haveNext_ = false;
+            swap_ = 0;
+            ApplyTrack(next_);
+            rx_ = -kRoll;
+            rxV_ = 0;
+            rxT_ = open_ ? 0 : -kRoll;
+            needleAt_ = now + (ULONGLONG)fx::Dur(420);
+        } else if (!haveNext_ && now - swapSince_ > 1200) {  // плеер так и не сменил трек
+            swap_ = 0;
+            rxT_ = open_ ? 0 : -kRoll;
+            needleAt_ = now + (ULONGLONG)fx::Dur(300);
+        }
+    }
+
+    bool playing = track_.status == media::kPlaying;
+    bool needle = open_ && playing && !swap_ && now >= needleAt_;
+    float f = track_.end > 0 ? (float)std::clamp((double)track_.Now() / track_.end, 0.0, 1.0) : 0;
+    float armT = needle ? -14 + 20 * f : -22;
+
+    bool frame = false, anim = false;  // frame - движется верхний слой, anim - перерисовать и неподвижный
+    float rxBefore = rx_, armBefore = arm_, slideBefore = slide_;
+    bool closing = !open_ && now - closingSince_ >= (ULONGLONG)fx::Dur(130);
+    if (fx::Game()) {  // в игре - сразу на месте
+        slide_ = open_ ? 1.0f : 0.0f;
+        slideV_ = 0;
+        morph_ = mode_ == M_FULL ? 1.0f : 0.0f;
+        morphV_ = 0;
+        rx_ = rxT_;
+        rxV_ = 0;
+        arm_ = armT;
+        armV_ = 0;
+        spin_ = 0;
+    } else {
+        Spring(slide_, slideV_, open_ || !closing ? 1.0f : 0.0f, 170, open_ ? 20.0f : 24.0f, dt);
+        float morphBefore = morph_;
+        Spring(morph_, morphV_, mode_ == M_FULL ? 1.0f : 0.0f, 150, 16, dt);
+        if (std::fabs(morph_ - (mode_ == M_FULL ? 1.0f : 0.0f)) < 0.001f && std::fabs(morphV_) < 0.01f)
+            morph_ = mode_ == M_FULL ? 1.0f : 0.0f, morphV_ = 0;
+        anim |= morph_ != morphBefore;
+        Spring(rx_, rxV_, rxT_, 95, 13.5f, dt);
+        if (std::fabs(rx_ - rxT_) < 0.15f && std::fabs(rxV_) < 1) rx_ = rxT_, rxV_ = 0;
+        Spring(arm_, armV_, armT, 90, 14, dt);
+        if (std::fabs(arm_ - armT) < 0.02f && std::fabs(armV_) < 0.05f) arm_ = armT, armV_ = 0;
+        float target = needle ? 200.0f : 0.0f;
+        spin_ += (target - spin_) * (float)(1 - std::exp(-dt / (needle ? 0.28 : 0.55)));
+        if (std::fabs(spin_ - target) < 0.3f) spin_ = target;
+        // катится по-настоящему: поворот равен пройденному пути
+        if (k_ > 0) {  // до первого показа масштаба ещё нет
+            float recR = RecordRect().Width / 2 / (float)k_;
+            ang_ = (float)std::fmod(ang_ + spin_ * dt + (rx_ - rxBefore) / recR * 57.3f, 360.0);
+        }
+    }
+    if (!open_ && closing && slide_ <= 0.01f)
+        slide_ = slideV_ = 0;  // хвост пружины: иначе маленькой карточке негде выглянуть
+    frame |= rx_ != rxBefore || arm_ != armBefore || slide_ != slideBefore || spin_ != 0;
+
     auto step = [&](float& v, float target, float up, float down) {
         if (v == target) return;
         v = Approach(v, target, fx::Step(up), fx::Step(down));
         anim = true;
     };
-    step(slide_, open_ ? 1.0f : 0.0f, 0.09f, 0.12f);
     step(expand_, lyricsOn_ && mode_ == M_FULL ? 1.0f : 0.0f, 0.08f, 0.1f);
     step(volShow_, now < volUntil_ ? 1.0f : 0.0f, 0.25f, 0.08f);
+    step(glow_, playing ? 1.0f : 0.4f, 0.05f, 0.04f);
+    step(acMix_, 1, 0.035f, 0.035f);
+    step(titleA_, swap_ ? 0.0f : 1.0f, 0.08f, 0.12f);
     for (int i = 0; i < kHits; ++i) step(hover_[i], i == hot_ ? 1.0f : 0.0f, 0.2f, 0.14f);
+    {
+        float before = eq_;
+        eq_ = Approach(eq_, needle ? 1.0f : 0.0f, fx::Step(0.1f), fx::Step(0.08f));
+        frame |= eq_ != before || eq_ > 0;
+    }
+    if (revealAt_ && now < revealAt_ + (ULONGLONG)fx::Dur(1000)) anim = true;  // строки появляются одна за другой
+    // длинное название прокручивается, пока на него смотрят
+    float over = titleW_ - Rect(H_TEXT).Width + 12 * (float)k_;
+    if (hot_ == H_TEXT && over > 0 && !swap_) {
+        if (!titleOverSince_) titleOverSince_ = now;
+        if (now - titleOverSince_ > 250 && titleOff_ < over) {
+            titleOff_ = std::min(over, titleOff_ + 45 * (float)(k_ * dt));
+            anim = true;
+        }
+    } else {
+        titleOverSince_ = 0;
+        if (titleOff_ > 0) {
+            titleOff_ = titleOff_ < 1 ? 0 : titleOff_ * (float)std::exp(-dt / 0.1);
+            anim = true;
+        }
+    }
     if (expand_ > 0) {
         lyrics::Lyrics ly = fetch_.Get(track_.artist, track_.title);
         if (ly.state == lyrics::kSynced) {
@@ -453,11 +705,185 @@ void MediaWidget::Tick(const Config& cfg, bool blocked) {
     if (slide_ <= 0) {
         if (IsWindowVisible(wnd_)) {
             ShowWindow(wnd_, SW_HIDE);
+            FreeFrame();
             mem::TrimSoon();
         }
         return;
     }
-    if (anim || dirty_) Render();
+    if (dirty_ || anim) layerDirty_ = true;
+    dirty_ = false;
+    if (discBaked_ != (rx_ == rxT_ && rx_ == 0)) layerDirty_ = true;  // пластинка встала или покатилась
+    if (layerDirty_ || frame || !IsWindowVisible(wnd_)) Render();
+}
+
+bool MediaWidget::SnapFrame(const Config& cfg, const media::Track& t, const SnapState& st, double k,
+                            const std::wstring& out) {
+    const CLSID png = {0x557CF406, 0x1A04, 0x11D3, {0x9A, 0x73, 0x00, 0x00, 0xF8, 0x1E, 0xF3, 0x2E}};
+    theme_ = CurrentTheme(cfg);
+    track_ = t;
+    mode_ = st.morph < 0.5f ? M_MINI : M_FULL;
+    morph_ = st.morph;
+    rx_ = rxT_ = st.rx;
+    arm_ = st.arm;
+    ang_ = st.ang;
+    expand_ = st.expand;
+    slide_ = 1;
+    eq_ = t.status == media::kPlaying ? 1.0f : 0.0f;
+    glow_ = t.status == media::kPlaying ? 1.0f : 0.4f;
+    if (!note_) note_ = LoadImageFile(ExeDir() + L"\\icons\\music.png", 160);
+    SetScale(k);
+    acMix_ = 1;
+    SIZE sz = WindowSize();
+    Bitmap frame(sz.cx, sz.cy, PixelFormat32bppARGB);
+    Graphics g(&frame);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+    g.Clear(Color(255, 46, 42, 50));
+    DrawStatic(g);
+    DrawDynamic(g);
+    return frame.Save(out.c_str(), &png, nullptr) == Ok;
+}
+
+void MediaWidget::DemoRun(HINSTANCE inst, const Config& cfg, const media::Track& a, const media::Track& b,
+                          const std::wstring& dir) {
+    const CLSID png = {0x557CF406, 0x1A04, 0x11D3, {0x9A, 0x73, 0x00, 0x00, 0xF8, 0x1E, 0xF3, 0x2E}};
+    Create(inst);
+    theme_ = CurrentTheme(cfg);
+    accent_ = accentFrom_ = theme_.ac;
+    enabled_ = demoHold_ = true;
+    toastOn_ = true;
+    skipFull_ = false;
+    ApplyTrack(a);
+    POINT pt;
+    GetCursorPos(&pt);
+    HMONITOR hm = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(hm, &mi);
+    POINT mid{(mi.rcMonitor.left + mi.rcMonitor.right) / 2, mi.rcMonitor.bottom - 1};
+    Open(mid, mi.rcMonitor);
+    ULONGLONG t0 = GetTickCount64();
+    std::wstring log;
+    struct Mark {
+        int ms;
+        const wchar_t* name;
+    };
+    const Mark marks[] = {{250, L"open-rolling"},  {750, L"open-needle"}, {1500, L"playing"},
+                          {2200, L"paused"},       {3000, L"resumed"},    {3350, L"next-rollout"},
+                          {3800, L"next-rollin"},  {4600, L"next-done"},  {5100, L"scratch"},
+                          {5500, L"closing"},      {6000, L"closed"},     {6500, L"mini"},
+                          {7400, L"mini-growing"}, {8200, L"grown"}};
+    size_t nextMark = 0;
+    int stage = 0;
+    for (;;) {
+        ULONGLONG ms = GetTickCount64() - t0;
+        MSG m;
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+        if (stage == 0 && ms >= 1600) {  // пауза
+            track_.status = media::kPaused;
+            stage = 1;
+        } else if (stage == 1 && ms >= 2500) {  // снова играет
+            track_.status = media::kPlaying;
+            FILETIME ft;
+            GetSystemTimePreciseAsFileTime(&ft);
+            track_.updated = ((int64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+            stage = 2;
+        } else if (stage == 2 && ms >= 3200) {  // нажали «дальше»: пластинка укатывается сразу
+            BeginSwap();
+            stage = 3;
+        } else if (stage == 3 && ms >= 3500) {  // плеер сообщил новый трек
+            FeedTrack(b);
+            stage = 4;
+        } else if (stage == 4 && ms >= 5000) {  // перемотка
+            spin_ = 1300;
+            stage = 5;
+        } else if (stage == 5 && ms >= 5400) {  // курсор ушёл
+            Close();
+            stage = 6;
+        } else if (stage == 6 && ms >= 6300) {  // сменился трек, карточка спрятана: выглядывает маленькая
+            lastTrackId_ = 0;                   // следующий ApplyTrack не откроет лишнего
+            ApplyTrack(a);
+            Toast();
+            stage = 7;
+        } else if (stage == 7 && ms >= 7200) {  // задержались на маленькой
+            Open(mid, mi.rcMonitor);
+            stage = 8;
+        }
+        Tick(cfg, false);
+        if (nextMark < sizeof(marks) / sizeof(marks[0]) && ms >= (ULONGLONG)marks[nextMark].ms) {
+            wchar_t line[256];
+            swprintf(line, 256,
+                     L"%5d %-14ls slide=%.2f morph=%.2f rx=%.0f rxT=%.0f arm=%.1f spin=%.0f eq=%.2f swap=%d visible=%d "
+                     L"open=%d title=%ls\r\n",
+                     (int)ms, marks[nextMark].name, slide_, morph_, rx_, rxT_, arm_, spin_, eq_, swap_,
+                     IsWindowVisible(wnd_) ? 1 : 0, open_ ? 1 : 0, track_.title.c_str());
+            log += line;
+            if (bits_) {
+                Bitmap frame(dibW_, dibH_, PixelFormat32bppARGB);
+                Graphics g(&frame);
+                g.Clear(Color(255, 46, 42, 50));
+                Bitmap src(dibW_, dibH_, dibW_ * 4, PixelFormat32bppPARGB, (BYTE*)bits_);
+                g.DrawImage(&src, 0, 0);
+                frame.Save((dir + L"\\sim-" + marks[nextMark].name + L".png").c_str(), &png, nullptr);
+            }
+            ++nextMark;
+        }
+        if (nextMark >= sizeof(marks) / sizeof(marks[0])) break;
+        Sleep(16);
+    }
+    if (wnd_) ShowWindow(wnd_, SW_HIDE);
+    HANDLE f = CreateFileW((dir + L"\\sim.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        std::string u(WideCharToMultiByte(CP_UTF8, 0, log.c_str(), (int)log.size(), nullptr, 0, nullptr, nullptr), 0);
+        WideCharToMultiByte(CP_UTF8, 0, log.c_str(), (int)log.size(), u.data(), (int)u.size(), nullptr, nullptr);
+        DWORD put = 0;
+        WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
+        CloseHandle(f);
+    }
+}
+
+void MediaWidget::Bench(const Config& cfg, const media::Track& t, double k, double& spinMs, double& fullMs) {
+    theme_ = CurrentTheme(cfg);
+    track_ = t;
+    mode_ = M_FULL;
+    morph_ = 1;
+    rx_ = rxT_ = 0;
+    arm_ = -8;
+    slide_ = 1;
+    eq_ = 1;
+    SetScale(k);
+    acMix_ = 1;
+    SIZE sz = WindowSize();
+    std::vector<uint32_t> layer((size_t)sz.cx * sz.cy), frameBits((size_t)sz.cx * sz.cy);
+    LARGE_INTEGER fq, a, b;
+    QueryPerformanceFrequency(&fq);
+    auto settle = [](Graphics& g) {
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        g.SetPixelOffsetMode(PixelOffsetModeHalf);
+        g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+    };
+    const int n = 200;
+    QueryPerformanceCounter(&a);
+    for (int i = 0; i < n; ++i) {
+        std::fill(layer.begin(), layer.end(), 0);
+        Bitmap bmp(sz.cx, sz.cy, sz.cx * 4, PixelFormat32bppPARGB, (BYTE*)layer.data());
+        Graphics g(&bmp);
+        settle(g);
+        DrawStatic(g);
+    }
+    QueryPerformanceCounter(&b);
+    fullMs = (b.QuadPart - a.QuadPart) * 1000.0 / fq.QuadPart / n;
+    QueryPerformanceCounter(&a);
+    for (int i = 0; i < n; ++i) {
+        memcpy(frameBits.data(), layer.data(), layer.size() * 4);
+        ang_ += 4;
+        Bitmap bmp(sz.cx, sz.cy, sz.cx * 4, PixelFormat32bppPARGB, (BYTE*)frameBits.data());
+        Graphics g(&bmp);
+        settle(g);
+        DrawDynamic(g);
+    }
+    QueryPerformanceCounter(&b);
+    spinMs = (b.QuadPart - a.QuadPart) * 1000.0 / fq.QuadPart / n;
 }
 
 void MediaWidget::Wheel(int delta, POINT client) {
@@ -569,13 +995,19 @@ LRESULT MediaWidget::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 track_.updated = NowFileTime();
                 dirty_ = true;
             }
-            if (h == H_NEXT && CanNext()) watch_.Send(media::CMD_NEXT);
+            if (h == H_NEXT && CanNext()) {
+                watch_.Send(media::CMD_NEXT);
+                if (!swap_) BeginSwap();  // пластинка укатывается сразу, не дожидаясь плеера
+            }
             if (h == H_PREV && CanPrev()) {
                 watch_.Send(media::CMD_PREV);
                 if (track_.Now() > 30000000 && track_.canSeek && track_.end > 0) {
                     track_.position = 0;  // в начало трека: показать сразу
                     track_.updated = NowFileTime();
+                    spin_ = -1300;  // царапает назад
                     dirty_ = true;
+                } else if (!swap_) {
+                    BeginSwap();
                 }
             }
             if (h == H_COVER || h == H_TEXT) media::FocusSource(track_.aumid);
@@ -588,6 +1020,7 @@ LRESULT MediaWidget::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 if (lyricsOn_) RequestLyrics();
             }
             auto seek = [&](int64_t to) {
+                spin_ = to > track_.Now() ? 1300.0f : -1300.0f;  // перемотка царапает пластинку
                 watch_.Send(media::CMD_SEEK, to);
                 track_.position = to;
                 track_.updated = NowFileTime();

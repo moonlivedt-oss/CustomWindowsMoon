@@ -18,7 +18,9 @@
 #include "core/secrets.h"
 #include "core/text.h"
 #include "core/usage.h"
+#include "cards/translatecard.h"
 #include "desktop/share.h"
+#include "helpers/ocr.h"
 #include "helpers/snip.h"
 #include "ring/menu.h"
 
@@ -30,6 +32,7 @@ namespace {
 
 constexpr wchar_t kClass[] = L"MoonRadialClip";
 constexpr UINT_PTR kWipeTimer = 1;
+constexpr UINT WM_CLIP_OCR = WM_APP + 1;
 constexpr size_t kMax = 30;
 constexpr size_t kMaxDib = 48u << 20;  // картинка больше 48 МБ (скриншот 8K) в историю не идёт
 constexpr size_t kMaxPins = 20;
@@ -295,6 +298,19 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         Wipe();
         return 0;
     }
+    if (m == WM_CLIP_OCR) {
+        std::unique_ptr<std::wstring> text((std::wstring*)lp);
+        if (wp == 0 && text && !text->empty()) {
+            // как обычное копирование: секрет не запомнится и будет стёрт из буфера
+            if (snipimg::TextToClipboard(g_wnd, *text))
+                translatecard::ShowText(L"Текст с картинки", *text);
+            else
+                translatecard::ShowError(L"Текст с картинки", L"Буфер обмена занят, попробуйте ещё раз");
+        } else {
+            translatecard::ShowError(L"Текст с картинки", text && !text->empty() ? *text : L"Текста на картинке не нашлось");
+        }
+        return 0;
+    }
     return DefWindowProcW(h, m, wp, lp);
 }
 
@@ -414,8 +430,26 @@ void Use(int n) {
     macro::Run(L"keys:ctrl+v");
 }
 
-void ShowRing(RadialMenu& menu) {
-    if (menu.IsOpen()) return;
+void ReadImage(int n) {
+    if (n < 0 || n >= (int)g_list.size() || g_list[n].dib.empty() || !g_wnd) return;
+    std::unique_ptr<Bitmap> bmp = snipimg::FromDib(g_list[n].dib.data(), g_list[n].dib.size());
+    std::vector<uint8_t> png = bmp ? snipimg::ToPng(bmp.get()) : std::vector<uint8_t>();
+    if (png.empty()) {
+        translatecard::ShowError(L"Текст с картинки", L"Картинка не открылась");
+        return;
+    }
+    ocr::RecognizeAsync(std::move(png), g_wnd, WM_CLIP_OCR);
+}
+
+void DemoAddImage(const std::vector<BYTE>& dib) {
+    Entry e;
+    GetLocalTime(&e.at);
+    e.dib = dib;
+    MakeThumb(e);
+    Remember(std::move(e));
+}
+
+std::vector<Item> Ring() {
     std::vector<Item> ring = Items(L"");
     if (ring.empty()) {
         Item none;
@@ -425,16 +459,34 @@ void ShowRing(RadialMenu& menu) {
         none.iconFull = ExeDir() + L"\\icons\\files.png";
         ring.push_back(none);
     }
-    // первое кольцо - 12 секторов вместе с «Закрепить»: 10 свежих и «Ещё» со всем, что постарше
-    if (ring.size() > 11) {
+    // первое кольцо - 12 секторов вместе с «Закрепить» и «Текст с картинки»: свежие записи и «Ещё» со всем, что постарше
+    std::vector<Item> images;
+    for (Item it : Items(L"ocr:")) {
+        int n = _wtoi(it.path.c_str() + 4);
+        if (n < 0 || n >= (int)g_list.size() || g_list[n].dib.empty()) continue;
+        it.note = L"2 клика - распознать текст: он ляжет в буфер обмена. Всё на этом компьютере";
+        images.push_back(std::move(it));
+    }
+    const size_t fresh = images.empty() ? 10 : 9;
+    if (ring.size() > fresh + 1) {
         Item more;
         more.special = 3;
-        more.name = L"Ещё " + std::to_wstring(ring.size() - 10);
+        more.name = L"Ещё " + std::to_wstring(ring.size() - fresh);
         more.note = L"Записи постарше";
         more.iconFull = ExeDir() + L"\\icons\\more.png";
-        more.children.assign(ring.begin() + 10, ring.end());
-        ring.resize(10);
+        more.children.assign(ring.begin() + (std::ptrdiff_t)fresh, ring.end());
+        ring.resize(fresh);
         ring.push_back(std::move(more));
+    }
+    if (!images.empty()) {
+        Item read;
+        read.special = 3;
+        read.name = L"Текст с картинки";
+        read.note = L"Распознать текст с картинки из истории";
+        read.iconFull = ExeDir() + L"\\icons\\editor.png";
+        if (!Exists(read.iconFull)) read.iconFull = ExeDir() + L"\\icons\\more.png";
+        read.children = std::move(images);
+        ring.push_back(std::move(read));
     }
     // сектор «Закрепить»: записи с ключом pin:номер - закрепить или открепить
     if (!g_list.empty()) {
@@ -453,9 +505,17 @@ void ShowRing(RadialMenu& menu) {
         }
         ring.push_back(std::move(pin));
     }
+    return ring;
+}
+
+void ShowRing(RadialMenu& menu) {
+    if (menu.IsOpen()) return;
+    std::vector<Item> ring = Ring();
     menu.onNet = [](const std::wstring& key) {
         if (key.rfind(L"pin:", 0) == 0)
             TogglePin(_wtoi(key.c_str() + 4));
+        else if (key.rfind(L"ocr:", 0) == 0)
+            ReadImage(_wtoi(key.c_str() + 4));
         else if (!key.empty())
             Use(_wtoi(key.c_str()));
     };

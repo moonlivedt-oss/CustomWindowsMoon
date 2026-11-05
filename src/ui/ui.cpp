@@ -15,7 +15,7 @@ namespace ui {
 namespace {
 Color Alpha(Color c, BYTE a) { return Color(a, c.GetR(), c.GetG(), c.GetB()); }
 // свои ключи Anim у элемента рядом с его id: нажатие, наведение, положение ручки
-constexpr int kPressKey = 0x20000000, kHoverKey = 0x30000000, kKnobKey = 0x40000000;
+constexpr int kPressKey = 0x20000000, kHoverKey = 0x30000000, kKnobKey = 0x40000000, kScrollBarKey = 0x48000000;
 }  // namespace
 
 // ---------- ввод ----------
@@ -28,6 +28,8 @@ int Ui::HitAt(int x, int y) const {
 
 void Ui::OnMouseMove(int x, int y) {
     mouse_ = {x, y};
+    DetailMoved();
+    if (spotFrame_ == frameNo_) repaint_ = true;  // прожектор идёт за курсором
     int h = HitAt(x, y);
     if (h != hot_) {
         hotSince_ = GetTickCount64();
@@ -86,7 +88,7 @@ float Ui::Anim(int id, bool on, float speed) {
     auto it = anims_.find(id);
     float v = it == anims_.end() ? (on ? 1.0f : 0.0f) : it->second;
     float target = on ? 1.0f : 0.0f;
-    float step = std::min(1.0f, dt_ * speed);
+    float step = 1.0f - std::exp(-dt_ * speed);  // одинаково при любой частоте кадров
     v += (target - v) * step;
     if (std::fabs(target - v) < 0.01f)
         v = target;
@@ -331,8 +333,156 @@ void Ui::DrawTip(float w, float h) {
     Text(t, RectF(r.X + S(10), r.Y + S(7), tw + S(2), th), c_.text, 11.5f, false, Left, true);
 }
 
+// Рамка под курсором сменилась: таймер подсказки в окне запускается заново, погасить открытую карточку - новым кадром.
+void Ui::DetailMoved() {
+    std::wstring key;
+    for (auto it = prevDetails_.rbegin(); it != prevDetails_.rend(); ++it)
+        if (mouse_.x >= it->r.X && mouse_.x < it->r.X + it->r.Width && mouse_.y >= it->r.Y &&
+            mouse_.y < it->r.Y + it->r.Height) {
+            key = it->title;
+            break;
+        }
+    size_t sig = 0;
+    for (size_t i = 0; i < prevHoverTrack_.size(); ++i) {
+        const RectF& r = prevHoverTrack_[i];
+        if (mouse_.x >= r.X && mouse_.x < r.X + r.Width && mouse_.y >= r.Y && mouse_.y < r.Y + r.Height)
+            sig = sig * 31 + i + 1;
+    }
+    if (sig != hoverSig_) {
+        hoverSig_ = sig;
+        repaint_ = true;
+    }
+    if (key == detailKey_) return;
+    detailKey_ = key;
+    detailSince_ = GetTickCount64();
+    hotChanged_ = true;
+    repaint_ = true;
+}
+
+void Ui::Spotlight(const RectF& r, float radius) {
+    TrackHover(r);
+    if (!DetailHot(r) || fx::Game()) return;
+    if (spotFrame_ + 1 != frameNo_ && spotFrame_ != frameNo_) GlideSnap(-610);  // только что вошли - без полёта
+    spotFrame_ = frameNo_;
+    RectF at = Glide(-610, RectF((float)mouse_.x - 1, (float)mouse_.y - 1, 2, 2));
+    float cx = at.X + at.Width / 2, cy = at.Y + at.Height / 2, rad = S(210);
+    GraphicsPath spot;
+    spot.AddEllipse(cx - rad, cy - rad, rad * 2, rad * 2);
+    PathGradientBrush b(&spot);
+    int n = 1;
+    Color none = WithAlpha(c_.accent, 0);
+    b.SetSurroundColors(&none, &n);
+    GraphicsState st = g_->Save();
+    g_->SetClip(Round(r, radius), CombineModeIntersect);
+    b.SetCenterColor(WithAlpha(c_.accent, 30));
+    g_->FillEllipse(&b, cx - rad, cy - rad, rad * 2, rad * 2);
+    g_->Restore(st);
+    b.SetCenterColor(WithAlpha(c_.accent, 170));
+    Pen edge(&b, std::max(1.0f, S(1.2f)));
+    g_->DrawPath(&edge, Round(RectF(r.X + 0.5f, r.Y + 0.5f, r.Width - 1, r.Height - 1), radius));
+}
+
+void Ui::TextOver(const std::wstring& s, const RectF& r, Color base, Color on, const RectF& pill, float size, bool bold) {
+    Text(s, r, base, size, bold, Center);
+    GraphicsState st = g_->Save();
+    g_->SetClip(pill, CombineModeIntersect);
+    Text(s, r, on, size, bold, Center);
+    g_->Restore(st);
+}
+
+void Ui::RowGlow(const RectF& r) {
+    TrackHover(r);
+    ULONGLONG now = GetTickCount64();
+    if (!DetailHot(r) || down_ || now < scrollBusyUntil_) return;
+    if (glowFrame_ + 1 != frameNo_) {  // только что вошли: плашка появляется на месте, а не прилетает
+        GlideSnap(-600);
+        glowBorn_ = now;
+    }
+    glowFrame_ = frameNo_;
+    RectF box = Glide(-600, r);
+    float t = std::min(1.0f, (float)(now - glowBorn_) / (float)std::max(1.0, fx::Dur(130)));
+    if (t < 1) repaint_ = true;
+    Fill(box, WithAlpha(c_.cardHi, (BYTE)(170 * t)), S(10));
+}
+
+void Ui::Detail(const RectF& r, const std::wstring& title, const std::wstring& body, const std::wstring& links) {
+    if (!interactive || body.empty() || !g_) return;
+    // прокрученное за край страницы не ловит курсор: рамка - только в видимой части
+    RectF clip;
+    g_->GetClipBounds(&clip);
+    RectF part;
+    if (!RectF::Intersect(part, r, clip)) return;
+    details_.push_back({part, title, body, links});
+}
+
+bool Ui::DetailHot(const RectF& r) const {
+    return interactive && mouse_.x >= r.X && mouse_.x < r.X + r.Width && mouse_.y >= r.Y && mouse_.y < r.Y + r.Height;
+}
+
+void Ui::DrawDetail(float w, float h) {
+    const DetailReg* cur = nullptr;
+    if (!down_)
+        for (auto it = details_.rbegin(); it != details_.rend() && !cur; ++it)
+            if (mouse_.x >= it->r.X && mouse_.x < it->r.X + it->r.Width && mouse_.y >= it->r.Y &&
+                mouse_.y < it->r.Y + it->r.Height)
+                cur = &*it;
+    ULONGLONG now = GetTickCount64();
+    std::wstring key = cur ? cur->title : L"";
+    if (key != detailKey_) {
+        detailKey_ = key;
+        detailSince_ = now;
+    }
+    // карточка только что была открыта - следующая без ожидания
+    bool want = cur && now >= scrollBusyUntil_ && (now - detailSince_ >= 600 || now - detailSeen_ < 350);
+    if (want) {
+        detailShown_ = *cur;
+        detailSeen_ = now;
+    }
+    bool wasHidden = detailAlpha_ <= 0.01f;
+    detailAlpha_ = Anim(-501, want, 15);
+    if (detailAlpha_ <= 0.01f || detailShown_.title.empty()) return;
+
+    const DetailReg& d = detailShown_;
+    float pad = S(16), tw = std::min(S(330), w - S(40)), inner = tw - pad * 2;
+    float titleH = MeasureWrapped(d.title, 13, true, inner);
+    float bodyH = MeasureWrapped(d.body, 12, false, inner);
+    float linksH = d.links.empty() ? 0 : MeasureWrapped(d.links, 11, false, inner) + S(31);
+    float th = pad + titleH + S(6) + bodyH + linksH + pad;
+    // под строкой у курсора; снизу не помещается - над строкой
+    float x = std::clamp((float)mouse_.x - S(36), S(10), std::max(S(10), w - tw - S(10)));
+    float y = d.r.Y + d.r.Height + S(6);
+    if (y + th > h - S(8)) y = std::max(S(8), d.r.Y - th - S(6));
+    if (wasHidden) GlideSnap(-500);
+    RectF box = Glide(-500, RectF(x, y + S(6) * (1 - detailAlpha_), tw, th));
+    BYTE a = (BYTE)(255 * detailAlpha_);
+    // окно ввода рисуется поверх холста: над полем, в котором печатают, карточку не показываем
+    for (auto& [id, e] : edits_)
+        if (e.hwnd && GetFocus() == e.hwnd && e.pos.left < box.X + box.Width && e.pos.right > box.X &&
+            e.pos.top < box.Y + box.Height && e.pos.bottom > box.Y)
+            return;
+
+    for (int s = 3; s >= 1; --s)
+        Fill(RectF(box.X - s * S(2), box.Y + s * S(2), box.Width + s * S(4), box.Height + s * S(2)),
+             Color((BYTE)(26 * detailAlpha_), 0, 0, 0), S(14) + s * S(2));
+    Fill(box, WithAlpha(MixColor(c_.cardHi, c_.win, 0.25f), (BYTE)(250 * detailAlpha_)), S(14));
+    Stroke(box, WithAlpha(MixColor(c_.border, c_.accent, 0.45f), a), S(14));
+    Fill(RectF(box.X + S(1), box.Y + pad, S(3), titleH), WithAlpha(c_.accent, a), S(1.5f));
+
+    float ty = box.Y + pad;
+    Text(d.title, RectF(box.X + pad, ty, inner, titleH + S(2)), WithAlpha(c_.text, a), 13, true, Left, true);
+    ty += titleH + S(6);
+    Text(d.body, RectF(box.X + pad, ty, inner, bodyH + S(2)), WithAlpha(c_.muted, a), 12, false, Left, true);
+    ty += bodyH;
+    if (!d.links.empty()) {
+        Fill(RectF(box.X + pad, ty + S(9), inner, std::max(1.0f, S(1))), WithAlpha(c_.border, a));
+        Text(L"СВЯЗАНО", RectF(box.X + pad, ty + S(13), inner, S(16)), WithAlpha(c_.accent, a), 9.5f, true);
+        Text(d.links, RectF(box.X + pad, ty + S(29), inner, linksH), WithAlpha(c_.text, a), 11, false, Left, true);
+    }
+}
+
 void Ui::OnLeave() {
     mouse_ = {-1, -1};
+    DetailMoved();
     if (hot_) {
         hot_ = 0;
         repaint_ = true;
@@ -365,18 +515,43 @@ void Ui::OnUp(int x, int y) {
 }
 
 void Ui::OnWheel(int x, int y, int delta) {
-    for (auto it = prevScrollViews_.rbegin(); it != prevScrollViews_.rend(); ++it) {
+    float step = delta / 120.0f * S(64);
+    int last = 0;
+    auto tryScroll = [&](int id) {
+        auto inf = scrollInfo_.find(id);
+        float maxOff = inf == scrollInfo_.end() ? 1e9f : std::max(0.0f, inf->second.content - inf->second.view.Height);
+        float& target = scroll_[id];
+        last = id;
+        if (std::clamp(target - step, 0.0f, maxOff) == target) return false;  // упёрлись
+        target -= step;
+        scrollBusyUntil_ = GetTickCount64() + 220;
+        detailSeen_ = 0;  // карточка подробностей не едет вслед за прокруткой
+        repaint_ = true;
+        return true;
+    };
+    bool any = false;
+    for (auto it = prevScrollViews_.rbegin(); it != prevScrollViews_.rend(); ++it)
         if (it->second.Contains((REAL)x, (REAL)y)) {
-            scroll_[it->first] -= delta / 120.0f * S(64);
-            repaint_ = true;
-            return;
+            any = true;
+            if (tryScroll(it->first)) return;
         }
+    if (!any) {  // курсор над заголовком или вкладками: крутится самая большая область окна
+        const std::pair<int, RectF>* big = nullptr;
+        for (const auto& v : prevScrollViews_)
+            if (!big || v.second.Width * v.second.Height > big->second.Width * big->second.Height) big = &v;
+        if (big && tryScroll(big->first)) return;
+    }
+    if (last && std::fabs(step) > 0) {  // дальше некуда: край страницы вспыхивает, сама страница стоит на месте
+        edgeId_ = last;
+        edgeDown_ = step < 0;
+        edgeAt_ = GetTickCount64();
+        repaint_ = true;
     }
 }
 
 bool Ui::OnSetCursor() {
     if (hot_) {
-        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        SetCursor(LoadCursorW(nullptr, edits_.count(hot_) ? IDC_IBEAM : IDC_HAND));
         return true;
     }
     return false;
@@ -405,9 +580,17 @@ bool Ui::EditFocused() const {
 
 void Ui::DropFocus() { SetFocus(hwnd_); }
 
+void Ui::FlushFields() {
+    for (auto& [id, e] : edits_)
+        if (e.hwnd && e.used) UpdateWindow(e.hwnd);
+}
+
 void Ui::FocusField(int id, bool selectAll) {
     auto it = edits_.find(id);
     if (it == edits_.end() || !it->second.hwnd) return;
+    const RECT& p = it->second.pos;
+    SetWindowPos(it->second.hwnd, nullptr, p.left, p.top, p.right - p.left, p.bottom - p.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     SetFocus(it->second.hwnd);
     if (selectAll) SendMessageW(it->second.hwnd, EM_SETSEL, 0, -1);
 }
@@ -435,9 +618,19 @@ void Ui::Begin(Graphics& g, const UiColors& c, double k) {
     cards_.clear();
     scrollViews_.clear();
     tips_.clear();
-    ULONGLONG now = GetTickCount64();
-    dt_ = lastFrame_ ? std::min(0.1f, (now - lastFrame_) / 1000.0f) : 0.016f;
+    prevDetails_.swap(details_);
+    details_.clear();
+    // точные часы: GetTickCount64 шагает по 15,6 мс, кадры получали то 0, то 31 мс, и движение дёргалось
+    LARGE_INTEGER qpc, qpf;
+    QueryPerformanceCounter(&qpc);
+    QueryPerformanceFrequency(&qpf);
+    ULONGLONG now = (ULONGLONG)qpc.QuadPart;
+    dt_ = lastFrame_ ? std::min(0.1f, (float)((now - lastFrame_) / (double)qpf.QuadPart)) : 0.016f;
     lastFrame_ = now;
+    ++frameNo_;
+    scrollInfo_.clear();
+    prevHoverTrack_.swap(hoverTrack_);
+    hoverTrack_.clear();
     for (auto& [id, e] : edits_) e.used = false;
     g.SetSmoothingMode(SmoothingModeAntiAlias);
     g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
@@ -483,7 +676,10 @@ bool Ui::Scaled() const {
 
 bool Ui::Hover(int id, const RectF& r) {
     if (!interactive) return false;
-    hits_.push_back({id, r});
+    // Только видимая часть: прокрученное за край страницы иначе перехватывало щелчки по вкладкам над ней
+    RectF clip, part;
+    g_->GetClipBounds(&clip);
+    if (RectF::Intersect(part, r, clip)) hits_.push_back({id, part});
     return hot_ == id;
 }
 
@@ -512,19 +708,69 @@ bool Ui::Dragging(int id) const {
 
 float Ui::Scroll(int id, const RectF& view, float content) {
     if (interactive) scrollViews_.push_back({id, view});
+    // Список на мгновение стал короче (данные пересчитываются) - страницу не выталкиваем: ждём, сжался ли он на самом деле
+    ScrollHold& hold = scrollHold_[id];
+    ULONGLONG holdNow = GetTickCount64();
+    if (content >= hold.content || holdNow - hold.at > 1200) {
+        hold.content = content;
+        hold.at = holdNow;
+    } else {
+        content = hold.content;
+        repaint_ = true;
+    }
     float maxOff = std::max(0.0f, content - view.Height);
     float& target = scroll_[id];
     target = std::clamp(target, 0.0f, maxOff);
     // колесо задаёт цель, страница доезжает до неё плавно
     auto it = scrollShown_.find(id);
     float shown = it == scrollShown_.end() ? target : it->second;
-    shown += (target - shown) * std::min(1.0f, dt_ * 16);
+    shown += (target - shown) * (1.0f - std::exp(-dt_ * 15));
     if (std::fabs(target - shown) < 0.5f)
         shown = target;
     else
         repaint_ = true;
     scrollShown_[id] = shown;
-    return shown;
+    scrollInfo_[id] = {view, content, shown};
+    // страница стоит на целых пикселях: текст привязан к сетке, а рамки - нет, и на дробном сдвиге они дрожали
+    return std::round(shown);
+}
+
+// Поверх прокручиваемой страницы: края растворяются в фоне, полоска видна, пока прокручивают.
+void Ui::ScrollChrome(int id) {
+    auto it = scrollInfo_.find(id);
+    if (it == scrollInfo_.end()) return;
+    const ScrollInfo& s = it->second;
+    float maxOff = s.content - s.view.Height;
+    if (maxOff <= 1) return;
+    float fade = S(22);
+    auto edge = [&](float y, bool down) {
+        // прямоугольник кисти чуть больше заливки: у GDI+ на границе кисти бывает полоса другого цвета
+        RectF br(s.view.X, y - 1, s.view.Width, fade + 2);
+        LinearGradientBrush b(br, down ? c_.win : WithAlpha(c_.win, 0), down ? WithAlpha(c_.win, 0) : c_.win,
+                              LinearGradientModeVertical);
+        g_->FillRectangle(&b, RectF(s.view.X, y, s.view.Width, fade));
+    };
+    if (s.shown > 1) edge(s.view.Y, true);
+    if (s.shown < maxOff - 1) edge(s.view.Y + s.view.Height - fade, false);
+    ULONGLONG now = GetTickCount64();
+    // вспышка на краю, куда упёрлись
+    float edgeT = edgeId_ == id ? (float)((now - edgeAt_) / std::max(1.0, fx::Dur(420))) : 1;
+    if (edgeT < 1) {
+        repaint_ = true;
+        float e = (1 - edgeT) * (1 - edgeT), eh = S(30);
+        float ey = edgeDown_ ? s.view.Y + s.view.Height - eh : s.view.Y;
+        RectF br(s.view.X, ey - 1, s.view.Width, eh + 2);
+        Color hot = WithAlpha(c_.accent, (BYTE)(95 * e)), none = WithAlpha(c_.accent, 0);
+        LinearGradientBrush b(br, edgeDown_ ? none : hot, edgeDown_ ? hot : none, LinearGradientModeVertical);
+        g_->FillRectangle(&b, RectF(s.view.X, ey, s.view.Width, eh));
+    }
+    bool active = now < scrollBusyUntil_ + 500;
+    if (active) repaint_ = true;
+    float a = Anim(id + kScrollBarKey, active, 10);
+    if (a <= 0.01f) return;
+    float h = std::max(S(36), s.view.Height * s.view.Height / s.content);
+    float y = s.view.Y + (s.view.Height - h) * std::clamp(s.shown / maxOff, 0.0f, 1.0f);
+    Fill(RectF(s.view.X + s.view.Width - S(7), y, S(4), h), WithAlpha(c_.muted, (BYTE)(130 * a)), S(2));
 }
 
 // ---------- рисование ----------
@@ -700,7 +946,31 @@ bool Ui::Button(int id, const RectF& r, const std::wstring& text, Kind kind, con
     float pr = Anim(id + kPressKey, pressed, pressed ? 40 : 14);
     RectF rr = r;
     rr.Inflate(-r.Width * 0.025f * pr, -r.Height * 0.06f * pr);
+    // магнит: кнопка чуть тянется к курсору
+    Track(id);
+    if (ht > 0.01f && r.Width > 0 && r.Height > 0 && kind != Kind::Ghost) {
+        float mx = std::clamp((mouse_.x - (r.X + r.Width / 2)) / (r.Width / 2), -1.0f, 1.0f);
+        float my = std::clamp((mouse_.y - (r.Y + r.Height / 2)) / (r.Height / 2), -1.0f, 1.0f);
+        rr.X += mx * S(2.5f) * ht;
+        rr.Y += my * S(1.5f) * ht;
+    }
     Fill(rr, fill, S(9));
+    // блик: при наведении светлая полоса проходит один раз
+    if (kind == Kind::Primary && Hot(id) && !busy && !fx::Game()) {
+        float t = (float)((GetTickCount64() - hotSince_) / std::max(1.0, fx::Dur(560)));
+        if (t < 1) {
+            repaint_ = true;
+            float bw = std::max(S(46), rr.Width * 0.4f), bx = rr.X - bw + (rr.Width + bw) * (1 - (1 - t) * (1 - t));
+            RectF band(bx, rr.Y, bw, rr.Height);
+            LinearGradientBrush br(RectF(bx - 1, rr.Y, bw + 2, rr.Height), Color(0, 255, 255, 255),
+                                   Color(70, 255, 255, 255), LinearGradientModeHorizontal);
+            br.SetBlendTriangularShape(0.5f);
+            GraphicsState st = g_->Save();
+            g_->SetClip(Round(rr, S(9)), CombineModeIntersect);
+            g_->FillRectangle(&br, band);
+            g_->Restore(st);
+        }
+    }
     Ripple(id, rr, S(9));
     if (border.GetA()) Stroke(rr, border, S(9));
     float iw = icon.empty() ? 0 : S(18);
@@ -829,10 +1099,11 @@ bool Ui::Segmented(int id, const RectF& r, const std::vector<std::wstring>& item
         Fill(pill, c_.accent, S(7));
         Ripple(id * 16 + sel, pill, S(7));
     }
-    for (size_t i = 0; i < items.size(); ++i) {
-        float on = Anim(id * 16 + (int)i + kKnobKey, sel == (int)i, 16);
-        Text(items[i], item(i), MixColor(c_.muted, c_.onAccent, on), 12, on > 0.5f, Center);
-    }
+    RectF shownPill = sel >= 0 && sel < (int)items.size() ? [&] {
+        RectF to = item(sel), rel = Glide(id, RectF(to.X - r.X, to.Y - r.Y, to.Width, to.Height));
+        return RectF(r.X + rel.X, r.Y + rel.Y, rel.Width, rel.Height);
+    }() : RectF();
+    for (size_t i = 0; i < items.size(); ++i) TextOver(items[i], item(i), c_.muted, c_.onAccent, shownPill, 12, true);
     return changed;
 }
 
@@ -879,25 +1150,33 @@ void Ui::Field(int id, const RectF& r, const std::wstring& value, std::function<
     if (!editFont_)
         editFont_ = CreateFontW(-(int)std::lround(S(13)), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                 CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    SendMessageW(e.hwnd, WM_SETFONT, (WPARAM)editFont_, FALSE);
+    if (e.font != editFont_) {
+        e.font = editFont_;
+        SendMessageW(e.hwnd, WM_SETFONT, (WPARAM)editFont_, TRUE);
+    }
     e.used = true;
     e.onChange = std::move(onChange);
+    bool clicked = Click(id, r);
     bool focused = GetFocus() == e.hwnd;
+    float ht = Anim(id + kHoverKey, Hot(id) && !focused, 16);
     Fill(r, c_.field, S(9));
-    Stroke(r, focused ? c_.accent : c_.border, S(9), focused ? S(1.5f) : 1);
+    Stroke(r, focused ? c_.accent : MixColor(c_.border, c_.accent, 0.4f * ht), S(9), focused ? S(1.5f) : 1);
 
     float lineH = S(19);
     RECT pos{(LONG)(r.X + S(11)), (LONG)(r.Y + (r.Height - lineH) / 2), (LONG)(r.X + r.Width - S(10)),
              (LONG)(r.Y + (r.Height - lineH) / 2 + lineH)};
-    if (memcmp(&pos, &e.pos, sizeof(RECT)) != 0 || !IsWindowVisible(e.hwnd)) {
-        e.pos = pos;
-        SetWindowPos(e.hwnd, nullptr, pos.left, pos.top, pos.right - pos.left, pos.bottom - pos.top,
-                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    EnableWindow(e.hwnd, interactive ? TRUE : FALSE);
+    // Окно Windows рисуется поверх холста и отстаёт от него при прокрутке, поэтому живёт только у поля в фокусе.
+    // Остальные поля - просто текст на холсте; щелчок показывает окно и ставит курсор туда, куда нажали
+    bool moved = memcmp(&pos, &e.pos, sizeof(RECT)) != 0;
+    e.pos = pos;
+    if (focused || clicked) {
+        if (moved || !IsWindowVisible(e.hwnd))
+            SetWindowPos(e.hwnd, nullptr, pos.left, pos.top, pos.right - pos.left, pos.bottom - pos.top,
+                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    } else if (IsWindowVisible(e.hwnd)) {
+        ShowWindow(e.hwnd, SW_HIDE);
     }
-    if (!interactive)
-        EnableWindow(e.hwnd, FALSE);
-    else
-        EnableWindow(e.hwnd, TRUE);
     if (!focused) {
         int n = GetWindowTextLengthW(e.hwnd);
         std::wstring cur(n, L'\0');
@@ -908,8 +1187,19 @@ void Ui::Field(int id, const RectF& r, const std::wstring& value, std::function<
             suppress_ = false;
         }
     }
-    if (!placeholder.empty()) SendMessageW(e.hwnd, EM_SETCUEBANNER, TRUE, (LPARAM)placeholder.c_str());
-    if (paintFields)
+    if (e.cue != placeholder) {
+        e.cue = placeholder;
+        SendMessageW(e.hwnd, EM_SETCUEBANNER, TRUE, (LPARAM)e.cue.c_str());
+    }
+    if (clicked && !focused) {
+        SetFocus(e.hwnd);
+        LRESULT at = SendMessageW(e.hwnd, EM_CHARFROMPOS, 0, MAKELPARAM(mouse_.x - pos.left, mouse_.y - pos.top));
+        int ch = (short)LOWORD(at);
+        SendMessageW(e.hwnd, EM_SETSEL, ch, ch);
+        focused = GetFocus() == e.hwnd;
+        repaint_ = true;
+    }
+    if (paintFields || !focused)
         Text(value.empty() ? placeholder : value, RectF(r.X + S(11), r.Y, r.Width - S(21), r.Height),
              value.empty() ? c_.faint : c_.text, 13);
 }

@@ -22,6 +22,9 @@ using Microsoft::WRL::ComPtr;
 class CoverCache {
 public:
     void Init(IWICImagingFactory* wic) { wic_ = wic; }
+    // false: после загрузки на видеокарту пиксели в памяти не держим. Когда устройство пропадёт, запись
+    // исчезает и Get вернёт nullptr - тот, кто так настроил кэш, загружает картинку заново.
+    void SetKeepPixels(bool keep) { keepPixels_ = keep; }
 
     // Декодирует картинку (JPEG/PNG и всё, что умеет WIC) для трека serial.
     // palette получает цвета картинки. false - картинки нет или она битая (тогда заглушка).
@@ -33,6 +36,7 @@ public:
     void Keep(const std::vector<uint64_t>& serials);
 
 private:
+    bool keepPixels_ = true;
     struct Entry {
         ComPtr<IWICBitmap> image;     // 32bppPBGRA, сторона не больше kMaxSide
         ComPtr<ID2D1Bitmap1> bitmap;  // для текущего устройства

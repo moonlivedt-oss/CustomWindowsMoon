@@ -110,3 +110,16 @@ TEST(DownloaderSmartIdentityAndArchive) {
     CHECK(dl::ParseLine("[download] abc: Video has already been recorded in the archive").type == dl::Event::Type::Skipped);
     CHECK(dl::ParseLine("[download] path.mp3 has already been downloaded").type == dl::Event::Type::Skipped);
 }
+
+TEST(DownloaderOneClickToolInstall) {
+    CHECK(std::fabs(dl::CurlPercent("######                                                   12.5%") - 12.5) < 1e-9);
+    CHECK(dl::CurlPercent("##################################################### 100.0%") == 100);
+    CHECK(dl::CurlPercent("curl: (6) Could not resolve host: github.com") < 0);
+    CHECK(dl::CurlPercent("") < 0 && dl::CurlPercent("50%") < 0);
+    const auto curl = dl::CurlArgs(dl::kYtdlpUrl, "C:/bin/yt-dlp.exe.part");
+    CHECK(curl.size() >= 3 && curl[curl.size() - 2] == "--" && curl.back() == dl::kYtdlpUrl);
+    CHECK(std::find(curl.begin(), curl.end(), "-f") != curl.end());
+    const auto tar = dl::FfmpegUnpackArgs("C:/bin/ffmpeg.zip", "C:/bin");
+    CHECK(std::find(tar.begin(), tar.end(), "*/bin/ffmpeg.exe") != tar.end());
+    CHECK(std::find(tar.begin(), tar.end(), "--strip-components=2") != tar.end());
+}

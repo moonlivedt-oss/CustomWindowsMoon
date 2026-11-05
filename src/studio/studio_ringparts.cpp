@@ -591,7 +591,7 @@ float Studio::IconDock(const RectF& view, float x, float y, float w) {
                 RectF(x + (k % cols) * (tile + gap) - ui.S(3), y + (k / cols) * rowStep + tile + ui.S(3),
                       tile + ui.S(6), ui.S(21)),
                 on ? c.text : c.muted, 10.5f, false, ui::Center);
-        ui.Tip(id, info.label + L"\n" + files[k] + L"\nЩелчок — поставить; можно перетащить к квадрату");
+        ui.Tip(id, info.label + L"\n" + files[k] + L"\nЩелчок - поставить; можно перетащить к квадрату");
     }
     if (moving) ui.Invalidate();
     return y - startY + grid.Height;

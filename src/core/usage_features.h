@@ -69,6 +69,7 @@ inline constexpr Feature kFeatures[] = {
     {L"gamepad", L"Кольцо с геймпада", &Config::gamepad},
     {L"cliphist", L"История буфера обмена", &Config::clipHistory},
     {L"clip_secrets", L"Защита секретов в буфере", &Config::clipSecrets},
+    {L"translate_google", L"Перевод через Google", &Config::translateGoogle},
     {L"windrag", L"Перетаскивание окон с Alt", &Config::winDrag},
     {L"cpu_balance", L"Баланс процессора", &Config::cpuBalance},
     {L"no_sleep", L"Не спать во время работы", &Config::noSleep},

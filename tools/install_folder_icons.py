@@ -5,11 +5,11 @@ Uses relative IconResource paths. No Explorer restart or icon-cache deletion.
 import argparse
 import configparser
 import ctypes
-from ctypes import wintypes
 import json
 import os
-from pathlib import Path
 import shutil
+from ctypes import wintypes
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT.parent

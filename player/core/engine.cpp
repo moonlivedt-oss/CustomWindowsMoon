@@ -1,4 +1,5 @@
 #include "core/engine.h"
+#include "core/karaoke.h"
 
 #include <algorithm>
 #include <array>
@@ -62,9 +63,11 @@ struct Engine::Impl {
     std::atomic<uint64_t> length{0};
     std::atomic<bool> hasTrack{false};
     std::atomic<bool> ended{false};
-    std::atomic<bool> silent{false};  // затухание паузы закончилось - устройство можно остановить
-    std::atomic<bool> switched{false};  // был бесшовный переход на следующий трек
+    std::atomic<bool> silent{false};           // затухание паузы закончилось - устройство можно остановить
+    std::atomic<bool> switched{false};         // был бесшовный переход на следующий трек
     std::atomic<uint64_t> crossfadeFrames{0};  // длина плавного перехода, пишет UI
+    std::atomic<float> karaoke{0};             // цель подавления голоса, пишет UI
+    VocalReducer vocals;                       // состояние фильтра - у того, кто рендерит
 
     // Кольцо сэмплов для визуализатора: атомарные числа, чтобы чтение из UI не было гонкой данных
     std::array<std::atomic<float>, kTapSize> tap{};
@@ -99,6 +102,7 @@ struct Engine::Impl {
                 Retire(tail.decoder, onAudioThread);  // новый трек выбран руками - без хвоста перехода
                 tail = Voice{};
                 tailLeft = tailTotal = 0;
+                v.fadeIn = 0;  // и без нарастания: оно относилось к треку, который вошёл переходом
                 v.decoder = c.type == Command::Type::SetTrack ? c.decoder : nullptr;
                 v.position = c.frame;
                 v.gain = c.gain;
@@ -117,8 +121,12 @@ struct Engine::Impl {
                     ended.store(false);
                 }
                 break;
-            case Command::Type::Play: wantPlay = true; break;
-            case Command::Type::Pause: wantPlay = false; break;
+            case Command::Type::Play:
+                wantPlay = true;
+                break;
+            case Command::Type::Pause:
+                wantPlay = false;
+                break;
             case Command::Type::SetNext:
             case Command::Type::ClearNext:
                 Retire(next.decoder, onAudioThread);
@@ -173,8 +181,10 @@ struct Engine::Impl {
         if (!d) return;
         // В аудиопотоке не освобождаем память: отдаём потоку UI.
         // Если очередь вдруг полна, декодер остаётся висеть до выхода - лучше утечка, чем щелчок.
-        if (onAudioThread) retired.Push(d);
-        else delete d;
+        if (onAudioThread)
+            retired.Push(d);
+        else
+            delete d;
     }
 
     void Render(float* out, uint32_t frames) {
@@ -239,6 +249,7 @@ struct Engine::Impl {
             const float inLen = static_cast<float>(v.fadeIn), tailLen = static_cast<float>(tailTotal);
             // Здесь будет обработка голоса (time-stretch)
             float* dst = out + static_cast<size_t>(done) * kChannels;
+            vocals.SetTarget(karaoke.load(std::memory_order_relaxed));
             for (uint32_t i = 0; i < n; ++i) {
                 fade = wantPlay ? std::min(1.f, fade + fadeStep) : std::max(0.f, fade - fadeStep);
                 volume += std::clamp(volTarget - volume, -volStep, volStep);
@@ -251,6 +262,7 @@ struct Engine::Impl {
                     l += tailScratch[i * 2] * tg;
                     r += tailScratch[i * 2 + 1] * tg;
                 }
+                if (!vocals.Idle()) vocals.Process(l, r);
                 dst[i * 2] = l * volume;
                 dst[i * 2 + 1] = r * volume;
                 // Визуализатор видит сигнал до громкости: полосы не зависят от ползунка
@@ -259,7 +271,7 @@ struct Engine::Impl {
             }
             done += n;
             if (v.fadeIn && v.position >= v.fadeIn) v.fadeIn = 0;  // нарастание закончилось
-            if (tail.decoder && !tailLeft) {                      // хвост доиграл - декодер потоку UI
+            if (tail.decoder && !tailLeft) {                       // хвост доиграл - декодер потоку UI
                 Retire(tail.decoder, true);
                 tail = Voice{};
                 tailTotal = 0;
@@ -322,6 +334,7 @@ bool Engine::Start(const Options& options, WakeFn wake, std::string* error) {
     }
     m.deviceReady = true;
     m.sampleRate = m.device.sampleRate;
+    m.vocals.SetSampleRate(static_cast<float>(m.sampleRate));
     return true;
 }
 
@@ -418,6 +431,8 @@ void Engine::Seek(uint64_t frame) {
 
 void Engine::SetVolume(float volume) { impl_->volumeTarget.store(std::clamp(volume, 0.f, 1.f)); }
 
+void Engine::SetKaraoke(float amount) { impl_->karaoke.store(std::clamp(amount, 0.f, 1.f)); }
+
 bool Engine::IsPlaying() const { return impl_->playing.load(); }
 bool Engine::DeviceRunning() const { return impl_->deviceRunning; }
 bool Engine::HasTrack() const { return impl_->hasTrack.load(); }
@@ -438,6 +453,8 @@ bool Engine::Service() {
     }
     return m.ended.exchange(false);
 }
+
+uint64_t Engine::TapWritten() const { return impl_->tapWritten.load(std::memory_order_acquire); }
 
 size_t Engine::CopyRecentMono(float* dst, size_t n) const {
     const Impl& m = *impl_;
