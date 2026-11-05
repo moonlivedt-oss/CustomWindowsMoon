@@ -13,10 +13,14 @@
 #include "core/bg.h"
 #include "core/crash.h"
 #include "core/files.h"
-#include "tools/journal.h"
-#include "tools/mft_detail.h"
-#include "tools/selfwatch.h"
-#include "tools/tools.h"
+#include "net/recovery.h"
+#include "net/security.h"
+#include "net/probe_policy.h"
+#include "net/background.h"
+#include "system/journal.h"
+#include "system/mft_detail.h"
+#include "system/selfwatch.h"
+#include "system/tools.h"
 
 namespace {
 
@@ -216,7 +220,7 @@ void TestLiveSize() {
     CHECK(got.today == 0 && got.hour == 0);  // первый замер - точка отсчёта
 }
 
-// ---- MFT: синтетические записи (tools/mft_detail.h), без прав и без тома ----
+// ---- MFT: синтетические записи (system/mft_detail.h), без прав и без тома ----
 
 namespace md = tools::mft_detail;
 
@@ -691,18 +695,101 @@ void TestBackground() {
 }  // namespace
 
 void TestTop20(void (*check)(bool, const char*, int));  // tests_top20.cpp
+void TestUsageCatalog(void (*check)(bool, const char*, int));
 void TestMore(void (*check)(bool, const char*, int));   // tests_more.cpp
 void TestLife(void (*check)(bool, const char*, int));   // tests_life.cpp
 void TestSec(void (*check)(bool, const char*, int));    // tests_sec.cpp
 void TestIconCatalog(void (*check)(bool, const char*, int));  // test_icon_catalog.cpp
+void TestTranslate(void (*check)(bool, const char*, int));    // test_translate.cpp
+void TestProfile(void (*check)(bool, const char*, int));      // test_profile.cpp
 
 int wmain() {
+    {
+        net::SettingsLatch settings;
+        CHECK(settings.Observe({{L"DNS", L"a", L"old"}}).empty());
+        CHECK(settings.Observe({{L"DNS", L"b", L"new"}}).empty());
+        CHECK(settings.Observe({{L"DNS", L"a", L"old"}}).empty());  // переходное изменение отменилось
+        CHECK(settings.Observe({{L"DNS", L"b", L"new"}}).empty());
+        CHECK(settings.Observe({}).empty());  // ошибка API не подтверждает изменение
+        CHECK(settings.Observe({{L"DNS", L"b", L"new"}}).empty());
+        auto changes = settings.Observe({{L"DNS", L"b", L"new"}});
+        CHECK(changes.size() == 1 && changes[0].before == L"old" && changes[0].after == L"new");
+        CHECK(settings.Observe({{L"DNS", L"b", L"new"}}).empty());
+        net::SettingsLatch restarted;
+        restarted.Seed(settings.Stable());
+        CHECK(restarted.Observe({{L"DNS", L"b", L"new"}}).empty());
+        CHECK(restarted.Observe({{L"DNS", L"c", L"third"}}).empty());
+        CHECK(restarted.Observe({{L"DNS", L"c", L"third"}}).size() == 1);
+        net::TransferPacer pace;
+        CHECK(pace.Sample(20) == 0);
+        CHECK(pace.Sample(150) > 0);
+        for (int i = 0; i < 20; ++i) pace.Sample(150);
+        CHECK(pace.Delay() == 200);
+        CHECK(pace.Sample(-1) == 200);  // нет измерения — не выдавать это за восстановление
+        for (int i = 0; i < 20; ++i) pace.Sample(20);
+        CHECK(pace.Delay() == 0);
+        CHECK(net::ExpectedTunnel(L"vpn", L"vpn", true));
+        CHECK(!net::ExpectedTunnel(L"vpn", L"wifi", false));
+        CHECK(!net::ExpectedTunnel(L"vpn", L"vpn", false));
+        CHECK(!net::ExpectedTunnel(L"", L"", true));
+    }
+    {
+        net::SecurityLatch guard;
+        CHECK(guard.Observe({net::FIREWALL_OFF, net::FIREWALL_OFF}) == 0);
+        CHECK(guard.Observe({0, 0}) == 0);  // отказ API прерывает неподтверждённую серию
+        CHECK(guard.Observe({net::FIREWALL_OFF, net::FIREWALL_OFF}) == 0);
+        CHECK(guard.Observe({net::FIREWALL_OFF, net::FIREWALL_OFF}) == net::FIREWALL_OFF);
+        CHECK(guard.Observe({net::FIREWALL_OFF, net::FIREWALL_OFF}) == 0);  // не спамить
+        CHECK(guard.Observe({0, 0}) == 0 && guard.Risks() == net::FIREWALL_OFF);
+        CHECK(guard.Observe({net::WIFI_OPEN, net::WIFI_OPEN}) == 0);
+        CHECK(guard.Observe({net::WIFI_OPEN, net::WIFI_OPEN}) == net::WIFI_OPEN);
+        CHECK(guard.Risks() == (net::FIREWALL_OFF | net::WIFI_OPEN));
+        CHECK(guard.Observe({net::FIREWALL_OFF, 0}) == 0 && guard.Risks() == net::WIFI_OPEN);
+        CHECK(guard.Observe({net::FIREWALL_OFF, net::FIREWALL_OFF}) == 0);
+        CHECK(guard.Observe({net::FIREWALL_OFF, net::FIREWALL_OFF}) == net::FIREWALL_OFF);
+        CHECK(guard.Observe({7, 0}) == 0 && guard.Risks() == 0);
+    }
+    CHECK(net::ConnectivityReply(0, 204, ""));
+    CHECK(!net::ConnectivityReply(0, 200, "<html>Sign in</html>"));
+    CHECK(!net::ConnectivityReply(0, 302, ""));
+    CHECK(!net::ConnectivityReply(0, 204, "portal"));
+    CHECK(net::ConnectivityReply(1, 200, "h=cloudflare.com\nip=192.0.2.1\nloc=ZZ\n"));
+    CHECK(!net::ConnectivityReply(1, 200, "<html>ip=192.0.2.1 loc=ZZ</html>"));
+    CHECK(!net::ConnectivityReply(1, 200, "ip=\nloc=ZZ\n"));
+    CHECK(!net::ConnectivityReply(1, 301, "ip=192.0.2.1\nloc=ZZ\n"));
+    CHECK(net::ConnectivityReply(2, 200, "Microsoft Connect Test\r\n"));
+    CHECK(!net::ConnectivityReply(2, 200, "Sign in to Wi-Fi"));
+    CHECK(!net::ConnectivityReply(2, 503, "Microsoft Connect Test"));
+    CHECK(net::RecoveryWait(1000, 26000, 600000) == 2000);
+    CHECK(net::RecoveryWait(25900, 26000, 20000) == 100);
+    CHECK(net::RecoveryWait(26000, 26000, 20000) == 20000);
+    CHECK(net::RecoveryWait(100000, 0, 5000) == 5000);
+    net::AddressBurst burst;
+    CHECK(burst.Observe(1000));
+    CHECK(burst.Until() == 26000);
+    CHECK(!burst.Observe(1500));
+    CHECK(!burst.Observe(2999));
+    CHECK(burst.Observe(3000));
+    CHECK(burst.Until() == 28000);
+    for (unsigned t = 5000; t <= 121000; t += 2000) {
+        CHECK(burst.Observe(t));
+        CHECK(burst.Until() <= 91000);
+    }
+    CHECK(burst.Until() == 91000);
+    CHECK(burst.Observe(146000));
+    CHECK(burst.Until() == 171000);
+    CHECK(net::BackgroundProbeInterval(20000, true) == 60000);
+    CHECK(net::BackgroundProbeInterval(120000, true) == 120000);
+    CHECK(net::BackgroundProbeInterval(20000, false) == 20000);
     CHECK(ExpandPath(L"{player}") == ExeDir() + L"\\apps\\PlayerMoon\\PlayerMoon.exe");
     TestTop20(Check);
     TestMore(Check);
+    TestUsageCatalog(Check);
     TestLife(Check);
     TestSec(Check);
     TestIconCatalog(Check);
+    TestTranslate(Check);
+    TestProfile(Check);
     TestParseCleanLine();
     TestTempRemovable();
     TestWalk();

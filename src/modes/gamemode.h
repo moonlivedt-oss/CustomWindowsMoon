@@ -1,0 +1,78 @@
+#pragma once
+#include <functional>
+#include <map>
+#include <string>
+#include <vector>
+
+#include <windows.h>
+
+#include "modes/modeswitch.h"
+
+struct Config;
+
+// Общее с режимом разработки (modes/devmode).
+namespace gm {
+std::wstring FileName(const std::wstring& path);
+bool MatchAny(const std::wstring& path, const std::wstring& masks);  // маска с \ - по полному пути, иначе по имени
+std::wstring ProcessPath(DWORD pid);
+std::wstring WallpaperEngine();                                       // путь к запущенному wallpaper64.exe или пусто
+void WallpaperControl(const std::wstring& exe, const wchar_t* what);  // pause / play
+}  // namespace gm
+
+// Игровой режим: пока запущена игра (по маскам путей из radial.cfg) или что-то идёт в эксклюзивном
+// полноэкранном режиме, вся красота выключается: анимации, стекло, свечения, рамки окон, перехват мыши.
+// По желанию заодно выключаются анимации и прозрачность самой Windows и ставится на паузу Wallpaper Engine.
+// Что было изменено в системе, записывается в %APPDATA%\MoonDesk\gamemode.ini: если программа упадёт,
+// при следующем запуске всё вернётся.
+class GameMode {
+public:
+    std::function<void(bool on)> onChange;
+    // своё распознавание игр, которых нет в масках (Minecraft - это javaw): имя игры или пусто
+    std::function<std::wstring(DWORD pid, const std::wstring& path)> recognize;
+    // обои на паузе держит кто-то ещё (режим разработки): при выходе из игры их не запускать
+    std::function<bool()> wallpaperHeld;
+
+    void Recover();                // при запуске: вернуть то, что осталось от прошлого раза
+    void Tick(const Config& cfg);  // из общего опроса; сама проверка раз в 2 секунды
+    void SetManual(bool on, const Config& cfg);
+    bool Manual() const { return sw_.manual; }
+    bool On() const { return on_; }
+    const std::wstring& Reason() const { return reason_; }  // что включило режим: имя игры или «вручную»
+    // лёгкая игра (games_light): режим идёт, но обои, анимации, прозрачность, красота и перехват мыши остаются
+    bool Light() const { return on_ && light_; }
+    // игра впереди; не знаем, какой процесс игра (вручную, эксклюзивный полный экран), - считаем, что впереди
+    bool GameInFront() const;
+    // игра, узнанная по окну на весь экран (не по маске), - полный путь; пусто - такой не было. Забирается один раз.
+    std::wstring TakeGuessed();
+    const std::wstring& Guessed() const { return guessPath_; }  // то же, не забирая (режим включился по догадке)
+    std::vector<DWORD> GamePids() const;  // процессы игр; для полноэкранной без маски - процесс активного окна
+    void Shutdown();                      // при выходе: вернуть систему как была
+
+private:
+    bool Detect(const Config& cfg, std::wstring& name);
+    bool FullscreenGame(const Config& cfg, DWORD& pid, std::wstring& exe);  // игра без маски - окно на весь экран
+    static bool Draws3d(DWORD pid);
+    DWORD fsPid_ = 0;                // чьё окно сейчас на весь экран
+    ULONGLONG fsSince_ = 0;          // с какого момента
+    std::map<DWORD, bool> draws3d_;  // по pid: рисует ли через 3D (список модулей спрашиваем один раз)
+    void Update(const Config& cfg, bool want);
+    void Enter(const Config& cfg);
+    void Leave();
+
+    bool on_ = false, detected_ = false, light_ = false;
+    ModeSwitch sw_;  // когда включаться и выключаться (с запасом, modes/modeswitch.h)
+    std::wstring reason_;
+    std::wstring gamePath_;   // путь найденной игры (для games_light)
+    std::wstring guessPath_;  // игра без маски, узнанная по окну на весь экран
+    ULONGLONG lastCheck_ = 0;
+    struct Seen {
+        std::wstring exe;   // имя файла процесса: номер мог достаться новому процессу
+        std::wstring game;  // имя файла игры или пусто (уже проверен, не игра)
+        std::wstring path;  // полный путь - только у игр
+    };
+    std::map<DWORD, Seen> games_;  // по pid
+    std::wstring masks_;           // games и games_skip, по которым проверены процессы
+    // что поменяли в системе
+    bool changedAnim_ = false, changedTransp_ = false;
+    std::wstring pausedWallpaper_;  // путь к wallpaper64.exe, если ставили на паузу
+};

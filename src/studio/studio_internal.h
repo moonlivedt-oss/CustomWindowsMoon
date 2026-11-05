@@ -12,18 +12,18 @@
 #include <string>
 #include <vector>
 
-#include "desk/lockscreen.h"
+#include "desktop/lockscreen.h"
 #include "net/net.h"
 #include "net/speed.h"
 #include "net/wifi.h"
-#include "desk/cardlog.h"
-#include "tools/healthscore.h"
-#include "tools/tools.h"
+#include "cards/cardlog.h"
+#include "system/healthscore.h"
+#include "system/tools.h"
 #include "core/config.h"
 #include "core/themes.h"
 #include "ui/ui.h"
 #include "gfx/scene.h"
-#include "app/toolsui.h"
+#include "system/ui/toolsui.h"
 #include "core/cfgdiff.h"
 #include "core/usage.h"
 
@@ -53,7 +53,7 @@ enum Page {
     PAGE_APPS,  // Кольца / Программы: кольца программ и рабочие наборы
     PAGE_AIDS   // Настройки / Помощники: палитра, буфер, раскладки, росчерк, сторожа
 };
-enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE };
+enum Overlay { OV_NONE, OV_TOUR, OV_JOURNAL, OV_LIBRARY, OV_MORE, OV_LOGIN };
 
 // идентификаторы элементов: постоянные и диапазоны для списков
 enum Id {
@@ -199,6 +199,16 @@ enum Id {
     ID_NET_DNS_TEST,
     ID_NET_ADMIN,
     ID_NET_WATCH,
+    ID_NET_SECURITY,
+    ID_NET_CHANGES,
+    ID_NET_VPN_WATCH,
+    ID_NET_VPN_BLOCK,
+    ID_NET_VPN_CURRENT,
+    ID_NET_VPN_ADD,
+    ID_NET_VPN_CLEAR,
+    ID_NET_VPN_SETUP,
+    ID_NET_VPN_OFF,
+    ID_NET_GENTLE,
     ID_NET_EXIT,
     ID_NET_GAME,
     ID_NET_SPEED_AUTO,
@@ -341,6 +351,16 @@ enum Id {
     ID_FLOW = 10800,          // +n: плашка второго кольца (щелчок - закрепить)
     ID_LANE_ANIM = 11000,     // +край*100 + i: раскрытие стопки
     ID_STATE_UNUSED = 20300,  // +i: «Выключить» у неиспользуемой возможности
+    ID_GUARD = 20640,         // +1,+2: чипы итога «Защиты»; +400.. - их анимация
+    ID_GUARD_MORE = 20650,
+    ID_GUARD_ROW = 21000,     // +n: появление кнопок у находки
+    ID_GUARD_EXT = 21200,     // +n: то же у расширения
+    ID_LOGIN = 20600,         // +i: профиль на экране входа; +10 - его анимация
+    ID_LOGIN_ASK = 20620,
+    ID_LOGIN_TOUR,
+    ID_LOGIN_CLOSE,
+    ID_RAIL_PROFILE,
+    ID_PEEK,
     ID_ICON_TOPIC = 20200,    // +category
 };
 
@@ -596,6 +616,8 @@ private:
     void ToolsPage(const RectF& r);
     void ToolsPathTab(struct ToolsKit& tk);           // studio_tools_path.cpp
     void ToolsDiskTab(struct ToolsKit& tk);           // studio_tools_disks.cpp
+    void ToolsGuardTab(struct ToolsKit& tk);          // studio_tools_guard.cpp
+    void GuardHero(const RectF& b, int danger, int odd, bool busy);
     tools::AppHealthIn AppHealthNow();                // снимок для строки здоровья программы (Л27)
     float UnusedFeatures(float x, float y, float w);  // «Чем не пользуетесь» (core/usage); 0 - нечего предложить
     float MissedCards(float x, float y, float w);     // пропущенные карточки (Л10/Л11); высота, 0 - нечего показать
@@ -619,6 +641,13 @@ private:
     void Card(const RectF& r, bool hi = false);
     void Mascot(const RectF& r, const std::wstring& file, const std::wstring& title, const std::wstring& text);
     void TourOverlay(float w, float h);
+    void LoginOverlay(float w, float h);  // studio_profile.cpp
+    int ovShown_ = 0;
+    ULONGLONG ovAt_ = 0;
+    ULONGLONG loginAt_ = 0;               // когда открылся экран профилей (появление)
+    void ChooseProfile(int level);
+    bool PageFits(Page p) const;  // раздел входит в этот профиль
+    bool PageOn(Page p) const;    // виден сейчас: входит в профиль или открыт по ссылке
     void JournalOverlay(float w, float h);
     void LibraryOverlay(float w, float h);
     void MoreOverlay();
@@ -679,6 +708,7 @@ private:
     std::shared_ptr<PhysJob> physJob_;
     ULONGLONG busyDue_ = 0;                       // когда сработает таймер следующего кадра (RepaintIn)
     bool painting_ = false, paintAgain_ = false;  // кадр уже рисуется (вложенный WM_PAINT из COM)
+    COLORREF captionColor_ = CLR_INVALID;         // цвет заголовка, уже отданный DWM
     std::set<std::wstring> projSel_, dlSel_;
     std::wstring stateFocus_;
     float stateFocusY_ = -1;
@@ -814,6 +844,11 @@ private:
     void CleanSceneIn(const RectF& r);
     bool netWasBusy_ = false;
     ULONGLONG netDoneAt_ = 0;  // когда пришёл итог проверки: узлы схемы загораются по очереди
+    // шар связи в «Состоянии» (images\net\*.png) по сторожу связи: 0 есть, 1 медленно, 2 нет, 3 через VPN; -1 не знаем
+    void NetOrb(const RectF& r);
+    int netOrb_ = -1, netOrbWas_ = -1;
+    ULONGLONG netOrbAt_ = 0, netProbeAt_ = 0;     // смена шара (для плавного перехода), последняя учтённая проба
+    std::vector<std::pair<int, int>> netProbes_;  // последние 10 проб сторожа: шар и пинг
     // живые сцены части 2 (studio_live.cpp): сеть, порты, автозагрузка, память, батарея, версии
     scene::RouteScene routeScene_;
     scene::PortsScene portsScene_;
@@ -826,6 +861,10 @@ private:
     bool versionsBusy_ = false;
     toolsui::SecurityView secView_;                 // вкладка «Защита»
     int secKind_ = 0;                               // фильтр: 0 - все, дальше - виды, что есть в находках
+    int secSev_ = 0;                                // итог проверки: 0 - всё, 1 - опасное, 2 - странное
+    bool extAll_ = false;                           // все расширения, а не первые шесть
+    std::wstring secHeroKey_, secRowKey_, extRowKey_;  // поменялось - кольцо и строки появляются заново
+    ULONGLONG secHeroAt_ = 0, secRowAt_ = 0, extRowAt_ = 0;
     int extKind_ = 0;                               // расширения браузеров: 0 - все, 1 - опасные
     std::shared_ptr<std::atomic<bool>> reportJob_;  // недельный отчёт собирается (false) / готов (true)
     std::vector<Item> stateImp_;                    // «Важное» на «Состоянии» (О4), раз в 10 с

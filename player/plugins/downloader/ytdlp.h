@@ -27,10 +27,10 @@ std::vector<std::string> ExtractUrls(const std::string& text);
 
 struct Options {
     std::string archiveFile;  // persistent successful source IDs, shared across playlists
-    std::string outDir;     // куда сохранять (UTF-8)
-    std::string browser;    // откуда взять вход: "", "firefox", "chrome", "edge"
-    std::string ffmpegDir;  // папка с ffmpeg, если не в PATH
-    bool mp3 = true;        // перекодировать в MP3 (нужен ffmpeg); иначе как есть
+    std::string outDir;       // куда сохранять (UTF-8)
+    std::string browser;      // откуда взять вход: "", "firefox", "chrome", "edge"
+    std::string ffmpegDir;    // папка с ffmpeg, если не в PATH
+    bool mp3 = true;          // перекодировать в MP3 (нужен ffmpeg); иначе как есть
 };
 
 // Аргументы для yt-dlp (без имени программы)
@@ -52,5 +52,17 @@ Event ParseLine(std::string line);
 
 // Скорость по-русски: «2.10MiB/s» -> «2.1 МБ/с»
 std::string HumanSpeed(const std::string& s);
+
+// Установка инструментов одной кнопкой: curl.exe и tar.exe есть в Windows 10 1803 и новее.
+// Официальные сборки: yt-dlp из его релизов, ffmpeg - сборка проекта yt-dlp/FFmpeg-Builds.
+constexpr const char* kYtdlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+constexpr const char* kFfmpegUrl =
+    "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
+// Аргументы curl: скачать url в файл out с полосой прогресса «###  12.3%»
+std::vector<std::string> CurlArgs(const std::string& url, const std::string& out);
+// Аргументы tar: достать ffmpeg.exe и ffprobe.exe из архива сразу в папку dir
+std::vector<std::string> FfmpegUnpackArgs(const std::string& zip, const std::string& dir);
+// Проценты из строки прогресса curl (-#); -1, если строка не про прогресс
+double CurlPercent(const std::string& line);
 
 }  // namespace dl

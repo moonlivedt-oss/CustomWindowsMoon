@@ -201,6 +201,9 @@ private:
 
 // Делегат TypedEventHandler<SMTC, Args>: читает аргументы и шлёт окну сообщение.
 // Методы делегата WinRT: IUnknown + Invoke(sender, args).
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wunnecessary-virtual-specifier"  // virtual нужен ради слота vtable
+#endif
 class Handler final : public IUnknown {
 public:
     using Fn = void (*)(IInspectable* args, HWND hwnd, UINT message);

@@ -26,6 +26,7 @@ struct AppState {
 
     // Настройки улучшений
     bool normalize = true;          // выравнивание громкости по ReplayGain
+    double crossfade = 0;           // плавный переход между треками, с (0 - стык)
     bool showRemaining = false;     // справа под прогрессом - оставшееся время
     bool miniOnTop = true;          // мини-плеер поверх окон
     bool playlistFromLibrary = false;  // плейлист - это вся библиотека (новые треки добавляются сами)

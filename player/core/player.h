@@ -78,10 +78,21 @@ public:
     // Выравнивание громкости по ReplayGain (по умолчанию включено)
     void SetNormalize(bool on);
     bool Normalize() const { return normalize_; }
+    // Плавный переход между треками, секунды (0 - стык). Внутри одного альбома всегда стык
+    void SetCrossfade(double seconds);
+    // Караоке: голос из центра стереопанорамы убирается, басы и инструменты по краям остаются
+    void SetKaraoke(bool on) {
+        karaoke_ = on;
+        engine_.SetKaraoke(on ? 1.f : 0.f);
+    }
+    bool Karaoke() const { return karaoke_; }
+    double Crossfade() const { return crossfade_; }
     // Убрать трек из плейлиста. Если он играет - начинается следующий (с тем же состоянием пуска).
     void Remove(int index);
     // Трек пойдёт сразу после текущего
     void PlayNext(int index);
+    // Перенести трек в очереди; играющий трек не прерывается
+    void Move(int from, int to);
     // Восстановление после запуска: открыть трек и встать на позицию без звука
     bool OpenAt(int index, double position, bool play);
 
@@ -93,6 +104,8 @@ public:
     void PumpEvents();
     // Последние n моно-сэмплов для визуализатора
     size_t ReadPcm(float* dst, size_t n) const;
+    // Сколько сэмплов уже выдано: не изменилось - ReadPcm вернёт то же самое, считать спектр заново незачем
+    uint64_t PcmWritten() const { return engine_.TapWritten(); }
     uint32_t SampleRate() const;
     // Работает ли аудиопоток. На паузе устройство останавливается - ноль активных циклов в покое.
     bool AudioDeviceRunning() const { return engine_.DeviceRunning(); }
@@ -114,6 +127,8 @@ private:
     bool muted_ = false;
     bool ready_ = false;
     bool normalize_ = true;
+    bool karaoke_ = false;
+    double crossfade_ = 0;
     int queued_ = -1;  // индекс трека, открытого заранее в движке
 };
 

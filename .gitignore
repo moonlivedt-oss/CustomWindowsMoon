@@ -7,18 +7,25 @@ RadialMenu.exe
 radial.cfg
 backups/
 
-# служебные файлы отладки
+# служебные файлы отладки (dev-режимы exe пишут их в build/out)
 *.log
 *_out.txt
 media_snap.png
 wifi_qr.png
 .ruff_cache/
 __pycache__/
-build-check/
-build-sym/
-build-player/
 apps/PlayerMoon/
 dev.on
 
 # локальные настройки редакторов и помощников - не в репозиторий
 .claude/
+
+# старая папка проверочной сборки и значки папок Проводника (путь привязан к этому ПК)
+build-check/
+desktop.ini
+
+# рабочие заметки: планы с личными подробностями остаются на этом ПК
+docs/plans/
+# значки проектов собираются под папки конкретного ПК (tools/install_folder_icons.py)
+icons/proj-*.png
+icons/folders-glass/

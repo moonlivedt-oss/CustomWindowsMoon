@@ -10,18 +10,18 @@ endif()
 
 # исходники раскладываются по папкам src/<часть>/, ресурсы - в src/res
 file(GLOB_RECURSE RADIAL_SOURCES CONFIGURE_DEPENDS src/*.cpp)
-list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/act/")  # src/act - отдельный RadialTools.exe
+list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/radialtools/")  # src/radialtools - отдельный RadialTools.exe
 # src/shutup/main.cpp - окно отдельного RadialShutUp.exe; каталог (catalog.cpp) общий с вкладкой «Приватность»
 list(FILTER RADIAL_SOURCES EXCLUDE REGEX "/src/shutup/main\\.cpp$")
 # страница телефона (src/phone/web) встраивается в exe строками - cmake/embed.cmake
-file(GLOB PHONE_WEB CONFIGURE_DEPENDS src/phone/web/*)
+file(GLOB PHONE_WEB LIST_DIRECTORIES false CONFIGURE_DEPENDS src/phone/web/* src/phone/web/img/*)
 set(PHONE_WEB_CPP ${CMAKE_BINARY_DIR}/gen/phone_web.cpp)
 add_custom_command(OUTPUT ${PHONE_WEB_CPP}
   COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/src/phone/web -DOUT=${PHONE_WEB_CPP} -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
   DEPENDS ${PHONE_WEB} ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
   COMMENT "Страница телефона -> phone_web.cpp")
 # хэши RadialTools.exe и RadialShutUp.exe - внутрь RadialMenu.exe: перед запуском он сверяет с ними файлы рядом
-# (tools/ownexe.cpp, cmake/ownhash.cmake). Снимаются с подписанных файлов - после POST_BUILD этих целей
+# (system/ownexe.cpp, cmake/ownhash.cmake). Снимаются с подписанных файлов - после POST_BUILD этих целей
 set(OWN_HASHES_CPP ${CMAKE_BINARY_DIR}/gen/own_hashes.cpp)
 add_custom_command(OUTPUT ${OWN_HASHES_CPP}
   COMMAND ${CMAKE_COMMAND} -DTOOLS=$<TARGET_FILE:RadialTools> -DSHUTUP=$<TARGET_FILE:RadialShutUp> -DOUT=${OWN_HASHES_CPP} -P ${CMAKE_SOURCE_DIR}/cmake/ownhash.cmake
@@ -51,7 +51,7 @@ set_target_properties(RadialMenu PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_LI
 
 # RadialTools.exe - удаление и завершение процессов отдельным процессом по кнопке:
 # постоянно работающий RadialMenu.exe сам ничего не удаляет и чужие процессы не трогает
-add_executable(RadialTools src/act/act.cpp src/core/text.cpp src/tools/common.cpp)
+add_executable(RadialTools src/radialtools/main.cpp src/core/text.cpp src/system/common.cpp)
 target_include_directories(RadialTools PRIVATE src)
 target_compile_definitions(RadialTools PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 target_link_libraries(RadialTools PRIVATE shlwapi shell32 ole32 user32 bcrypt)
@@ -79,9 +79,10 @@ set_target_properties(RadialShutUp PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${RADIAL_
 # тесты без окон (tests/): правило TEMP, разбор хода чистки, обход папок, разбор MFT, журнал, дампы падений, фоновые
 # задачи; запуск - ctest или build.cmd test
 enable_testing()
-add_executable(radial_tests EXCLUDE_FROM_ALL tests/tests.cpp tests/tests_top20.cpp tests/tests_more.cpp tests/tests_life.cpp tests/tests_sec.cpp tests/test_icon_catalog.cpp tests/own_hashes_stub.cpp src/core/usage_logic.cpp src/tools/ownexe.cpp src/core/elevate_logic.cpp src/phone/phone_sec_logic.cpp src/phone/phone_logic.cpp src/phone/phone_more_logic.cpp src/phone/phone_remote_logic.cpp src/phone/phone_share_logic.cpp src/phone/phone_app_logic.cpp src/phone/cert.cpp src/life/shelf_logic.cpp src/life/preview_logic.cpp src/life/tidy_logic.cpp src/life/record_logic.cpp src/life/convert_logic.cpp src/life/batcare_logic.cpp src/life/gamehot_logic.cpp src/life/vpnexit_logic.cpp src/life/appbright_logic.cpp src/life/capwatch_logic.cpp src/life/btbattery_logic.cpp src/life/nightupd_logic.cpp src/life/remind_logic.cpp src/life/picker_logic.cpp src/life/awake_logic.cpp src/core/edgecheck.cpp src/core/procsnap.cpp src/core/themes.cpp src/gfx/color.cpp src/net/speedlog.cpp src/tools/weekdiff.cpp src/gfx/qr.cpp src/net/wifi.cpp src/tools/extrights.cpp src/tools/sandbox.cpp src/desk/dropundo.cpp src/tools/helper.cpp src/app/rules_logic.cpp src/app/weekreport_logic.cpp src/app/settingsio.cpp src/tools/healthscore.cpp src/tools/important.cpp src/desk/cardlog_logic.cpp src/tools/builderr.cpp src/tools/devserv.cpp src/tools/drain.cpp src/desk/appvol_logic.cpp src/app/resume_logic.cpp src/app/afterwork_logic.cpp src/app/gameprep_logic.cpp src/app/focus_logic.cpp src/app/modestats_logic.cpp src/desk/share_logic.cpp src/tools/projver_logic.cpp src/tools/winget_logic.cpp src/tools/contests_logic.cpp src/tools/scancache.cpp src/core/cfgdiff.cpp src/core/config.cpp src/core/files.cpp src/core/perf.cpp src/core/macro.cpp src/core/stroke.cpp src/core/fuzzy.cpp src/core/secrets.cpp src/desk/zones.cpp src/tools/guard.cpp src/tools/common.cpp src/tools/livesize.cpp
-  src/tools/mft_parse.cpp src/tools/journal.cpp src/shutup/catalog.cpp src/shutup/details.cpp src/tools/explain.cpp src/tools/security_logic.cpp src/tools/sysitems_logic.cpp src/app/selring_logic.cpp src/desk/snipname.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/tools/selfwatch.cpp)
+add_executable(radial_tests EXCLUDE_FROM_ALL tests/test_usage_catalog.cpp src/helpers/markup_logic.cpp tests/tests.cpp tests/tests_top20.cpp tests/tests_more.cpp tests/tests_life.cpp tests/tests_sec.cpp tests/test_icon_catalog.cpp tests/own_hashes_stub.cpp src/core/usage_logic.cpp src/system/ownexe.cpp src/core/elevate_logic.cpp src/phone/phone_sec_logic.cpp src/phone/phone_logic.cpp src/phone/phone_more_logic.cpp src/phone/phone_remote_logic.cpp src/phone/phone_share_logic.cpp src/phone/phone_app_logic.cpp src/phone/cert.cpp src/helpers/shelf_logic.cpp src/helpers/preview_logic.cpp src/helpers/tidy_logic.cpp src/helpers/record_logic.cpp src/helpers/convert_logic.cpp src/system/auto/batcare_logic.cpp src/modes/gamehot_logic.cpp src/net/vpnexit_logic.cpp src/desktop/appbright_logic.cpp src/system/auto/capwatch_logic.cpp src/system/auto/btbattery_logic.cpp src/system/auto/nightupd_logic.cpp src/helpers/remind_logic.cpp src/helpers/picker_logic.cpp src/helpers/awake_logic.cpp src/core/edgecheck.cpp src/core/procsnap.cpp src/core/themes.cpp src/gfx/color.cpp src/net/speedlog.cpp src/system/weekdiff.cpp src/gfx/qr.cpp src/net/wifi.cpp src/system/extrights.cpp src/system/sandbox.cpp src/ring/dropundo.cpp src/system/helper.cpp src/app/rules_logic.cpp src/system/auto/weekreport_logic.cpp src/app/settingsio.cpp src/system/healthscore.cpp src/system/important.cpp src/cards/cardlog_logic.cpp src/system/builderr.cpp src/system/devserv.cpp src/system/drain.cpp src/media/appvol_logic.cpp src/helpers/resume_logic.cpp src/helpers/afterwork_logic.cpp src/modes/gameprep_logic.cpp src/modes/powerpick_logic.cpp src/modes/focus_logic.cpp src/modes/modestats_logic.cpp src/desktop/share_logic.cpp src/system/projver_logic.cpp src/system/winget_logic.cpp src/system/contests_logic.cpp src/system/scancache.cpp src/core/cfgdiff.cpp src/core/config.cpp src/core/files.cpp src/core/perf.cpp src/core/macro.cpp src/core/stroke.cpp src/core/fuzzy.cpp src/core/secrets.cpp src/desktop/zones.cpp src/system/guard.cpp src/system/common.cpp src/system/livesize.cpp
+  src/system/mft_parse.cpp src/system/journal.cpp src/shutup/catalog.cpp src/shutup/details.cpp src/system/explain.cpp src/system/security_logic.cpp src/system/sysitems_logic.cpp src/ring/selring_logic.cpp src/helpers/ocrtext_logic.cpp src/helpers/translate_logic.cpp tests/test_translate.cpp src/helpers/snipname.cpp src/core/text.cpp src/core/bg.cpp src/core/crash.cpp src/system/selfwatch.cpp src/core/profile_logic.cpp tests/test_profile.cpp)
 target_include_directories(radial_tests PRIVATE src)
+target_compile_definitions(radial_tests PRIVATE RADIAL_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_definitions(radial_tests PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
 target_link_libraries(radial_tests PRIVATE shlwapi shell32 ole32 oleaut32 uuid taskschd bcrypt gdiplus wlanapi iphlpapi crypt32 ncrypt)
 target_compile_options(radial_tests PRIVATE ${RADIAL_WERROR})

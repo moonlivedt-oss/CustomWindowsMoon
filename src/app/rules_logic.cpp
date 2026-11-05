@@ -6,7 +6,7 @@
 
 #include "app/rules.h"
 #include "core/text.h"
-#include "tools/guard.h"
+#include "system/guard.h"
 
 namespace rules {
 

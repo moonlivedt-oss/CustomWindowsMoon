@@ -837,6 +837,7 @@ void App::Paint() {
     }
     BitBlt(dc, 0, 0, w, h, memDC_, 0, 0, SRCCOPY);
     EndPaint(wnd_, &ps);
+    ui_.FlushFields();
     if (ui_.TakeRepaint())
         InvalidateRect(wnd_, nullptr, FALSE);
     else if (ui_.TakeTick())

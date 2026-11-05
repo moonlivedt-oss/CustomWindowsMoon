@@ -11,15 +11,22 @@ import android.content.ClipboardManager
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.BroadcastReceiver
 import android.content.pm.ServiceInfo
 import android.database.ContentObserver
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.LinkProperties
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.os.BatteryManager
 import android.provider.MediaStore
 import java.io.IOException
 import java.net.URLEncoder
@@ -49,6 +56,7 @@ class LinkService : Service() {
     @Volatile
     private var running = false
     private val wake = Object()
+    private var networkEpoch = 0L  // под wake: событие между запросом и wait не должно потеряться
     private val main = Handler(Looper.getMainLooper())
     private var photoThread: Thread? = null
     private val photoKick = Object()
@@ -59,8 +67,22 @@ class LinkService : Service() {
     private val mediaObserver = object : ContentObserver(main) {
         override fun onChange(selfChange: Boolean) = kickPhotos()
     }
+    private val localLinks = mutableMapOf<Network, String>()
+    @Volatile private var pcBulkPause = true
+    private val powerEvents = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = kickPhotos()
+    }
     private val net = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) = nudge()
+        // Здесь только снимок адресов и сигнал потоку; запросов и поиска ПК в callback нет.
+        override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+            val addresses = properties.linkAddresses.map { it.toString() }.sorted().joinToString(",")
+            if (localLinks.put(network, addresses) != addresses) nudge()
+        }
+
+        override fun onLost(network: Network) {
+            localLinks.remove(network)
+            nudge()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -71,23 +93,39 @@ class LinkService : Service() {
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Связь с ПК", NotificationManager.IMPORTANCE_MIN))
         startForeground(1, note(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         running = true
+        val powerFilter = IntentFilter(Intent.ACTION_POWER_CONNECTED).apply { addAction(Intent.ACTION_POWER_DISCONNECTED) }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(powerEvents, powerFilter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(powerEvents, powerFilter)
         Thread({ loop() }, "poll").start()
         photoThread = Thread({ photoLoop() }, "photos").also { it.start() }
         contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, mediaObserver)
         contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaObserver)
-        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(net)
+        // Wi-Fi без интернета тоже подходит для ПК; default callback может видеть только мобильную сеть/VPN.
+        // clearCapabilities() - только с Android 11, а minSdk 29: на Android 10 служба падала бы при старте.
+        // Снять требование интернета хватает: NOT_VPN и так в запросе по умолчанию.
+        getSystemService(ConnectivityManager::class.java).registerNetworkCallback(
+            NetworkRequest.Builder()
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET).build(), net,
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        nudge()
+        kickPhotos()
         refresh()
         return START_STICKY
     }
 
     override fun onDestroy() {
         running = false
+        online = false
         nudge()
         kickPhotos()
         contentResolver.unregisterContentObserver(mediaObserver)
+        unregisterReceiver(powerEvents)
         try {
             getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(net)
         } catch (_: Exception) {
@@ -106,7 +144,7 @@ class LinkService : Service() {
             PendingIntent.FLAG_IMMUTABLE,
         )
         val b = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_tile)
+            .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle(if (online) "$pc на связи" else "$pc не на связи")
             .setContentIntent(open)
             .setOngoing(true)
@@ -124,9 +162,19 @@ class LinkService : Service() {
         if (running) getSystemService(NotificationManager::class.java).notify(1, note())
     }
 
-    private fun nudge() = synchronized(wake) { wake.notifyAll() }
+    private fun nudge() = synchronized(wake) {
+        ++networkEpoch
+        wake.notifyAll()
+    }
 
-    private fun pause(ms: Long) = synchronized(wake) { if (running) wake.wait(ms) }
+    private fun pause(ms: Long, epoch: Long) = synchronized(wake) {
+        val until = SystemClock.elapsedRealtime() + ms
+        while (running && networkEpoch == epoch) {
+            val left = until - SystemClock.elapsedRealtime()
+            if (left <= 0) break
+            wake.wait(left)
+        }
+    }
 
     private fun setOnline(v: Boolean) {
         if (online == v) return
@@ -140,10 +188,19 @@ class LinkService : Service() {
         var seq = -1L
         var first = true
         var infoAt = 0L
-        var fails = 0
+        val retry = Pure.Reconnect()
+        var previousEpoch = -1L
         while (running) {
+            val epoch = synchronized(wake) { networkEpoch }
+            if (epoch != previousEpoch) {
+                retry.networkChanged()
+                previousEpoch = epoch
+                seq = -1
+                first = true
+                infoAt = 0L
+            }
             if (!Link.connected(this)) {
-                pause(30000)
+                pause(30000, epoch)
                 continue
             }
             try {
@@ -151,7 +208,11 @@ class LinkService : Service() {
                 if (r.code != 200) throw IOException("код ${r.code}")
                 val o = org.json.JSONObject(r.text)
                 seq = o.optLong("seq", -1)
-                fails = 0
+                if (!running || synchronized(wake) { networkEpoch != epoch }) continue
+                retry.connected()
+                val pauseWas = pcBulkPause
+                pcBulkPause = o.optBoolean("bulkPause", false)
+                if (pauseWas && !pcBulkPause) kickPhotos()
                 setOnline(true)
                 val clip = o.optString("clip", "")
                 if (first) {
@@ -164,16 +225,28 @@ class LinkService : Service() {
                             .setPrimaryClip(ClipData.newPlainText("С компьютера", clip))
                     }
                 }
-                if (System.currentTimeMillis() - infoAt > 10 * 60000) {  // MAC для Wake-on-LAN
-                    infoAt = System.currentTimeMillis()
+                if (infoAt == 0L || SystemClock.elapsedRealtime() - infoAt > 10 * 60000) {  // MAC для Wake-on-LAN
+                    infoAt = SystemClock.elapsedRealtime()
                     val info = Link.call(this, "GET", "pcinfo")
                     if (info.code == 200) Link.savePcInfo(this, info.text)
                 }
             } catch (_: Exception) {
+                if (!running) break
                 setOnline(false)
                 first = true
                 seq = -1
-                pause(minOf(60000L, 5000L shl minOf(fails++, 4)))
+                if (synchronized(wake) { networkEpoch != epoch }) continue
+                val delay = retry.failed()
+                if (Link.hasLan(this) && retry.searchDue(SystemClock.elapsedRealtime())) {
+                    val found = try {
+                        Link.relocate(this) { running && synchronized(wake) { networkEpoch == epoch } }
+                    } catch (_: Exception) { false }
+                    if (found) {
+                        retry.connected()
+                        continue
+                    }
+                }
+                pause(delay, epoch)
             }
         }
     }
@@ -188,7 +261,7 @@ class LinkService : Service() {
             synchronized(photoKick) { if (!photoWanted && running) photoKick.wait(5 * 60000) }
             photoWanted = false
             Thread.sleep(3000)  // камера дописывает файл и выставляет его в галерею
-            if (online && Prefs(this).photos && mediaAllowed()) {
+            if (online && Prefs(this).photos && mediaAllowed() && autoTransferAllowed()) {
                 try {
                     syncKind("img", MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
                     syncKind("vid", MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
@@ -200,6 +273,14 @@ class LinkService : Service() {
 
     private fun mediaAllowed() = if (Build.VERSION.SDK_INT >= 33) granted(Manifest.permission.READ_MEDIA_IMAGES)
     else granted(Manifest.permission.READ_EXTERNAL_STORAGE)
+
+    private fun autoTransferAllowed(): Boolean {
+        val prefs = Prefs(this)
+        val power = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val charging = (power?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+        val metered = getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
+        return Pure.autoTransferAllowed(prefs.gentleTransfer, charging, metered, pcBulkPause)
+    }
 
     private fun syncKind(kind: String, uri: Uri) {
         val prefs = Prefs(this)
@@ -243,6 +324,7 @@ class LinkService : Service() {
                     skip -= k
                 }
                 while (off < size) {
+                    if (!autoTransferAllowed()) throw IOException("бережный режим: продолжим позже")
                     var len = 0
                     while (len < buf.size) {
                         val k = s.read(buf, len, buf.size - len)

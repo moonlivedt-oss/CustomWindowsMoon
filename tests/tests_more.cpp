@@ -13,38 +13,40 @@
 #include "core/procsnap.h"
 #include "core/themes.h"
 #include "net/speed.h"
-#include "tools/tools.h"
-#include "tools/weekdiff.h"
+#include "system/tools.h"
+#include "system/weekdiff.h"
 #include "gfx/qr.h"
 #include "net/wifi.h"
-#include "desk/dropundo.h"
+#include "ring/dropundo.h"
 #include "app/rules.h"
-#include "app/modestats.h"
-#include "desk/share.h"
+#include "modes/modestats.h"
+#include "desktop/share.h"
 #include "app/settingsio.h"
-#include "tools/healthscore.h"
-#include "tools/important.h"
-#include "tools/journal.h"
-#include "tools/builderr.h"
-#include "tools/devserv.h"
-#include "tools/drain.h"
-#include "tools/projver.h"
-#include "tools/winget.h"
-#include "tools/contests.h"
+#include "system/healthscore.h"
+#include "system/important.h"
+#include "system/journal.h"
+#include "system/builderr.h"
+#include "system/devserv.h"
+#include "system/drain.h"
+#include "system/projver.h"
+#include "system/winget.h"
+#include "system/contests.h"
 #include "core/cfgdiff.h"
-#include "app/weekreport.h"
-#include "app/resume.h"
-#include "app/afterwork.h"
-#include "app/gameprep.h"
+#include "system/auto/weekreport.h"
+#include "helpers/resume.h"
+#include "helpers/afterwork.h"
+#include "modes/gameprep.h"
+#include "modes/powerpick.h"
 #include "core/usage.h"
-#include "app/focus.h"
-#include "desk/appvol.h"
-#include "desk/cardlog.h"
-#include "desk/modeswitch.h"
-#include "app/selring.h"
-#include "desk/snipname.h"
+#include "modes/focus.h"
+#include "media/appvol.h"
+#include "cards/cardlog.h"
+#include "modes/modeswitch.h"
+#include "ring/selring.h"
+#include "helpers/markup_logic.h"
+#include "helpers/snipname.h"
 #include "shutup/catalog.h"
-#include "tools/explain.h"
+#include "system/explain.h"
 
 namespace {
 
@@ -59,6 +61,13 @@ std::wstring TempFile(const wchar_t* name) {
 
 void TestConfigRoundTrip() {
     Config c;
+    c.netSecurity = false;
+    c.netChanges = false;
+    c.netVpnWatch = true;
+    c.netVpnBlock = true;
+    c.transferGentle = false;
+    c.netVpnRoute = L"Test tunnel";
+    c.netVpnApps = L"D:\\Apps\\a.exe|D:\\Apps\\b.exe";
     Item g;
     g.name = L"Settings";  // группа с именем служебного раздела
     g.path = L"C:\\";
@@ -82,6 +91,9 @@ void TestConfigRoundTrip() {
     CHECK(SaveConfig(file, c));
     Config back;
     CHECK(LoadConfig(file, back));
+    CHECK(!back.netSecurity);  // отключение фоновой защиты сохраняется при перезапуске
+    CHECK(!back.netChanges && back.netVpnWatch && back.netVpnBlock && !back.transferGentle);
+    CHECK(back.netVpnRoute == c.netVpnRoute && back.netVpnApps == c.netVpnApps);
     CHECK(back.left.size() == 2 && back.right.size() == 1);
     if (back.left.size() == 2) {
         CHECK(back.left[0].name == L"Settings");
@@ -464,6 +476,32 @@ void TestExtRights() {
     CHECK(tools::ExtRightsOf(R"({"permissions":["https://example.com/*","storage"]})") == 0);
     CHECK(tools::ExtRightsText(tools::EXT_CLIPBOARD | tools::EXT_COOKIES) ==
           L"читает буфер обмена, читает куки (входы на сайты)");
+    // ложные тревоги: сайты, которые могут обратиться к расширению, и права, которые оно только может попросить
+    CHECK(tools::ExtRightsOf(R"({"web_accessible_resources":[{"resources":["a.png"],"matches":["<all_urls>"]}]})") == 0);
+    CHECK(tools::ExtRightsOf(R"({"externally_connectable":{"matches":["*://*/*"]}})") == 0);
+    CHECK(tools::ExtRightsOf(R"({"optional_permissions":["clipboardRead","cookies"]})") == 0);
+    CHECK(tools::ExtRightsOf(R"({"content_scripts":[{"matches":["https://a.com/[x]"]},{"matches":["<all_urls>"]}],
+        "web_accessible_resources":[]})") == tools::EXT_ALL_SITES);
+    // права - ещё не опасность
+    int many = tools::EXT_ALL_SITES | tools::EXT_COOKIES;
+    CHECK(tools::ExtVerdict(0, true) == tools::EXT_V_NONE);
+    CHECK(tools::ExtVerdict(tools::EXT_ALL_SITES, true) == tools::EXT_V_SITES);
+    CHECK(tools::ExtVerdict(many, true) == tools::EXT_V_WIDE);
+    CHECK(tools::ExtVerdict(many, false) == tools::EXT_V_DANGER);
+    CHECK(tools::ExtVerdict(tools::EXT_HISTORY, false) == tools::EXT_V_NONE);
+    // одно расширение в двух профилях - одной строкой
+    tools::BrowserExt a, b, other;
+    a.browser = b.browser = L"Chrome";
+    b.profile = L"Profile 2";
+    a.id = b.id = L"same";
+    a.rights = tools::EXT_COOKIES;
+    b.rights = tools::EXT_CLIPBOARD;
+    other.id = L"other";
+    std::vector<tools::ExtGroup> g = tools::GroupExts({a, other, b});
+    CHECK(g.size() == 2);
+    CHECK(g[0].copies == 2);
+    CHECK(g[0].where == L"Chrome, Chrome (Profile 2)");
+    CHECK(g[0].e.rights == (tools::EXT_COOKIES | tools::EXT_CLIPBOARD));
 }
 
 // Ссылка в песочнице: годится только http(s) без кавычек и пробелов - иначе адрес вышел бы из кавычек команды.
@@ -478,6 +516,244 @@ void TestSafeUrl() {
 }
 
 // Л29: имя снимка по окну и папка для него
+void TestMarkup() {
+    using namespace markup;
+    // Случайный щелчок фигурой не считается: иначе он займёт шаг отмены
+    Shape click;
+    click.tool = Tool::Box;
+    click.pts = {{10, 10}, {11, 11}};
+    CHECK(!Meaningful(click));
+    Shape box = click;
+    box.pts[1] = {60, 40};
+    CHECK(Meaningful(box));
+    Shape label;
+    label.tool = Tool::Label;
+    label.pts = {{5, 5}};
+    label.text = L"   ";
+    CHECK(!Meaningful(label));
+    label.text = L"Ошибка";
+    CHECK(Meaningful(label));
+    Shape stroke;
+    stroke.tool = Tool::Marker;
+    stroke.pts = {{1, 1}};
+    CHECK(!Meaningful(stroke));
+
+    // Отмена и возврат; новая фигура убирает возможность вернуть прежнюю
+    Doc doc;
+    CHECK(doc.Empty() && !doc.CanUndo() && !doc.Undo() && !doc.Redo());
+    doc.Add(box);
+    doc.Add(label);
+    CHECK(doc.Shapes().size() == 2);
+    CHECK(doc.Undo() && doc.Shapes().size() == 1 && doc.CanRedo());
+    CHECK(doc.Redo() && doc.Shapes().size() == 2 && doc.Shapes()[1].text == L"Ошибка");
+    CHECK(doc.Undo());
+    doc.Add(box);
+    CHECK(!doc.CanRedo() && doc.Shapes().size() == 2);
+
+    // Вписывание: большой снимок уменьшается, мелкий не растягивается, оба по центру
+    Fit big = FitImage(2000, 1000, 10, 20, 1000, 800);
+    CHECK(big.scale == 0.5f && big.w == 1000 && big.h == 500 && big.x == 10 && big.y == 170);
+    Fit tiny = FitImage(100, 50, 0, 0, 1000, 800);
+    CHECK(tiny.scale == 1 && tiny.w == 100 && tiny.x == 450 && tiny.y == 375);
+    CHECK(FitImage(0, 50, 0, 0, 100, 100).w == 0);
+    // Крошечный снимок в разметке крупнее, но целым числом раз и не больше области
+    CHECK(EditZoom(90, 40) == 4 && EditZoom(200, 100) == 2 && EditZoom(1920, 1080) == 1 && EditZoom(0, 0) == 1);
+    Fit zoomed = FitImage(90, 40, 0, 0, 1000, 800, EditZoom(90, 40));
+    CHECK(zoomed.scale == 4 && zoomed.w == 360);
+    Fit squeezed = FitImage(90, 40, 0, 0, 180, 800, 4);
+    CHECK(squeezed.scale == 2);
+    // Окно -> картинка: туда и обратно, за краем прижимается
+    const Rc all = View({}, 2000, 1000);
+    CHECK(all.w == 2000 && all.h == 1000);
+    Pt inImage = ToImage(big, 510, 420, all);
+    CHECK(inImage.x == 1000 && inImage.y == 500);
+    Pt past = ToImage(big, 5000, -50, all);
+    CHECK(past.x == 2000 && past.y == 0);
+    Pt there = ToWindow(big, inImage, all);
+    CHECK(there.x == 510 && there.y == 420);
+
+    // Обрезка: координаты фигур остаются в исходной картинке, вид - по целым пикселям и в её пределах
+    Rc view = View({100.4f, 50.2f, 200.3f, 100.1f}, 2000, 1000);
+    CHECK(view.x == 100 && view.y == 50 && view.w == 201 && view.h == 101);
+    Rc wide = View({1900, 900, 500, 500}, 2000, 1000);
+    CHECK(wide.Right() == 2000 && wide.Bottom() == 1000);
+    Rc farOff = View({5000, 5000, 10, 10}, 2000, 1000);
+    CHECK(farOff.w == 2000);  // вся за краем - обрезки нет
+    Fit croppedFit = FitImage(201, 101, 0, 0, 1000, 800);
+    Pt inCrop = ToImage(croppedFit, croppedFit.x, croppedFit.y, view);
+    CHECK(inCrop.x == 100 && inCrop.y == 50);
+    Pt cropEdge = ToImage(croppedFit, 0, 0, view);
+    CHECK(cropEdge.x == 100 && cropEdge.y == 50);
+
+    // История: перемещение, удаление и обрезка отменяются и возвращаются
+    Doc edits;
+    edits.Add(box);
+    Shape moved = box;
+    Translate(moved, 100, 0);
+    edits.Replace(0, moved);
+    CHECK(edits.Shapes()[0].pts[0].x == 110);
+    CHECK(edits.Undo() && edits.Shapes()[0].pts[0].x == 10);
+    CHECK(edits.Redo() && edits.Shapes()[0].pts[0].x == 110);
+    edits.Remove(0);
+    CHECK(edits.Shapes().empty() && edits.Empty());
+    edits.Replace(5, moved);  // нет такой - ничего не ломает и в историю не идёт
+    edits.Remove(5);
+    CHECK(edits.Undo() && edits.Shapes().size() == 1);
+    edits.SetCrop({0, 0, 50, 50});
+    CHECK(!edits.Crop().Empty() && !edits.Empty());
+    CHECK(edits.Undo() && edits.Crop().Empty() && edits.Shapes().size() == 1);
+    Doc onlyCrop;
+    onlyCrop.SetCrop({1, 1, 20, 20});
+    CHECK(!onlyCrop.Empty());  // обрезка без фигур - тоже правка
+
+    // Выбор: рамка пустая внутри, стрелка - по линии, верхняя важнее нижней
+    Shape frame;
+    frame.tool = Tool::Box;
+    frame.width = 4;
+    frame.pts = {{100, 100}, {300, 200}};
+    CHECK(HitTest(frame, {100, 150}, 2) && HitTest(frame, {300, 200}, 2));
+    CHECK(!HitTest(frame, {200, 150}, 2) && !HitTest(frame, {50, 50}, 2));
+    Shape arrow;
+    arrow.tool = Tool::Arrow;
+    arrow.width = 4;
+    arrow.pts = {{0, 0}, {100, 100}};
+    CHECK(HitTest(arrow, {50, 50}, 2) && !HitTest(arrow, {90, 10}, 2));
+    Shape blurBox = frame;
+    blurBox.tool = Tool::Blur;
+    CHECK(HitTest(blurBox, {200, 150}, 2));  // размытие сплошное
+    Shape step;
+    step.tool = Tool::Step;
+    step.width = 30;
+    step.pts = {{200, 150}};
+    CHECK(Meaningful(step) && HitTest(step, {210, 155}, 0) && !HitTest(step, {300, 300}, 0));
+    std::vector<Shape> stack = {blurBox, step};
+    CHECK(TopShape(stack, {205, 150}, 2) == 1);
+    CHECK(TopShape(stack, {110, 110}, 2) == 0);
+    CHECK(TopShape(stack, {900, 900}, 2) == -1);
+
+    // Ручки: угол рамки тянется, противоположный стоит; за него можно перетащить
+    CHECK(Handles(frame).size() == 4 && Handles(arrow).size() == 2 && Handles(step).size() == 1);
+    CHECK(HandleAt(frame, {300, 200}, 4) == 3 && HandleAt(frame, {200, 150}, 4) == -1);
+    Shape dragged = frame;
+    DragHandle(dragged, 3, {400, 260});
+    Rc grown = Bounds(dragged);
+    CHECK(grown.x == 100 && grown.y == 100 && grown.w == 300 && grown.h == 160);
+    DragHandle(dragged, 3, {40, 20});
+    grown = Bounds(dragged);
+    CHECK(grown.x == 40 && grown.y == 20 && grown.Right() == 100 && grown.Bottom() == 100);
+    Shape head = arrow;
+    DragHandle(head, 1, {200, 0});
+    CHECK(head.pts[0].x == 0 && head.pts[1].x == 200 && head.pts[1].y == 0);
+    Shape bigger = step;
+    DragHandle(bigger, 0, {230, 150});
+    CHECK(bigger.width == 60);
+    Shape lab;
+    lab.tool = Tool::Label;
+    lab.text = L"Текст";
+    lab.width = 20;
+    lab.pts = {{10, 10}};
+    lab.extent = {100, 30};
+    DragHandle(lab, 0, {999, 70});
+    CHECK(lab.width == 40 && lab.extent.x == 200 && lab.extent.y == 60);
+    Shape path;
+    path.tool = Tool::Marker;
+    path.width = 10;
+    path.pts = {{0, 0}, {50, 25}, {100, 50}};
+    DragHandle(path, 3, {200, 100});
+    CHECK(path.pts[1].x == 100 && path.pts[1].y == 50 && path.pts[2].x == 200);
+    DragHandle(path, -1, {0, 0});  // нет ручки - ничего не меняется
+    CHECK(path.pts[2].x == 200);
+
+    // Выпрямление: чуть наклонная линия становится ровной, заметно косая остаётся
+    Pt nearly{200, 8};
+    SnapAxis({0, 0}, nearly);
+    CHECK(nearly.y == 0 && nearly.x == 200);
+    Pt nearlyV{8, 200};
+    SnapAxis({0, 0}, nearlyV);
+    CHECK(nearlyV.x == 0);
+    Pt slanted{200, 60};
+    SnapAxis({0, 0}, slanted);
+    CHECK(slanted.y == 60);
+    std::vector<Pt> underline = {{0, 100}, {50, 103}, {100, 98}, {150, 102}, {200, 104}};
+    CHECK(StraightenStroke(underline) && underline.size() == 2 && underline[1].y == 100);
+    std::vector<Pt> circle = {{0, 0}, {100, 100}, {200, 0}};
+    CHECK(!StraightenStroke(circle) && circle.size() == 3);
+    std::vector<Pt> shortStroke = {{0, 0}, {10, 0}, {20, 0}};
+    CHECK(!StraightenStroke(shortStroke) && shortStroke.size() == 3);
+
+    CHECK(IsLight(0xFFFFFF) && IsLight(0xFFD23F) && !IsLight(0x101010) && !IsLight(0xE5484D));
+
+    // Секреты: токен закрывается как слово, номер карты из нескольких слов - всей строкой, обычный текст не трогаем
+    auto word = [](const wchar_t* t, float x, float y, int line) {
+        OcrWord w;
+        w.text = t;
+        w.box = {x, y, 50, 20};
+        w.line = line;
+        return w;
+    };
+    std::vector<OcrWord> plain = {word(L"Всё", 0, 0, 0), word(L"работает", 60, 0, 0)};
+    CHECK(SecretBoxes(plain, 3).empty());
+    std::vector<OcrWord> token = {word(L"token:", 0, 0, 0), word(L"ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gH3jK", 60, 0, 0)};
+    std::vector<Rc> tokenBox = SecretBoxes(token, 3);
+    CHECK(tokenBox.size() == 1 && tokenBox[0].x == 57 && tokenBox[0].w == 56);
+    std::vector<OcrWord> card = {word(L"4111", 0, 40, 1), word(L"1111", 60, 40, 1), word(L"1111", 120, 40, 1),
+                                 word(L"1111", 180, 40, 1)};
+    std::vector<Rc> cardBox = SecretBoxes(card, 0);
+    CHECK(cardBox.size() == 1 && cardBox[0].x == 0 && cardBox[0].w == 230);
+    // оба движка прочли одно и то же: рамка одна
+    std::vector<OcrWord> twice = {word(L"ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gH3jK", 60, 0, 0),
+                                  word(L"ghp_aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gH3jK", 61, 1, 5)};
+    CHECK(SecretBoxes(twice, 2).size() == 1);
+
+    // Лента: уходит самый старый без звезды
+    CHECK(EvictIndex({false, false}) == 0);
+    CHECK(EvictIndex({true, false, false}) == 1);
+    CHECK(EvictIndex({true, true}) == 0);
+    CHECK(EvictIndex({}) == -1);
+
+    // Стрелка: остриё на месте, линия кончается у основания, крылья по бокам; короткая не выворачивается
+    Pt a[4];
+    ArrowGeometry({0, 0}, {100, 0}, 4, a);
+    CHECK(a[1].x == 100 && a[1].y == 0);
+    CHECK(a[0].x > 50 && a[0].x < 100 && a[0].y == 0);
+    CHECK(a[2].x == a[0].x && a[3].x == a[0].x && a[2].y > 0 && a[3].y < 0);
+    ArrowGeometry({0, 0}, {5, 0}, 10, a);
+    CHECK(a[0].x >= 0 && a[0].x < 5);
+    ArrowGeometry({7, 7}, {7, 7}, 3, a);
+    CHECK(a[0].x == 7 && a[2].y == 7);
+
+    // Размытие: внутри - только клетки одного цвета, снаружи цело, исходные значения не сохраняются
+    const int W = 60, H = 40;
+    std::vector<uint32_t> px((size_t)W * H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) px[(size_t)(y * W + x)] = 0xFF000000u | (uint32_t)((x * 7 + y * 13) & 0xFF) * 0x010101u;
+    const std::vector<uint32_t> before = px;
+    Pixelate(px.data(), W, H, W, {36, 24}, {12, 0});  // углы в обратном порядке - тоже годится
+    const int cell = BlurCell(24, 24);
+    CHECK(cell == 12);
+    bool flat = true, outside = true, changed = false;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            uint32_t v = px[(size_t)(y * W + x)];
+            bool in = x >= 12 && x < 36 && y >= 0 && y < 24;
+            if (!in) {
+                outside = outside && v == before[(size_t)(y * W + x)];
+                continue;
+            }
+            int cx = 12 + (x - 12) / cell * cell, cy = (y / cell) * cell;
+            flat = flat && v == px[(size_t)(cy * W + cx)];
+            changed = changed || v != before[(size_t)(y * W + x)];
+        }
+    CHECK(flat && outside && changed);
+    // За границей картинки - ничего не ломает
+    std::vector<uint32_t> copy = before;
+    Pixelate(copy.data(), W, H, W, {-50, -50}, {-10, -10});
+    Pixelate(copy.data(), W, H, W, {W + 5.0f, 5}, {W + 50.0f, 50});
+    CHECK(copy == before);
+    // Крупная область - клетки крупнее: крупный текст не читается и сквозь них
+    CHECK(BlurCell(600, 300) == 100);
+}
+
 void TestSnipName() {
     using namespace snipname;
     CHECK(Context(L"Player.cpp - MyGame - Visual Studio Code", L"Code.exe") == L"MyGame Player.cpp");
@@ -493,6 +769,17 @@ void TestSnipName() {
     CHECK(TargetDir(L"D:\\Proj\\", true) == L"D:\\Proj\\screenshots");
     CHECK(TargetDir(L"C:\\Users\\u\\Downloads", false) == L"C:\\Users\\u\\Downloads");
     CHECK(TargetDir(L"", true).empty());
+    float pw = 0, ph = 0;
+    FitPreview(1920, 1080, 136, 112, pw, ph);  // широкий: упирается в ширину, ничего не срезано
+    CHECK(pw == 136 && ph > 76 && ph < 77);
+    FitPreview(600, 1800, 136, 112, pw, ph);  // высокий: упирается в высоту
+    CHECK(ph == 112 && pw > 37 && pw < 38);
+    FitPreview(40, 30, 136, 112, pw, ph);  // мелкий не растягивается
+    CHECK(pw == 40 && ph == 30);
+    FitPreview(4000, 4, 136, 112, pw, ph);  // полоска не исчезает
+    CHECK(pw == 136 && ph == 2);
+    FitPreview(0, 0, 136, 112, pw, ph);
+    CHECK(pw == 136 && ph == 112);
 }
 
 // Кольцо выделенного: раскладка, калькулятор, регистр, пробелы, адрес поиска
@@ -1184,6 +1471,29 @@ void TestAfterWork() {
 }
 
 // Подготовка к игре (Л21): мешает - строками, кнопка - самое полезное (обновления важнее Steam), нечему - молчим
+// Режим питания по нагрузке: открытый, но простаивающий Unreal на зарядке - не максимум (шумели вентиляторы)
+void TestPowerPick() {
+    using namespace powerpick;
+    CHECK(Pick(false, false, false) == BALANCED);  // одна зарядка максимум не включает
+    CHECK(Pick(false, true, false) == BALANCED);   // редактор открыт, но простаивает
+    CHECK(Pick(false, true, true) == BEST);
+    CHECK(Pick(true, false, false) == SAVER && Pick(true, true, true) == BALANCED);
+    CHECK(Reason(false, false, true, false) == L"на зарядке, Unreal, простаивает");
+    CHECK(Reason(false, true, false, true) == L"на зарядке, игра, нагрузка");
+    CHECK(Reason(true, true, false, true) == L"от батареи, игра" && Reason(false, false, false, true) == L"на зарядке");
+    Load l;
+    CHECK(!l.Want(1000, 0.9));  // миг нагрузки - ещё не максимум
+    CHECK(!l.Want(10000, 0.9));
+    CHECK(l.Want(16000, 0.5));                           // 15 с подряд выше порога
+    CHECK(l.Want(20000, 0.05) && l.Want(100000, 0.05));  // простой меньше полутора минут - держим
+    CHECK(l.Want(110000, 0.15));                         // между порогами - держим, отсчёт простоя заново
+    CHECK(l.Want(150000, 0.05) && l.Want(239000, 0.05));
+    CHECK(!l.Want(240000, 0.05));                                                 // 90 с подряд простоя - снова баланс
+    CHECK(!l.Want(241000, 0.9) && !l.Want(250000, 0.2) && !l.Want(260000, 0.9));  // провал прерывает отсчёт
+    l.Reset();
+    CHECK(!l.busy && !l.highSince && !l.lowSince);
+}
+
 void TestGamePrep() {
     gameprep::In in;
     gameprep::Out o;
@@ -1353,6 +1663,7 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestResume();
     TestAfterWork();
     TestGamePrep();
+    TestPowerPick();
     TestFocus();
     TestProjVer();
     TestPlanLaunch();
@@ -1368,4 +1679,5 @@ void TestMore(void (*check)(bool, const char*, int)) {
     TestShareMask();
     TestSelRing();
     TestSnipName();
+    TestMarkup();
 }

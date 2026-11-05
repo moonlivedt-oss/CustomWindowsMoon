@@ -17,6 +17,7 @@
 #include "core/perf.h"
 #include "core/text.h"
 #include "net/net_internal.h"
+#include "net/probe_policy.h"
 
 namespace net {
 
@@ -207,7 +208,9 @@ bool RouteTo(const std::wstring& ip, std::wstring* adapter) {
 
 // ---- HTTPS через системные настройки ----
 
-bool HttpGet(const wchar_t* host, const wchar_t* path, int timeoutMs, std::string* body, int* status) {
+bool HttpGet(const wchar_t* host, const wchar_t* path, int timeoutMs, std::string* body, int* status, bool allowRedirects) {
+    if (body) body->clear();
+    if (status) *status = 0;
     // AUTOMATIC_PROXY берёт настройки пользователя, как браузер: застрявший прокси здесь и проявится
     HINTERNET s = WinHttpOpen(L"MoonRadial", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                               WINHTTP_NO_PROXY_BYPASS, 0);
@@ -215,6 +218,12 @@ bool HttpGet(const wchar_t* host, const wchar_t* path, int timeoutMs, std::strin
         s = WinHttpOpen(L"MoonRadial", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
                         WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) return false;
+    DWORD redirects = allowRedirects ? WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP
+                                    : WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    if (!WinHttpSetOption(s, WINHTTP_OPTION_REDIRECT_POLICY, &redirects, sizeof(redirects))) {
+        WinHttpCloseHandle(s);
+        return false;
+    }
     WinHttpSetTimeouts(s, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
     bool ok = false;
     if (HINTERNET c = WinHttpConnect(s, host, INTERNET_DEFAULT_HTTPS_PORT, 0)) {
@@ -226,12 +235,24 @@ bool HttpGet(const wchar_t* host, const wchar_t* path, int timeoutMs, std::strin
                 WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &sz,
                                     nullptr);
                 if (status) *status = (int)code;
-                ok = code >= 200 && code < 400;
+                ok = code >= 200 && code < 300;
                 if (body) {
                     char chunk[4096];
                     DWORD got = 0;
-                    while (body->size() < 65536 && WinHttpReadData(r, chunk, sizeof(chunk), &got) && got)
+                    for (;;) {
+                        if (!WinHttpReadData(r, chunk, sizeof(chunk), &got)) {
+                            ok = false;
+                            break;
+                        }
+                        if (!got) break;
+                        // длинный ответ обрезаем, а не бракуем: версии (GitHub, endoflife) и драйверы NVIDIA бывают
+                        // больше 64 КБ, нужное в них - в начале; пробе связи хватает и обрезанного
+                        if (body->size() + got >= 65536) {
+                            body->append(chunk, 65536 - body->size());
+                            break;
+                        }
                         body->append(chunk, got);
+                    }
                 }
             }
             WinHttpCloseHandle(r);
@@ -259,8 +280,7 @@ int HttpRtt(int timeoutMs) {
                       WinHttpReceiveResponse(r, nullptr);
             char buf[1024];
             DWORD got = 0;
-            while (ok && WinHttpReadData(r, buf, sizeof(buf), &got) && got) {
-            }
+            while (ok && WinHttpReadData(r, buf, sizeof(buf), &got) && got) {}
             int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
                          .count();
             WinHttpCloseHandle(r);
@@ -279,10 +299,14 @@ bool HttpsOk(int budgetMs) {
     const wchar_t* urls[][2] = {{L"www.gstatic.com", L"/generate_204"},
                                 {L"cloudflare.com", L"/cdn-cgi/trace"},
                                 {L"www.msftconnecttest.com", L"/connecttest.txt"}};
-    for (auto& u : urls) {
+    for (unsigned i = 0; i < 3; ++i) {
+        const auto& u = urls[i];
         int left = budgetMs - (int)(GetTickCount64() - t0);
         if (left < 800) break;
-        if (HttpGet(u[0], u[1], std::min(left, 5000), nullptr, nullptr)) return true;
+        std::string body;
+        int status = 0;
+        if (HttpGet(u[0], u[1], std::min(left, 5000), &body, &status, false) && ConnectivityReply(i, status, body))
+            return true;
     }
     return false;
 }

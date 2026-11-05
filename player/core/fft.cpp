@@ -40,17 +40,29 @@ SpectrumAnalyzer::SpectrumAnalyzer(size_t fftSize) : size_(fftSize), window_(fft
         window_[i] = static_cast<float>(0.5 - 0.5 * std::cos(2 * kPi * static_cast<double>(i) / (size_ - 1)));
 }
 
+float SpectrumAnalyzer::BinDb(size_t k) const {
+    // Нормировка: синус полной шкалы даёт 0 дБ (усиление окна Ханна 0.5)
+    const double norm = 2.0 / (static_cast<double>(size_) * 0.5);
+    const double mag = std::abs(work_[k]) * norm;
+    return static_cast<float>(std::max(kFloorDb, 20 * std::log10(mag + 1e-12)));
+}
+
+const std::vector<float>& SpectrumAnalyzer::BinsDb() const {
+    if (!binsFresh_) {
+        binsDb_.assign(size_ / 2, static_cast<float>(kFloorDb));
+        for (size_t k = 1; k < size_ / 2; ++k) binsDb_[k] = BinDb(k);
+        binsFresh_ = true;
+    }
+    return binsDb_;
+}
+
 void SpectrumAnalyzer::Compute(const float* samples, double sampleRate, int bands, std::vector<float>& out) {
     for (size_t i = 0; i < size_; ++i) work_[i] = {samples[i] * window_[i], 0.f};
     Fft(work_);
-    // Нормировка: синус полной шкалы даёт 0 дБ (усиление окна Ханна 0.5)
     const size_t half = size_ / 2;
-    binsDb_.assign(half, static_cast<float>(kFloorDb));
-    const double norm = 2.0 / (static_cast<double>(size_) * 0.5);
-    for (size_t k = 1; k < half; ++k) {
-        const double mag = std::abs(work_[k]) * norm;
-        binsDb_[k] = static_cast<float>(std::max(kFloorDb, 20 * std::log10(mag + 1e-12)));
-    }
+    power_.resize(half);
+    for (size_t k = 1; k < half; ++k) power_[k] = std::norm(work_[k]);
+    binsFresh_ = false;
     out.assign(static_cast<size_t>(std::max(bands, 0)), 0.f);
     if (bands <= 0) return;
     const double binHz = sampleRate / static_cast<double>(size_);
@@ -63,8 +75,11 @@ void SpectrumAnalyzer::Compute(const float* samples, double sampleRate, int band
         size_t k1 = static_cast<size_t>(std::ceil(hi / binHz));
         k0 = std::clamp<size_t>(k0, 1, half - 1);
         k1 = std::clamp<size_t>(k1, k0 + 1, half);
-        float peak = static_cast<float>(kFloorDb);
-        for (size_t k = k0; k < k1; ++k) peak = std::max(peak, binsDb_[k]);
+        // Логарифм монотонен: дБ считаем только для самого громкого бина полосы, а не для всей тысячи
+        const size_t loudest = static_cast<size_t>(std::max_element(power_.begin() + static_cast<std::ptrdiff_t>(std::min(k0, half)),
+                                                                    power_.begin() + static_cast<std::ptrdiff_t>(std::min(k1, half))) -
+                                                   power_.begin());
+        const float peak = std::max(static_cast<float>(kFloorDb), BinDb(loudest));
         out[static_cast<size_t>(b)] = static_cast<float>((peak - kFloorDb) / -kFloorDb);
     }
 }

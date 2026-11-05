@@ -6,6 +6,9 @@ struct Item;
 
 // Пути и файлы: папка программы, подстановки {desktop} и %VAR%, проверки, чтение папок.
 std::wstring ExeDir();
+// Куда dev-режимы пишут итоги (*_out.txt, profile.log): из папки проекта (рядом CMakeLists.txt) - в build\out,
+// чтобы корень не зарастал; установленная копия - рядом с exe, как раньше
+std::wstring DevOutPath(const std::wstring& name);
 std::wstring ExpandPath(const std::wstring& p);   // %VAR% и {desktop} {downloads} {documents} {music} ...
 std::wstring ResolveIcon(const std::wstring& p);  // относительный путь значка - от папки программы
 bool IsFolder(const std::wstring& full);

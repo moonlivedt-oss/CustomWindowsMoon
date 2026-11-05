@@ -21,7 +21,7 @@ public:
     // samples - ровно FftSize() сэмплов; out получает bands значений 0..1
     void Compute(const float* samples, double sampleRate, int bands, std::vector<float>& out);
     // Амплитуды бинов после последнего Compute, дБ относительно полной шкалы (для тестов)
-    const std::vector<float>& BinsDb() const { return binsDb_; }
+    const std::vector<float>& BinsDb() const;
 
     static constexpr double kMinHz = 40;
     static constexpr double kMaxHz = 16000;
@@ -31,7 +31,10 @@ private:
     size_t size_;
     std::vector<float> window_;
     std::vector<std::complex<float>> work_;
-    std::vector<float> binsDb_;
+    float BinDb(size_t k) const;
+    std::vector<float> power_;  // квадрат амплитуды: для сравнения бинов корень и логарифм не нужны
+    mutable std::vector<float> binsDb_;
+    mutable bool binsFresh_ = false;
 };
 
 }  // namespace pm

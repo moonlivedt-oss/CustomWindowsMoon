@@ -16,14 +16,16 @@
 #include "core/mem.h"
 #include "core/files.h"
 #include "core/perf.h"
-#include "app/autos.h"
+#include "system/auto/autos.h"
 #include "app/autostart.h"
-#include "app/toolsui.h"
+#include "system/ui/toolsui.h"
 #include "core/text.h"
 #include "gfx/accent.h"
 #include "gfx/draw.h"
 #include "gfx/icons.h"
+#include "core/profile.h"
 #include "studio/studio.h"
+#include "studio/studio_help.h"
 #include "studio/studio_internal.h"
 
 using namespace Gdiplus;
@@ -41,30 +43,30 @@ struct GroupPage {
 };
 struct Group {
     const wchar_t* name;
-    const wchar_t* own;  // свой значок группы (icons\rail-*.png), пока его нет - общий
+    const wchar_t* own;  // свой значок группы (icons\studio\*.png - стеклянный набор), пока его нет - общий
     const wchar_t* icon;
     GroupPage pages[3];
     int count;
 };
 const Group kGroups[] = {
     {L"Обзор",
-     L"rail-home.png",
+     L"studio\\today.png",
      L"hub.png",
      {{PAGE_STATE, L"Состояние"}, {PAGE_AUTO, L"Автоматика"}, {PAGE_HOME, L"Разделы"}},
      3},
     {L"Кольца",
-     L"rail-rings.png",
+     L"studio\\rings.png",
      L"apps.png",
      {{PAGE_RINGS, L"Кольца"}, {PAGE_APPS, L"Программы"}, {PAGE_THEMES, L"Темы"}},
      3},
     {L"Стол",
-     L"rail-desk.png",
+     L"studio\\look.png",
      L"desktop.png",
      {{PAGE_DESK, L"Углы и панель"}, {PAGE_STYLE, L"Красота"}, {PAGE_SYSTEM, L"Система"}},
      3},
-    {L"Сервис", L"rail-tools.png", L"tools-box.png", {{PAGE_NET, L"Сеть"}, {PAGE_TOOLS, L"Утилиты"}}, 2},
+    {L"Сервис", L"studio\\netphone.png", L"tools-box.png", {{PAGE_NET, L"Сеть"}, {PAGE_TOOLS, L"Утилиты"}}, 2},
     {L"Настройки",
-     L"rail-behavior.png",
+     L"studio\\settings.png",
      L"editor.png",
      {{PAGE_BEHAVIOR, L"Поведение"}, {PAGE_AIDS, L"Помощники"}, {PAGE_KEYS, L"Клавиши"}},
      3},
@@ -77,7 +79,31 @@ int GroupOf(Page p) {
             if (kGroups[g].pages[k].page == p) return g;
     return 0;
 }
+
+// С какого профиля виден раздел.
+profile::Level PageMin(Page p) {
+    switch (p) {
+        case PAGE_APPS:
+        case PAGE_AUTO:
+        case PAGE_TOOLS:
+        case PAGE_SYSTEM:
+        case PAGE_AIDS:
+            return profile::Dev;
+        case PAGE_HOME:
+            return profile::Expert;
+        default:
+            return profile::Simple;
+    }
+}
 }  // namespace
+
+bool Studio::PageFits(Page p) const {
+    return profile::Effective() >= PageMin(p);
+}
+
+bool Studio::PageOn(Page p) const {
+    return p == page_ || PageFits(p);
+}
 
 void Studio::Paint() {
     // Вложенный WM_PAINT (COM или WMI внутри кадра прокачали сообщения): второй кадр поверх первого
@@ -138,9 +164,12 @@ void Studio::Paint() {
     }
     BitBlt(dc, 0, 0, w, h, memDC_, 0, 0, SRCCOPY);
     EndPaint(wnd, &ps);
+    ui.FlushFields();
     painting_ = false;
-    if (ui.TakeRepaint() || paintAgain_)
+    if (ui.TakeRepaint() || paintAgain_) {
+        DwmFlush();  // следующий кадр - по такту экрана: без разрывов и без лишних кадров
         InvalidateRect(wnd, nullptr, FALSE);
+    }
     else if (ui.TakeTick())
         RepaintIn(33);  // ожидание крутится ~30 кадров в секунду, а не без передышки
     paintAgain_ = false;
@@ -263,7 +292,9 @@ void Studio::Frame(float w, float h) {
     // вкладки группы (Кольца | Темы...) над страницей рисуются после неё: плашка чуть заходит
     // на страницу, и появление страницы срезало бы её низ
     RectF full = body;
-    float tabsH = kGroups[GroupOf(page_)].count < 2 ? 0 : ui.S(44);
+    int visibleTabs = 0;
+    for (int k = 0; k < kGroups[GroupOf(page_)].count; ++k) visibleTabs += PageOn(kGroups[GroupOf(page_)].pages[k].page);
+    float tabsH = visibleTabs < 2 ? 0 : ui.S(44);
     body.Y += tabsH;
     body.Height -= tabsH;
     childDragShown_ = childDrag_;
@@ -348,6 +379,7 @@ void Studio::Frame(float w, float h) {
         RevealComposite(body, since);
         ui.Invalidate();
     }
+    ui.ScrollChrome(ID_PAGE_SCROLL);
     SubTabs(full);
     ui.interactive = ov_ == OV_NONE || ov_ == OV_JOURNAL;  // «Журнал» внизу закрывает сам себя
     StatusBar(RectF(rail, h - status, w - rail, status));
@@ -355,11 +387,33 @@ void Studio::Frame(float w, float h) {
     WaveComposite(w, h);
     DrawToast(w, h);  // под всплывающими окнами, чтобы не налезать на журнал
     ui.interactive = true;
+    // окно поверх появляется с лёгким перелётом от чуть меньшего размера
+    ULONGLONG ovNow = GetTickCount64();
+    if (ov_ != ovShown_) {
+        ovShown_ = ov_;
+        ovAt_ = ovNow;
+    }
+    bool pop = (ov_ == OV_TOUR || ov_ == OV_JOURNAL || ov_ == OV_LIBRARY) && !fx::Game();
+    double popT = pop ? std::min(1.0, (double)(ovNow - ovAt_) / std::max(1.0, fx::Dur(300))) : 1;
+    GraphicsState ovState = ui.G().Save();
+    if (popT < 1) {
+        float s = 0.94f + 0.06f * (float)(1 + 1.7 * std::pow(popT - 1, 3) + 0.7 * std::pow(popT - 1, 2));
+        ui.G().TranslateTransform(w / 2, h / 2);
+        ui.G().ScaleTransform(s, s);
+        ui.G().TranslateTransform(-w / 2, -h / 2);
+        ui.Invalidate();
+    }
     if (ov_ == OV_TOUR) TourOverlay(w, h);
     if (ov_ == OV_JOURNAL) JournalOverlay(w, h);
     if (ov_ == OV_LIBRARY) LibraryOverlay(w, h);
+    ui.G().Restore(ovState);
     if (ov_ == OV_MORE) MoreOverlay();
+    if (ov_ == OV_LOGIN)
+        LoginOverlay(w, h);
+    else
+        loginAt_ = 0;
     ui.DrawTip(w, h);
+    ui.DrawDetail(w, h);
 }
 
 // Страница уже нарисована в revealDC_. Всё, что не карточки (заголовки), проступает целиком,
@@ -431,11 +485,21 @@ void Studio::Card(const RectF& r, bool hi) {
     const UiColors& c = ui.C();
     ui.Fill(r, hi ? c.cardHi : c.card, ui.S(12));
     ui.Stroke(r, c.border, ui.S(12));
+    ui.Spotlight(r, ui.S(12));
 }
 
 void Studio::Header(const RectF& r, const std::wstring& title, const std::wstring& sub) {
-    ui.Text(title, RectF(r.X, r.Y, r.Width, ui.S(32)), ui.C().text, 21, true);
-    ui.Text(sub, RectF(r.X, r.Y + ui.S(32), r.Width, ui.S(20)), ui.C().muted, 12);
+    // заголовок и подпись поднимаются по очереди, пока раздел появляется
+    float t0 = 1, t1 = 1;
+    if (pageAt_ && !fx::Game()) {
+        double ms = (double)(GetTickCount64() - pageAt_), d = std::max(1.0, fx::Dur(420));
+        t0 = (float)std::min(1.0, ms / d);
+        t1 = (float)std::clamp((ms - fx::Dur(70)) / d, 0.0, 1.0);
+        if (t1 < 1) ui.Invalidate();
+    }
+    auto rise = [&](float t) { return ui.S(12) * (1 - t) * (1 - t) * (1 - t); };
+    ui.Text(title, RectF(r.X, r.Y + rise(t0), r.Width, ui.S(32)), ui.C().text, 21, true);
+    ui.Text(sub, RectF(r.X, r.Y + ui.S(32) + rise(t1), r.Width, ui.S(20)), ui.C().muted, 12);
 }
 
 RectF Studio::Column(const RectF& in, float maxW) const {
@@ -474,14 +538,27 @@ void Studio::Rail(const RectF& r) {
         return Exists(p) ? p : ExeDir() + L"\\icons\\" + fallback;
     };
     // пять групп вместо десяти разделов; внутри группы - вкладки над страницей (SubTabs)
-    auto slot = [&](int gi) { return RectF(r.X + ui.S(7), ui.S(72) + gi * ui.S(72), r.Width - ui.S(14), ui.S(66)); };
+    // группа без видимых разделов в этом профиле не показывается, остальные сдвигаются вверх
+    bool shown[kGroupCount];
+    int place[kGroupCount], places = 0;
     for (int gi = 0; gi < kGroupCount; ++gi) {
+        shown[gi] = false;
+        for (int k = 0; k < kGroups[gi].count; ++k) shown[gi] = shown[gi] || PageOn(kGroups[gi].pages[k].page);
+        place[gi] = shown[gi] ? places++ : 0;
+    }
+    auto slot = [&](int gi) {
+        return RectF(r.X + ui.S(7), ui.S(72) + place[gi] * ui.S(72), r.Width - ui.S(14), ui.S(66));
+    };
+    for (int gi = 0; gi < kGroupCount; ++gi) {
+        if (!shown[gi]) continue;
         RectF b = slot(gi);
         bool on = GroupOf(page_) == gi;
         if (ui.Click(ID_RAIL + gi, b) && !on) {
             pageAt_ = GetTickCount64();
             renaming_ = -1;
-            page_ = groupLast_[gi];
+            Page next = groupLast_[gi];
+            for (int k = 0; !PageOn(next) && k < kGroups[gi].count; ++k) next = kGroups[gi].pages[k].page;
+            page_ = next;
             ui.ResetScroll(ID_PAGE_SCROLL);
             railPop_ = gi;
             railPopAt_ = pageAt_;
@@ -502,6 +579,7 @@ void Studio::Rail(const RectF& r) {
     float barH = std::min(selR.Height, ui.S(34) + std::max(0.0f, selR.Height - ui.S(66)));
     ui.Fill(RectF(r.X + ui.S(1), selR.Y + (selR.Height - barH) / 2, ui.S(4), barH), c.accent, ui.S(2));
     for (int gi = 0; gi < kGroupCount; ++gi) {
+        if (!shown[gi]) continue;
         const Group& e = kGroups[gi];
         RectF b = slot(gi);
         bool on = GroupOf(page_) == gi;
@@ -521,38 +599,47 @@ void Studio::Rail(const RectF& r) {
         float tx = ui.Anim(ID_RAIL_BAR + gi, on, 14);
         ui.Text(e.name, RectF(b.X - ui.S(4), b.Y + ui.S(42), b.Width + ui.S(8), ui.S(18)),
                 MixColor(c.muted, c.text, tx), 10.5f, on, ui::Center);
-        std::wstring tip;
-        for (int k = 0; k < e.count; ++k) tip += (k ? L", " : L"") + std::wstring(e.pages[k].name);
-        if (e.count > 1) ui.Tip(ID_RAIL + gi, tip);
+        std::wstring inside;
+        for (int k = 0; k < e.count; ++k)
+            if (PageOn(e.pages[k].page)) inside += (inside.empty() ? L"" : L", ") + std::wstring(e.pages[k].name);
+        if (const wchar_t* blurb = AreaBlurb(e.name)) ui.Detail(b, e.name, blurb, inside);
     }
+    // внизу - кто вошёл: щелчок снова открывает экран профилей (там же тур)
+    profile::Level who = profile::Current();
     RectF t(r.X + ui.S(7), r.Height - ui.S(122), r.Width - ui.S(14), ui.S(66));
-    if (ui.Click(ID_TOUR_BTN, t)) {
-        ov_ = OV_TOUR;
-        tourStep_ = 0;
-    }
-    if (ui.Hot(ID_TOUR_BTN)) ui.Fill(t, c.card, ui.S(12));
-    ui.Icon(railIcon(L"rail-tour.png", L"study.png"),
-            RectF(t.X + (t.Width - ui.S(30)) / 2, t.Y + ui.S(8), ui.S(30), ui.S(30)));
-    ui.Text(L"Тур", RectF(t.X, t.Y + ui.S(42), t.Width, ui.S(18)), c.muted, 10.5f, false, ui::Center);
+    if (ui.Click(ID_RAIL_PROFILE, t)) ov_ = OV_LOGIN;
+    if (ui.Hot(ID_RAIL_PROFILE)) ui.Fill(t, c.card, ui.S(12));
+    float lift = ui.Anim(ID_RAIL_PROFILE + 200, ui.Hot(ID_RAIL_PROFILE), 16) * ui.S(3);
+    const wchar_t* face =
+        who == profile::Simple ? L"mascot-wave.webp" : who == profile::Dev ? L"mascot-point.webp" : L"mascot-read.webp";
+    ui.Icon(ExeDir() + L"\\icons\\" + face,
+            RectF(t.X + (t.Width - ui.S(32)) / 2, std::round(t.Y + ui.S(7) - lift), ui.S(32), ui.S(32)));
+    ui.Text(profile::Name(who), RectF(t.X - ui.S(6), t.Y + ui.S(42), t.Width + ui.S(12), ui.S(18)), c.muted, 9.5f, false,
+            ui::Center);
+    ui.Detail(t, std::wstring(L"Профиль: ") + profile::Name(who), std::wstring(profile::Holds(who)) + L" Щелчок - сменить.");
 }
 
 float Studio::SubTabs(const RectF& body) {
     int gi = GroupOf(page_);
     groupLast_[gi] = page_;
     const Group& g = kGroups[gi];
-    if (g.count < 2) return 0;
+    int visible = 0;
+    for (int k = 0; k < g.count; ++k) visible += PageOn(g.pages[k].page);
+    if (visible < 2) return 0;
     const UiColors& c = ui.C();
     float y = ui.S(14), h = ui.S(34);
     std::vector<RectF> rs;
     float x = body.X + ui.S(28);
     int cur = 0;
     for (int k = 0; k < g.count; ++k) {
-        float w = ui.Measure(g.pages[k].name, 12.5f, true) + ui.S(30);
+        bool vis = PageOn(g.pages[k].page);
+        float w = vis ? ui.Measure(g.pages[k].name, 12.5f, true) + ui.S(30) : 0;
         rs.push_back(RectF(x, y, w, h));
         if (page_ == g.pages[k].page) cur = k;
-        x += w + ui.S(8);
+        if (vis) x += w + ui.S(8);
     }
     for (int k = 0; k < g.count; ++k) {
+        if (!PageOn(g.pages[k].page)) continue;
         bool on = k == cur;
         int id = ID_SUBTAB + g.pages[k].page;
         if (ui.Click(id, rs[k]) && !on) {
@@ -561,6 +648,7 @@ float Studio::SubTabs(const RectF& body) {
         }
         float hov = ui.Anim(id + 40, !on && ui.Hot(id), 18);
         ui.Fill(rs[k], WithAlpha(c.cardHi, (BYTE)(90 + 140 * hov)), h / 2);
+        if (const wchar_t* blurb = AreaBlurb(g.pages[k].name)) ui.Detail(rs[k], g.pages[k].name, blurb);
     }
     // выбранная вкладка - одна плашка, которая перетекает к новой; в другой группе появляется сразу
     if (tabsGroup_ != gi) ui.GlideSnap(-1 - gi);
@@ -569,8 +657,8 @@ float Studio::SubTabs(const RectF& body) {
     ui.Fill(pill, c.accent, h / 2);
     ui.Ripple(ID_SUBTAB + g.pages[cur].page, pill, h / 2);
     for (int k = 0; k < g.count; ++k) {
-        float on = ui.Anim(ID_SUBTAB + g.pages[k].page + 60, k == cur, 16);
-        ui.Text(g.pages[k].name, rs[k], MixColor(c.muted, c.onAccent, on), 12.5f, on > 0.5f, ui::Center);
+        if (!PageOn(g.pages[k].page)) continue;
+        ui.TextOver(g.pages[k].name, rs[k], c.muted, c.onAccent, pill, 12.5f, true);
     }
     return ui.S(44);
 }
@@ -598,7 +686,8 @@ void Studio::StatusBar(const RectF& r) {
         SolidBrush dot(statusFresh_ ? c.accent : c.faint);
         ui.G().FillEllipse(&dot, dcx - d / 2, dcy - d / 2, d, d);
     }
-    ui.Text(status_, RectF(bar.X + ui.S(32), bar.Y, bar.Width - ui.S(300), bar.Height), c.muted, 12);
+    bool canPeek = profile::Current() < profile::Expert;
+    ui.Text(status_, RectF(bar.X + ui.S(32), bar.Y, bar.Width - ui.S(canPeek ? 450 : 300), bar.Height), c.muted, 12);
     RectF j(bar.X + bar.Width - ui.S(104), bar.Y + ui.S(4), ui.S(98), bar.Height - ui.S(8));
     if (ui.Button(ID_JOURNAL, j, L"Журнал", Kind::Secondary)) ov_ = ov_ == OV_JOURNAL ? OV_NONE : OV_JOURNAL;
     ui.Tip(ID_JOURNAL, L"История изменений и резервные копии radial.cfg");
@@ -606,6 +695,18 @@ void Studio::StatusBar(const RectF& r) {
     if (ui.Button(ID_UNDO, u, L"Отменить", undo_.empty() ? Kind::Ghost : Kind::Secondary)) Undo();
     ui.Tip(ID_UNDO,
            undo_.empty() ? L"Пока нечего отменять" : L"Отменить последнее изменение (Ctrl+Z). Вернуть - Ctrl+Y");
+    if (canPeek) {
+        bool peek = profile::Peek();
+        RectF p(u.X - ui.S(142), j.Y, ui.S(134), j.Height);
+        if (ui.Button(ID_PEEK, p, peek ? L"Скрыть лишнее" : L"Показать всё", peek ? Kind::Primary : Kind::Ghost)) {
+            profile::SetPeek(!peek);
+            if (peek && !PageFits(page_)) GoPage(PAGE_STATE);
+            pageAt_ = GetTickCount64();
+            ui.ResetScroll(ID_PAGE_SCROLL);
+        }
+        ui.Detail(p, L"Показать всё", L"Открывает скрытые разделы, пока открыта студия. Профиль не меняется.",
+                  L"Кольца и трей остаются как в профиле");
+    }
 }
 
 void Studio::GoPage(Page p) {
@@ -621,6 +722,8 @@ void Studio::GoPage(Page p) {
 int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
     OleInitialize(nullptr);  // как в программе: значки (WIC) и планировщик (автозапуск) идут через COM
     LoadConfig(cfgPath, cfg);
+    if (const wchar_t* who = _wgetenv(L"RADIAL_PROFILE")) cfg.profile = who;  // снимок раздела глазами профиля
+    profile::Load(cfg.profile);
     ApplyAccent();
     Recheck();
     k = 1.0;
@@ -639,6 +742,11 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
         }
     } else
         GoPage((Page)page);
+    if (getenv("RADIAL_LOGIN")) ov_ = OV_LOGIN;  // экран профилей поверх раздела
+    if (const char* tour = getenv("RADIAL_TOUR")) {  // RADIAL_TOUR=0..3 - снять шаг знакомства поверх раздела
+        ov_ = OV_TOUR;
+        tourStep_ = std::clamp(atoi(tour), 0, 3);
+    }
     if (page == PAGE_RINGS) tab_ = std::clamp(tab, 0, 2);
     // RADIAL_JOURNAL=n - снять с открытым журналом и отличиями n-й резервной копии (с 1; 0 - без отличий)
     if (const wchar_t* jr = _wgetenv(L"RADIAL_JOURNAL")) {
@@ -684,15 +792,27 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
             float v[4] = {};
             if (sscanf(c, "%f %f %f %f", &v[0], &v[1], &v[2], &v[3]) == 4) crop = RectF(v[0], v[1], v[2], v[3]);
         }
+        // среднее и худшее время кадра - в film_out.txt рядом с exe (замер прокрутки без окна)
+        LARGE_INTEGER qpf;
+        QueryPerformanceFrequency(&qpf);
+        double frameSum = 0, frameMax = 0;
+        int frameN = 0;
         auto frame = [&] {
             MSG m;
             while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+            LARGE_INTEGER t0, t1;
+            QueryPerformanceCounter(&t0);
             Graphics g(mdc);
             hoverThemeNext_.clear();
             ui.Begin(g, TryoutPalette(), k);
             Frame((float)w, (float)h);
             ui.End();
             hoverTheme_ = hoverThemeNext_;
+            QueryPerformanceCounter(&t1);
+            double ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / qpf.QuadPart;
+            frameSum += ms;
+            frameMax = std::max(frameMax, ms);
+            ++frameN;
         };
         auto run = [&](int ms) {
             ULONGLONG until = GetTickCount64() + ms;
@@ -735,6 +855,16 @@ int Studio::Snapshot(int page, int tab, const std::wstring& out, int ms) {
             } else if (op == 'r') {  // «r делта»: колесо над серединой окна (120 - щелчок вверх, -120 - вниз)
                 ui.OnWheel(w / 2, h / 2, a);
                 run(40);
+            } else if (op == 't') {  // записать замер кадров
+                wchar_t line[160];
+                swprintf(line, 160, L"frames %d avg %.1f ms max %.1f ms, field focused %d, page height %.0f, scroll %.0f\r\n",
+                         frameN, frameSum / std::max(1, frameN), frameMax, ui.EditFocused() ? 1 : 0, pageContentH_,
+                         ui.ScrollPos(ID_PAGE_SCROLL));
+                std::wstring outTxt = ExeDir() + L"\\film_out.txt";
+                if (FILE* fo = _wfopen(outTxt.c_str(), L"a")) {
+                    fputws(line, fo);
+                    fclose(fo);
+                }
             } else if (op == 'f') {
                 for (int i = 0; i < a; ++i) {
                     if (i) run(b);
@@ -807,7 +937,12 @@ void Studio::Open() {
     COLORREF cap = RGB(c.rail.GetR(), c.rail.GetG(), c.rail.GetB());
     DwmSetWindowAttribute(wnd, 35, &cap, sizeof(cap));  // цвет заголовка (Windows 11)
     DragAcceptFiles(wnd, TRUE);
-    if (!cfg.tourDone) ov_ = OV_TOUR;
+    profile::Load(cfg.profile);
+    profile::SetPeek(false);
+    if (!profile::Chosen() || cfg.profileAsk)
+        ov_ = OV_LOGIN;  // тур - сразу после выбора, если его ещё не показывали
+    else if (!cfg.tourDone)
+        ov_ = OV_TOUR;
     ShowWindow(wnd, SW_SHOWNORMAL);
     SetForegroundWindow(wnd);
 }
@@ -822,7 +957,10 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             // заголовок окна следует за темой
             UiColors c = UiPalette(cfg);
             COLORREF cap = RGB(c.rail.GetR(), c.rail.GetG(), c.rail.GetB());
-            DwmSetWindowAttribute(wnd, 35, &cap, sizeof(cap));
+            if (cap != captionColor_) {
+                captionColor_ = cap;
+                DwmSetWindowAttribute(wnd, 35, &cap, sizeof(cap));
+            }
             return 0;
         }
         case WM_ERASEBKGND:
@@ -871,6 +1009,10 @@ LRESULT Studio::Proc(UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case WM_COMMAND:
             if (HIWORD(wp) == EN_CHANGE && ui.OnEditChange((HWND)lp)) after();
+            if (HIWORD(wp) == EN_KILLFOCUS || HIWORD(wp) == EN_SETFOCUS) {  // поле становится текстом или окном ввода
+                ui.Invalidate();
+                after();
+            }
             return 0;
         case WM_CTLCOLOREDIT: {
             HDC dc = (HDC)wp;

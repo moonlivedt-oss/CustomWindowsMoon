@@ -12,7 +12,8 @@
 #include "core/bg.h"
 #include "core/perf.h"
 #include "core/text.h"
-#include "tools/tools.h"
+#include "system/tools.h"
+#include "net/vpnguard.h"
 
 namespace net {
 
@@ -200,7 +201,7 @@ std::vector<FwRule> FirewallBlocks(bool* readOk) {
                             low.find(L"block all") != std::wstring::npos ||
                             low.find(L"lockdown") != std::wstring::npos || low.find(L"vpn") != std::wstring::npos;
                     // своё «отрезано» (И16) - не kill-switch, даже если в пути есть vpn / happ: починка его не трогает
-                    if (r.name.rfind(tools::kCutPrefix, 0) == 0) r.vpn = false;
+                    if (r.name.rfind(tools::kCutPrefix, 0) == 0 || r.name.rfind(kVpnGuardPrefix, 0) == 0) r.vpn = false;
                     out.push_back(r);
                     SysFreeString(name);
                     SysFreeString(app);
@@ -433,7 +434,7 @@ void Remember(const std::wstring& kind, const std::wstring& text) {
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t ts[32];
-    swprintf(ts, 32, L"%02d.%02d %02d:%02d", st.wDay, st.wMonth, st.wHour, st.wMinute);
+    swprintf(ts, 32, L"%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
     std::string line = Narrow(std::wstring(ts) + L"\t" + kind + L"\t" + text) + "\n";
     AcquireSRWLockExclusive(&g_histLock);
     std::wstring path = DataDir() + L"\\history.txt";
@@ -484,9 +485,17 @@ std::vector<std::pair<std::wstring, std::wstring>> History(int max) {
     }
     ReleaseSRWLockShared(&g_histLock);
     std::vector<std::wstring> lines = Split(Widen(all), L'\n');
+    std::wstring lastKind, lastText;
+    int repeats = 0;
     for (auto it = lines.rbegin(); it != lines.rend() && (int)out.size() < max; ++it) {
         std::vector<std::wstring> p = Split(*it, L'\t');
-        if (p.size() >= 3) out.push_back({p[0], p[2]});
+        if (p.size() < 3) continue;
+        if (!out.empty() && p[1] == lastKind && p[2] == lastText) {
+            out.back().second = lastText + L" (повторов: " + std::to_wstring(++repeats) + L")";
+        } else {
+            lastKind = p[1]; lastText = p[2]; repeats = 1;
+            out.push_back({p[0], p[2]});
+        }
     }
     return out;
 }

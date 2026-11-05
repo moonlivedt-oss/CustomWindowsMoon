@@ -3,9 +3,9 @@
 python tools/apply_icon_theme.py aurora
 Restart RadialMenu afterwards to clear its image cache.
 """
-from pathlib import Path
 import argparse
 import shutil
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 

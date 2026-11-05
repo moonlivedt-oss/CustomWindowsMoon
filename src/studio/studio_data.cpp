@@ -298,7 +298,6 @@ void Studio::FixProblem(const Problem& p) {
             break;
         }
     }
-    roots.push_back(L"D:\\Desktop");
     roots.push_back(ExpandPath(L"{desktop}"));
     std::wstring found;
     std::function<void(const std::wstring&, int)> walk = [&](const std::wstring& dir, int depth) {

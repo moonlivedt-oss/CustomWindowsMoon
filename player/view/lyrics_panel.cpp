@@ -14,7 +14,6 @@ constexpr float kLyricPadX = 12;      // отступ строк от краёв
 constexpr float kLyricGap = 10;       // между строками
 constexpr float kLyricBreak = 14;     // пустая строка (между куплетами)
 constexpr double kLyricLead = 0.15;   // строка подсвечивается чуть раньше: глаз успевает
-constexpr double kManualPause = 4.0;  // после прокрутки колесом автопрокрутка ждёт, с
 
 }  // namespace
 

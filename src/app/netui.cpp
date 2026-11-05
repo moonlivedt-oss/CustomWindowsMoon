@@ -1,8 +1,10 @@
+#include "core/usage.h"
 #include "app/netui.h"
 
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <map>
 
 #include "core/bg.h"
 #include "core/config.h"
@@ -11,15 +13,19 @@
 #include "core/fx.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "desk/boostcard.h"
-#include "desk/corners.h"
-#include "desk/share.h"
-#include "menu/menu.h"
+#include "cards/boostcard.h"
+#include "desktop/corners.h"
+#include "desktop/share.h"
+#include "ring/menu.h"
 #include "net/net.h"
 #include "net/speed.h"
 #include "net/wifi.h"
 #include "net/watch.h"
-#include "tools/tools.h"
+#include "net/security.h"
+#include "net/background.h"
+#include "net/vpnguard.h"
+#include "phone/phone.h"
+#include "system/tools.h"
 
 namespace netui {
 
@@ -27,12 +33,20 @@ namespace {
 
 HWND g_app = nullptr;
 const Config* g_cfg = nullptr;
+ULONGLONG g_gameCheckAt = 0;
+std::vector<DWORD> g_gamePids;
+std::wstring g_gameName;
 bool g_dev = false;  // открыт Unreal: тихий замер скорости ждёт
 BoostCard g_card;
 net::Watch g_watch;
 std::function<void()> g_openStudio;
 std::atomic<bool> g_busy{false};
 bool g_downShown = false;  // карточка «пропал интернет» была - «вернулся» имеет смысл
+unsigned g_securityPending = 0;
+SRWLOCK g_vpnLock = SRWLOCK_INIT;
+std::wstring g_vpnStatus = L"Блокировка выключена";
+std::atomic<bool> g_vpnCancel{false};
+std::map<net::Event::Kind, std::wstring> g_networkNotices;
 SRWLOCK g_topLock = SRWLOCK_INIT;
 std::vector<TopRow> g_top;  // под g_topLock: последний замер «Кто качает»
 ULONGLONG g_topAt = 0;
@@ -163,11 +177,27 @@ void Init(HINSTANCE inst, HWND app, const Config* cfg, const BoostCard* below, s
     g_openStudio = std::move(openStudio);
     g_card.below = below;
     g_card.Create(inst);
-    g_watch.Configure(cfg->netWatch, cfg->netExit, cfg->netInterval);
+    g_watch.Configure(cfg->netWatch, cfg->netExit, cfg->netInterval, cfg->netSecurity);
+    g_watch.GuardOptions(cfg->netChanges, cfg->netVpnWatch, cfg->netVpnRoute);
     g_watch.Start(app, WM_NET_EVENT);
 }
 
-void Apply(const Config& cfg) { g_watch.Configure(cfg.netWatch, cfg.netExit, cfg.netInterval); }
+void Apply(const Config& cfg) {
+    g_vpnCancel = true;
+    g_watch.Configure(cfg.netWatch, cfg.netExit, cfg.netInterval, cfg.netSecurity);
+    g_watch.GuardOptions(cfg.netChanges, cfg.netVpnWatch, cfg.netVpnRoute);
+}
+
+net::Light State() { return g_watch.Now(); }
+void HistoryDetail(const std::wstring& text) {
+    g_card.Show(BoostCard::DONE, L"Событие сети", text, Theme(), 30000, Toast::G_NET);
+}
+std::wstring VpnBlockStatus() {
+    AcquireSRWLockShared(&g_vpnLock);
+    auto result = g_vpnStatus;
+    ReleaseSRWLockShared(&g_vpnLock);
+    return result;
+}
 
 std::wstring Status() {
     net::Light l = g_watch.Now();
@@ -556,6 +586,17 @@ void OnEvent(LPARAM lp) {
     std::unique_ptr<net::Event> e((net::Event*)lp);
     ThemeInfo t = Theme();
     switch (e->kind) {
+        case net::Event::SETTINGS:
+        case net::Event::VPN:
+            g_networkNotices[e->kind] = e->text;
+            return;
+        case net::Event::SECURITY:
+            if (g_cfg->netSecurity) g_securityPending |= e->risks;
+            return;
+        case net::Event::NETWORK:
+            net::Remember(L"network", L"Изменился локальный IPv4: пересматриваю маршрут и подключение телефона");
+            phone::NetworkChanged();
+            return;
         case net::Event::DOWN: {
             if (!g_cfg->netWatch) return;
             g_downShown = true;
@@ -569,6 +610,7 @@ void OnEvent(LPARAM lp) {
             g_card.yesLabel = r.fixLabel;
             g_card.noLabel = L"Не надо";
             g_card.onYes = [key] {
+                usage::Hit(L"net_watch");
                 g_card.yesLabel.clear();
                 g_card.noLabel.clear();
                 Run(key);
@@ -582,23 +624,36 @@ void OnEvent(LPARAM lp) {
             if (!g_busy) g_card.Show(BoostCard::DONE, L"Интернет вернулся", e->text, t, 5000, Toast::G_OK);
             return;
         case net::Event::EXIT:
-            if (g_cfg->netExit && !g_busy)
-                g_card.Show(BoostCard::DONE, L"Выход сменился", e->text, t, 7000, Toast::G_NET);
+            if (g_cfg->netExit && !g_busy) {
+
+                { if (g_card.Show(BoostCard::DONE, L"Выход сменился", e->text, t, 7000, Toast::G_NET)) usage::Hit(L"net_exit"); }
+            }
             return;
         case net::Event::GAME:
             if (e->worth && !g_busy) {
+
                 g_card.more = e->more;
-                g_card.Show(BoostCard::DONE, L"Сеть в игре", e->text, t, 15000, Toast::G_NET);
+                { if (g_card.Show(BoostCard::DONE, L"Сеть в игре", e->text, t, 15000, Toast::G_NET)) usage::Hit(L"net_game"); }
             }
             return;
     }
 }
 
 void Game(bool on, const std::vector<DWORD>& pids, const std::wstring& name) {
-    if (on && g_cfg->netGame) net::CheckGame(pids, name, g_app, WM_NET_EVENT);
+    g_gameCheckAt = 0;
+    g_gamePids.clear();
+    if (on && g_cfg && g_cfg->netGame) {
+        g_gamePids = pids;
+        g_gameName = name;
+        g_gameCheckAt = GetTickCount64() + 20000;
+    }
 }
 
-void Wake() { g_watch.Kick(25000); }
+void Wake() {
+    net::Remember(L"wake", L"Пробуждение или разблокировка: сеть восстанавливается");
+    g_watch.Kick(25000);
+    phone::NetworkChanged();
+}
 
 void Dev(bool on) { g_dev = on; }
 
@@ -621,8 +676,13 @@ void AutoSpeed() {
     if (!bg::Run(
             [] {
                 SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+                SYSTEM_POWER_STATUS power{};
+                if (!GetSystemPowerStatus(&power) || power.ACLineStatus != 1 || !net::BackgroundTrafficAllowed()) {
+                    running = false;
+                    return;
+                }
                 net::Speed s = net::MeasureSpeed([](const std::wstring&) {});
-                if (s.down > 0) net::SaveSpeed(s);
+                if (s.down > 0) { net::SaveSpeed(s); usage::Hit(L"speed_auto"); }
                 running = false;
             },
             THREAD_PRIORITY_LOWEST))
@@ -631,10 +691,91 @@ void AutoSpeed() {
 
 void Tick() {
     g_card.Tick();
+    if (g_gameCheckAt && GetTickCount64() >= g_gameCheckAt) {
+        g_gameCheckAt = 0;
+        if (g_cfg && g_cfg->netGame && !bg::Quitting())
+            net::CheckGame(g_gamePids, g_gameName, g_app, WM_NET_EVENT);
+        g_gamePids.clear();
+    }
+    static std::atomic<bool> guardBusy{false}, guardApplied{false}, guardUsageBlocked{false};
+    static ULONGLONG guardAt = 0;
+    bool guardWanted = g_cfg && g_cfg->netVpnWatch && g_cfg->netVpnBlock;
+    if ((guardWanted || guardApplied) && GetTickCount64() - guardAt >= 10000 && !guardBusy.exchange(true)) {
+        g_vpnCancel = false;
+        guardAt = GetTickCount64();
+        auto route = g_cfg->netVpnRoute, apps = g_cfg->netVpnApps;
+        if (!bg::Run([guardWanted, route, apps] {
+            std::wstring last;
+            auto log = [&](const std::wstring& s) { last = s; };
+            bool ok = false;
+            if (guardWanted && !net::VpnGuardMatches(route, apps))
+                last = L"Список или туннель не разрешён: нажмите «Разрешить список (UAC)».";
+            else {
+                if (guardWanted) guardApplied = true;
+                ok = net::RunAdmin(guardWanted ? net::JOB_VPN_GUARD_TICK : net::JOB_VPN_GUARD_OFF, log, 30000, &g_vpnCancel, true);
+            }
+            if (ok) {
+                bool blocked = guardWanted && last.rfind(L"Выбранные программы заблокированы:", 0) == 0;
+                if (blocked && !guardUsageBlocked.exchange(true)) usage::Hit(L"net_vpn_block");
+                if (!blocked) guardUsageBlocked = false;
+                guardApplied = guardWanted;
+            }
+            AcquireSRWLockExclusive(&g_vpnLock);
+            g_vpnStatus = last;
+            ReleaseSRWLockExclusive(&g_vpnLock);
+            guardBusy = false;
+        })) guardBusy = false;
+    }
+    static net::TransferPacer pacer;
+    static std::wstring pacedRoute;
+    static ULONGLONG paceAt = 0, budgetAt = 0;
+    static ULONGLONG usedProbe = 0;
+    static std::atomic<bool> budgetBusy{false}, pauseAutomatic{true};
+    auto now = GetTickCount64();
+    if (g_cfg && g_cfg->transferGentle && now - paceAt >= 15000) {
+        paceAt = now;
+        auto sample = g_watch.Now();
+        if (pacedRoute != sample.route) { pacer = net::TransferPacer{}; pacedRoute = sample.route; }
+        if (sample.probedAt != usedProbe) {
+            usedProbe = sample.probedAt;
+            pacer.Sample(sample.pingMs);
+        }
+    }
+    if (g_cfg && !g_cfg->netWatch) pacer = net::TransferPacer{};
+    if (g_cfg && g_cfg->transferGentle && now - budgetAt >= 30000 && !budgetBusy.exchange(true)) {
+        budgetAt = now;
+        if (!bg::Run([] {
+            SYSTEM_POWER_STATUS power{};
+            bool battery = !GetSystemPowerStatus(&power) || power.ACLineStatus != 1;
+            pauseAutomatic = battery || !net::BackgroundTrafficAllowed();
+            budgetBusy = false;
+        })) budgetBusy = false;
+    }
+    phone::TransferPolicy(g_cfg && g_cfg->transferGentle, pacer.Delay(), pauseAutomatic);
+    if (!g_cfg || !g_cfg->netSecurity) g_securityPending = 0;
+    if (g_securityPending) g_securityPending &= g_watch.Now().securityRisks;
+    if (g_securityPending && !g_busy && !g_downShown && !g_card.Visible()) {
+
+        { if (g_card.Show(BoostCard::DONE, L"Проверьте безопасность сети", net::SecurityAdvice(g_securityPending), Theme(),
+                    20000, Toast::G_NET)) usage::Hit(L"net_security"); }
+        g_securityPending = 0;
+    }
+    if (!g_networkNotices.empty() && !g_busy && !g_downShown && !g_card.Visible()) {
+        auto next = g_networkNotices.begin();
+        bool allowed = g_cfg && (next->first == net::Event::VPN ? g_cfg->netVpnWatch : g_cfg->netChanges);
+        if (allowed && g_card.Show(BoostCard::DONE, next->first == net::Event::VPN ? L"Ожидаемый VPN" : L"Изменились настройки сети",
+                                 next->second, Theme(), 20000, Toast::G_NET)) {
+            if (next->first == net::Event::VPN) usage::Hit(L"net_vpn_watch");
+            else usage::Hit(L"net_changes");
+        }
+        g_networkNotices.erase(next);
+    }
     AutoSpeed();
 }
 
 void Shutdown() {
+    g_gameCheckAt = 0;
+    g_gamePids.clear();
     g_watch.Stop();
     g_card.Destroy();
 }

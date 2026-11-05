@@ -1,8 +1,10 @@
 #include "core/player.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <system_error>
+#include <thread>
 
 #include "core/text.h"
 
@@ -45,6 +47,7 @@ bool Player::Init(const Options& options, WakeFn wake, std::string* error) {
     eo.nullBackend = options.nullBackend;
     ready_ = engine_.Start(eo, std::move(wake), error);
     ApplyVolume();
+    engine_.SetCrossfade(crossfade_);  // длина в кадрах зависит от частоты устройства
     return ready_;
 }
 
@@ -55,17 +58,30 @@ void Player::Shutdown() {
 
 int Player::LoadFiles(const std::vector<std::filesystem::path>& files, bool append) {
     std::vector<PlaylistEntry> tracks;
-    for (const auto& f : files) {
-        if (!IsSupportedAudio(f)) continue;
-        TagInfo tags;
-        PlaylistEntry e{f, {}};
-        if (ReadTags(f, tags, false)) {
-            e.meta.title = tags.title;
-            e.meta.artist = tags.artist;
-            e.meta.album = tags.album;
-            e.meta.duration = tags.duration;
+    for (const auto& f : files)
+        if (IsSupportedAudio(f)) tracks.push_back({f, {}});
+    // Почти всё время здесь - ожидание открытия файлов, поэтому большой плейлист читается в несколько потоков.
+    // Порядок треков задан заранее; каждый поток пишет только в свою запись.
+    std::atomic<size_t> next{0};
+    auto work = [&] {
+        for (size_t i = next++; i < tracks.size(); i = next++) {
+            TagInfo tags;
+            if (!ReadTags(tracks[i].path, tags, false)) continue;
+            TrackMeta& meta = tracks[i].meta;
+            meta.title = tags.title;
+            meta.artist = tags.artist;
+            meta.album = tags.album;
+            meta.duration = tags.duration;
         }
-        tracks.push_back(std::move(e));
+    };
+    if (tracks.size() >= 16) {
+        const size_t count = std::clamp<size_t>(std::thread::hardware_concurrency(), 1, 8);
+        std::vector<std::thread> pool;
+        for (size_t t = 1; t < count; ++t) pool.emplace_back(work);
+        work();
+        for (auto& t : pool) t.join();
+    } else {
+        work();
     }
     return LoadTracks(tracks, append);
 }
@@ -158,7 +174,9 @@ void Player::PreloadNext() {
     }
     TagInfo tags;
     ReadTags(e.path, tags, false);
-    engine_.QueueNext(std::move(decoder), TrackGain(tags));
+    // альбом слушают целиком: между его треками стык без перехода (концерты, миксы, сюиты)
+    const bool sameAlbum = !tags.album.empty() && tags.album == now_.tags.album;
+    engine_.QueueNext(std::move(decoder), TrackGain(tags), crossfade_ > 0 && !sameAlbum);
     queued_ = next;
 }
 
@@ -247,6 +265,14 @@ void Player::SetNormalize(bool on) {
     }
 }
 
+void Player::SetCrossfade(double seconds) {
+    seconds = seconds > 0 ? std::min(seconds, 12.0) : 0;
+    if (seconds == crossfade_) return;
+    crossfade_ = seconds;
+    engine_.SetCrossfade(seconds);
+    if (engine_.HasTrack()) PreloadNext();  // разрешение перехода хранится у открытого заранее трека
+}
+
 void Player::Remove(int index) {
     if (index < 0 || index >= playlist_.Size()) return;
     const bool current = index == now_.index;
@@ -273,6 +299,12 @@ void Player::Remove(int index) {
 
 void Player::PlayNext(int index) {
     playlist_.PlayNext(index);
+    now_.index = playlist_.Current();
+    if (engine_.HasTrack()) PreloadNext();
+}
+
+void Player::Move(int from, int to) {
+    playlist_.Move(from, to);
     now_.index = playlist_.Current();
     if (engine_.HasTrack()) PreloadNext();
 }

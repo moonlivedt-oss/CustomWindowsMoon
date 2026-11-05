@@ -77,8 +77,10 @@ std::wstring CaFingerprint(const std::string& der) {
 bool ControlPath(const std::string& rest) {
     // ещё файлы ПК (/fs: открыть, переименовать, в Корзину), ссылка в браузер ПК (/open) и пульт (/cmd: сон,
     // блокировка, экран)
-    static const char* const kControl[] = {"/in",   "/type", "/combo",   "/tap", "/screen", "/mons",
-                                           "/wins", "/win",  "/ringrun", "/fs",  "/open",   "/cmd"};
+    static const char* const kControl[] = {
+        "/in",  "/type",    "/combo", "/tap",  "/screen", "/mons",  "/wins",
+        "/win", "/ringrun", "/fs",    "/open", "/cmd",    "/ctlask"};  // «Попросить разрешение» - та же проверка задаёт
+                                                                       // вопрос на ПК
     for (const char* c : kControl)
         if (rest == c) return true;
     return false;
@@ -125,6 +127,11 @@ std::vector<DeviceRec> ParseDevices(const std::string& text) {
         if (f.size() > 2) d.added = atoll(f[2].c_str());
         d.seen = f.size() > 3 ? atoll(f[3].c_str()) : d.added;
         if (f.size() > 4) d.control = f[4] == "1";
+        d.screen = f.size() > 5 ? f[5] == "1" : d.control;
+        d.files = f.size() > 6 ? f[6] == "1" : true;
+        if (f.size() > 7) d.expires = f[7].empty() || f[7].size() > 18 ||
+            f[7].find_first_not_of("0123456789") != std::string::npos ? 1 : atoll(f[7].c_str());
+        if (d.expires < 0) d.expires = 1;  // испорченный срок не превращает гостя в постоянного
         out.push_back(d);
     }
     return out;
@@ -134,13 +141,25 @@ std::string DevicesText(const std::vector<DeviceRec>& list) {
     std::string out;
     for (const DeviceRec& d : list)
         out += d.key + "\t" + Narrow(CleanLine(d.name, 60)) + "\t" + std::to_string(d.added) + "\t" +
-               std::to_string(d.seen) + "\t" + (d.control ? "1" : "0") + "\n";
+               std::to_string(d.seen) + "\t" + (d.control ? "1" : "0") + "\t" +
+               (d.screen ? "1" : "0") + "\t" + (d.files ? "1" : "0") + "\t" + std::to_string(d.expires) + "\n";
     return out;
 }
 
 bool DeviceStale(const DeviceRec& d, long long now) {
+    if (d.expires && now >= d.expires) return true;
     long long last = d.seen > d.added ? d.seen : d.added;
     return last > 0 && now - last > kDeviceDays * 86400;
+}
+
+bool DevicePathAllowed(const DeviceRec& d, const std::string& path, long long now) {
+    if (DeviceStale(d, now)) return false;
+    if (path == "/screen" || path == "/mons") return d.screen;
+    if (path == "/fs" || path == "/ls" || path == "/get" || path == "/zipdir" || path == "/zip" ||
+        path == "/up" || path == "/share" || path.compare(0, 3, "/f/") == 0) return d.files;
+    // Вопрос о разрешении разрешён; само управление по-прежнему подтверждается на ПК (ControlCheck).
+    if (path != "/ctlask" && ControlPath(path)) return d.control;
+    return true;
 }
 
 // ---- тормоз неверных ключей ----

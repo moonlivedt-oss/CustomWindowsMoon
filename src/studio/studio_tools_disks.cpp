@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "app/toolsui.h"
+#include "system/ui/toolsui.h"
 #include "core/bg.h"
 #include "core/elevate.h"
 #include "core/files.h"
@@ -385,7 +385,7 @@ void Studio::ToolsDiskTab(ToolsKit& tk) {
                 return true;
             });
         if (toolsJob_ && toolsJob_->title != L"Что занимает место")
-            tk.Note(b, (y + ui.S(48) - b.Y) / tk.rowH, tk.Log(), c.muted);
+            tk.Status(b, (y + ui.S(48) - b.Y) / tk.rowH, tk.Log(), c.muted);
     });
 }
 

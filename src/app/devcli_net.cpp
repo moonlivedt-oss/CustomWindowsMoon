@@ -7,8 +7,24 @@
 #include "core/files.h"
 #include "net/net.h"
 #include "net/speed.h"
+#include "net/security.h"
+#include "net/background.h"
+#include "net/vpnguard.h"
 
 namespace devcli {
+
+// Только локальная проверка: без HTTPS, DNS-запросов, паролей и изменения настроек.
+int NetSecurityDiag() {
+    auto state = net::ReadSecurity();
+    std::wstring report = L"known=" + std::to_wstring(state.known) + L"\r\nrisks=" +
+        std::to_wstring(state.risks) + L"\r\nauto_speed_allowed=" +
+        std::to_wstring(net::BackgroundTrafficAllowed() ? 1 : 0) + L"\r\n";
+    report += net::SecurityAdvice(state.risks);
+    report += L"\r\nsetting_sources=" + std::to_wstring(net::ReadSettingStamps().size());
+    report += L"\r\nvpn_guard_authorized=" + std::to_wstring(net::VpnGuardConfigured() ? 1 : 0) + L"\r\n";
+    WriteOut(L"net_security_out.txt", report);
+    return 0;
+}
 
 // Проверка сети без окна: отчёт в net_out.txt (то же, что раздел «Сеть» в студии)
 int NetDiag() {

@@ -28,6 +28,9 @@
 #include "ui/home.h"
 #include "ui/painter.h"
 #include "ui/renderer.h"
+#include "ui/intro.h"
+#include "ui/narrator.h"
+#include "core/karaoke.h"
 #include "ui/smtc.h"
 #include "ui/settings_preview.h"
 #include <optional>
@@ -73,18 +76,66 @@ private:
     struct SettingsSnapshot {
         theme::Theme theme;
         bool user, reduce, normalize, remaining, top, autoScan, hideDuplicates;
+        double crossfade = 0;
+        int windowFx = 0;
     };
-    std::optional<SettingsSnapshot> settingsUndo_;
+    // История изменений настроек: «Отменить» снимает последнее, «Все N» - возвращает начало
+    std::vector<SettingsSnapshot> settingsHistory_;
+    SettingsSnapshot CaptureSettings() const;
+    void RestoreSettings(const SettingsSnapshot& snapshot);
+    void RememberSettings();
+    void BuildSettings();
+    void BuildSettingsSection(int section);
+    bool SettingsCommand(int command);
+    void SliderCommand(int command, float fraction, bool begin);
+    bool sliderDragging_ = false;
+    int previewHover_ = -1;
+    void UpdateSettingsHoverPreview();
+    HWND settingsEdit_ = nullptr;
+    // Клавиши: действие -> сочетание (порядок - в app_shortcuts.cpp), назначение по щелчку
+    struct ShortcutKey {
+        UINT key = 0;
+        bool ctrl = false;
+    };
+    std::vector<ShortcutKey> shortcuts_;
+    int capturingShortcut_ = -1;
+    std::wstring KeyName(UINT key, bool ctrl) const;
+    void ResetShortcuts();
+    void BuildShortcutCards();
+    bool CaptureShortcut(UINT key);
+    bool RunShortcut(UINT key, bool fromEdit);
+    void RunAction(int action);
+    // Палитра команд
+    HWND paletteEdit_ = nullptr;
+    bool paletteOpen_ = false;
+    int paletteSelected_ = 0;
+    std::vector<std::string> paletteArtists_;  // исполнители для «Волна · имя» в палитре
+    void OpenPalette();
+    void ClosePalette();
+    void BuildPalette();
+    void RunPalette(int item);
     void WorkspaceCommand(int command);
     void EnterMini();
     std::string submittedDownload_;
+    // Ссылка из буфера подставляется в поле загрузки один раз на каждое новое копирование
+    DWORD prefillClipboard_ = 0;
+    pm::BeatDetector beat_;  // доли такта для пульса главной
+    void PrefillDownload();
+    bool EnableDownloaderPlugin();
     std::vector<std::filesystem::path> pendingPluginFolders_;
     HWND downloadEdit_ = nullptr;
     bool reduceMotion_ = false;
     std::wstring workspaceNotice_;
-    struct WorkspaceBinding { size_t page; int row, action; };
+    struct WorkspaceBinding {
+        size_t page;
+        int row, action;
+    };
     std::vector<WorkspaceBinding> workspaceBindings_;
     void HomeClick(view::Point point);
+    void HomeDrop(const Home::Drop& drop);
+    // Меню трека по правому клику: index - как в Home::Hit (>= 0 коллекция, <= -2 очередь)
+    void TrackMenu(int index, view::Point at);
+    int EnsureInPlaylist(const view::HomeTrack& track);  // номер в плейлисте, при нужде дописывает
     void ToggleHome();
     void LayoutHomeSearch();
     void SetHomeWindowStyle();
@@ -98,7 +149,7 @@ private:
     static LRESULT CALLBACK SearchProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     WNDPROC homeSearchProc_ = nullptr;
     bool homeMode_ = true;
-    view::Size homeSize_{1200,800};
+    view::Size homeSize_{1200, 800};
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT Handle(UINT msg, WPARAM wp, LPARAM lp);
 
@@ -196,6 +247,41 @@ private:
 
     pm::SpectrumAnalyzer analyzer_{2048};
     std::vector<float> pcm_, spectrum_;
+    // Спектр считается, только если пришли новые сэмплы: кадров в секунду больше, чем порций звука
+    struct SpectrumRun {
+        std::vector<float> bars;
+        uint64_t written = ~0ull;
+    };
+    bool UpdateSpectrum(SpectrumRun& run, int bars);
+    SpectrumRun playerSpectrum_, homeSpectrum_, nowSpectrum_;
+    uint64_t homeTrackSerial_ = ~0ull;
+    const void* homeLyricsShown_ = nullptr;
+    size_t homeLyricsCount_ = 0;
+    bool lazyTimer_ = false;
+    // Работа в фоне (app_background.cpp)
+    static constexpr UINT kTrayMessage = WM_APP + 7;
+    void AddTrayIcon();
+    void RemoveTrayIcon();
+    void HideToBackground();
+    void FinishHide();
+    void OnShownFromBackground();
+    void ShowFromBackground();
+    void ShowTrayMenu();
+    bool HandleBackgroundMessage(UINT msg, WPARAM wp, LPARAM lp);
+    void StartCloseAnimation();
+    void QuitApp();
+    UINT trayCreatedMsg_ = 0;
+    bool hidden_ = false, hideWhenClosed_ = false, showWhenHidden_ = false;
+    bool backgroundHintShown_ = false;
+    // Пока пользователь ничего не делает, постоянные анимации идут примерно 60 кадров в секунду; см. PlanFramePace
+    void ReadRefreshRate();
+    void PlanFramePace(double now);
+    UINT refreshHz_ = 60;
+    UINT framePace_ = 1;       // обновлений экрана на следующий кадр
+    UINT lastFramePace_ = 1;   // обновлений экрана на кадр, который рисуется сейчас
+    double lastActive_ = -10;  // последний ввод или смена трека
+    bool graphicsRetry_ = false;
+    bool systemHighContrast_ = false;
     std::vector<PlaylistRow> rows_;
     std::wstring countText_;
 
@@ -229,6 +315,33 @@ private:
     bool win11Backdrop_ = false;  // сборка Windows умеет системный акрил (22621+)
     bool acrylicOn_ = false;      // акрил сейчас включён
     bool miniOnTop_ = true;
+    // Появление окна при запуске и смене вида. windowFx_: 0 - своё для каждого вида, дальше варианты
+    // из WindowFxNames(), последний - без эффекта. Хранится в home.json.
+    enum class WindowForm { Unknown, Compact, Home, Mini };
+    // Заставка при открытии и закрытии; introEnabled_ - настройка «Заставка при запуске» (home.json)
+    Intro intro_;
+    Narrator narrator_;
+    bool highContrast_ = false;
+    // Учитывать ли «Эффекты анимации» Windows: выключены там - и плеер без движения
+    bool followSystemMotion_ = true;
+    int coverFrame_ = 0;             // рамка обложки в «Сейчас играет» (assets/frames)
+    int storyBackground_ = 0;        // фон карточки «Итогов»: 0 - ночь, 1 - пластинки
+    bool windowsAnimations_ = true;  // как сейчас в Windows (для подсказки в настройках)  // настройка «Высокий
+                                     // контраст»; системный режим Windows включает его сам
+    bool HighContrast() const;
+    bool introEnabled_ = true, closing_ = false, modeSwitchPending_ = false;
+    bool MotionAllowed() const;
+    // Главная <-> плеер с уходом старого вида перед входом нового
+    void AnimatedToggleHome();
+    // «Волна» под настроение (WaveMoodFirst + n); artist - для волны одного исполнителя
+    void StartMoodWave(int mood, const std::string& artist = {});
+    // «Итоги» историей на главной
+    void OpenStory(pm::StatsPeriod period);
+    void StoryCommand(int index);
+    void SaveStoryCard();
+    WindowForm windowForm_ = WindowForm::Unknown;
+    int windowFx_ = 0;
+    void PlayWindowEntrance(WindowForm from, WindowForm to, Entrance preferred = Entrance::None);
     bool topmostApplied_ = false;
     bool visible_ = true;
     bool dirty_ = true;
@@ -237,7 +350,7 @@ private:
     bool trackingMouse_ = false;
     bool tickTimer_ = false;
     bool saveTick_ = false;
-    int lastPlaying_ = -1;      // для события «пуск/пауза» плагинам
+    int lastPlaying_ = -1;       // для события «пуск/пауза» плагинам
     double lastCopyData_ = -10;  // время прошлой передачи файлов от второго экземпляра
     std::atomic<bool> wakePosted_{false};
 };

@@ -49,6 +49,17 @@ std::wstring ExeDir() {
     return dir;
 }
 
+std::wstring DevOutPath(const std::wstring& name) {
+    static const std::wstring dir = [] {
+        const std::wstring exe = ExeDir();
+        if (GetFileAttributesW((exe + L"\\CMakeLists.txt").c_str()) == INVALID_FILE_ATTRIBUTES) return exe;
+        CreateDirectoryW((exe + L"\\build").c_str(), nullptr);
+        CreateDirectoryW((exe + L"\\build\\out").c_str(), nullptr);
+        return exe + L"\\build\\out";
+    }();
+    return dir + L"\\" + name;
+}
+
 std::wstring ExpandPath(const std::wstring& p) {
     if (p.empty()) return p;
     if (p == L"{player}") return ExeDir() + L"\\apps\\PlayerMoon\\PlayerMoon.exe";

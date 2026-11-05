@@ -1,9 +1,10 @@
 // «Состояние»: пропущенные карточки (Л10) - вопросы, ушедшие без нажатия, с теми же кнопками; заглушённые виды
-// карточек (Л11) - вернуть одной кнопкой. Данные - desk/cardlog.
+// карточек (Л11) - вернуть одной кнопкой. Данные - cards/cardlog.
 #include <windows.h>
 
 #include "core/usage.h"
-#include "desk/cardlog.h"
+#include "core/usage_features.h"
+#include "cards/cardlog.h"
 #include "studio/studio_internal.h"
 
 using namespace Gdiplus;
@@ -108,21 +109,8 @@ float Studio::MissedCards(float x, float y, float w) {
 // «Чем не пользуетесь»: включённые возможности, которых давно не касались (core/usage), - выключить одной кнопкой.
 // Пока счёт ведётся меньше двух недель или всё в ходу - блока нет.
 float Studio::UnusedFeatures(float x, float y, float w) {
-    struct Feature {
-        const wchar_t* key;
-        const wchar_t* label;
-        bool Config::* flag;
-    };
-    static const Feature kFeatures[] = {
-        {L"winring", L"Кольцо открытых окон (Alt + `)", &Config::winRing},
-        {L"selring", L"Кольцо выделенного текста (Ctrl + Alt + Пробел)", &Config::selectionRing},
-        {L"palette", L"Поиск и команды (палитра)", &Config::palette},
-        {L"deskdouble", L"Двойной клик по пустому столу", &Config::deskDouble},
-        {L"stroke", L"Росчерк с зажатым Alt", &Config::stroke},
-        {L"gamepad", L"Кольцо с геймпада", &Config::gamepad},
-        {L"windrag", L"Alt + мышь: тащить и тянуть окна", &Config::winDrag},
-        {L"cliphist", L"История буфера обмена", &Config::clipHistory},
-    };
+    using usage::Feature;
+    using usage::kFeatures;
     const UiColors& c = ui.C();
     ULONGLONG now = GetTickCount64();
     if (!unusedAt_ || now - unusedAt_ > 3000 || Demo()) {

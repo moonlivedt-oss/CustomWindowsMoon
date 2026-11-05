@@ -16,34 +16,35 @@
 #include "app/autostart.h"
 #include "app/devcli.h"
 #include "app/netui.h"
-#include "app/afterwork.h"
-#include "app/focus.h"
-#include "app/modestats.h"
-#include "app/palette.h"
-#include "desk/playermoon.h"
-#include "app/resume.h"
+#include "helpers/afterwork.h"
+#include "modes/focus.h"
+#include "modes/modestats.h"
+#include "helpers/palette.h"
+#include "media/playermoon.h"
+#include "helpers/resume.h"
 #include "phone/phone.h"
-#include "life/shelf.h"
-#include "life/preview.h"
-#include "life/tidy.h"
-#include "life/record.h"
-#include "life/convert.h"
-#include "life/batcare.h"
-#include "life/appbright.h"
-#include "life/capwatch.h"
-#include "life/btbattery.h"
-#include "life/nightupd.h"
-#include "life/remind.h"
-#include "life/picker.h"
-#include "life/awake.h"
-#include "app/worksets.h"
-#include "desk/appvol.h"
-#include "desk/cardlog.h"
-#include "desk/cliphist.h"
-#include "desk/layout.h"
-#include "app/autos.h"
-#include "app/selring.h"
-#include "app/toolsui.h"
+#include "helpers/shelf.h"
+#include "helpers/preview.h"
+#include "helpers/tidy.h"
+#include "helpers/record.h"
+#include "helpers/convert.h"
+#include "system/auto/batcare.h"
+#include "desktop/appbright.h"
+#include "system/auto/capwatch.h"
+#include "system/auto/btbattery.h"
+#include "system/auto/nightupd.h"
+#include "helpers/remind.h"
+#include "helpers/picker.h"
+#include "helpers/awake.h"
+#include "ring/worksets.h"
+#include "media/appvol.h"
+#include "cards/cardlog.h"
+#include "helpers/cliphist.h"
+#include "desktop/layout.h"
+#include "system/auto/autos.h"
+#include "ring/selring.h"
+#include "system/ui/toolsui.h"
+#include "core/profile.h"
 #include "core/bg.h"
 #include "core/crash.h"
 #include "core/edgecheck.h"
@@ -58,33 +59,34 @@
 #include "core/night.h"
 #include "core/perf.h"
 #include "core/usage.h"
-#include "desk/battery.h"
-#include "desk/boost.h"
-#include "desk/boostcard.h"
-#include "desk/dropundo.h"
-#include "desk/gamepad.h"
-#include "desk/recent.h"
-#include "desk/monitors.h"
+#include "desktop/battery.h"
+#include "modes/boost.h"
+#include "cards/boostcard.h"
+#include "ring/dropundo.h"
+#include "modes/gamepad.h"
+#include "ring/recent.h"
+#include "desktop/monitors.h"
 #include "app/rules.h"
-#include "desk/boostpick.h"
-#include "desk/corners.h"
-#include "desk/cursor.h"
-#include "desk/deskclick.h"
-#include "desk/devmode.h"
-#include "desk/frame.h"
-#include "desk/gameboost.h"
-#include "desk/gamemode.h"
-#include "desk/hexwave.h"
-#include "desk/lockscreen.h"
-#include "desk/minecraft.h"
-#include "desk/modefx.h"
-#include "desk/share.h"
-#include "desk/snip.h"
-#include "desk/widget.h"
-#include "desk/winfx.h"
+#include "modes/boostpick.h"
+#include "desktop/corners.h"
+#include "desktop/cursor.h"
+#include "desktop/deskclick.h"
+#include "modes/devmode.h"
+#include "desktop/frame.h"
+#include "modes/gameboost.h"
+#include "modes/gamemode.h"
+#include "desktop/hexwave.h"
+#include "desktop/lockscreen.h"
+#include "modes/minecraft.h"
+#include "modes/modefx.h"
+#include "desktop/share.h"
+#include "cards/translatecard.h"
+#include "helpers/snip.h"
+#include "media/widget.h"
+#include "desktop/winfx.h"
 #include "gfx/accent.h"
 #include "gfx/sound.h"
-#include "menu/menu.h"
+#include "ring/menu.h"
 #include "net/watch.h"
 #include "studio/studio.h"
 
@@ -149,6 +151,7 @@ void Reload() {
     if (g_menu.IsOpen()) return;  // меню держит указатели на старые пункты
     Config c;
     if (LoadConfig(g_cfgPath, c)) g_cfg = std::move(c);
+    profile::Load(g_cfg.profile);
     if (!g_themeOverride.empty()) g_cfg.theme = g_themeOverride;  // правило ещё держится
     g_cfgTime = FileTime(g_cfgPath);
     ApplyAccent();
@@ -159,6 +162,7 @@ void Reload() {
     g_media.Apply(g_cfg);
     g_winfx.Apply(g_cfg);
     g_snip.Apply(g_cfg);
+    translatecard::Apply(g_cfg);
     g_deskClick.SetEnabled(g_cfg.deskDouble);
     appvol::SetEnabled(g_cfg.appVolume);
     cursor::Apply(g_cfg);
@@ -254,6 +258,7 @@ void PollWork() {
     g_winfx.SetBlocked(g_menu.IsOpen() || fx::Game());  // Alt + мышь не мешает кольцу и игре
     g_battery.Tick(g_cfg);
     g_snip.Tick();
+    translatecard::Tick();
     g_boostCard.Tick();
     g_pick.Tick();
     g_gbCard.Tick();
@@ -344,11 +349,12 @@ void PollWork() {
 
     FILETIME ft = FileTime(g_cfgPath);
     if (CompareFileTime(&g_cfgTime, &ft) != 0) Reload();
-    if (g_cfg.desktopOnly && !IsDesktopForeground()) return;
-    if (g_cfg.skipFullscreen && IsFullscreenForeground(mon, r)) return;
+    if (g_cfg.desktopOnly && !IsDesktopForeground()) { usage::Hit(L"desktop_only"); return; }
+    if (g_cfg.skipFullscreen && IsFullscreenForeground(mon, r)) { usage::Hit(L"skip_fullscreen"); return; }
 
     MaskAlt();
     g_menu.Show(&g_cfg, pt, r, left, MonitorDpi(mon));
+    if (inner && g_menu.IsOpen()) usage::Hit(L"inner_edges");
 }
 
 // Курсор у края монитора (40 px): там углы, кольца и панель «Сейчас играет» - отклик нужен быстрый.
@@ -593,7 +599,7 @@ void OnDevMode(bool on) {
     NoteMode(L"Режим разработки", on, g_dev.Reason(), g_devSince);
     StatMode(modestats::DEV, on);
     UpdateTrayTip();
-    autos::OnModes(g_game.On(), on);  // питание: в Unreal - производительность
+    autos::OnModes(g_game.On(), on);  // питание: в Unreal под нагрузкой - производительность
     toolsui::OnModes(g_game.On(), on);
     netui::Dev(on);
     // видеокарту проверяем только у редактора из dev_apps (рендер Blender и так на чём выбран в нём самом)
@@ -607,7 +613,7 @@ void OnDevMode(bool on) {
             chips.push_back(L"Шейдеры");
             chips.push_back(L"Сборки UBT");
         }
-        if (g_cfg.autoPower && !tools::OnBattery()) chips.push_back(L"Питание: максимум");
+        if (g_cfg.autoPower && !tools::OnBattery()) chips.push_back(L"Питание: по нагрузке");
         if (g_cfg.devBoost && !g_game.On() && !g_dev.Busy()) OfferBoost(false, L"для " + g_dev.Reason());
         g_avHintAt = GetTickCount64() + 90000;
     } else {
@@ -637,7 +643,7 @@ void OnGameMode(bool on) {
         llmouse::Suspend(on);  // перехват мыши снят: каждое движение мыши не ходит через нас
     }
     if (!on) heavy = false;
-    autos::OnModes(on, g_dev.On());  // питание: в игре - производительность
+    autos::OnModes(on, g_dev.On());  // питание: в игре под нагрузкой - производительность
     toolsui::OnModes(on, g_dev.On());
     UpdateTrayTip();
     // Boost: во время игры таймер и приоритеты, при запуске - предложить
@@ -654,18 +660,18 @@ void OnGameMode(bool on) {
         if (g_cfg.boostEco) {
             int n = gboost::GameFirst(g_game.GamePids(), Split(g_cfg.boostKeepFast, L'|'), s.guarded);
             chips.push_back(L"Игре высокий приоритет");
-            if (n) chips.push_back(L"Фон в экономии: " + std::to_wstring(n));
+            if (n) { usage::Hit(L"boost_eco"); chips.push_back(L"Фон в экономии: " + std::to_wstring(n)); }
         }
         if (g_cfg.boostQuiet) {
             gboost::QuietFor(L'g', true);
-            if (gboost::QuietOn()) chips.push_back(L"Уведомления молчат");
+            if (gboost::QuietOn()) { usage::Hit(L"boost_quiet"); chips.push_back(L"Уведомления молчат"); }
         }
         if (McBegin()) chips.push_back(L"Prism усыплён");
         bool battery = tools::OnBattery();
-        if (g_cfg.autoPower) chips.push_back(battery ? L"От батареи: баланс" : L"Питание: максимум");
+        if (g_cfg.autoPower) chips.push_back(battery ? L"От батареи: баланс" : L"Питание: по нагрузке");
         gboost::SetGame(true, g_game.GamePids(), GameExe(), g_game.Reason(), g_cfg.boostIslc);
         if (g_cfg.boostOffer) OfferBoost(false);
-        GamePrep();  // Л21: обновления, загрузки, батарея - одной карточкой
+        GamePrep();        // Л21: обновления, загрузки, батарея - одной карточкой
         GameGuessOffer();  // по догадке - сразу дать сказать «не игра»
     } else {
         bool quiet = gboost::QuietOn();
@@ -768,30 +774,39 @@ void TrayMenu() {
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING | MF_DEFAULT, CMD_EDITOR, L"Редактор колец");
     AppendMenuW(m, MF_STRING, CMD_PALETTE, L"Поиск и команды...");
-    AppendMenuW(m, MF_STRING, CMD_WINDOWS, L"Открытые окна кольцом");
+    profile::Level who = profile::Current();
+    if (who >= profile::Dev) AppendMenuW(m, MF_STRING, CMD_WINDOWS, L"Открытые окна кольцом");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     std::wstring game = L"Игровой режим";
     if (g_game.On() && !g_game.Manual()) game += L": " + g_game.Reason();
     AppendMenuW(m, MF_STRING | (g_game.On() ? MF_CHECKED : 0), CMD_GAME, game.c_str());
     std::wstring dev = L"Режим разработки";
     if (g_dev.On() && !g_dev.Manual()) dev += L": " + g_dev.Reason();
-    AppendMenuW(m, MF_STRING | (g_dev.On() ? MF_CHECKED : 0), CMD_DEV, dev.c_str());
+    if (who >= profile::Dev || g_dev.On()) AppendMenuW(m, MF_STRING | (g_dev.On() ? MF_CHECKED : 0), CMD_DEV, dev.c_str());
     AppendMenuW(m, MF_STRING, CMD_BOOST, L"Освободить память...");
     std::wstring fs = focus::Status();
-    AppendMenuW(
-        m, MF_STRING | (focus::On() ? MF_CHECKED : 0), CMD_FOCUS,
-        (focus::On() ? fs + L" - закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут").c_str());
+    if (who >= profile::Dev || focus::On())
+        AppendMenuW(
+            m, MF_STRING | (focus::On() ? MF_CHECKED : 0), CMD_FOCUS,
+            (focus::On() ? fs + L" - закончить" : L"Фокус на " + std::to_wstring(g_cfg.focusMinutes) + L" минут").c_str());
     std::wstring sh = L"Показ экрана: окна не видны в записи";
     if (share::On() && !share::Manual()) sh += L" (" + share::Reason() + L")";
-    AppendMenuW(m, MF_STRING | (share::On() ? MF_CHECKED : 0), CMD_SHARE, sh.c_str());
+    if (who >= profile::Dev || share::On()) AppendMenuW(m, MF_STRING | (share::On() ? MF_CHECKED : 0), CMD_SHARE, sh.c_str());
     // Л6: сон после работы - галочка у взведённого, в подписи - чего ждём
     afterwork::Mode aw = afterwork::Armed();
     std::wstring awWhy = aw == afterwork::OFF ? L"" : L" (" + afterwork::Status() + L")";
-    AppendMenuW(m, MF_STRING | (aw == afterwork::SLEEP ? MF_CHECKED : 0), CMD_AFTER_SLEEP,
-                (L"Усыпить, когда всё закончится" + (aw == afterwork::SLEEP ? awWhy : L"")).c_str());
-    AppendMenuW(m, MF_STRING | (aw == afterwork::SHUTDOWN ? MF_CHECKED : 0), CMD_AFTER_OFF,
-                (L"Выключить, когда всё закончится" + (aw == afterwork::SHUTDOWN ? awWhy : L"")).c_str());
+    if (who >= profile::Dev || aw != afterwork::OFF) {
+        AppendMenuW(m, MF_STRING | (aw == afterwork::SLEEP ? MF_CHECKED : 0), CMD_AFTER_SLEEP,
+                    (L"Усыпить, когда всё закончится" + (aw == afterwork::SLEEP ? awWhy : L"")).c_str());
+        AppendMenuW(m, MF_STRING | (aw == afterwork::SHUTDOWN ? MF_CHECKED : 0), CMD_AFTER_OFF,
+                    (L"Выключить, когда всё закончится" + (aw == afterwork::SHUTDOWN ? awWhy : L"")).c_str());
+    }
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    HMENU people = CreatePopupMenu();
+    for (int i = 0; i < profile::kCount; ++i)
+        AppendMenuW(people, MF_STRING | (profile::Chosen() && who == i ? MF_CHECKED : 0), CMD_PROFILE + i,
+                    profile::Name((profile::Level)i));
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)people, L"Профиль");
     HMENU service = CreatePopupMenu();
     AppendMenuW(service, MF_STRING, CMD_RESTORE_ALL, L"Вернуть всё как было");
     AppendMenuW(service, MF_STRING, CMD_RESET_WINDOWS, L"Вернуть окнам прозрачность и закрепление");
@@ -986,6 +1001,7 @@ void ShutdownAll() {
     gamepad::Stop();
     rules::Release();
     g_snip.Destroy();
+    translatecard::Destroy();
     cursor::Restore();
     RemoveTray();
     bg::Quit(1500);  // фоновые задачи видят Quitting() и не пишут в уже убранное; дольше выход не ждёт
@@ -1097,6 +1113,13 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 case CMD_DEV:
                     g_dev.SetManual(!g_dev.On(), g_cfg);  // выключили при открытом редакторе - до его закрытия
                     break;
+                case CMD_PROFILE:
+                case CMD_PROFILE + 1:
+                case CMD_PROFILE + 2:
+                    profile::Choose((profile::Level)(LOWORD(wp) - CMD_PROFILE));
+                    g_cfg.profile = profile::CurrentKey();
+                    SaveConfig(g_cfgPath, g_cfg);
+                    return 0;
                 case CMD_AUTOSTART:
                     SetAutostart(!AutostartOn());
                     break;
@@ -1218,8 +1241,11 @@ LRESULT CALLBACK AppProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_POWERBROADCAST:
             if (wp == PBT_POWERSETTINGCHANGE) {
                 auto* s = reinterpret_cast<POWERBROADCAST_SETTING*>(lp);
-                if (s && IsEqualGUID(s->PowerSetting, GUID_CONSOLE_DISPLAY_STATE) && s->DataLength >= 4)
-                    g_reveal.OnDisplay(*reinterpret_cast<DWORD*>(s->Data) == 1);
+                if (s && IsEqualGUID(s->PowerSetting, GUID_CONSOLE_DISPLAY_STATE) && s->DataLength >= 4) {
+                    DWORD state = *reinterpret_cast<DWORD*>(s->Data);
+                    g_reveal.OnDisplay(state == 1);
+                    toolsui::OnDisplay(state != 0);  // 2 - притушен, за компьютером ещё сидят
+                }
                 if (s && IsEqualGUID(s->PowerSetting, GUID_ACDC_POWER_SOURCE)) autos::OnPower();
             } else {
                 g_reveal.OnPower(wp);
@@ -1284,6 +1310,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     Gdiplus::GdiplusStartup(&gdipToken, &gsi, nullptr);
 
     g_inst = inst;
+    if (devcli::HasFlag(L"--after-crash")) usage::Hit(L"crash_restart");
     // SHA-256 своего exe - сейчас, пока файл рядом тот, что запущен: с ним сверяется помощник с правами
     bg::Run([] { elevate::SelfHash(); }, THREAD_PRIORITY_BELOW_NORMAL);
     g_game.Recover();  // если прошлый запуск упал в игровом режиме - вернуть анимации, прозрачность, обои
@@ -1335,6 +1362,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     SetEditorDevStatus([] { return g_dev.On() ? L"включён (" + g_dev.Reason() + L")" : std::wstring(L"выключен"); });
     g_snip.Create(inst);
     g_snip.Apply(g_cfg);
+    translatecard::Create(inst);
+    translatecard::Apply(g_cfg);
     // двойной клик по пустому столу: целое кольцо вокруг курсора
     g_deskClick.onDouble = [](POINT pt) {
         if (g_menu.IsOpen()) return;
@@ -1464,7 +1493,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     g_menu.focusStatus = [] { return focus::Status(); };
     palette::AddSource([](std::vector<Item>& out) {
         Item player;
-        player.name = L"PlayerMoon — открыть музыкальный плеер";
+        player.name = L"PlayerMoon - открыть музыкальный плеер";
         player.path = L"pm|open";
         player.icon = L"icons/music.png";
         player.special = 3;
@@ -1490,7 +1519,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     });
     palette::AddRunner(L"l|", [](const std::wstring& dir) { toolsui::LaunchProject(dir); });
     corners::SetClip([] {
-        usage::Hit(L"cliphist");
         cliphist::ShowRing(g_menu);
     });
     palette::AddSource([](std::vector<Item>& out) {

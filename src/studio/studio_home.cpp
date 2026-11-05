@@ -13,7 +13,7 @@
 #include "core/fx.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "desk/corners.h"
+#include "desktop/corners.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
 #include "studio/studio.h"
@@ -551,7 +551,7 @@ void Studio::HomeShelf(const RectF& r, double t) {
 void Studio::HomePage(const RectF& r) {
     LaneTick();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(in, L"Обзор", L"Программа на твоём экране: кольца у краёв, углы в углах, тема на обоях и рамке окна.");
+    Header(in, L"Обзор", L"Программа на твоём экране");
 
     // данные: дешёвое - каждый кадр, PATH и диски - не чаще раза в 30 с
     ULONGLONG now = GetTickCount64();

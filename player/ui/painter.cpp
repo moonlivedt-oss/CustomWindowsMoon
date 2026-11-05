@@ -67,6 +67,12 @@ void Painter::Init(Renderer* renderer, TextSystem* text, IconSet* icons, CoverCa
     icons_ = icons;
     covers_ = covers;
     placeholderArt_.Init(renderer->Wic());
+}
+
+// Заглушка нужна только плееру без обложки, а Painter-ов два (плеер и образец в настройках): читаем при первом показе
+void Painter::LoadPlaceholder() {
+    if (placeholderTried_) return;
+    placeholderTried_ = true;
     wchar_t exe[32768]{};
     GetModuleFileNameW(nullptr, exe, 32768);
     std::string bytes;
@@ -83,6 +89,7 @@ void Painter::EnsureResources(ID2D1DeviceContext* dc) {
     dc_ = dc;
     if (generation_ == renderer_->DeviceGeneration() && brush_) return;
     generation_ = renderer_->DeviceGeneration();
+    gradients_.Clear();
     brush_.Reset();
     aux_.Reset();
     noise_.Reset();
@@ -138,16 +145,7 @@ ComPtr<ID2D1GradientStopCollection> Painter::Stops(std::initializer_list<std::pa
         if (n == 8) break;
         s[n++] = {pos, ToD2D(color)};
     }
-    // Смешивание в premultiplied, как в CSS: «цвет -> transparent» не уходит в серый
-    ComPtr<ID2D1GradientStopCollection1> coll;
-    if (SUCCEEDED(dc_->CreateGradientStopCollection(s, n, D2D1_COLOR_SPACE_SRGB, D2D1_COLOR_SPACE_SRGB,
-                                                    D2D1_BUFFER_PRECISION_8BPC_UNORM, D2D1_EXTEND_MODE_CLAMP,
-                                                    D2D1_COLOR_INTERPOLATION_MODE_PREMULTIPLIED, &coll)))
-        return coll;
-    // Запасной путь (реализации D2D без этого метода): обычная коллекция
-    ComPtr<ID2D1GradientStopCollection> plain;
-    dc_->CreateGradientStopCollection(s, n, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &plain);
-    return plain;
+    return gradients_.GetPremultiplied(dc_, s, n);
 }
 
 ComPtr<ID2D1LinearGradientBrush> Painter::Linear(D2D1_POINT_2F a, D2D1_POINT_2F b,
@@ -499,6 +497,7 @@ void Painter::DrawIcon(const Icon& icon, D2D1_POINT_2F c, float size, const Rgba
 
 void Painter::DrawPlaceholder(const theme::CoverPalette& p, const D2D1_RECT_F& r, ID2D1Geometry* clip,
                               float alpha) {
+    LoadPlaceholder();
     if (auto* bitmap = placeholderArt_.Get(1, dc_, renderer_->DeviceGeneration())) {
         const auto size = bitmap->GetSize();
         const float scale = std::max(Width(r) / size.width, Height(r) / size.height);

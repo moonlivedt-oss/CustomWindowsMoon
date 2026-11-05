@@ -18,8 +18,8 @@
 #include "app/autostart.h"
 #include "app/settingsio.h"
 #include "core/text.h"
-#include "desk/corners.h"
-#include "desk/playermoon.h"
+#include "desktop/corners.h"
+#include "media/playermoon.h"
 #include "gfx/accent.h"
 #include "gfx/draw.h"
 #include "gfx/icons.h"
@@ -35,7 +35,7 @@ namespace studio {
 void Studio::BehaviorPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(Column(in, ui.S(900)), L"Поведение", L"Где и как открывается меню. Всё применяется сразу.");
+    Header(Column(in, ui.S(900)), L"Поведение", L"Применяется сразу");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -123,7 +123,8 @@ void Studio::BehaviorPage(const RectF& r) {
             if (!(save ? GetSaveFileNameW(&of) : GetOpenFileNameW(&of))) return std::wstring();
             return std::wstring(file);
         };
-        if (ui.Button(ID_SETTINGS_EXPORT, RectF(a.X + a.Width - ui.S(290), a.Y + ui.S(4), ui.S(150), ui.S(36)),
+        // кнопки поуже: подпись слева длинная, и в полной ширине они её обрезали
+        if (ui.Button(ID_SETTINGS_EXPORT, RectF(a.X + a.Width - ui.S(216), a.Y + ui.S(4), ui.S(104), ui.S(36)),
                       L"Сохранить"))
             Defer([this, pick] {
                 std::wstring f = pick(true), msg;
@@ -131,7 +132,7 @@ void Studio::BehaviorPage(const RectF& r) {
                 settingsio::Export(f, msg);
                 Toast(msg);
             });
-        if (ui.Button(ID_SETTINGS_IMPORT, RectF(a.X + a.Width - ui.S(132), a.Y + ui.S(4), ui.S(132), ui.S(36)),
+        if (ui.Button(ID_SETTINGS_IMPORT, RectF(a.X + a.Width - ui.S(104), a.Y + ui.S(4), ui.S(104), ui.S(36)),
                       L"Загрузить"))
             Defer([this, pick] {
                 std::wstring f = pick(false), msg;
@@ -179,7 +180,7 @@ void Studio::BehaviorPage(const RectF& r) {
 void Studio::DeskPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(Column(in, ui.S(900)), L"Стол", L"Горячие углы и панель «Сейчас играет». Всё применяется сразу.");
+    Header(Column(in, ui.S(900)), L"Стол", L"Горячие углы и панель музыки");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -364,9 +365,11 @@ void Studio::DeskPage(const RectF& r) {
         Defer([this] { playermoon::Open(wnd); });
     bool added = false;
     for (const auto* ring : {&cfg.left, &cfg.right})
-        for (const auto& item : *ring) if (item.path == L"{player}") added = true;
+        for (const auto& item : *ring)
+            if (item.path == L"{player}") added = true;
     if (ui.Button(playermoon::kSectorControl, RectF(mb.X + ui.S(200), playerY, ui.S(190), ui.S(36)),
-                  added ? L"Уже в кольце" : L"Добавить в кольцо", Kind::Ghost) && !added) {
+                  added ? L"Уже в кольце" : L"Добавить в кольцо", Kind::Ghost) &&
+        !added) {
         Change();
         Item player;
         player.name = L"PlayerMoon";
@@ -499,7 +502,7 @@ bool Studio::CaptureKey(WPARAM vk) {
 void Studio::KeysPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(in, L"Клавиши", L"Всё, что умеет меню, на одной странице.");
+    Header(in, L"Клавиши", L"Все сочетания и жесты");
     ui.Icon(ExeDir() + L"\\icons\\mascot-read.webp",
             RectF(in.X + in.Width - ui.S(84), in.Y - ui.S(6), ui.S(80), ui.S(80)));
     RectF view(in.X - ui.S(4), in.Y + ui.S(76), in.Width + ui.S(8), in.Height - ui.S(76));

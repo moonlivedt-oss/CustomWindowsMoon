@@ -520,6 +520,7 @@ void Studio::ThemeFilm(const RectF& r) {
         RectF hit(cr.X + cw / 2 - cw * sc / 2, base - ch * sc, cw * sc, ch * sc);
         if (ui.Click(id, hit) && !on) ThemeWave(t.key, PointF(hit.X + hit.Width / 2, hit.Y + hit.Height / 2));
         ui.Track(id);
+        ui.Tip(id, t.name);
         if (ui.Hot(id) && !on) hoverThemeNext_ = t.key;
         cards.push_back({i, cr, sc});
     }
@@ -564,9 +565,10 @@ void Studio::FilmCard(const ThemeInfo& t, const RectF& cr, bool on) {
                 ui.Fill(RectF(pal.X + pal.Width * k / 4, pal.Y, pal.Width / 4 + 1, pal.Height), ToColor(pc[k]));
             ui.G().Restore(s2);
         }
-        RectF nr(cr.X + ui.S(7), cr.Y + cr.Height - ui.S(31), cr.Width - ui.S(12), ui.S(18));
-        ui.Text(t.name, RectF(nr.X, nr.Y + ui.S(1), nr.Width, nr.Height), Color(150, 0, 0, 0), 10.5f, true);
-        ui.Text(t.name, nr, kOnImage, 10.5f, true);
+        // карточка узкая: мелкий шрифт и почти вся ширина, чтобы «Лунная ночь» и «Tokyo Night» влезали целиком
+        RectF nr(cr.X + ui.S(5), cr.Y + cr.Height - ui.S(31), cr.Width - ui.S(8), ui.S(18));
+        ui.Text(t.name, RectF(nr.X, nr.Y + ui.S(1), nr.Width, nr.Height), Color(150, 0, 0, 0), 9.5f, true);
+        ui.Text(t.name, nr, kOnImage, 9.5f, true);
         if (on) {
             ui.Stroke(cr, c.accent, rad, ui.S(2));
             float bd = ui.S(18);
@@ -589,8 +591,7 @@ void Studio::ThemesPage(const RectF& r) {
     LaneTick();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(in, L"Темы",
-           L"Наведи, чтобы примерить, щёлкни, чтобы выбрать. Справа - как тема "
-           L"ляжет: студия, окна, сообщения.");
+           L"Наведи - примерить, щёлкни - выбрать");
     RectF a(in.X, in.Y + ui.S(66), in.Width, in.Height - ui.S(66));
     const auto& themes = Themes();
     int n = (int)themes.size();

@@ -12,6 +12,7 @@
 #include <ctime>
 
 #include "core/files.h"
+#include "core/fx.h"
 #include "core/perf.h"
 #include "app/autostart.h"
 #include "core/text.h"
@@ -44,8 +45,16 @@ void Studio::DrawToast(float w, float h) {
         float left = laneRect_[1].X + laneRect_[1].Width + ui.S(30);
         r.X = std::max(left, left + (w - left - tw) / 2);
     }
+    // выезжает снизу с лёгким перелётом, полоска внизу показывает, сколько осталось на «Отменить»
+    double left = (double)(toastUntil_ - GetTickCount64()), since = 5000 - left;
+    double t = std::min(1.0, since / std::max(1.0, fx::Dur(380)));
+    r.Y += ui.S(40) * (float)(1 - (1 + 1.7 * std::pow(t - 1, 3) + 0.7 * std::pow(t - 1, 2)));
+    if (t < 1) ui.Invalidate();
+    else ui.Tick();
     ui.Fill(r, MixColor(c.cardHi, c.accent, 0.08f), ui.S(14));
     ui.Stroke(r, c.accent, ui.S(14), ui.S(1.5f));
+    float bar = (r.Width - ui.S(28)) * (float)std::clamp(left / 5000.0, 0.0, 1.0);
+    ui.Fill(RectF(r.X + ui.S(14), r.Y + r.Height - ui.S(4), bar, ui.S(2)), WithAlpha(c.accent, 190), ui.S(1));
     ui.Text(toast_, RectF(r.X + ui.S(18), r.Y, r.Width - ui.S(150), r.Height), c.text, 12.5f);
     if (ui.Button(ID_TOAST_UNDO, RectF(r.X + r.Width - ui.S(128), r.Y + ui.S(8), ui.S(116), ui.S(32)), toastBtn_,
                   Kind::Primary))
@@ -54,35 +63,46 @@ void Studio::DrawToast(float w, float h) {
 
 void Studio::TourOverlay(float w, float h) {
     const UiColors& c = ui.C();
-    ui.Fill(RectF(0, 0, w, h), Color(170, 0, 0, 0));
+    ui.Fill(RectF(-200, -200, w + 400, h + 400), Color(170, 0, 0, 0));
     ui.Hover(ID_OV_BG, RectF(0, 0, w, h));
     struct Step {
+        const wchar_t* picture;  // images\tour\*.jpg - широкая картинка сверху; нет файла - талисман
         const wchar_t* mascot;
         const wchar_t* title;
         const wchar_t* text;
     } steps[] = {
-        {L"mascot-wave.webp", L"Привет! Это Radial Studio",
-         L"Здесь настраивается всё: кольца у краёв экрана, углы, сеть, утилиты. Начни с «Обзора» - там главное "
-         L"плитками."},
-        {L"mascot-point.webp", L"Пять групп",
-         L"Слева группы: Обзор, Кольца, Стол, Сервис, Настройки. Внутри группы - вкладки сверху: например, «Сеть» и "
-         L"«Утилиты» в «Сервисе»."},
-        {L"mascot-surprised.webp", L"Темы",
+        {L"1-alt-edge.jpg", L"mascot-wave.webp", L"Привет! Это Radial Studio",
+         L"Кольцо открывается так: зажми Alt и доведи курсор до левого или правого края экрана. А здесь "
+         L"настраивается всё: кольца, углы, сеть, утилиты. Начни с «Обзора» - там главное плитками."},
+        {L"3-studio.jpg", L"mascot-point.webp", L"Группы и профиль",
+         L"Слева группы, внутри них - вкладки сверху. Внизу панели - профиль: он прячет лишнее. Задержи курсор на "
+         L"подписи, и появятся подробности."},
+        {L"2-ring.jpg", L"mascot-surprised.webp", L"Темы",
          L"Тема красит и кольца, и саму студию. Двенадцать штук, включая цвет из обоев и свою палитру."},
-        {L"mascot-read.webp", L"Сохранять не нужно",
+        {L"", L"mascot-read.webp", L"Сохранять не нужно",
          L"Всё сохраняется само. Ошибся - «Отменить» внизу. «Показать меню» сразу открывает кольцо для проверки."},
     };
     const Step& s = steps[tourStep_];
-    RectF card((w - ui.S(600)) / 2, (h - ui.S(300)) / 2, ui.S(600), ui.S(300));
+    RectF card((w - ui.S(640)) / 2, (h - ui.S(500)) / 2, ui.S(640), ui.S(500));
     ui.Fill(card, c.card, ui.S(18));
-    ui.Stroke(card, c.accent, ui.S(18), ui.S(1.5f));
     ui.Hover(ID_OV_BG + 1, card);
-    ui.Icon(ExeDir() + L"\\icons\\" + s.mascot, RectF(card.X + ui.S(24), card.Y + ui.S(50), ui.S(170), ui.S(170)));
-    float tx = card.X + ui.S(214), tw = card.Width - ui.S(240);
-    ui.Text(L"Шаг " + std::to_wstring(tourStep_ + 1) + L" из 4", RectF(tx, card.Y + ui.S(34), tw, ui.S(20)), c.accent,
-            11.5f, true);
-    ui.Text(s.title, RectF(tx, card.Y + ui.S(56), tw, ui.S(32)), c.text, 18, true);
-    ui.Text(s.text, RectF(tx, card.Y + ui.S(96), tw, ui.S(110)), c.muted, 13, false, ui::Left, true);
+    // сверху картинка шага во всю ширину карточки (cover, скруглены только верхние углы)
+    RectF banner(card.X, card.Y, card.Width, ui.S(250));
+    Bitmap* pic = s.picture[0] ? Img(ExeDir() + L"\\images\\tour\\" + s.picture, 1280) : nullptr;
+    if (pic) {
+        ui.Picture(pic, banner, ui.S(18), false);
+    } else {
+        ui.Fill(banner, MixColor(c.card, c.accent, 0.08f), ui.S(18));
+        ui.Fill(RectF(banner.X, banner.Y + banner.Height - ui.S(18), banner.Width, ui.S(18)),
+                MixColor(c.card, c.accent, 0.08f));  // низ полосы прямой, как у картинки
+        ui.Icon(ExeDir() + L"\\icons\\" + s.mascot,
+                RectF(banner.X + (banner.Width - ui.S(190)) / 2, banner.Y + ui.S(30), ui.S(190), ui.S(190)));
+    }
+    ui.Stroke(card, c.accent, ui.S(18), ui.S(1.5f));
+    float tx = card.X + ui.S(28), tw = card.Width - ui.S(56), ty = banner.Y + banner.Height + ui.S(20);
+    ui.Text(L"Шаг " + std::to_wstring(tourStep_ + 1) + L" из 4", RectF(tx, ty, tw, ui.S(20)), c.accent, 11.5f, true);
+    ui.Text(s.title, RectF(tx, ty + ui.S(22), tw, ui.S(32)), c.text, 18, true);
+    ui.Text(s.text, RectF(tx, ty + ui.S(60), tw, ui.S(84)), c.muted, 13, false, ui::Left, true);
     float by = card.Y + card.Height - ui.S(62);
     bool last = tourStep_ == 3;
     if (ui.Button(ID_TOUR_NEXT, RectF(card.X + card.Width - ui.S(146), by, ui.S(122), ui.S(38)),
@@ -105,9 +125,11 @@ void Studio::TourOverlay(float w, float h) {
         cfg.tourDone = true;
         Save();
     }
+    // точки шагов - посередине между «Пропустить» и кнопками справа
+    float dots = card.X + card.Width / 2 - ui.S(25);
     for (int i = 0; i < 4; ++i) {
         SolidBrush b(i == tourStep_ ? c.accent : c.border);
-        ui.G().FillEllipse(&b, card.X + ui.S(84) + i * ui.S(14), card.Y + card.Height - ui.S(36), ui.S(8), ui.S(8));
+        ui.G().FillEllipse(&b, dots + i * ui.S(14), by + ui.S(15), ui.S(8), ui.S(8));
     }
 }
 
@@ -225,7 +247,7 @@ void Studio::DiffPanel(const RectF& p) {
 
 void Studio::LibraryOverlay(float w, float h) {
     const UiColors& c = ui.C();
-    ui.Fill(RectF(0, 0, w, h), Color(170, 0, 0, 0));
+    ui.Fill(RectF(-200, -200, w + 400, h + 400), Color(170, 0, 0, 0));
     if (ui.Click(ID_OV_BG, RectF(0, 0, w, h))) {
         ov_ = OV_NONE;
         return;

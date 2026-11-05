@@ -3,17 +3,18 @@
 python tools/build_identity.py          # generate and install
 python tools/build_identity.py --check  # verify generated assets
 """
-from pathlib import Path
 import argparse
 import html
 import json
 import math
 import shutil
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT.parent
-OUT = ROOT / 'art' / 'identity'
+OUT = ROOT / 'docs' / 'design' / 'identity'
 BACKUP = ROOT / 'backups' / 'identity-originals'
 S = 4
 

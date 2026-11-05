@@ -13,6 +13,7 @@
 #include "core/json.h"
 #include "core/state.h"
 #include "core/text.h"
+#include "motion/easing.h"
 #include "theme/assets.h"
 #include "theme/palette.h"
 #include "ui/http.h"
@@ -25,7 +26,7 @@ namespace {
 constexpr wchar_t kClassName[] = L"PlayerMoonWindow";
 constexpr wchar_t kInstanceMutex[] = L"Local\\PlayerMoon.Instance";
 constexpr UINT_PTR kMoveFrame = 20;
-constexpr UINT_PTR kGraphicsRetry = 19;  // bounded retry after a temporary graphics failure
+constexpr UINT_PTR kGraphicsRetry = 19;       // bounded retry after a temporary graphics failure
 constexpr UINT kWakeMessage = WM_APP + 1;     // аудиопоток: есть события для PumpEvents
 constexpr UINT kLibraryMessage = WM_APP + 2;  // сканер библиотеки закончил
 constexpr UINT kWatchMessage = WM_APP + 3;    // в папках библиотеки что-то поменялось
@@ -36,7 +37,11 @@ constexpr ULONG_PTR kCopyDataPaths = 0x504D;  // WM_COPYDATA: пути от вт
 constexpr UINT_PTR kTickTimer = 1;            // раз в секунду: время в мини-режиме и на панели задач
 constexpr UINT_PTR kSaveTimer = 2;            // отложенное сохранение после изменений
 constexpr UINT_PTR kSaveTick = 3;             // во время игры - позиция раз в 30 секунд
-constexpr UINT_PTR kLazyTimer = 4;            // подсказки и уведомления: разовый кадр к нужному времени
+constexpr UINT_PTR kLazyTimer = 4;
+constexpr UINT_PTR kCloseFade = 21;  // закрытие: заставка сжалась - окно гаснет
+constexpr UINT_PTR kCloseDone = 22;  // закрытие: окно погасло - уничтожить
+constexpr UINT_PTR kModeSwitch = 23;  // смена вида: старый ушёл - показать новый            // подсказки и уведомления:
+                                      // разовый кадр к нужному времени
 
 // Атрибуты DWM числами: в заголовках MinGW имён может не быть (как в RadialMenu)
 constexpr DWORD kDwmDarkMode = 20;
@@ -94,8 +99,10 @@ std::wstring FormatDuration(double seconds) {
     if (!(seconds > 0)) return L"";
     const long t = static_cast<long>(std::lround(seconds));
     wchar_t buf[32];
-    if (t >= 3600) swprintf(buf, 32, L"%ld:%02ld:%02ld", t / 3600, (t / 60) % 60, t % 60);
-    else swprintf(buf, 32, L"%ld:%02ld", t / 60, t % 60);
+    if (t >= 3600)
+        swprintf(buf, 32, L"%ld:%02ld:%02ld", t / 3600, (t / 60) % 60, t % 60);
+    else
+        swprintf(buf, 32, L"%ld:%02ld", t / 60, t % 60);
     return buf;
 }
 
@@ -115,9 +122,12 @@ pm::Repeat RepeatFromString(const std::string& s) {
 
 const char* RepeatToString(pm::Repeat r) {
     switch (r) {
-        case pm::Repeat::All: return "all";
-        case pm::Repeat::One: return "one";
-        default: return "off";
+        case pm::Repeat::All:
+            return "all";
+        case pm::Repeat::One:
+            return "one";
+        default:
+            return "off";
     }
 }
 
@@ -126,14 +136,15 @@ std::vector<std::filesystem::path> PickPaths(HWND owner, bool folder, bool multi
                                              const wchar_t* filterSpec, const wchar_t* title = nullptr) {
     std::vector<std::filesystem::path> out;
     Microsoft::WRL::ComPtr<IFileOpenDialog> dlg;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg))))
-        return out;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg)))) return out;
     if (title) dlg->SetTitle(title);
     FILEOPENDIALOGOPTIONS opts = 0;
     dlg->GetOptions(&opts);
     opts |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
-    if (folder) opts |= FOS_PICKFOLDERS;
-    else opts |= FOS_FILEMUSTEXIST;
+    if (folder)
+        opts |= FOS_PICKFOLDERS;
+    else
+        opts |= FOS_FILEMUSTEXIST;
     if (multi) opts |= FOS_ALLOWMULTISELECT;
     dlg->SetOptions(opts);
     if (!folder && filterSpec) {
@@ -207,13 +218,15 @@ int App::Run(HINSTANCE instance, int show) {
     pcm_.resize(analyzer_.FftSize());
     historyPath_ = statePath_.parent_path() / L"history.jsonl";
     // Тексты песен: кэш рядом с state.json, сеть - lrclib.net в фоновом потоке
-    lyrics_.Start(statePath_.parent_path() / L"lyrics",
-                  [](const std::string& query, std::string& body) { return HttpsGet(L"lrclib.net", query, body); },
-                  [hwnd] { PostMessageW(hwnd, kLyricsMessage, 0, 0); });
+    lyrics_.Start(
+        statePath_.parent_path() / L"lyrics",
+        [](const std::string& query, std::string& body) { return HttpsGet(L"lrclib.net", query, body); },
+        [hwnd] { PostMessageW(hwnd, kLyricsMessage, 0, 0); });
 
     view_.SetHost(this);
     home_.Init(hwnd_, &renderer_, &text_);
     LoadHomePreferences();
+    ReadSystemReduce();  // настройка «Учитывать эффекты анимации Windows» уже прочитана
     SetHomeWindowStyle();
     LoadSavedState();
     RefreshHome();
@@ -235,13 +248,22 @@ int App::Run(HINSTANCE instance, int show) {
     started_ = true;
     lastCopyData_ = Now();  // файлы, пришедшие следом от других экземпляров, - дописываются
 
+    if (introEnabled_ && MotionAllowed() && show != SW_SHOWMINNOACTIVE && show != SW_SHOWMINIMIZED) {
+        intro_.Start(Now(), false);
+        renderer_.PlayEntrance(Entrance::None, 0, nullptr);
+    }
     ShowWindow(hwnd_, show);
     RegisterMediaKeys();
+    trayCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
+    ChangeWindowMessageFilterEx(hwnd_, trayCreatedMsg_, MSGFLT_ALLOW, nullptr);
+    AddTrayIcon();
     smtc_.Attach(hwnd_, kSmtcMessage);
+    narrator_.Attach(hwnd_);
     if (const pm::NowPlaying& np = player_.Current(); np.index >= 0)  // трек из state.json - сразу в панель
         smtc_.SetTrack(np.title, np.tags.artist, np.tags.album, np.tags.track, np.tags.cover);
     if (silent) {
-        const std::wstring msg = L"Не удалось открыть звуковое устройство, звук выключен.\n" + ::text::Utf8ToWide(error);
+        const std::wstring msg =
+            L"Не удалось открыть звуковое устройство, звук выключен.\n" + ::text::Utf8ToWide(error);
         MessageBoxW(hwnd_, msg.c_str(), L"PlayerMoon", MB_ICONWARNING);
     }
     MessageLoop();
@@ -301,11 +323,11 @@ bool App::CreateMainWindow(HINSTANCE instance) {
     // WS_CAPTION нужен для системной тени и скруглённых углов; саму рамку убирает WM_NCCALCSIZE
     const DWORD style =
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_CLIPCHILDREN;
-    hwnd_ = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_APPWINDOW | WS_EX_ACCEPTFILES, kClassName,
-                            L"PlayerMoon", style, CW_USEDEFAULT, CW_USEDEFAULT, 420, 680, nullptr, nullptr, instance,
-                            this);
+    hwnd_ = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_APPWINDOW | WS_EX_ACCEPTFILES, kClassName, L"PlayerMoon",
+                            style, CW_USEDEFAULT, CW_USEDEFAULT, 420, 680, nullptr, nullptr, instance, this);
     if (!hwnd_) return false;
     dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
+    ReadRefreshRate();
     // Окно с повышенными правами иначе не получит сообщение о кнопке на панели задач
     ChangeWindowMessageFilterEx(hwnd_, taskbarCreatedMsg_, MSGFLT_ALLOW, nullptr);
     ChangeWindowMessageFilterEx(hwnd_, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
@@ -345,6 +367,7 @@ void App::LoadSavedState() {
     miniOnTop_ = st.miniOnTop;
     playlistFromLibrary_ = st.playlistFromLibrary;
     player_.SetNormalize(st.normalize);
+    player_.SetCrossfade(st.crossfade);
 
     view_.RestoreModes(st.mini, st.playlistOpen);
     ApplyTheme(t, false);
@@ -387,6 +410,7 @@ void App::SaveCurrentState() {
     st.themeId = theme_.id;
     if (userTheme_) st.userTheme = themes_.ToUserDocument(theme_, theme_.name);
     st.normalize = player_.Normalize();
+    st.crossfade = player_.Crossfade();
     st.showRemaining = view_.showRemaining;
     st.miniOnTop = miniOnTop_;
     st.playlistFromLibrary = playlistFromLibrary_;
@@ -417,13 +441,20 @@ void App::ResetTickTimer() {
 void App::ReadSystemReduce() {
     BOOL anim = TRUE;
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &anim, 0);
-    systemReduce_ = !anim;
+    windowsAnimations_ = anim != FALSE;
+    systemReduce_ = followSystemMotion_ && !anim;
+    // Читается при запуске и по WM_SETTINGCHANGE: спрашивать систему на каждом кадре незачем
+    HIGHCONTRASTW hc{};
+    hc.cbSize = sizeof(hc);
+    systemHighContrast_ =
+        SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON);
 }
 
 bool App::SystemPrefersLight() {
     DWORD value = 0, size = sizeof(value);
-    const LSTATUS r = RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                                   L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size);
+    const LSTATUS r =
+        RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size);
     return r == ERROR_SUCCESS && value != 0;
 }
 
@@ -442,10 +473,14 @@ void App::SnapToEdges(RECT* r) const {
     if (!GetMonitorInfoW(MonitorFromRect(r, MONITOR_DEFAULTTONEAREST), &mi)) return;
     const RECT& w = mi.rcWork;
     const LONG th = ToPx(16), width = r->right - r->left, height = r->bottom - r->top;
-    if (std::abs(r->left - w.left) < th) r->left = w.left;
-    else if (std::abs(r->right - w.right) < th) r->left = w.right - width;
-    if (std::abs(r->top - w.top) < th) r->top = w.top;
-    else if (std::abs(r->bottom - w.bottom) < th) r->top = w.bottom - height;
+    if (std::abs(r->left - w.left) < th)
+        r->left = w.left;
+    else if (std::abs(r->right - w.right) < th)
+        r->left = w.right - width;
+    if (std::abs(r->top - w.top) < th)
+        r->top = w.top;
+    else if (std::abs(r->bottom - w.bottom) < th)
+        r->top = w.bottom - height;
     r->right = r->left + width;
     r->bottom = r->top + height;
 }
@@ -478,8 +513,12 @@ void App::ApplyBackdrop() {
 // ---------------- трек и плейлист ----------------
 
 void App::OnTrackChanged(int index, int direction) {
+    lastActive_ = Now();
     view::TrackText t;
     const pm::NowPlaying& np = player_.Current();
+    if (index >= 0 && started_)
+        narrator_.Announce(L"Играет: " + ::text::Utf8ToWide(np.title) +
+                           (np.tags.artist.empty() ? std::wstring() : L", " + ::text::Utf8ToWide(np.tags.artist)));
     if (index >= 0) {
         t.title = np.title;
         t.artist = np.tags.artist;
@@ -497,14 +536,16 @@ void App::OnTrackChanged(int index, int direction) {
     std::vector<uint64_t> keep;
     for (const view::CoverSlot& c : view_.covers) keep.push_back(c.serial);
     covers_.Keep(keep);
-    RebuildRows();  // длительность трека уточнилась после открытия декодера
+    RebuildRows();      // длительность трека уточнилась после открытия декодера
     lyricsSerial_ = 0;  // текст нового трека ищется, когда видна вкладка «Текст»
     FinishListen();
     if (index >= 0) BeginListen();
     // Не из колбэка плеера: плейлист дописывается на ближайшем кадре
     if (waveMode_ && index >= 0 && index >= player_.GetPlaylist().Size() - 3) waveExtend_ = true;
-    if (index >= 0) smtc_.SetTrack(np.title, np.tags.artist, np.tags.album, np.tags.track, np.tags.cover);
-    else smtc_.ClearTrack();
+    if (index >= 0)
+        smtc_.SetTrack(np.title, np.tags.artist, np.tags.album, np.tags.track, np.tags.cover);
+    else
+        smtc_.ClearTrack();
     if (index >= 0 && started_) library_.NotePlayed(np.path, static_cast<int64_t>(time(nullptr)));
     NotifyPluginsTrack();
     MarkDirty();
@@ -554,8 +595,10 @@ void App::LoadPaths(const std::vector<std::filesystem::path>& paths, bool append
     if (append && player_.GetPlaylist().Size() > before)
         view_.ShowToast("Добавлено треков: " + std::to_string(player_.GetPlaylist().Size() - before), Now());
     // Дописанные треки не прерывают текущий; новый плейлист начинается сразу
-    if (!append && player_.GetPlaylist().Size() > 0) player_.PlayIndex(0);
-    else if (append && !player_.GetState().hasTrack && player_.GetPlaylist().Size() > before) player_.PlayIndex(before);
+    if (!append && player_.GetPlaylist().Size() > 0)
+        player_.PlayIndex(0);
+    else if (append && !player_.GetState().hasTrack && player_.GetPlaylist().Size() > before)
+        player_.PlayIndex(before);
     MarkDirty();
     Invalidate();
 }
@@ -618,9 +661,7 @@ void App::ExportTheme() {
 
 // ---------------- меню ----------------
 
-void App::ShowContextMenu(POINT) {
-    OpenWorkspace(view::HomeModel::Settings);
-}
+void App::ShowContextMenu(POINT) { OpenWorkspace(view::HomeModel::Settings); }
 
 // ---------------- меню строки плейлиста ----------------
 
@@ -644,10 +685,14 @@ void App::ShowRowMenu(int row, view::Point at) {
     const std::filesystem::path path = pl.At(row).path;
     switch (cmd) {
         case kMenuRowPlay:
-            if (current) player_.Toggle();
-            else player_.PlayIndex(row);
+            if (current)
+                player_.Toggle();
+            else
+                player_.PlayIndex(row);
             break;
-        case kMenuRowNext: player_.PlayNext(row); break;
+        case kMenuRowNext:
+            player_.PlayNext(row);
+            break;
         case kMenuRowShow:
             // Проводник с выделенным файлом
             if (PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(path.c_str())) {
@@ -655,8 +700,11 @@ void App::ShowRowMenu(int row, view::Point at) {
                 ILFree(pidl);
             }
             break;
-        case kMenuRowRemove: player_.Remove(row); break;
-        default: return;
+        case kMenuRowRemove:
+            player_.Remove(row);
+            break;
+        default:
+            return;
     }
     RebuildRows();
     MarkDirty();
@@ -676,13 +724,24 @@ void App::RegisterMediaKeys() {
 
 void App::HandleMediaCommand(int command) {
     switch (command) {
-        case APPCOMMAND_MEDIA_PLAY_PAUSE: TogglePlay(); break;
-        case APPCOMMAND_MEDIA_PLAY: player_.Play(); break;
+        case APPCOMMAND_MEDIA_PLAY_PAUSE:
+            TogglePlay();
+            break;
+        case APPCOMMAND_MEDIA_PLAY:
+            player_.Play();
+            break;
         case APPCOMMAND_MEDIA_PAUSE:
-        case APPCOMMAND_MEDIA_STOP: player_.Pause(); break;
-        case APPCOMMAND_MEDIA_NEXTTRACK: Next(); break;
-        case APPCOMMAND_MEDIA_PREVIOUSTRACK: Prev(); break;
-        default: break;
+        case APPCOMMAND_MEDIA_STOP:
+            player_.Pause();
+            break;
+        case APPCOMMAND_MEDIA_NEXTTRACK:
+            Next();
+            break;
+        case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+            Prev();
+            break;
+        default:
+            break;
     }
     Invalidate();
 }
@@ -716,7 +775,9 @@ void App::ToggleMute() {
 }
 void App::CycleRepeat() {
     const pm::Repeat r = player_.GetState().repeat;
-    player_.SetRepeat(r == pm::Repeat::Off ? pm::Repeat::All : r == pm::Repeat::All ? pm::Repeat::One : pm::Repeat::Off);
+    player_.SetRepeat(r == pm::Repeat::Off   ? pm::Repeat::All
+                      : r == pm::Repeat::All ? pm::Repeat::One
+                                             : pm::Repeat::Off);
     Invalidate();
 }
 void App::ToggleShuffle() {
@@ -744,11 +805,62 @@ void App::ResizeWindow(view::Size dip) {
     }
     // Мгновенно: левый верхний угол на месте, содержимое анимирует PlayerView
     SetWindowPos(hwnd_, nullptr, 0, 0, ToPx(dip.w), ToPx(dip.h), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // Смена вида окна (не открытие панели плейлиста) - окно появляется заново со своим эффектом
+    const WindowForm form = homeMode_                                                   ? WindowForm::Home
+                            : (dip.w == view::kMiniWidth && dip.h == view::kMiniHeight) ? WindowForm::Mini
+                                                                                        : WindowForm::Compact;
+    if (form != windowForm_) {
+        PlayWindowEntrance(windowForm_, form);
+        windowForm_ = form;
+    }
     Invalidate();
 }
 
+bool App::HighContrast() const { return highContrast_ || systemHighContrast_; }
+
+bool App::MotionAllowed() const { return !(systemReduce_ || reduceMotion_) && theme_.settings.motion != "none"; }
+
+void App::PlayWindowEntrance(WindowForm from, WindowForm to, Entrance preferred) {
+    if (!MotionAllowed() || (from == WindowForm::Unknown && intro_.Active(Now()) && !intro_.Closing())) {
+        renderer_.PlayEntrance(Entrance::None, 0, nullptr);
+        return;
+    }
+    // Своё движение для каждого перехода: главная раскрывается кругом, плеер откидывается крышкой,
+    // мини-полоска разъезжается из середины, из полоски плеер поднимается снизу.
+    Entrance fx = Entrance::Pop;
+    if (windowFx_ == 0 && preferred != Entrance::None) {
+        fx = preferred;
+    } else if (windowFx_ == 0) {
+        if (from == WindowForm::Unknown)
+            fx = Entrance::Pop;
+        else if (to == WindowForm::Home)
+            fx = Entrance::Iris;
+        else if (to == WindowForm::Mini)
+            fx = Entrance::Split;
+        else if (from == WindowForm::Mini)
+            fx = Entrance::Rise;
+        else
+            fx = Entrance::Unfold;
+    } else {
+        const Entrance fixed[] = {Entrance::Pop,  Entrance::Rise,    Entrance::Unfold,
+                                  Entrance::Iris, Entrance::Curtain, Entrance::None};
+        fx = fixed[std::clamp(windowFx_ - 1, 0, 5)];
+    }
+    const auto& s = theme_.settings;
+    const auto spring = motion::Easing::Spring({s.stiffness, s.damping});
+    const double base = fx == Entrance::Iris || fx == Entrance::Unfold ? 0.52 : 0.44;
+    renderer_.PlayEntrance(fx, base * std::clamp(s.speed, 0.5, 2.0), [spring](double u) { return spring.Eval(u); });
+}
+
 void App::MinimizeWindow() { ShowWindow(hwnd_, SW_MINIMIZE); }
-void App::CloseWindow() { PostMessageW(hwnd_, WM_CLOSE, 0, 0); }
+// Крестик прячет окно; WM_CLOSE (пункт «Выход», другие программы, завершение Windows) по-прежнему завершает плеер
+void App::CloseWindow() { HideToBackground(); }
+void App::QuitApp() { PostMessageW(hwnd_, WM_CLOSE, 0, 0); }
+void App::StartCloseAnimation() {
+    intro_.Start(Now(), true);
+    SetTimer(hwnd_, kCloseFade, (UINT)(Intro::kClose * 1000) - 120, nullptr);
+    Invalidate();
+}
 
 void App::ShowMenu(view::Point at) {
     POINT pt{ToPx(at.x), ToPx(at.y)};
@@ -759,13 +871,27 @@ void App::ShowMenu(view::Point at) {
 float App::MeasureText(view::TextStyle style, const std::string& s) {
     TextSpec spec;
     switch (style) {
-        case view::TextStyle::Title: spec = Painter::TitleSpec(view_); break;
-        case view::TextStyle::MiniTitle: spec = Painter::MiniTitleSpec(view_); break;
-        case view::TextStyle::Tab: spec = Painter::TabSpecFor(view_, false); break;
-        case view::TextStyle::TabSmall: spec = Painter::TabSpecFor(view_, true); break;
-        case view::TextStyle::Pill: spec = Painter::PillSpec(); break;
-        case view::TextStyle::Tooltip: spec = Painter::TooltipSpec(); break;
-        case view::TextStyle::Lyric: spec = Painter::LyricSpec(view_); break;
+        case view::TextStyle::Title:
+            spec = Painter::TitleSpec(view_);
+            break;
+        case view::TextStyle::MiniTitle:
+            spec = Painter::MiniTitleSpec(view_);
+            break;
+        case view::TextStyle::Tab:
+            spec = Painter::TabSpecFor(view_, false);
+            break;
+        case view::TextStyle::TabSmall:
+            spec = Painter::TabSpecFor(view_, true);
+            break;
+        case view::TextStyle::Pill:
+            spec = Painter::PillSpec();
+            break;
+        case view::TextStyle::Tooltip:
+            spec = Painter::TooltipSpec();
+            break;
+        case view::TextStyle::Lyric:
+            spec = Painter::LyricSpec(view_);
+            break;
     }
     return text_.Measure(::text::Utf8ToWide(s), spec);
 }
@@ -808,11 +934,14 @@ void App::OnLyricsReady() {
                 times.push_back(l.time);
             }
             break;
-        case pm::LyricsStatus::Instrumental: state = view::LyricsState::Instrumental; break;
+        case pm::LyricsStatus::Instrumental:
+            state = view::LyricsState::Instrumental;
+            break;
         case pm::LyricsStatus::NetworkError:
             state = view::LyricsState::Offline;  // снова - со следующим треком (без повторов на каждом кадре)
             break;
-        case pm::LyricsStatus::NotFound: break;
+        case pm::LyricsStatus::NotFound:
+            break;
     }
     view_.SetLyrics(r.serial, state, std::move(lines), std::move(times), Now());
     Invalidate();
@@ -881,8 +1010,10 @@ void App::AddFilesFromPlugin(const std::vector<std::string>& paths, bool play) {
         RebuildRows();
         if (playIndex < 0) playIndex = before;
     }
-    if (play && playIndex >= 0) player_.PlayIndex(playIndex);
-    else if (!player_.GetState().hasTrack && player_.GetPlaylist().Size() > 0) player_.OpenAt(0, 0, false);
+    if (play && playIndex >= 0)
+        player_.PlayIndex(playIndex);
+    else if (!player_.GetState().hasTrack && player_.GetPlaylist().Size() > 0)
+        player_.OpenAt(0, 0, false);
     MarkDirty();
     Invalidate();
 }
@@ -909,6 +1040,34 @@ view::Size App::ClientDip() const {
     return {static_cast<float>(rc.right - rc.left) * k, static_cast<float>(rc.bottom - rc.top) * k};
 }
 
+void App::ReadRefreshRate() {
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    DEVMODEW mode{};
+    mode.dmSize = sizeof(mode);
+    if (GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &info) &&
+        EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
+        refreshHz_ = mode.dmDisplayFrequency;
+}
+
+// Ввод и смена трека - сразу и ещё секунду с полной частотой экрана: наведение, прокрутка и переходы плавные как
+// раньше. В остальное время кадр показывается раз в несколько обновлений, ближе всего к 60 в секунду (165 Гц -> 55, 144
+// Гц -> 72). Экран 60-75 Гц ничего не теряет: там интервал остаётся 1.
+void App::PlanFramePace(double now) {
+    const bool active = now - lastActive_ < 1.0 || intro_.Active(now);
+    framePace_ = active ? 1 : std::clamp<UINT>((refreshHz_ + 30) / 60, 1, 4);
+    renderer_.SetSyncInterval(framePace_);
+}
+
+bool App::UpdateSpectrum(SpectrumRun& run, int bars) {
+    const uint64_t written = player_.PcmWritten();
+    if (written == run.written && run.bars.size() == static_cast<size_t>(bars)) return true;
+    if (player_.ReadPcm(pcm_.data(), pcm_.size()) != pcm_.size()) return false;
+    analyzer_.Compute(pcm_.data(), player_.SampleRate(), bars, run.bars);
+    run.written = written;
+    return true;
+}
+
 void App::RenderFrame() {
     if (rendering_) return;
     struct RenderGuard {
@@ -919,6 +1078,11 @@ void App::RenderFrame() {
     dirty_ = false;
     visible_ = IsWindowVisible(hwnd_) && !IsIconic(hwnd_);
     const double t = Now();
+    // Сглаживание задано «за обновление экрана»: кадр длиной в несколько обновлений делает столько же шагов
+    const float paceSteps = static_cast<float>(lastFramePace_);
+    const auto paced = [paceSteps](float k) { return paceSteps <= 1 ? k : 1 - std::pow(1 - k, paceSteps); };
+    lastFramePace_ = framePace_;
+    PlanFramePace(t);
     const pm::PlayerState ps = player_.GetState();
     view::PlaybackSnapshot snap;
     snap.playing = ps.playing;
@@ -936,26 +1100,26 @@ void App::RenderFrame() {
     const std::vector<float>* spectrum = nullptr;
     if (!homeMode_ && visible_ && ps.playing && view_.WantsSpectrum() && player_.AudioDeviceRunning() &&
         view_.viz.Bars() > 0) {
-        if (player_.ReadPcm(pcm_.data(), pcm_.size()) == pcm_.size()) {
-            analyzer_.Compute(pcm_.data(), player_.SampleRate(), view_.viz.Bars(), spectrum_);
-            spectrum = &spectrum_;
-        }
+        if (UpdateSpectrum(playerSpectrum_, view_.viz.Bars())) spectrum = &playerSpectrum_.bars;
     }
     if (waveExtend_) {
         waveExtend_ = false;
         ExtendWave();
     }
     SyncPages();
-    if (view_.WantsLyrics()) RequestLyrics();
+    if (view_.WantsLyrics() || (homeMode_ && home_.NowPlayingOpen())) RequestLyrics();
     view_.SetBusy(scanner_.Running(), "Поиск музыки");
     view_.Update(t, snap, spectrum, visible_);
     ApplyTopmost();
     // Подсказка или уведомление ждут своего времени: разовый таймер вместо цикла кадров
     const double wake = view_.NextLazyWake();
-    if (wake < 1e300 && !view_.NeedsFrames())
+    if (wake < 1e300 && !view_.NeedsFrames()) {
         SetTimer(hwnd_, kLazyTimer, static_cast<UINT>(std::clamp((wake - t) * 1000.0 + 5, 10.0, 60000.0)), nullptr);
-    else
+        lazyTimer_ = true;
+    } else if (lazyTimer_) {
         KillTimer(hwnd_, kLazyTimer);
+        lazyTimer_ = false;
+    }
     taskbar_.Update(ps.hasTrack, ps.playing, ps.position, ps.duration);
     smtc_.Update(ps.hasTrack, ps.playing, ps.position, ps.duration);
     listen_.Advance(ps.position, ps.playing);
@@ -969,13 +1133,16 @@ void App::RenderFrame() {
     if (wantTicks != tickTimer_) {
         if (wantTicks)
             SetTimer(hwnd_, kTickTimer, homeMode_ && visible_ ? 250 : 1000, nullptr);
-        else KillTimer(hwnd_, kTickTimer);
+        else
+            KillTimer(hwnd_, kTickTimer);
         tickTimer_ = wantTicks;
     }
     // Во время игры позиция сохраняется раз в 30 секунд; на паузе таймера нет
     if (ps.playing != saveTick_) {
-        if (ps.playing) SetTimer(hwnd_, kSaveTick, 30000, nullptr);
-        else KillTimer(hwnd_, kSaveTick);
+        if (ps.playing)
+            SetTimer(hwnd_, kSaveTick, 30000, nullptr);
+        else
+            KillTimer(hwnd_, kSaveTick);
         saveTick_ = ps.playing;
     }
     if (!visible_) return;
@@ -983,9 +1150,13 @@ void App::RenderFrame() {
     ID2D1DeviceContext* dc = renderer_.BeginFrame();
     if (!dc) {
         SetTimer(hwnd_, kGraphicsRetry, 250, nullptr);
+        graphicsRetry_ = true;
         return;
     }
-    KillTimer(hwnd_, kGraphicsRetry);
+    if (graphicsRetry_) {
+        KillTimer(hwnd_, kGraphicsRetry);
+        graphicsRetry_ = false;
+    }
     PaintInput in;
     in.window = ClientDip();
     in.systemBackdrop = acrylicOn_;
@@ -1000,12 +1171,84 @@ void App::RenderFrame() {
         homeInput_.playback = snap;
         homeInput_.scanning = scanner_.Running();
         homeInput_.searchFocused = GetFocus() == homeSearch_;
-        SendMessageW(homeSearch_, EM_GETSEL, (WPARAM)&homeInput_.selectionStart, (LPARAM)&homeInput_.selectionEnd);
+        if (homeInput_.searchFocused)  // без фокуса выделение нигде не рисуется
+            SendMessageW(homeSearch_, EM_GETSEL, (WPARAM)&homeInput_.selectionStart, (LPARAM)&homeInput_.selectionEnd);
         const auto& np = player_.Current();
-        homeInput_.current = np.path;
-        homeInput_.title = ::text::Utf8ToWide(np.title);
-        homeInput_.artist = ::text::Utf8ToWide(np.tags.artist);
+        if (homeTrackSerial_ != np.serial) {  // другой трек - другой serial; иначе те же строки
+            homeTrackSerial_ = np.serial;
+            homeInput_.current = np.path;
+            homeInput_.title = ::text::Utf8ToWide(np.title);
+            homeInput_.artist = ::text::Utf8ToWide(np.tags.artist);
+        }
+        {
+            // Главная в цветах темы: живой акцент плеера (из темы или обложки) и оттенок окна темы
+            HomeColors colors;
+            const auto live = view_.accent.Value(t);
+            const auto& s = theme_.settings;
+            colors.accent = D2D1::ColorF(live.r, live.g, live.b);
+            colors.accent2 = s.accentFromCover ? MixColor(colors.accent, D2D1::ColorF(0xa78bfa), .55f)
+                                               : MixColor(D2D1::ColorF(s.accent2.r, s.accent2.g, s.accent2.b),
+                                                          D2D1::ColorF(0xa78bfa), .35f);
+            const auto win = D2D1::ColorF(s.winColor.r, s.winColor.g, s.winColor.b);
+            const float light = .2126f * win.r + .7152f * win.g + .0722f * win.b;
+            // Тёмное окно темы - основа фона; у светлой темы берём только лёгкий оттенок акцента
+            const D2D1_COLOR_F tint = light < .35f ? D2D1_COLOR_F(win) : colors.accent;
+            const float k = light < .35f ? .55f : .05f;
+            colors.bg = MixColor(colors.bg, tint, k * .6f);
+            colors.surface = MixColor(colors.surface, tint, k * .5f);
+            colors.card = MixColor(colors.card, tint, k * .35f);
+            homeInput_.colors = colors;
+        }
         BuildWorkspace();
+        // Живой фон главной слушает музыку: 8 полос спектра, бас сглаживается, чтобы свет дышал, а не мигал
+        homeInput_.ambient = ps.playing && !(systemReduce_ || reduceMotion_) && theme_.settings.motion != "none" &&
+                             GetForegroundWindow() == hwnd_;
+        float bass = 0;
+        // Полосы эквалайзера - всегда, пока играет музыка: это показатель звука, а не украшение.
+        // При «меньше движения» кадров не просим - они идут по таймеру четыре раза в секунду
+        homeInput_.bandsLive = false;
+        if (ps.playing && visible_ && player_.AudioDeviceRunning() && UpdateSpectrum(homeSpectrum_, 8)) {
+            const auto& homeBands = homeSpectrum_.bars;
+            for (size_t i = 0; i < 8 && i < homeBands.size(); ++i)
+                homeInput_.bands[i] += (homeBands[i] - homeInput_.bands[i]) * paced(.45f);
+            homeInput_.bandsLive = true;
+            bass = homeBands.size() >= 2 ? (homeBands[0] + homeBands[1]) * .5f : 0;
+        }
+        homeInput_.energy +=
+            (std::clamp(bass, 0.f, 1.f) - homeInput_.energy) * paced(bass > homeInput_.energy ? .35f : .08f);
+        // Доля такта: вспышка 1 и быстрое затухание (~150 мс)
+        if (homeInput_.ambient) beat_.Feed(bass, t, paced(.06f));
+        homeInput_.beat = homeInput_.ambient ? (float)std::exp(-(t - beat_.Last()) * 7) : 0.f;
+        homeInput_.karaoke = player_.Karaoke();
+        homeInput_.coverFrame = home_.HasFrame(coverFrame_) ? coverFrame_ : 0;
+        homeInput_.skin = theme_.settings.skin;
+        // Полноэкранный вид: текст песни и 48 полос для волны
+        homeInput_.lyricsState = 0;
+        if (home_.NowPlayingOpen()) {
+            // Текст песни меняется вместе с вектором строк: на каждом кадре его не перекодируем
+            if (homeLyricsShown_ != view_.lyrics.lines.data() || homeLyricsCount_ != view_.lyrics.lines.size()) {
+                homeLyricsShown_ = view_.lyrics.lines.data();
+                homeLyricsCount_ = view_.lyrics.lines.size();
+                homeInput_.lyrics.clear();
+                for (const auto& line : view_.lyrics.lines) homeInput_.lyrics.push_back(::text::Utf8ToWide(line));
+                homeInput_.lyricTimes = view_.lyrics.times;
+            }
+            homeInput_.lyricsState = (int)view_.lyrics.state;
+            if (ps.playing && player_.AudioDeviceRunning() && UpdateSpectrum(nowSpectrum_, 48)) {
+                const auto& bars = nowSpectrum_.bars;
+                homeInput_.spectrum.resize(bars.size());
+                for (size_t i = 0; i < bars.size(); ++i)
+                    homeInput_.spectrum[i] += (bars[i] - homeInput_.spectrum[i]) * paced(.5f);
+            } else {
+                for (auto& v : homeInput_.spectrum) v *= 1 - paced(.15f);
+            }
+        } else {
+            homeInput_.spectrum.clear();
+            homeInput_.lyrics.clear();
+            homeInput_.lyricTimes.clear();
+            homeLyricsShown_ = nullptr;
+            homeLyricsCount_ = 0;
+        }
         homeInput_.settingsPreview = nullptr;
         if (home_.model.page == view::HomeModel::Settings) {
             view::TrackText demo;
@@ -1019,21 +1262,66 @@ void App::RenderFrame() {
                 demo.palette = view_.covers.back().palette;
                 demo.hasImage = view_.covers.back().hasImage;
             }
-            homeInput_.settingsPreview = settingsPreview_.Render(dc, demo, t, previewMini_, !(systemReduce_ || reduceMotion_) && theme_.settings.motion != "none" && GetForegroundWindow() == hwnd_, view_.showRemaining);
+            homeInput_.settingsPreview = settingsPreview_.Render(
+                dc, demo, t, previewMini_,
+                !(systemReduce_ || reduceMotion_) && theme_.settings.motion != "none" && GetForegroundWindow() == hwnd_,
+                view_.showRemaining);
             homeInput_.previewSize = settingsPreview_.Size();
         }
+        UpdateSettingsHoverPreview();
+        if (HighContrast()) {
+            // Высокий контраст: чёрный фон, белый текст, системный цвет выделения, без живого фона
+            HomeColors hc;
+            hc.bg = D2D1::ColorF(0, 0, 0);
+            hc.surface = D2D1::ColorF(0x0a0a0a);
+            hc.card = D2D1::ColorF(0x1c1c1c);
+            hc.white = D2D1::ColorF(1, 1, 1);
+            hc.muted = D2D1::ColorF(0xe0e0e0);
+            const COLORREF sel = GetSysColor(COLOR_HIGHLIGHT);
+            hc.accent = D2D1::ColorF(GetRValue(sel) / 255.f, GetGValue(sel) / 255.f, GetBValue(sel) / 255.f);
+            hc.accent2 = hc.accent;
+            homeInput_.colors = hc;
+            homeInput_.ambient = false;
+            homeInput_.reducedMotion = true;
+        }
+        homeInput_.highContrast = HighContrast();
         home_.Paint(dc, homeInput_);
+        if (const auto spoken = home_.TakeToast(); !spoken.empty()) narrator_.Announce(spoken);
+        if (const double homeWake = home_.NextWake(); homeWake > 0 && !home_.NeedsFrames()) {
+            // Paint считает время по GetTickCount64, таймеру важен только промежуток
+            SetTimer(hwnd_, kLazyTimer,
+                     static_cast<UINT>(std::clamp((homeWake - GetTickCount64() / 1000.) * 1000.0 + 5, 10.0, 60000.0)),
+                     nullptr);
+            lazyTimer_ = true;
+        }
     } else
         painter_.Paint(dc, view_, in);
+    if (intro_.Active(t)) {
+        const auto live = view_.accent.Value(t);
+        const auto win = theme_.settings.winColor;
+        const D2D1_COLOR_F bg = homeMode_ ? homeInput_.colors.bg : D2D1::ColorF(win.r * .8f, win.g * .8f, win.b * .8f);
+        const auto size = ClientDip();
+        intro_.Paint(dc, renderer_.Factory(), renderer_.DWrite(), {size.w, size.h}, t, bg,
+                     D2D1::ColorF(live.r, live.g, live.b), home_.SharedPicture(dc, Home::IntroBackdrop));
+    }
     if (!renderer_.EndFrame()) dirty_ = true;  // устройство пересоздано - повторить кадр
 }
 
 void App::MessageLoop() {
     MSG msg;
+    const auto noteInput = [this](UINT message) {
+        if ((message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) ||
+            (message >= WM_KEYFIRST && message <= WM_KEYLAST) ||
+            (message >= WM_NCMOUSEMOVE && message <= WM_NCMBUTTONDBLCLK))
+            lastActive_ = Now();
+    };
     for (;;) {
-        const bool demo = homeMode_ && home_.model.page == view::HomeModel::Settings && GetForegroundWindow() == hwnd_ &&
+        const bool demo =
+            homeMode_ && home_.model.page == view::HomeModel::Settings && GetForegroundWindow() == hwnd_ &&
             (settingsPreview_.NeedsFrames() || (!(systemReduce_ || reduceMotion_) && theme_.settings.motion != "none"));
-        const bool frames = dirty_ || (visible_ && (homeMode_ ? home_.NeedsFrames() || demo : view_.NeedsFrames()));
+        const bool frames =
+            dirty_ ||
+            (visible_ && (intro_.Active(Now()) || (homeMode_ ? home_.NeedsFrames() || demo : view_.NeedsFrames())));
         HANDLE waitable = renderer_.FrameWaitable();
         if (frames && waitable) {
             // Ждём, пока DWM готов принять кадр, и одновременно обрабатываем сообщения
@@ -1049,11 +1337,13 @@ void App::MessageLoop() {
         } else {
             // Покой: ноль кадров, поток спит до сообщения
             if (GetMessageW(&msg, nullptr, 0, 0) <= 0) return;
+            noteInput(msg.message);
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) return;
+            noteInput(msg.message);
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -1075,6 +1365,8 @@ LRESULT CALLBACK App::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
+    if (HandleBackgroundMessage(msg, wp, lp)) return 0;
+    if (msg == WM_DISPLAYCHANGE || msg == WM_EXITSIZEMOVE) ReadRefreshRate();
     if (msg == taskbarCreatedMsg_ && taskbarCreatedMsg_) {
         taskbar_.Attach(hwnd_, renderer_.Factory(), renderer_.Wic());
         Invalidate();
@@ -1097,13 +1389,20 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             break;
+        case WM_GETOBJECT: {
+            bool handled = false;
+            const LRESULT result = narrator_.OnGetObject(wp, lp, handled);
+            if (handled) return result;
+            break;
+        }
         case WM_NCPAINT:
             return 0;  // The custom titlebar is drawn by Direct2D, including after activation.
         case WM_NCACTIVATE:
             Invalidate();
             return DefWindowProcW(hwnd_, msg, wp, -1);
         case WM_CTLCOLOREDIT:
-            if ((HWND)lp == homeSearch_ || (HWND)lp == downloadEdit_) {
+            if ((HWND)lp == homeSearch_ || (HWND)lp == downloadEdit_ || (HWND)lp == settingsEdit_ ||
+                (HWND)lp == paletteEdit_) {
                 SetTextColor((HDC)wp, RGB(239, 235, 238));
                 SetBkColor((HDC)wp, RGB(17, 20, 28));
                 SetDCBrushColor((HDC)wp, RGB(17, 20, 28));
@@ -1175,14 +1474,13 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             // Use Windows' monitor-aware rectangle, especially for a maximized dashboard.
             int width = suggested->right - suggested->left, height = suggested->bottom - suggested->top;
             if (!homeMode_) {
-                const auto size = view_.mini ? view::Size{view::kMiniWidth, view::kMiniHeight}
-                    : view_.layout ? view_.layout->WindowSize(view_.layoutInput, view_.playlistOpen)
-                                   : view::Size{420, 680};
+                const auto size = view_.mini     ? view::Size{view::kMiniWidth, view::kMiniHeight}
+                                  : view_.layout ? view_.layout->WindowSize(view_.layoutInput, view_.playlistOpen)
+                                                 : view::Size{420, 680};
                 width = ToPx(size.w);
                 height = ToPx(size.h);
             }
-            SetWindowPos(hwnd_, nullptr, suggested->left, suggested->top, width, height,
-                         SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hwnd_, nullptr, suggested->left, suggested->top, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
             LayoutHomeSearch();
             Invalidate();
             return 0;
@@ -1192,9 +1490,16 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd_, 0};
                 trackingMouse_ = TrackMouseEvent(&tme);
             }
-            if (homeMode_)
+            if (homeMode_) {
                 home_.Move(ToDip(lp));
-            else
+                // Ползунок настроек тянется за мышью
+                int command = 0;
+                float fraction = 0;
+                if ((wp & MK_LBUTTON) && home_.ActiveSlider(command, fraction)) {
+                    SliderCommand(command, fraction, !sliderDragging_);
+                    sliderDragging_ = true;
+                }
+            } else
                 view_.OnMouseMove(ToDip(lp), Now());
             Invalidate();
             return 0;
@@ -1208,27 +1513,51 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
+            home_.ClearFocus();  // мышью - контур клавиатуры не нужен
             SetCapture(hwnd_);
             if (homeMode_) {
                 SetFocus(hwnd_);
                 home_.Move(ToDip(lp));
+                home_.Press(ToDip(lp));
+                int command = 0;
+                float fraction = 0;
+                if (home_.ActiveSlider(command, fraction)) {
+                    SliderCommand(command, fraction, true);
+                    sliderDragging_ = true;
+                }
             } else
                 view_.OnMouseDown(ToDip(lp), Now());
             Invalidate();
             return 0;
         case WM_LBUTTONUP:
             ReleaseCapture();
-            if (homeMode_)
-                HomeClick(ToDip(lp));
-            else
+            if (homeMode_) {
+                const bool slid = sliderDragging_;
+                sliderDragging_ = false;
+                const auto drop = home_.Release(ToDip(lp));
+                if (slid) {
+                    SaveHomePreferences();
+                    MarkDirty();
+                    Invalidate();
+                    return 0;
+                }
+                if (drop.kind != Home::Drop::None)
+                    HomeDrop(drop);
+                else if (drop.index != -2)
+                    HomeClick(ToDip(lp));  // -2: перенос брошен мимо очереди
+            } else
                 view_.OnMouseUp(ToDip(lp), Now());
             MarkDirty();
             Invalidate();
             return 0;
         case WM_RBUTTONUP:
-            if (homeMode_)
-                ShowMenu(ToDip(lp));
-            else
+            if (homeMode_) {
+                const auto hit = home_.At(ToDip(lp));
+                if (hit.action == Home::PlayTrack && hit.index != -1)
+                    TrackMenu(hit.index, ToDip(lp));
+                else
+                    ShowMenu(ToDip(lp));
+            } else
                 view_.OnRightClick(ToDip(lp));
             return 0;
         case WM_NCRBUTTONUP:
@@ -1252,25 +1581,34 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_KEYDOWN: {
-            if (GetKeyState(VK_CONTROL) < 0 && wp == VK_OEM_COMMA) {
-                OpenWorkspace(view::HomeModel::Settings);
+            // Сначала - назначение новой клавиши, потом настроенные сочетания
+            if (CaptureShortcut((UINT)wp)) return 0;
+            if (homeMode_ && home_.StoryOpen() && (wp == VK_ESCAPE || wp == VK_LEFT || wp == VK_RIGHT)) {
+                StoryCommand(wp == VK_ESCAPE ? 202 : wp == VK_LEFT ? -1 : 1);
                 return 0;
             }
-            if (GetKeyState(VK_CONTROL) < 0 && wp == 'M') {
-                if (!homeMode_ && view_.mini) { view_.ToggleMini(Now()); ApplyTopmost(); MarkDirty(); }
-                else EnterMini();
+            if (homeMode_ && paletteOpen_ && wp == VK_ESCAPE) {
+                ClosePalette();
                 return 0;
             }
-            if (GetKeyState(VK_CONTROL) < 0 && wp == 'H') {
-                ToggleHome();
+            // Клавиатура на главной: Tab ходит по элементам, Enter нажимает
+            if (homeMode_ && wp == VK_TAB) {
+                const auto label = home_.MoveFocus(GetKeyState(VK_SHIFT) < 0 ? -1 : 1);
+                narrator_.Announce(label);
+                Invalidate();
                 return 0;
             }
-            if (homeMode_ && GetKeyState(VK_CONTROL) < 0 && wp == 'F') {
-                if (home_.model.page >= view::HomeModel::Plugins) {
-                    home_.Navigate(view::HomeModel::Library);
-                    LayoutHomeSearch();
+            if (homeMode_ && wp == VK_RETURN) {
+                view::Point center;
+                if (home_.FocusedPoint(center)) {
+                    HomeClick(center);
+                    return 0;
                 }
-                SetFocus(homeSearch_);
+            }
+            if (RunShortcut((UINT)wp, false)) return 0;
+            if (homeMode_ && wp == VK_ESCAPE && home_.NowPlayingOpen()) {
+                home_.ToggleNowPlaying();
+                Invalidate();
                 return 0;
             }
             if (homeMode_ && wp == VK_ESCAPE) {
@@ -1280,12 +1618,24 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             }
             const pm::PlayerState ps = player_.GetState();
             switch (wp) {
-                case VK_SPACE: TogglePlay(); break;
-                case VK_LEFT: Seek(std::max(0.0, ps.position - 5)); break;
-                case VK_RIGHT: Seek(ps.position + 5); break;
-                case VK_UP: SetVolume(std::min(1.f, ps.volume + 0.05f)); break;
-                case VK_DOWN: SetVolume(std::max(0.f, ps.volume - 0.05f)); break;
-                case 'M': ToggleMute(); break;
+                case VK_SPACE:
+                    TogglePlay();
+                    break;
+                case VK_LEFT:
+                    Seek(std::max(0.0, ps.position - 5));
+                    break;
+                case VK_RIGHT:
+                    Seek(ps.position + 5);
+                    break;
+                case VK_UP:
+                    SetVolume(std::min(1.f, ps.volume + 0.05f));
+                    break;
+                case VK_DOWN:
+                    SetVolume(std::max(0.f, ps.volume - 0.05f));
+                    break;
+                case 'M':
+                    ToggleMute();
+                    break;
                 case 'L':
                     if (homeMode_)
                         home_.Navigate(view::HomeModel::Queue);
@@ -1295,7 +1645,8 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 case 'O':
                     if (GetKeyState(VK_CONTROL) < 0) OpenFiles(false);
                     break;
-                default: break;
+                default:
+                    break;
             }
             MarkDirty();
             Invalidate();
@@ -1303,11 +1654,20 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_HOTKEY:
             switch (static_cast<int>(wp)) {
-                case kHotPlay: HandleMediaCommand(APPCOMMAND_MEDIA_PLAY_PAUSE); break;
-                case kHotNext: HandleMediaCommand(APPCOMMAND_MEDIA_NEXTTRACK); break;
-                case kHotPrev: HandleMediaCommand(APPCOMMAND_MEDIA_PREVIOUSTRACK); break;
-                case kHotStop: HandleMediaCommand(APPCOMMAND_MEDIA_STOP); break;
-                default: break;
+                case kHotPlay:
+                    HandleMediaCommand(APPCOMMAND_MEDIA_PLAY_PAUSE);
+                    break;
+                case kHotNext:
+                    HandleMediaCommand(APPCOMMAND_MEDIA_NEXTTRACK);
+                    break;
+                case kHotPrev:
+                    HandleMediaCommand(APPCOMMAND_MEDIA_PREVIOUSTRACK);
+                    break;
+                case kHotStop:
+                    HandleMediaCommand(APPCOMMAND_MEDIA_STOP);
+                    break;
+                default:
+                    break;
             }
             return 0;
         case WM_APPCOMMAND: {
@@ -1339,19 +1699,47 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 KillTimer(hwnd_, kLazyTimer);
                 Invalidate();
             }
+            if (wp == kCloseFade) {
+                KillTimer(hwnd_, kCloseFade);
+                renderer_.PlayExit(Entrance::Pop, .16);
+                SetTimer(hwnd_, kCloseDone, 170, nullptr);
+            }
+            if (wp == kCloseDone) {
+                KillTimer(hwnd_, kCloseDone);
+                if (hideWhenClosed_)
+                    FinishHide();
+                else
+                    DestroyWindow(hwnd_);
+            }
+            if (wp == kModeSwitch) {
+                KillTimer(hwnd_, kModeSwitch);
+                modeSwitchPending_ = false;
+                ToggleHome();
+            }
             return 0;
         case kLyricsMessage:
             OnLyricsReady();
             return 0;
         case kSmtcMessage:
             switch (wp) {
-                case Smtc::kPlay: player_.Play(); break;
+                case Smtc::kPlay:
+                    player_.Play();
+                    break;
                 case Smtc::kPause:
-                case Smtc::kStop: player_.Pause(); break;
-                case Smtc::kNext: Next(); break;
-                case Smtc::kPrevious: Prev(); break;
-                case Smtc::kSeek: Seek(static_cast<double>(lp) / 1000.0); break;
-                default: break;
+                case Smtc::kStop:
+                    player_.Pause();
+                    break;
+                case Smtc::kNext:
+                    Next();
+                    break;
+                case Smtc::kPrevious:
+                    Prev();
+                    break;
+                case Smtc::kSeek:
+                    Seek(static_cast<double>(lp) / 1000.0);
+                    break;
+                default:
+                    break;
             }
             Invalidate();
             return 0;
@@ -1361,7 +1749,13 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             Invalidate();
             return 0;
         case WM_COMMAND:
-            if ((HWND)lp == downloadEdit_ && HIWORD(wp) == EN_CHANGE) {
+            if (((HWND)lp == downloadEdit_ || (HWND)lp == paletteEdit_) && HIWORD(wp) == EN_CHANGE) {
+                if ((HWND)lp == paletteEdit_) paletteSelected_ = 0;
+                Invalidate();
+                return 0;
+            }
+            if ((HWND)lp == settingsEdit_ && HIWORD(wp) == EN_CHANGE) {
+                home_.ResetScroll();
                 Invalidate();
                 return 0;
             }
@@ -1376,10 +1770,17 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             // Кнопки в превью окна на панели задач
             if (HIWORD(wp) == THBN_CLICKED) {
                 switch (LOWORD(wp)) {
-                    case Taskbar::kPrev: Prev(); break;
-                    case Taskbar::kPlayPause: TogglePlay(); break;
-                    case Taskbar::kNext: Next(); break;
-                    default: break;
+                    case Taskbar::kPrev:
+                        Prev();
+                        break;
+                    case Taskbar::kPlayPause:
+                        TogglePlay();
+                        break;
+                    case Taskbar::kNext:
+                        Next();
+                        break;
+                    default:
+                        break;
                 }
                 MarkDirty();
                 return 0;
@@ -1426,6 +1827,8 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 plugins_.Discover({exeDir_ / L"plugins", UserPluginsDir()});
                 RebuildPluginRows();
             }
+            // Скопировали ссылку в браузере и вернулись - она уже в поле загрузки
+            if (LOWORD(wp) != WA_INACTIVE) PrefillDownload();
             Invalidate();
             break;
         case WM_ENDSESSION:
@@ -1435,8 +1838,18 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_CLOSE:
+            if (closing_) {
+                DestroyWindow(hwnd_);  // второй запрос не ждёт анимации
+                return 0;
+            }
             SaveCurrentState();
             library_.Save(libraryPath_);
+            if (introEnabled_ && MotionAllowed() && visible_ && !IsIconic(hwnd_) && IsWindowVisible(hwnd_)) {
+                // Окно сжимается в круг вокруг луны, луна гаснет, затем окно исчезает
+                closing_ = true;
+                StartCloseAnimation();
+                return 0;
+            }
             DestroyWindow(hwnd_);
             return 0;
         case WM_DESTROY:
@@ -1445,12 +1858,15 @@ LRESULT App::Handle(UINT msg, WPARAM wp, LPARAM lp) {
                 homeSearchFont_ = nullptr;
             }
             for (int id = kHotPlay; id <= kHotStop; ++id) UnregisterHotKey(hwnd_, id);
+            RemoveTrayIcon();
+            narrator_.Detach();
             KillTimer(hwnd_, kTickTimer);
             KillTimer(hwnd_, kSaveTimer);
             KillTimer(hwnd_, kSaveTick);
             PostQuitMessage(0);
             return 0;
-        default: break;
+        default:
+            break;
     }
     return DefWindowProcW(hwnd_, msg, wp, lp);
 }
@@ -1499,8 +1915,12 @@ void App::HandleCopyData(const COPYDATASTRUCT* cds) {
     }
     // A shell launcher can start with SW_HIDE; such a window is not iconic.
     // Reopening must make it visible in either case, without replacing its queue.
-    ShowWindow(hwnd_, IsIconic(hwnd_) ? SW_RESTORE : SW_SHOW);
-    SetForegroundWindow(hwnd_);
+    if (hidden_ || closing_) {
+        ShowFromBackground();
+    } else {
+        ShowWindow(hwnd_, IsIconic(hwnd_) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(hwnd_);
+    }
     if (paths.empty()) return;
     // Проводник запускает по экземпляру на каждый выделенный файл: файлы, пришедшие подряд
     // (меньше чем через 1.5 с), дописываются к только что открытым
@@ -1539,7 +1959,8 @@ void App::InitLibrary(bool firstRun) {
     // Plugins start before the library is loaded; merge their folders only after loading,
     // otherwise FromJson would silently replace those additions.
     bool addedPluginFolder = false;
-    for (const auto& folder : pendingPluginFolders_) addedPluginFolder = library_.AddFolder(folder) || addedPluginFolder;
+    for (const auto& folder : pendingPluginFolders_)
+        addedPluginFolder = library_.AddFolder(folder) || addedPluginFolder;
     pendingPluginFolders_.clear();
     if (addedPluginFolder) library_.Save(libraryPath_);
     // Плейлист пуст, а библиотека уже знает треки (кэш прошлого запуска) - сразу показываем их
@@ -1557,7 +1978,9 @@ void App::StartLibraryScan() {
     if (library_.Folders().empty()) return;
     HWND hwnd = hwnd_;
     // Уже идёт - повторим по окончании (изменения могли прийти посреди обхода)
-    if (!scanner_.Start(library_.Folders(), library_.Tracks(), [hwnd] { PostMessageW(hwnd, kLibraryMessage, 0, 0); }, library_.HideDuplicates()))
+    if (!scanner_.Start(
+            library_.Folders(), library_.Tracks(), [hwnd] { PostMessageW(hwnd, kLibraryMessage, 0, 0); },
+            library_.HideDuplicates()))
         rescanPending_ = true;
     Invalidate();
 }
@@ -1581,7 +2004,9 @@ void App::OnLibraryScanned() {
     } else if (playlistFromLibrary_ && !fresh.empty() && !wasEmpty) {
         player_.LoadTracks(fresh, true);
         RebuildRows();
-        view_.ShowToast(fresh.size() == 1 ? "Новый трек в библиотеке" : "Новых треков в библиотеке: " + std::to_string(fresh.size()), Now());
+        view_.ShowToast(fresh.size() == 1 ? "Новый трек в библиотеке"
+                                          : "Новых треков в библиотеке: " + std::to_string(fresh.size()),
+                        Now());
         MarkDirty();
     }
     if (rescanPending_) {
@@ -1597,8 +2022,10 @@ void App::LoadLibraryPlaylist(bool play) {
     playlistFromLibrary_ = true;
     waveMode_ = false;
     RebuildRows();
-    if (play) player_.PlayIndex(0);
-    else player_.OpenAt(0, 0, false);
+    if (play)
+        player_.PlayIndex(0);
+    else
+        player_.OpenAt(0, 0, false);
     MarkDirty();
     Invalidate();
 }
@@ -1638,12 +2065,23 @@ void App::InitPlugins(const std::set<std::string>& enabled) {
     };
     host.command = [this](int cmd) {
         switch (cmd) {
-            case PM_CMD_TOGGLE: player_.Toggle(); break;
-            case PM_CMD_PLAY: player_.Play(); break;
-            case PM_CMD_PAUSE: player_.Pause(); break;
-            case PM_CMD_NEXT: player_.Next(); break;
-            case PM_CMD_PREV: player_.Prev(); break;
-            default: break;
+            case PM_CMD_TOGGLE:
+                player_.Toggle();
+                break;
+            case PM_CMD_PLAY:
+                player_.Play();
+                break;
+            case PM_CMD_PAUSE:
+                player_.Pause();
+                break;
+            case PM_CMD_NEXT:
+                player_.Next();
+                break;
+            case PM_CMD_PREV:
+                player_.Prev();
+                break;
+            default:
+                break;
         }
         Invalidate();
     };
@@ -1739,6 +2177,45 @@ void App::TogglePlugin(int index) {
         view_.ShowToast("Плагин «" + name + "» не запустился", Now());
     RebuildPluginRows();
     MarkDirty();
+}
+
+bool App::EnableDownloaderPlugin() {
+    const auto& list = plugins_.Plugins();
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (list[i].id != "downloader") continue;
+        if (list[i].enabled) return list[i].loaded;
+        // Штатный загрузчик лежит рядом с exe и ставится вместе с плеером: нажатие «Скачать» и есть согласие.
+        // Чужая копия из пользовательской папки включается только через обычный вопрос.
+        std::error_code ec;
+        const auto bundled = std::filesystem::weakly_canonical(exeDir_ / L"plugins", ec);
+        const auto dir = std::filesystem::weakly_canonical(list[i].dir, ec);
+        if (!ec && dir.parent_path() == bundled) {
+            if (!plugins_.SetEnabled(i, true)) view_.ShowToast("Загрузчик не запустился", Now());
+            RebuildPluginRows();
+            MarkDirty();
+        } else {
+            TogglePlugin(static_cast<int>(i));
+        }
+        return plugins_.Plugins()[i].enabled && plugins_.Plugins()[i].loaded;
+    }
+    return false;
+}
+
+void App::PrefillDownload() {
+    if (!homeMode_ || home_.model.page != view::HomeModel::Downloads || !downloadEdit_) return;
+    if (GetWindowTextLengthW(downloadEdit_) > 0) return;
+    const DWORD sequence = GetClipboardSequenceNumber();
+    if (sequence == prefillClipboard_) return;
+    prefillClipboard_ = sequence;
+    std::string text = ClipboardText(hwnd_);
+    const size_t at = text.find("http");
+    if (at == std::string::npos || (text.compare(at, 7, "http://") != 0 && text.compare(at, 8, "https://") != 0))
+        return;
+    text = text.substr(at, text.find_first_of(" \t\r\n\"'<>", at) - at);
+    SetWindowTextW(downloadEdit_, ::text::Utf8ToWide(text).c_str());
+    SendMessageW(downloadEdit_, EM_SETSEL, 0, -1);
+    workspaceNotice_ = L"Ссылка из буфера обмена уже в поле - нажмите «Скачать».";
+    Invalidate();
 }
 
 void App::OpenPluginsFolder() {

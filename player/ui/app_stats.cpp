@@ -204,3 +204,59 @@ void App::ExtendWave() {
 }
 
 }  // namespace ui
+
+namespace ui {
+// «Волна» под настроение. Подбор - тот же BuildWave, меняются кандидаты и час:
+// утро/день/вечер/ночь - музыка, которую вы слушаете в это время суток; забытое - давно не игравшее;
+// любимое - отмеченное сердечком и частое; новое - ещё ни разу не звучавшее; исполнитель - только его треки.
+void App::StartMoodWave(int mood, const std::string& artist) {
+    const auto& lib = library_.Tracks();
+    if (lib.empty()) {
+        view_.ShowToast("Для Волны нужна библиотека: добавьте папку с музыкой", Now());
+        Invalidate();
+        return;
+    }
+    EnsureHistory();
+    const int64_t now = static_cast<int64_t>(time(nullptr));
+    const int hours[] = {8, 14, 20, 1};
+    int64_t at = now;
+    if (mood >= 0 && mood < 4) {
+        // Сдвиг «текущего часа» к нужному времени суток: BuildWave отдаёт привычки этого часа
+        const int local = static_cast<int>(((now + UtcOffset()) / 3600) % 24);
+        at = now + (int64_t)(((hours[mood] - local) % 24 + 24) % 24) * 3600;
+    }
+    std::vector<pm::WaveCandidate> cands;
+    std::vector<size_t> source;
+    for (size_t i = 0; i < lib.size(); ++i) {
+        const auto& t = lib[i];
+        bool keep = true;
+        if (mood == 4) keep = t.lastPlayed == 0 || now - t.lastPlayed > 30 * 24 * 3600;
+        if (mood == 5) keep = home_.model.favorites.count(view::HomePathKey(t.path)) > 0 || t.plays >= 3;
+        if (mood == 6) keep = t.plays == 0;
+        if (mood == 7) keep = view::HomeLower(::text::Utf8ToWide(t.meta.artist)).find(view::HomeLower(::text::Utf8ToWide(artist))) !=
+                              std::wstring::npos;
+        if (!keep) continue;
+        cands.push_back({::text::PathToUtf8(t.path), t.meta.artist, t.plays, t.lastPlayed});
+        source.push_back(i);
+    }
+    const char* names[] = {"утро", "день", "вечер", "ночь", "забытое", "любимое", "новое", "исполнитель"};
+    if (cands.size() < 3) {
+        view_.ShowToast(std::string("Для волны «") + names[std::clamp(mood, 0, 7)] + "» пока мало треков", Now());
+        Invalidate();
+        return;
+    }
+    const auto picks = pm::BuildWave(cands, history_, at, UtcOffset(), 25, static_cast<uint64_t>(now) ^ GetTickCount64());
+    if (picks.empty()) return;
+    std::vector<pm::PlaylistEntry> entries;
+    for (size_t i : picks) entries.push_back({lib[source[i]].path, lib[source[i]].meta});
+    player_.LoadTracks(entries);
+    playlistFromLibrary_ = false;
+    waveMode_ = false;  // продолжение «Волны» дописывает обычный подбор - у настроения своя очередь
+    RebuildRows();
+    RefreshHome();
+    player_.PlayIndex(0);
+    view_.ShowToast(mood == 7 ? "Волна: " + artist : std::string("Волна: ") + names[std::clamp(mood, 0, 7)], Now());
+    MarkDirty();
+    Invalidate();
+}
+}  // namespace ui

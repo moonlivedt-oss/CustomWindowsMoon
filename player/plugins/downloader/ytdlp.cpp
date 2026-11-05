@@ -105,7 +105,7 @@ std::string UrlPath(const std::string& url) {
     const auto end = url.find_first_of("?#", slash);
     return url.substr(slash, end == std::string::npos ? end : end - slash);
 }
-}
+}  // namespace
 bool IsPlaylist(const std::string& url) {
     const auto source = DetectSource(url);
     const auto path = UrlPath(url);
@@ -120,7 +120,7 @@ bool IsPlaylist(const std::string& url) {
 bool NeedsAccount(const std::string& url) {
     const auto list = Query(url, "list");
     return IsPlaylist(url) && (DetectSource(url) == Source::YouTube || DetectSource(url) == Source::YouTubeMusic) &&
-        (list == "LM" || list == "LL" || list == "WL");
+           (list == "LM" || list == "LL" || list == "WL");
 }
 std::string CanonicalDownloadKey(const std::string& url) {
     const auto source = DetectSource(url);
@@ -149,11 +149,16 @@ bool IsYandexMusicExtractor(const std::string& line) {
 
 const char* SourceName(Source s) {
     switch (s) {
-        case Source::YouTubeMusic: return "YouTube Music";
-        case Source::YouTube: return "YouTube";
-        case Source::Yandex: return "Яндекс Музыка";
-        case Source::Other: return "Другой сайт";
-        default: return "Не ссылка";
+        case Source::YouTubeMusic:
+            return "YouTube Music";
+        case Source::YouTube:
+            return "YouTube";
+        case Source::Yandex:
+            return "Яндекс Музыка";
+        case Source::Other:
+            return "Другой сайт";
+        default:
+            return "Не ссылка";
     }
 }
 
@@ -184,24 +189,43 @@ std::vector<std::string> ExtractUrls(const std::string& text) {
 
 std::vector<std::string> BuildArgs(const std::string& url, const Options& o) {
     std::vector<std::string> a = {
-        "--newline", "--no-colors", "--encoding", "utf-8", "--ignore-config", "--no-mtime",
+        "--newline",
+        "--no-colors",
+        "--encoding",
+        "utf-8",
+        "--ignore-config",
+        "--no-mtime",
         // Шаблоны вывода с метками PM*, их разбирает ParseLine. --print прячет обычный вывод и
         // включает «только посмотреть» - поэтому --progress и --no-simulate.
-        "--progress", "--no-simulate", "--continue", "--no-overwrites", "--windows-filenames",
-        "--trim-filenames", "180", "--retries", "3", "--fragment-retries", "3", "--no-abort-on-error",
-        "--progress-template", "download:PMPROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
-        "--print", "before_dl:PMITEM|%(playlist_index)s|%(n_entries)s|%(title)s|%(artist,creator,uploader,channel)s",
-        "--print", "after_move:PMFILE|%(filepath)s",
+        "--progress",
+        "--no-simulate",
+        "--continue",
+        "--no-overwrites",
+        "--windows-filenames",
+        "--trim-filenames",
+        "180",
+        "--retries",
+        "3",
+        "--fragment-retries",
+        "3",
+        "--no-abort-on-error",
+        "--progress-template",
+        "download:PMPROG|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
+        "--print",
+        "before_dl:PMITEM|%(playlist_index)s|%(n_entries)s|%(title)s|%(artist,creator,uploader,channel)s",
+        "--print",
+        "after_move:PMFILE|%(filepath)s",
         // Без перекодирования в MP3 берём M4A: его плеер играет через Media Foundation без расширений
-        "-f", o.mp3 ? "bestaudio/best" : "bestaudio[ext=m4a]/bestaudio/best",
-        "--embed-metadata", "--embed-thumbnail",
-        "-o", o.outDir + "/%(artist,creator,uploader,channel)s - %(title)s [%(extractor_key)s-%(id)s].%(ext)s",
+        "-f",
+        o.mp3 ? "bestaudio/best" : "bestaudio[ext=m4a]/bestaudio/best",
+        "--embed-metadata",
+        "--embed-thumbnail",
+        "-o",
+        o.outDir + "/%(artist,creator,uploader,channel)s - %(title)s [%(extractor_key)s-%(id)s].%(ext)s",
     };
     a.push_back(IsPlaylist(url) ? "--yes-playlist" : "--no-playlist");
     if (!o.archiveFile.empty()) a.insert(a.end(), {"--download-archive", o.archiveFile});
-    if (o.mp3) {
-        a.insert(a.end(), {"-x", "--audio-format", "mp3", "--audio-quality", "0"});
-    }
+    if (o.mp3) { a.insert(a.end(), {"-x", "--audio-format", "mp3", "--audio-quality", "0"}); }
     if (!o.ffmpegDir.empty()) a.insert(a.end(), {"--ffmpeg-location", o.ffmpegDir});
     if (!o.browser.empty()) a.insert(a.end(), {"--cookies-from-browser", o.browser});
     a.push_back("--");  // дальше - только ссылка, даже если она начинается с «-»
@@ -314,6 +338,25 @@ std::string HumanSpeed(const std::string& s) {
         return buf;
     }
     return s;
+}
+
+std::vector<std::string> CurlArgs(const std::string& url, const std::string& out) {
+    // -f: ошибка HTTP - ненулевой код, а не страница ошибки под видом exe
+    return {"-#", "-L", "-f", "--retry", "2", "-o", out, "--", url};
+}
+
+std::vector<std::string> FfmpegUnpackArgs(const std::string& zip, const std::string& dir) {
+    // Внутри архива: <имя сборки>/bin/ffmpeg.exe; шаблон не зависит от имени папки
+    return {"-xf", zip, "-C", dir, "--strip-components=2", "*/bin/ffmpeg.exe", "*/bin/ffprobe.exe"};
+}
+
+double CurlPercent(const std::string& line) {
+    const size_t pct = line.rfind('%');
+    if (pct == std::string::npos || line.find('#') == std::string::npos) return -1;
+    size_t start = pct;
+    while (start > 0 && (std::isdigit(static_cast<unsigned char>(line[start - 1])) || line[start - 1] == '.')) --start;
+    if (start == pct) return -1;
+    return std::clamp(std::strtod(line.substr(start, pct - start).c_str(), nullptr), 0.0, 100.0);
 }
 
 }  // namespace dl

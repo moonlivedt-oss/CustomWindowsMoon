@@ -6,6 +6,7 @@
 #include "tests/check.h"
 #include "theme/theme.h"
 #include "view/layout.h"
+#include "view/liquid.h"
 #include "view/marquee.h"
 #include "view/player_view.h"
 #include "view/svg_arc.h"
@@ -22,6 +23,74 @@ theme::ThemeLibrary& Lib() {
 
 bool Near(const view::Rect& r, float x, float y, float w, float h, float eps = 0.6f) {
     return std::abs(r.x - x) <= eps && std::abs(r.y - y) <= eps && std::abs(r.w - w) <= eps && std::abs(r.h - h) <= eps;
+}
+
+// Прокрутка: кнопка едет шагами колеса, подложка обязана ехать с ней, не меняя размера.
+// Раньше край по ходу убегал, задний отставал, и кнопка вытягивалась на сотни точек.
+TEST(LiquidFollowsScrollWithoutStretching) {
+    view::Liquid liquid;
+    const view::Rect button{100, 900, 200, 32};
+    double clock = 10;
+    uint64_t frame = 1;
+    liquid.Update(button, 1, clock, frame, false);
+    for (float scroll = 0; scroll < 600; scroll += 37) {
+        clock += .016;
+        const view::Rect target = button.Offset(0, -scroll);
+        const view::Rect now = liquid.Update(target, 1, clock, ++frame, false);
+        CHECK(Near(now, target.x, target.y, target.w, target.h));
+    }
+}
+
+// Смена размера окна тоже не перетекание
+TEST(LiquidFollowsResizeWithoutAnimating) {
+    view::Liquid liquid;
+    liquid.Update({10, 10, 100, 30}, 0, 1, 1, false);
+    const view::Rect now = liquid.Update({40, 300, 180, 30}, 0, 1.016, 2, false);
+    CHECK(Near(now, 40, 300, 180, 30));
+}
+
+// Выбор другой кнопки перетекает: в пути подложка между кнопками, в конце ровно на новой
+TEST(LiquidFlowsToNewSelection) {
+    view::Liquid liquid;
+    const view::Rect a{10, 10, 100, 30}, b{320, 10, 100, 30};
+    liquid.Update(a, 0, 1, 1, false);
+    const view::Rect first = liquid.Update(b, 1, 2, 2, false);
+    CHECK(Near(first, a.x, a.y, a.w, a.h));
+    CHECK(liquid.Animating(2.1));
+    const view::Rect middle = liquid.Update(b, 1, 2.12, 3, false);
+    CHECK(middle.x >= a.x && middle.Right() > a.Right() && middle.Right() <= b.Right() + 40);
+    CHECK(middle.h <= a.h + .01f);  // по горизонтали выше кнопки не становится
+    const view::Rect done = liquid.Update(b, 1, 3, 4, false);
+    CHECK(Near(done, b.x, b.y, b.w, b.h));
+    CHECK(!liquid.Animating(3));
+}
+
+// Прокрутка посреди перетекания не ломает его: путь сдвигается вместе с содержимым
+TEST(LiquidScrollDuringFlowKeepsHeight) {
+    view::Liquid liquid;
+    const view::Rect a{10, 500, 100, 30}, b{320, 500, 100, 30};
+    liquid.Update(a, 0, 1, 1, false);
+    liquid.Update(b, 1, 2, 2, false);
+    const view::Rect now = liquid.Update(b.Offset(0, -200), 1, 2.1, 3, false);
+    CHECK(now.y >= 300 - 1 && now.Bottom() <= 330 + 1);
+}
+
+// Карточка уходила за край или открывался другой раздел: от старого места не тянемся, а встаём сразу
+TEST(LiquidSnapsAfterGroupWasNotDrawn) {
+    view::Liquid liquid;
+    liquid.Update({10, 10, 100, 30}, 0, 1, 1, false);
+    const view::Rect sameSlot = liquid.Update({10, 900, 100, 30}, 0, 2, 50, false);
+    CHECK(Near(sameSlot, 10, 900, 100, 30));
+    const view::Rect otherSlot = liquid.Update({300, 40, 100, 30}, 2, 3, 90, false);
+    CHECK(Near(otherSlot, 300, 40, 100, 30));
+    CHECK(!liquid.Animating(3));
+}
+
+TEST(LiquidReducedMotionJumps) {
+    view::Liquid liquid;
+    liquid.Update({10, 10, 100, 30}, 0, 1, 1, true);
+    const view::Rect now = liquid.Update({300, 10, 100, 30}, 1, 1.016, 2, true);
+    CHECK(Near(now, 300, 10, 100, 30));
 }
 
 // Окно-заглушка: запоминает вызовы
@@ -237,11 +306,11 @@ TEST(ViewPlaylistAndMiniTransitions) {
     CHECK(host.lastSize.w == 360 && host.lastSize.h == 88);
     CHECK(std::abs(v.miniAlpha.Value(now) - 1) < 1e-4 && v.fullAlpha.Value(now) < 1e-4);
     CHECK(v.HitTest({200, 40}) == view::PlayerView::Hit::Caption);  // мини-полоску можно тянуть
-    CHECK(v.HitTest({35, 40}) == view::PlayerView::Hit::Caption);  // mini cover
-    CHECK(v.HitTest({6, 40}) == view::PlayerView::Hit::Caption);   // explicit grip
-    CHECK(v.HitTest({282, 42}) == view::PlayerView::Hit::Client);  // play stays clickable
-    CHECK(v.HitTest({333, 42}) == view::PlayerView::Hit::Client);  // expand stays clickable
-    CHECK(v.HitTest({180, 82}) == view::PlayerView::Hit::Client);  // seek stays draggable
+    CHECK(v.HitTest({35, 40}) == view::PlayerView::Hit::Caption);   // mini cover
+    CHECK(v.HitTest({6, 40}) == view::PlayerView::Hit::Caption);    // explicit grip
+    CHECK(v.HitTest({282, 42}) == view::PlayerView::Hit::Client);   // play stays clickable
+    CHECK(v.HitTest({333, 42}) == view::PlayerView::Hit::Client);   // expand stays clickable
+    CHECK(v.HitTest({180, 82}) == view::PlayerView::Hit::Client);   // seek stays draggable
     v.ToggleMini(now);
     RunUntil(v, now, now + 0.5, s);
     CHECK(host.lastSize.w == 420 && host.lastSize.h == 680);

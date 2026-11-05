@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // «Телефон рядом»: сессия передачи - ключ, адрес, буфер ПК для страницы, команды пульта, конец по времени.
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -18,7 +19,7 @@
 #include <ctime>
 #include <memory>
 
-#include "app/autos.h"
+#include "system/auto/autos.h"
 #include "core/bg.h"
 #include "core/config.h"
 #include "core/files.h"
@@ -26,13 +27,14 @@
 #include "core/secrets.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "desk/boostcard.h"
+#include "cards/boostcard.h"
 #include "core/winlist.h"
-#include "desk/corners.h"
-#include "desk/ocr.h"
-#include "desk/volume.h"
+#include "desktop/corners.h"
+#include "helpers/ocr.h"
+#include "media/volume.h"
 #include "phone/cert.h"
 #include "phone/phone_internal.h"
+#include "net/net.h"
 
 namespace phone {
 
@@ -69,6 +71,7 @@ bool g_fwOk = true;
 bool g_bluetooth = false;
 DWORD g_clipSeq = 0;
 ULONGLONG g_addrAt = 0;
+ULONGLONG g_networkAt = 0, g_networkUntil = 0;
 // пачка принятого с телефона: карточка «показать», когда 4 с ничего не приходит
 int g_batch = 0;
 std::wstring g_batchLast;
@@ -279,6 +282,7 @@ SRWLOCK g_devLock = SRWLOCK_INIT;
 std::vector<DeviceRec> g_devCache;
 ULONGLONG g_devAt = 0;               // когда читан файл (0 - перечитать)
 std::vector<std::string> g_devSeen;  // ключи, которые заходили после последней записи
+std::map<std::string, long long> g_devLiveSeen;
 ULONGLONG g_devFlushAt = 0;
 constexpr char kDevMagic[] = "MoonDesk-DPAPI-1\n";
 
@@ -588,7 +592,7 @@ void RefreshAddress(bool force, ULONGLONG every = 2000) {
     std::vector<Adapter> list = g_loopback ? std::vector<Adapter>() : Adapters();
     uint32_t ip = g_loopback ? 0x7F000001 : PickAddress(list);
     if (GetEnvironmentVariableW(L"RADIAL_PHONE_NOLAN", nullptr, 0) > 0) ip = 0;  // снимок «общей сети нет»
-    if (ip == g_rawIp && !force) return;
+    // Профиль мог смениться с частного на общественный без смены IPv4: пересмотреть ограничения всё равно.
     if (ip != g_rawIp) g_hint.clear();  // подсказка пути сделала своё
     g_rawIp = ip;
     g_netHint.clear();
@@ -621,8 +625,25 @@ void AskPublic(const std::wstring& net) {
         Lock l;
         standing = S().standing;
     }
-    if (g_askedPublic == net || standing) return;  // ждущий запомненный телефон в чужой сети не открывается вовсе
+    if (g_askedPublic == net) return;
     g_askedPublic = net;
+    if (standing) {
+        // ждущий запомненный телефон в чужой сети не открывается вовсе - но молча это выглядело как «ПК спит»:
+        // приложение на телефоне писало «не отвечает». Сказать один раз за запуск, что мешает и где это меняется
+        g_pubCard.kind = L"Телефон не подключится";
+        g_pubCard.yesLabel = L"Параметры сети";
+        g_pubCard.noLabel = L"Не сейчас";
+        g_pubCard.onYes = [] {
+            ShellExecuteW(nullptr, L"open", L"ms-settings:network-status", nullptr, nullptr, SW_SHOWNORMAL);
+        };
+        g_pubCard.onNo = nullptr;
+        g_pubCard.Show(
+            BoostCard::OFFER, L"Телефон не подключится: сеть «" + net + L"» общественная",
+            L"Запомненный телефон ждётся только в частной сети. Если это ваша домашняя сеть - в параметрах "
+            L"откройте её свойства и выберите «Частная сеть». Одна передача по QR открывается и так, по вопросу.",
+            Theme(), 30000, Toast::G_WARN);
+        return;
+    }
     g_pubCard.kind = L"-";
     g_pubCard.yesLabel = L"Открыть";
     g_pubCard.noLabel = L"Не открывать";
@@ -688,9 +709,11 @@ bool StartSession(bool oneTime, bool standing = false) {
         s.receivedBytes = 0;
         s.standing = standing;
         s.devices.clear();
+        s.deviceAccess.clear();
         s.ctlKeys.clear();
         for (const DeviceRec& d : DeviceRecs()) {
             s.devices.push_back(d.key);
+            s.deviceAccess[d.key] = d;
             if (d.control) s.ctlKeys.push_back(d.key);
         }
         s.tokenCtlIps.clear();
@@ -817,6 +840,16 @@ int ControlCheck(const std::string& devKey, uint32_t ip) {
     return 0;
 }
 
+int ControlState(const std::string& devKey, uint32_t ip) {
+    std::string id = devKey.empty() ? "s:" + std::to_string(ip) : "d:" + devKey;
+    Lock l;
+    if (std::find(S().ctlDenied.begin(), S().ctlDenied.end(), id) != S().ctlDenied.end()) return -1;
+    if (devKey.empty() ? std::find(S().tokenCtlIps.begin(), S().tokenCtlIps.end(), ip) != S().tokenCtlIps.end()
+                       : std::find(S().ctlKeys.begin(), S().ctlKeys.end(), devKey) != S().ctlKeys.end())
+        return 1;
+    return S().ctlAsk == id && GetTickCount64() - S().ctlAskAt < 30000 ? 2 : 0;
+}
+
 bool ScreenAllowed() { return g_screen && !g_screenStopped; }
 
 bool FilesAllowed() { return g_files; }
@@ -845,13 +878,23 @@ std::string NewDevice(const std::wstring& name) {
     if (!ok) return "";
     Lock l;
     S().devices.push_back(d.key);
+    S().deviceAccess[d.key] = d;
     return d.key;
 }
 
 void DeviceSeen(const std::string& key) {
+    long long now = (long long)time(nullptr);
     AcquireSRWLockExclusive(&g_devLock);
+    bool connected = !g_devLiveSeen.count(key) || now - g_devLiveSeen[key] > 60;
+    g_devLiveSeen[key] = now;
     if (std::find(g_devSeen.begin(), g_devSeen.end(), key) == g_devSeen.end()) g_devSeen.push_back(key);
     ReleaseSRWLockExclusive(&g_devLock);
+    {
+        Lock l;
+        auto d = S().deviceAccess.find(key);
+        if (d != S().deviceAccess.end()) d->second.seen = now;
+    }
+    if (connected) net::Remember(L"phone", L"Знакомый телефон подключился к ПК");
 }
 
 float Command(const std::string& c) {
@@ -1015,7 +1058,14 @@ int Devices() { return (int)DeviceRecs().size(); }
 
 std::vector<KnownPhone> KnownPhones() {
     std::vector<KnownPhone> out;
-    for (const DeviceRec& d : DeviceRecs()) out.push_back({d.key, d.name, d.added, d.seen});
+    for (const DeviceRec& d : DeviceRecs())
+        out.push_back({d.key, d.name, d.added, d.seen, d.control, d.screen, d.files, d.expires});
+    AcquireSRWLockShared(&g_devLock);
+    for (auto& p : out) {
+        auto t = g_devLiveSeen.find(p.key);
+        if (t != g_devLiveSeen.end()) p.seen = std::max(p.seen, t->second);
+    }
+    ReleaseSRWLockShared(&g_devLock);
     return out;
 }
 
@@ -1031,16 +1081,51 @@ void ForgetPhone(const std::string& key) {
         } else {
             ++it;
         }
-    WriteDevices(list);
+    bool saved = WriteDevices(list);
     left = !list.empty();
     g_devSeen.erase(std::remove(g_devSeen.begin(), g_devSeen.end(), key), g_devSeen.end());
+    g_devLiveSeen.erase(key);
     ReleaseSRWLockExclusive(&g_devLock);
     {
         Lock l;
         S().devices.erase(std::remove(S().devices.begin(), S().devices.end(), key), S().devices.end());
+        S().deviceAccess.erase(key);
+        S().ctlKeys.erase(std::remove(S().ctlKeys.begin(), S().ctlKeys.end(), key), S().ctlKeys.end());
+        ++S().seq;
     }
+    ServerRevoke(key);
+    if (!saved) ShowNote(L"Доступ закрыт до перезапуска", L"Не удалось сохранить отзыв ключа. Повторите отзыв перед перезапуском.");
+    net::Remember(L"phone", L"Доступ телефона отозван");
     autos::Note(L"Телефон рядом: забыт «" + (name.empty() ? std::wstring(L"телефон") : name) + L"»");
     if (!left && S().on && S().standing) StopSession(L"телефоны забыты");
+}
+
+bool SetPhoneAccess(const KnownPhone& phone) {
+    if (phone.expires < 0) return false;
+    AcquireSRWLockExclusive(&g_devLock);
+    auto list = ReadDevices(nullptr);
+    bool found = false;
+    DeviceRec updated;
+    for (auto& d : list) if (d.key == phone.key) {
+        d.control = phone.control; d.screen = phone.screen; d.files = phone.files; d.expires = phone.expires;
+        updated = d; found = true; break;
+    }
+    bool ok = found && WriteDevices(list);
+    ReleaseSRWLockExclusive(&g_devLock);
+    if (!ok) return false;
+    {
+        Lock l;
+        S().deviceAccess[phone.key] = updated;
+        auto& keys = S().ctlKeys;
+        keys.erase(std::remove(keys.begin(), keys.end(), phone.key), keys.end());
+        if (updated.control) keys.push_back(phone.key);
+        auto& denied = S().ctlDenied;
+        denied.erase(std::remove(denied.begin(), denied.end(), "d:" + phone.key), denied.end());
+        ++S().seq;
+    }
+    ServerRevoke(phone.key);  // старые ответы и передачи не продолжаются с прежними разрешениями
+    net::Remember(L"phone", L"Обновлены разрешения или срок доступа телефона");
+    return true;
 }
 
 void Find() {
@@ -1134,14 +1219,20 @@ bool PostToRunning(HWND app, const std::vector<std::wstring>& files) {
 }
 
 void Forget() {
+    auto phones = KnownPhones();
     AcquireSRWLockExclusive(&g_devLock);
     WriteDevices({});
     g_devSeen.clear();
+    g_devLiveSeen.clear();
     ReleaseSRWLockExclusive(&g_devLock);
     {
         Lock l;
         S().devices.clear();
+        S().deviceAccess.clear();
+        S().ctlKeys.clear();
+        ++S().seq;
     }
+    for (const auto& p : phones) ServerRevoke(p.key);
     autos::Note(L"Телефон рядом: запомненные телефоны забыты");
     if (S().on && S().standing) StopSession(L"телефоны забыты");
 }
@@ -1189,7 +1280,20 @@ std::wstring Status() {
     return S().seen ? L"Телефон на связи" : L"Телефон: ждём по QR";
 }
 
+void NetworkChanged() {
+    ULONGLONG now = GetTickCount64();
+    if (!g_networkAt) g_networkAt = now + 1000;  // пачку событий DHCP объединяем
+    g_networkUntil = now + 30000;
+}
+
 void Tick() {
+    std::vector<std::string> expired;
+    {
+        Lock l;
+        auto now = (long long)time(nullptr);
+        for (const auto& p : S().deviceAccess) if (DeviceStale(p.second, now)) expired.push_back(p.first);
+    }
+    for (const auto& key : expired) ForgetPhone(key);
     Card().Tick();
     g_note.Tick();
     g_watchCard.Tick();
@@ -1201,8 +1305,12 @@ void Tick() {
     RefreshCfg();
     FlushSeen(false);
     ULONGLONG now = GetTickCount64();
+    bool networkCheck = g_networkAt && now >= g_networkAt;
+    if (networkCheck) {
+        g_networkAt = now < g_networkUntil ? now + 2000 : 0;
+    }
     // запомненный телефон: сервер ждёт его всё время, пока ноутбук в своей (частной) сети
-    if (g_cfg && g_cfg->phoneAlways && now - g_standAt > 30000) {
+    if (g_cfg && g_cfg->phoneAlways && (networkCheck || now - g_standAt > 30000)) {
         g_standAt = now;
         std::vector<Adapter> list = Adapters();
         uint32_t ip = PickAddress(list);
@@ -1231,7 +1339,7 @@ void Tick() {
     ULONGLONG ctl = g_ctlAt;
     Watching(g_screen && !g_screenStopped && shot && tick >= shot && tick - shot < 4000,
              g_input && !g_inputStopped && ctl && tick >= ctl && tick - ctl < 5000);
-    RefreshAddress(false, Card().Visible() ? 2000 : 10000);  // без карточки - реже: адрес меняется редко
+    RefreshAddress(networkCheck, Card().Visible() ? 2000 : 10000);  // после сна также пересмотреть профиль сети
     RefreshCert();                                           // адрес поменялся - новый сертификат
     bool oneTime, allDone;
     ULONGLONG last, seen;
@@ -1369,6 +1477,7 @@ void AskControl(const std::string& id) {
             else
                 S().ctlKeys.push_back(id.substr(2));
             S().ctlAsk.clear();
+            ++S().seq;  // страница ждёт в /poll - пусть сразу узнает, что можно
         }
         if (id.compare(0, 2, "d:") == 0) {
             AcquireSRWLockExclusive(&g_devLock);
@@ -1377,6 +1486,9 @@ void AskControl(const std::string& id) {
                 if (d.key == id.substr(2)) d.control = true;
             WriteDevices(list);
             ReleaseSRWLockExclusive(&g_devLock);
+            Lock l;
+            auto it = S().deviceAccess.find(id.substr(2));
+            if (it != S().deviceAccess.end()) it->second.control = true;
         }
         autos::Note(L"Телефон рядом: управление разрешено - " + name);
     };
@@ -1384,6 +1496,7 @@ void AskControl(const std::string& id) {
         Lock l;
         S().ctlDenied.push_back(id);
         S().ctlAsk.clear();
+        ++S().seq;
         autos::Note(L"Телефон рядом: управление запрещено - " + name);
     };
     g_askCard.Show(BoostCard::OFFER, L"Разрешить управление телефону?",
@@ -1761,11 +1874,13 @@ void OnMessage(WPARAM wp, LPARAM lp) {
         if (t.size() > 80) t = t.substr(0, 79) + L"…";
         ShowNote(L"С телефона - в буфере", t);
     } else if (wp == EV_RECEIVED && text) {
+        if (g_cfg && g_cfg->phoneAlways) usage::Hit(L"phone_always");
         ++g_batch;
         g_batchLast = *text;
         g_batchAt = GetTickCount64();
         autos::Note(L"Телефон рядом: принят " + *text);
     } else if (wp == EV_FILE_DONE && text) {
+        if (g_cfg && g_cfg->phoneAlways) usage::Hit(L"phone_always");
         autos::Note(L"Телефон рядом: скачан " + *text);
     }
     if (Card().Visible()) Card().Update(MakeView());

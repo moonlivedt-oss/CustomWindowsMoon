@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // «Телефон рядом»: файлы. Отдача с Range (докачка, просмотр видео без скачивания), ZIP на лету без сжатия (длина
 // известна заранее), загрузка с телефона кусками с докачкой, папки ПК, которые открыты телефону (phone_share).
 #include <winsock2.h>
@@ -237,6 +238,7 @@ void Finish(Conn& cn, Incoming in, const std::string& kind) {
         ++S().received;
         S().receivedBytes += in.total;
     }
+    usage::Hit(L"phone_files");
     Post(kind == "scan" ? EV_SCAN : EV_RECEIVED, final);
     JsonReply(cn, "{\"have\":" + std::to_string(in.total) + ",\"done\":true}");
 }
@@ -423,6 +425,7 @@ bool SendFile(Conn& cn, const Request& r, const std::wstring& path, const std::w
     g_sendLeft -= left;
     CloseHandle(h);
     if (left > 0) cn.close = true;  // не дослали - длина в заголовке врёт, соединение больше не годится
+    if (ok && left == 0 && to == size - 1) usage::Hit(L"phone_files");
     if (complete) *complete = ok && left == 0 && to == size - 1;
     return ok && left == 0;
 }

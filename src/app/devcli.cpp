@@ -1,8 +1,11 @@
+#include "helpers/snip.h"
+#include "helpers/translate.h"
+#include "helpers/markup.h"
 #include "app/devcli.h"
 #include "app/devcli_internal.h"
 #include "app/autostart.h"
-#include "app/toolsui.h"
-#include "app/weekreport.h"
+#include "system/ui/toolsui.h"
+#include "system/auto/weekreport.h"
 
 #include <atomic>
 #include <windows.h>
@@ -15,15 +18,15 @@
 #include <cstdint>
 #include <vector>
 
-#include "life/batcare.h"
-#include "life/btbattery.h"
-#include "life/convert.h"
-#include "life/preview.h"
-#include "life/record.h"
-#include "life/shelf.h"
-#include "life/tidy.h"
-#include "life/vpnexit.h"
-#include "life/picker.h"
+#include "system/auto/batcare.h"
+#include "system/auto/btbattery.h"
+#include "helpers/convert.h"
+#include "helpers/preview.h"
+#include "helpers/record.h"
+#include "helpers/shelf.h"
+#include "helpers/tidy.h"
+#include "net/vpnexit.h"
+#include "helpers/picker.h"
 #include "phone/phone.h"
 #include "core/bg.h"
 #include "core/config.h"
@@ -34,32 +37,32 @@
 #include "core/procsnap.h"
 #include "core/text.h"
 #include "core/themes.h"
-#include "app/afterwork.h"
-#include "app/gameprep.h"
-#include "app/resume.h"
-#include "app/selring.h"
-#include "desk/appvol.h"
-#include "desk/boost.h"
-#include "desk/gamemode.h"
-#include "desk/lockscreen.h"
-#include "desk/gameboost.h"
-#include "desk/minecraft.h"
-#include "desk/monitors.h"
-#include "desk/recent.h"
-#include "desk/modefx.h"
-#include "desk/ocr.h"
-#include "desk/startbg.h"
-#include "desk/whreg.h"
+#include "helpers/afterwork.h"
+#include "modes/gameprep.h"
+#include "helpers/resume.h"
+#include "ring/selring.h"
+#include "media/appvol.h"
+#include "modes/boost.h"
+#include "modes/gamemode.h"
+#include "desktop/lockscreen.h"
+#include "modes/gameboost.h"
+#include "modes/minecraft.h"
+#include "desktop/monitors.h"
+#include "ring/recent.h"
+#include "modes/modefx.h"
+#include "helpers/ocr.h"
+#include "desktop/startbg.h"
+#include "desktop/whreg.h"
 #include "gfx/color.h"
-#include "menu/menu.h"
+#include "ring/menu.h"
 #include "net/net.h"
 #include "net/wifi.h"
 #include "gfx/qr.h"
 #include "studio/studio.h"
-#include "tools/builderr.h"
-#include "tools/projver.h"
-#include "tools/winget.h"
-#include "tools/tools.h"
+#include "system/builderr.h"
+#include "system/projver.h"
+#include "system/winget.h"
+#include "system/tools.h"
 
 namespace devcli {
 
@@ -89,10 +92,10 @@ bool Has(const std::vector<std::wstring>& args, const wchar_t* flag) {
     return false;
 }
 
-// Итог проверки - в файл рядом с exe (ocr_out.txt, lock_out.txt, game_out.txt).
+// Итог проверки - в файл (ocr_out.txt, lock_out.txt, game_out.txt): из папки проекта - в build\out, иначе рядом с exe.
 void WriteOut(const wchar_t* name, const std::wstring& text) {
     std::string bytes = Narrow(text);
-    HANDLE f = CreateFileW((ExeDir() + L"\\" + name).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    HANDLE f = CreateFileW(DevOutPath(name).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
     if (f == INVALID_HANDLE_VALUE) return;
     DWORD put = 0;
     WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr);
@@ -107,8 +110,8 @@ Config LoadOwnConfig() {
 
 namespace {
 
-// --ocr картинка.png - распознать текст в ocr_out.txt
-int Ocr(const std::wstring& path) {
+// --ocr картинка.png [raw] - распознать текст в ocr_out.txt; raw - без подготовки картинки
+int Ocr(const std::wstring& path, bool raw) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     std::vector<uint8_t> png;
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -119,6 +122,8 @@ int Ocr(const std::wstring& path) {
         png.resize(got);
         CloseHandle(f);
     }
+    Gdip gdip;  // подготовка картинки перед распознаванием
+    ocr::SetEnhance(!raw);
     std::wstring err, text = ocr::Recognize(png, &err);
     WriteOut(L"ocr_out.txt", L"error=[" + err + L"]\r\n" + text);
     return 0;
@@ -218,7 +223,7 @@ bool Run(int& exitCode) {
     std::vector<std::wstring> args = Args();
     std::wstring v;
     if (Value(args, L"--ocr", v)) {
-        exitCode = Ocr(v);
+        exitCode = Ocr(v, Has(args, L"raw"));
     } else if (Value(args, L"--dlg", v)) {
         exitCode = Dialog(v);
     } else if (Has(args, L"--explorer-reg") || Has(args, L"--notify-reg") || Has(args, L"--settings-reg") ||
@@ -272,7 +277,7 @@ bool Run(int& exitCode) {
             toolsui::PrimeForSnapshot(&cfg);  // рост и неделя - как у работающей программы
             exitCode = weekreport::Render(weekreport::Collect(), nullptr, UiPalette(cfg), out) ? 0 : 1;
         }
-    } else if (Has(args, L"--own-check")) {  // сверка своих exe, как перед запуском (tools/ownexe) -> own_out.txt
+    } else if (Has(args, L"--own-check")) {  // сверка своих exe, как перед запуском (system/ownexe) -> own_out.txt
         std::wstring out;
         exitCode = 0;
         for (const wchar_t* name : {L"RadialTools.exe", L"RadialShutUp.exe"}) {
@@ -632,9 +637,47 @@ bool Run(int& exitCode) {
                                   std::vector<std::wstring>(args.begin() + (long)i + 3, args.end()));
         else
             exitCode = 2;
-    } else if (Has(args, L"--card-snap")) {  // --card-snap файл.png ask|pick [more]: карточка в картинку
+    } else if (Has(args,
+                   L"--card-snap")) {  // --card-snap файл.png ask|pick|snip-...|media-... [more]: карточка в картинку
         size_t i = std::find(args.begin(), args.end(), L"--card-snap") - args.begin();
         exitCode = i + 2 < args.size() ? CardSnap(args[i + 2], Has(args, L"more"), args[i + 1]) : 2;
+    } else if (Has(args, L"--snip-try")) {  // --snip-try сек [файл]: настоящая карточка снимка на выдуманных снимках
+        size_t i = std::find(args.begin(), args.end(), L"--snip-try") - args.begin();
+        Gdip gdip;
+        snipimg::SetTestOutput(i + 2 < args.size() ? args[i + 2] : L"");
+        translate::SetFake(true);  // в проверках окон ни Python, ни сети
+        exitCode = SnipTry(i + 1 < args.size() ? _wtoi(args[i + 1].c_str()) : 30);
+    } else if (Has(args, L"--translate-try")) {
+        size_t i = std::find(args.begin(), args.end(), L"--translate-try") - args.begin();
+        Gdip gdip;
+        exitCode = i + 3 < args.size() ? TranslateTry(args[i + 1], args[i + 2], args[i + 3], Has(args, L"fake"), Has(args, L"google")) : 2;
+    } else if (Has(args, L"--clip-ocr-try")) {
+        size_t i = std::find(args.begin(), args.end(), L"--clip-ocr-try") - args.begin();
+        Gdip gdip;
+        exitCode = i + 3 < args.size() ? ClipOcrTry(args[i + 1], args[i + 2], args[i + 3]) : 2;
+    } else if (Has(args, L"--markup-translate")) {  // --markup-translate снимок.png кадр.png итог.png [fake]
+        size_t i = std::find(args.begin(), args.end(), L"--markup-translate") - args.begin();
+        Gdip gdip;
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Config cfg = LoadOwnConfig();
+        translate::SetFake(Has(args, L"fake"));
+        exitCode = i + 3 < args.size() ? markup::DemoTranslate(UiPalette(cfg), args[i + 1], args[i + 2], args[i + 3]) : 2;
+    } else if (Has(args, L"--markup-snap")) {  // --markup-snap кадр.png итог.png [ш в]: окно разметки и готовая картинка
+        size_t i = std::find(args.begin(), args.end(), L"--markup-snap") - args.begin();
+        Gdip gdip;
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Config cfg = LoadOwnConfig();
+        int w = i + 3 < args.size() ? _wtoi(args[i + 3].c_str()) : 1000, h = i + 4 < args.size() ? _wtoi(args[i + 4].c_str()) : 600;
+        exitCode = i + 2 < args.size() ? markup::DemoSnap(UiPalette(cfg), args[i + 1], args[i + 2], w, h) : 2;
+    } else if (Has(args, L"--markup-try")) {  // --markup-try итог.png: настоящее окно разметки на показательном снимке
+        size_t i = std::find(args.begin(), args.end(), L"--markup-try") - args.begin();
+        Gdip gdip;
+        OleInitialize(nullptr);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Config cfg = LoadOwnConfig();
+        exitCode = i + 1 < args.size() ? markup::DemoWindow(UiPalette(cfg), args[i + 1]) : 2;
     } else if (Has(args, L"--snap-suite")) {  // --snap-suite <эталоны> <выход> [update]
         size_t i = std::find(args.begin(), args.end(), L"--snap-suite") - args.begin();
         if (i + 2 < args.size())
@@ -643,8 +686,8 @@ bool Run(int& exitCode) {
             exitCode = 2;
     } else if (Has(args, L"--monitors-diag")) {  // мониторы: DDC/CI, яркость, вход -> monitors_out.txt
         std::string u = Narrow(monitors::Diag());
-        HANDLE f = CreateFileW((ExeDir() + L"\\monitors_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0,
-                               nullptr);
+        HANDLE f =
+            CreateFileW(DevOutPath(L"monitors_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
         DWORD put = 0;
         if (f != INVALID_HANDLE_VALUE) {
             WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
@@ -728,7 +771,7 @@ bool Run(int& exitCode) {
         s += L"(" + std::to_wstring(GetTickCount64() - t0) + L" мс)\r\n";
         std::string u = Narrow(s);
         HANDLE f =
-            CreateFileW((ExeDir() + L"\\recent_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+            CreateFileW(DevOutPath(L"recent_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
         DWORD put = 0;
         if (f != INVALID_HANDLE_VALUE) {
             WriteFile(f, u.data(), (DWORD)u.size(), &put, nullptr);
@@ -783,6 +826,8 @@ bool Run(int& exitCode) {
         exitCode = SpeedDiag();
     } else if (Has(args, L"--net-diag")) {
         exitCode = NetDiag();
+    } else if (Has(args, L"--net-security")) {
+        exitCode = NetSecurityDiag();
     } else if (Has(args, L"--lock-apply")) {
         exitCode = LockApply();
     } else if (Has(args, L"--game-test")) {

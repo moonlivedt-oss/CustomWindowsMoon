@@ -10,8 +10,8 @@
 #include <map>
 
 #include "core/text.h"
-#include "desk/appvol.h"
-#include "desk/media.h"
+#include "media/appvol.h"
+#include "media/media.h"
 #include "phone/phone_internal.h"
 
 namespace phone::detail {

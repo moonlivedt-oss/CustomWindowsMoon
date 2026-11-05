@@ -1,7 +1,9 @@
 #include "core/engine.h"
+#include "core/karaoke.h"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <atomic>
 #include <vector>
 
@@ -16,12 +18,14 @@ constexpr size_t kTapSize = 8192;          // кольцо моно-сэмпло
 constexpr double kFadeSeconds = 0.010;     // затухание при паузе и нарастание при пуске
 constexpr double kVolumeSeconds = 0.005;   // сглаживание громкости
 constexpr uint32_t kScratchFrames = 4096;  // кусок чтения из декодера
+constexpr float kHalfPi = 1.5707963f;
 
 struct Command {
     enum class Type { SetTrack, Clear, Seek, Play, Pause, SetNext, ClearNext } type = Type::Play;
     IDecoder* decoder = nullptr;  // для SetTrack и SetNext: владение переходит получателю
     uint64_t frame = 0;
     float gain = 1.f;
+    bool crossfade = false;  // для SetNext
 };
 
 // Голос: декодер и его позиция. Звучит голос 0; голос 1 - следующий трек для бесшовного перехода.
@@ -29,10 +33,15 @@ struct Voice {
     IDecoder* decoder = nullptr;
     uint64_t position = 0;
     bool active = false;
-    float gain = 1.f;  // ReplayGain
+    float gain = 1.f;        // ReplayGain
+    bool crossfade = false;  // следующий трек: можно ли войти в него плавным переходом
+    uint64_t fadeIn = 0;     // вошёл переходом: столько первых кадров громкость нарастает
 };
 
 }  // namespace
+
+float CrossfadeOut(float t) { return std::cos(std::clamp(t, 0.f, 1.f) * kHalfPi); }
+float CrossfadeIn(float t) { return std::sin(std::clamp(t, 0.f, 1.f) * kHalfPi); }
 
 struct Engine::Impl {
     ma_context context{};
@@ -54,8 +63,11 @@ struct Engine::Impl {
     std::atomic<uint64_t> length{0};
     std::atomic<bool> hasTrack{false};
     std::atomic<bool> ended{false};
-    std::atomic<bool> silent{false};  // затухание паузы закончилось - устройство можно остановить
-    std::atomic<bool> switched{false};  // был бесшовный переход на следующий трек
+    std::atomic<bool> silent{false};           // затухание паузы закончилось - устройство можно остановить
+    std::atomic<bool> switched{false};         // был бесшовный переход на следующий трек
+    std::atomic<uint64_t> crossfadeFrames{0};  // длина плавного перехода, пишет UI
+    std::atomic<float> karaoke{0};             // цель подавления голоса, пишет UI
+    VocalReducer vocals;                       // состояние фильтра - у того, кто рендерит
 
     // Кольцо сэмплов для визуализатора: атомарные числа, чтобы чтение из UI не было гонкой данных
     std::array<std::atomic<float>, kTapSize> tap{};
@@ -63,6 +75,11 @@ struct Engine::Impl {
 
     // Состояние, которым владеет тот, кто сейчас рендерит (аудиопоток или UI при остановке)
     std::array<Voice, 2> voices{};
+    // Уходящий трек плавного перехода: доигрывает с затуханием, пока голос 0 уже играет следующий
+    // (голос 1 к этому времени свободен под новый следующий трек)
+    Voice tail{};
+    uint64_t tailLeft = 0, tailTotal = 0;
+    std::vector<float> tailScratch;
     bool wantPlay = false;
     float fade = 0;
     float volume = 0.7f;
@@ -82,6 +99,10 @@ struct Engine::Impl {
                 Retire(v.decoder, onAudioThread);
                 Retire(next.decoder, onAudioThread);  // очередь относилась к прежнему треку
                 next = Voice{};
+                Retire(tail.decoder, onAudioThread);  // новый трек выбран руками - без хвоста перехода
+                tail = Voice{};
+                tailLeft = tailTotal = 0;
+                v.fadeIn = 0;  // и без нарастания: оно относилось к треку, который вошёл переходом
                 v.decoder = c.type == Command::Type::SetTrack ? c.decoder : nullptr;
                 v.position = c.frame;
                 v.gain = c.gain;
@@ -100,8 +121,12 @@ struct Engine::Impl {
                     ended.store(false);
                 }
                 break;
-            case Command::Type::Play: wantPlay = true; break;
-            case Command::Type::Pause: wantPlay = false; break;
+            case Command::Type::Play:
+                wantPlay = true;
+                break;
+            case Command::Type::Pause:
+                wantPlay = false;
+                break;
             case Command::Type::SetNext:
             case Command::Type::ClearNext:
                 Retire(next.decoder, onAudioThread);
@@ -109,6 +134,7 @@ struct Engine::Impl {
                 if (c.type == Command::Type::SetNext && c.decoder) {
                     next.decoder = c.decoder;
                     next.gain = c.gain;
+                    next.crossfade = c.crossfade;
                     next.active = true;
                 }
                 break;
@@ -124,16 +150,41 @@ struct Engine::Impl {
         voices[0].position = 0;
         next = Voice{};
         length.store(voices[0].decoder->LengthFrames());
+        position.store(0);  // до флага смены: UI не увидит новый трек с позицией прежнего
         switched.store(true);
         return true;
+    }
+
+    // Пора начинать плавный переход: текущий трек близок к концу, следующий открыт и переход для пары разрешён.
+    // Текущий уходит в хвост, следующий становится текущим с нулевой позиции - для UI это обычная смена трека.
+    // Короткие треки (меньше двух переходов) идут стыком: переход съел бы их почти целиком
+    void MaybeStartCrossfade() {
+        Voice& v = voices[0];
+        Voice& next = voices[1];
+        const uint64_t xf = crossfadeFrames.load(std::memory_order_relaxed);
+        if (!xf || !v.active || !v.decoder || !next.decoder || !next.crossfade || tail.decoder) return;
+        const uint64_t len = v.decoder->LengthFrames(), nextLen = next.decoder->LengthFrames();
+        if (!len || len < 2 * xf || (nextLen && nextLen < 2 * xf) || v.position + xf < len) return;
+        tail = v;
+        tailTotal = tailLeft = len > v.position ? len - v.position : 1;
+        voices[0] = next;
+        voices[0].position = 0;
+        voices[0].fadeIn = xf;
+        next = Voice{};
+        length.store(voices[0].decoder->LengthFrames());
+        position.store(0);  // до флага смены: UI не увидит новый трек с позицией прежнего
+        switched.store(true);
+        if (wake) wake();
     }
 
     void Retire(IDecoder* d, bool onAudioThread) {
         if (!d) return;
         // В аудиопотоке не освобождаем память: отдаём потоку UI.
         // Если очередь вдруг полна, декодер остаётся висеть до выхода - лучше утечка, чем щелчок.
-        if (onAudioThread) retired.Push(d);
-        else delete d;
+        if (onAudioThread)
+            retired.Push(d);
+        else
+            delete d;
     }
 
     void Render(float* out, uint32_t frames) {
@@ -157,6 +208,7 @@ struct Engine::Impl {
         uint32_t done = 0;
         while (done < frames) {
             const uint32_t n = std::min(frames - done, kScratchFrames);
+            MaybeStartCrossfade();
             float* buf = scratch.data();
             uint64_t got = 0;
             // gainAt: до какого кадра действует множитель прежнего трека (при переходе он меняется)
@@ -180,14 +232,37 @@ struct Engine::Impl {
                 }
             }
             std::fill(buf + got * kChannels, buf + static_cast<size_t>(n) * kChannels, 0.f);
-            // Здесь будет обработка голоса (time-stretch) и кроссфейд
+            // Хвост плавного перехода: читаем столько кадров, сколько ему осталось в этом куске
+            uint64_t tailGot = 0;
+            const uint64_t tailStart = tailTotal - tailLeft;
+            if (tail.decoder) {
+                const uint64_t want = std::min<uint64_t>(n, tailLeft);
+                while (tailGot < want) {
+                    const uint64_t r = tail.decoder->Read(tailScratch.data() + tailGot * kChannels, want - tailGot);
+                    if (!r) break;
+                    tailGot += r;
+                }
+                tailLeft = tailGot < want ? 0 : tailLeft - tailGot;
+            }
+            // Нарастание входящего трека - по его позиции: перемотка внутрь перехода его не ломает
+            const uint64_t inStart = v.position >= got ? v.position - got : 0;
+            const float inLen = static_cast<float>(v.fadeIn), tailLen = static_cast<float>(tailTotal);
+            // Здесь будет обработка голоса (time-stretch)
             float* dst = out + static_cast<size_t>(done) * kChannels;
+            vocals.SetTarget(karaoke.load(std::memory_order_relaxed));
             for (uint32_t i = 0; i < n; ++i) {
                 fade = wantPlay ? std::min(1.f, fade + fadeStep) : std::max(0.f, fade - fadeStep);
                 volume += std::clamp(volTarget - volume, -volStep, volStep);
-                const float g = (i < gainAt ? gainBefore : v.gain) * fade;
-                const float l = buf[i * 2] * g;
-                const float r = buf[i * 2 + 1] * g;
+                float g = (i < gainAt ? gainBefore : v.gain) * fade;
+                if (v.fadeIn && i >= gainAt) g *= CrossfadeIn(static_cast<float>(inStart + i) / inLen);
+                float l = buf[i * 2] * g;
+                float r = buf[i * 2 + 1] * g;
+                if (i < tailGot) {
+                    const float tg = tail.gain * fade * CrossfadeOut(static_cast<float>(tailStart + i) / tailLen);
+                    l += tailScratch[i * 2] * tg;
+                    r += tailScratch[i * 2 + 1] * tg;
+                }
+                if (!vocals.Idle()) vocals.Process(l, r);
                 dst[i * 2] = l * volume;
                 dst[i * 2 + 1] = r * volume;
                 // Визуализатор видит сигнал до громкости: полосы не зависят от ползунка
@@ -195,6 +270,13 @@ struct Engine::Impl {
                 ++tapPos;
             }
             done += n;
+            if (v.fadeIn && v.position >= v.fadeIn) v.fadeIn = 0;  // нарастание закончилось
+            if (tail.decoder && !tailLeft) {                       // хвост доиграл - декодер потоку UI
+                Retire(tail.decoder, true);
+                tail = Voice{};
+                tailTotal = 0;
+                if (wake) wake();
+            }
         }
         tapWritten.store(tapPos, std::memory_order_release);
         position.store(v.position, std::memory_order_relaxed);
@@ -226,6 +308,7 @@ bool Engine::Start(const Options& options, WakeFn wake, std::string* error) {
     if (m.contextReady || m.deviceReady) Shutdown();
     m.wake = std::move(wake);
     m.scratch.assign(static_cast<size_t>(kScratchFrames) * kChannels, 0.f);
+    m.tailScratch.assign(static_cast<size_t>(kScratchFrames) * kChannels, 0.f);
 
     ma_context_config ctxCfg = ma_context_config_init();
     ma_backend nullBackend[] = {ma_backend_null};
@@ -251,6 +334,7 @@ bool Engine::Start(const Options& options, WakeFn wake, std::string* error) {
     }
     m.deviceReady = true;
     m.sampleRate = m.device.sampleRate;
+    m.vocals.SetSampleRate(static_cast<float>(m.sampleRate));
     return true;
 }
 
@@ -273,6 +357,9 @@ void Engine::Shutdown() {
         delete v.decoder;
         v = Voice{};
     }
+    delete m.tail.decoder;
+    m.tail = Voice{};
+    m.tailLeft = m.tailTotal = 0;
 }
 
 uint32_t Engine::SampleRate() const { return impl_->sampleRate; }
@@ -286,12 +373,18 @@ void Engine::SetTrack(std::unique_ptr<IDecoder> decoder, uint64_t startFrame, fl
     impl_->Submit(c);
 }
 
-void Engine::QueueNext(std::unique_ptr<IDecoder> decoder, float gain) {
+void Engine::QueueNext(std::unique_ptr<IDecoder> decoder, float gain, bool crossfade) {
     Command c;
     c.type = Command::Type::SetNext;
     c.decoder = decoder.release();
     c.gain = gain;
+    c.crossfade = crossfade;
     impl_->Submit(c);
+}
+
+void Engine::SetCrossfade(double seconds) {
+    Impl& m = *impl_;
+    m.crossfadeFrames.store(seconds > 0 ? static_cast<uint64_t>(std::min(seconds, 12.0) * m.sampleRate) : 0);
 }
 
 void Engine::ClearNext() {
@@ -338,6 +431,8 @@ void Engine::Seek(uint64_t frame) {
 
 void Engine::SetVolume(float volume) { impl_->volumeTarget.store(std::clamp(volume, 0.f, 1.f)); }
 
+void Engine::SetKaraoke(float amount) { impl_->karaoke.store(std::clamp(amount, 0.f, 1.f)); }
+
 bool Engine::IsPlaying() const { return impl_->playing.load(); }
 bool Engine::DeviceRunning() const { return impl_->deviceRunning; }
 bool Engine::HasTrack() const { return impl_->hasTrack.load(); }
@@ -358,6 +453,8 @@ bool Engine::Service() {
     }
     return m.ended.exchange(false);
 }
+
+uint64_t Engine::TapWritten() const { return impl_->tapWritten.load(std::memory_order_acquire); }
 
 size_t Engine::CopyRecentMono(float* dst, size_t n) const {
     const Impl& m = *impl_;

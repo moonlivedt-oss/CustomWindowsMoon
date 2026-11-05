@@ -144,6 +144,102 @@ TEST(EngineGaplessSwitch) {
     e.Shutdown();
 }
 
+TEST(CrossfadeCurvesKeepLoudness) {
+    // Равномощный переход: в каждой точке сумма квадратов 1, по краям - только один трек
+    for (int i = 0; i <= 20; ++i) {
+        const float t = i / 20.f, a = pm::CrossfadeOut(t), b = pm::CrossfadeIn(t);
+        CHECK_NEAR(a * a + b * b, 1.0, 1e-4);
+    }
+    CHECK_NEAR(pm::CrossfadeOut(0), 1.0, 1e-6);
+    CHECK_NEAR(pm::CrossfadeIn(0), 0.0, 1e-6);
+    CHECK_NEAR(pm::CrossfadeOut(1), 0.0, 1e-6);
+    CHECK_NEAR(pm::CrossfadeIn(1), 1.0, 1e-6);
+    CHECK_NEAR(pm::CrossfadeIn(2), 1.0, 1e-6);  // за пределами - не больше единицы
+}
+
+TEST(EngineCrossfadeStartsNextEarly) {
+    const auto dir = tests::TempDir("crossfade");
+    tests::WriteBytes(dir / "a.wav", tests::MakeWav(0.6, 48000));
+    tests::WriteBytes(dir / "b.wav", tests::MakeWav(0.6, 48000));
+    tests::WriteBytes(dir / "short.wav", tests::MakeWav(0.3, 48000));
+    pm::Engine e;
+    CHECK(e.Start({true, 48000}, [] {}));
+    e.SetCrossfade(0.2);
+    e.SetTrack(pm::OpenDecoder(dir / "a.wav", 2, 48000), 0);
+    e.QueueNext(pm::OpenDecoder(dir / "b.wav", 2, 48000), 1.f, true);
+    e.Play();
+    // Переход начинается за 0.2 с до конца первого: оба трека вместе звучат 1.0 с, а не 1.2
+    const auto start = std::chrono::steady_clock::now();
+    auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
+    bool switched = false, ended = false;
+    double switchAt = 0;
+    while (!ended && elapsed() < 3) {
+        ended = e.Service();
+        if (!switched && e.TakeSwitched()) {
+            switched = true;
+            switchAt = elapsed();
+            // Смена уже произошла, а первый трек ещё не доиграл: позиция - начало второго
+            CHECK(e.PositionFrames() < 48000 * 0.2);
+            CHECK(e.LengthFrames() >= 28790 && e.LengthFrames() <= 28810);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(switched && ended);
+    CHECK(switchAt > 0.25 && switchAt < 0.5);     // около 0.4 с, а не 0.6
+    CHECK(elapsed() > 0.85 && elapsed() < 1.15);  // около 1.0 с
+    // Трек короче двух переходов идёт стыком: смена - только в его конце
+    e.SetTrack(pm::OpenDecoder(dir / "short.wav", 2, 48000), 0);
+    e.QueueNext(pm::OpenDecoder(dir / "b.wav", 2, 48000), 1.f, true);
+    e.SetCrossfade(0.2);
+    const auto start2 = std::chrono::steady_clock::now();
+    switched = false;
+    while (!switched && std::chrono::steady_clock::now() - start2 < std::chrono::seconds(3)) {
+        e.Service();
+        switched = e.TakeSwitched();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(switched);
+    CHECK(std::chrono::duration<double>(std::chrono::steady_clock::now() - start2).count() > 0.25);
+    e.Shutdown();
+}
+
+// Трек, выбранный руками посреди перехода, звучит сразу: нарастание относилось к прошлому следующему
+TEST(EngineManualTrackDuringCrossfadeIsNotFadedIn) {
+    const auto dir = tests::TempDir("crossfade_manual");
+    tests::WriteBytes(dir / "a.wav", tests::MakeWav(1.0, 48000));
+    tests::WriteBytes(dir / "b.wav", tests::MakeWav(1.0, 48000));
+    tests::WriteBytes(dir / "c.wav", tests::MakeWav(3.0, 48000));
+    pm::Engine e;
+    CHECK(e.Start({true, 48000}, [] {}));
+    e.SetCrossfade(0.45);  // через 0.15 с после смены нарастание дало бы лишь половину громкости
+    e.SetTrack(pm::OpenDecoder(dir / "a.wav", 2, 48000), 0);
+    e.QueueNext(pm::OpenDecoder(dir / "b.wav", 2, 48000), 1.f, true);
+    e.Play();
+    const auto start = std::chrono::steady_clock::now();
+    auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
+    bool switched = false;
+    while (!switched && elapsed() < 3) {
+        e.Service();
+        switched = e.TakeSwitched();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(switched);
+    // Переход идёт; выбираем другой трек
+    e.SetTrack(pm::OpenDecoder(dir / "c.wav", 2, 48000), 0);
+    const auto chosen = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - chosen < std::chrono::milliseconds(150)) {
+        e.Service();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    std::vector<float> recent(2400);
+    const size_t got = e.CopyRecentMono(recent.data(), recent.size());
+    float peak = 0;
+    for (size_t i = 0; i < got; ++i) peak = std::max(peak, std::fabs(recent[i]));
+    CHECK(got > 0);
+    CHECK(peak > .25f);  // синус 12000/32768 = 0.37 на полной громкости
+    e.Shutdown();
+}
+
 TEST(PlayerGaplessAndQueueEdits) {
     const auto dir = tests::TempDir("player_gapless");
     for (const char* n : {"1.wav", "2.wav", "3.wav", "4.wav"}) tests::WriteBytes(dir / n, tests::MakeWav(0.15));

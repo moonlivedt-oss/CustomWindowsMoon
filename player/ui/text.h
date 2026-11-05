@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <unordered_map>
 
 namespace ui {
 
@@ -51,7 +52,8 @@ private:
     IDWriteFontCollection* textCollection_ = nullptr;
     IDWriteFontCollection* displayCollection_ = nullptr;
     std::map<std::wstring, ComPtr<IDWriteTextFormat>> formats_;
-    std::map<std::wstring, ComPtr<IDWriteTextLayout>> layouts_;
+    std::unordered_map<std::wstring, ComPtr<IDWriteTextLayout>> layouts_;
+    std::wstring layoutKey_;
     ComPtr<IDWriteInlineObject> ellipsis_;
 };
 

@@ -1,3 +1,4 @@
+#include "core/usage.h"
 // «Телефон рядом»: то, что Chrome даёт только защищённой странице. Корневой сертификат для телефона, страница как
 // приложение (manifest, service worker, значок), «Поделиться - на ПК» (share_target: POST multipart - файлы, текст,
 // ссылка) и камера телефона (кадры JPEG - в окно «Камера телефона» на ПК).
@@ -145,6 +146,7 @@ void Share(Conn& cn, const Request& r) {
         ++files;
         bytes += cur.size;
         last = final;
+        usage::Hit(L"phone_files");
         Post(EV_RECEIVED, final);
         return true;
     };
@@ -223,6 +225,21 @@ bool HandleShare(Conn& cn, const Request& r, const std::string& rest) {
     }
     if (rest == "/manifest.json" && get) {
         Reply(cn, 200, "application/manifest+json; charset=utf-8", ManifestJson());
+        return true;
+    }
+    if (rest.rfind("/img/", 0) == 0 && get) {  // картинки страницы (шаги настройки, пустые вкладки)
+        size_t len = 0;
+        const unsigned char* data = WebImage(rest.substr(5), &len);
+        if (!data) {
+            Text(cn, 404, "нет такой картинки");
+            return true;
+        }
+        std::string name = rest.substr(5);
+        const char* type = name.size() > 4 && name.compare(name.size() - 4, 4, ".svg") == 0    ? "image/svg+xml"
+                           : name.size() > 5 && name.compare(name.size() - 5, 5, ".webp") == 0 ? "image/webp"
+                           : name.size() > 4 && name.compare(name.size() - 4, 4, ".jpg") == 0  ? "image/jpeg"
+                                                                                               : "image/png";
+        Reply(cn, 200, type, std::string((const char*)data, len), "Cache-Control: max-age=86400\r\n");
         return true;
     }
     if (rest == "/sw.js" && get) {

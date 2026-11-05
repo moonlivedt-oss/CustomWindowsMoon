@@ -136,6 +136,21 @@ void Playlist::PlayNext(int index) {
     entries_.insert(entries_.begin() + current_ + 1, std::move(e));
 }
 
+void Playlist::Move(int from, int to) {
+    if (from < 0 || from >= Size() || to < 0 || to >= Size() || from == to) return;
+    auto remap = [&](int i) {
+        if (i == from) return to;
+        if (from < to && i > from && i <= to) return i - 1;
+        if (from > to && i >= to && i < from) return i + 1;
+        return i;
+    };
+    PlaylistEntry e = std::move(entries_[static_cast<size_t>(from)]);
+    entries_.erase(entries_.begin() + from);
+    entries_.insert(entries_.begin() + to, std::move(e));
+    if (current_ >= 0) current_ = remap(current_);
+    for (int& i : order_) i = remap(i);
+}
+
 int Playlist::Back() {
     if (entries_.empty()) return -1;
     if (shuffle_) {

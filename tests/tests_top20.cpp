@@ -10,10 +10,10 @@
 #include "core/macro.h"
 #include "core/secrets.h"
 #include "core/stroke.h"
-#include "desk/zones.h"
-#include "tools/guard.h"
-#include "tools/mft_detail.h"
-#include "tools/tools.h"
+#include "desktop/zones.h"
+#include "system/guard.h"
+#include "system/mft_detail.h"
+#include "system/tools.h"
 
 namespace {
 

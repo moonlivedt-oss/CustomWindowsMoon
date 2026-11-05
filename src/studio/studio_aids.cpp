@@ -5,16 +5,17 @@
 #include <algorithm>
 #include <cmath>
 
-#include "app/afterwork.h"
-#include "app/focus.h"
-#include "app/palette.h"
-#include "app/toolsui.h"
+#include "helpers/afterwork.h"
+#include "modes/focus.h"
+#include "helpers/palette.h"
+#include "system/ui/toolsui.h"
 #include "core/files.h"
-#include "desk/appvol.h"
-#include "desk/cliphist.h"
+#include "media/appvol.h"
+#include "cards/translatecard.h"
+#include "helpers/cliphist.h"
 #include "core/text.h"
-#include "desk/gamepad.h"
-#include "tools/guard.h"
+#include "modes/gamepad.h"
+#include "system/guard.h"
 #include "app/rules.h"
 #include "gfx/color.h"
 #include "gfx/draw.h"
@@ -29,7 +30,7 @@ namespace studio {
 
 void Studio::AidsPage(const RectF& r) {
     RectF in = Inset(r, ui.S(28), ui.S(20));
-    Header(Column(in, ui.S(900)), L"Помощники", L"Что работает рядом с кольцами. Всё выключается.");
+    Header(Column(in, ui.S(900)), L"Помощники", L"Работают рядом с кольцами");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -184,6 +185,20 @@ void Studio::AidsPage(const RectF& r) {
             L"JWT), закрытые ключи, пароли строкой и номера карт не запоминаются и стираются из буфера, если "
             L"его не заменили. Что менеджеры паролей помечают «не для истории» - не трогаю.",
             c.faint);
+    });
+    cols.Card(L"Перевод", 4.4f, [&](const RectF& b) {
+        RectF rr = cols.Row(b, 0, L"Разрешить Google, если здесь нельзя");
+        toggle(rr, ID_AID + 60, cfg.translateGoogle);
+        rr = cols.Row(b, 1, L"С русского на английский", 0.6f);
+        if (ui.Button(ID_AID + 61, RectF(rr.GetRight() - ui.S(170), rr.Y + ui.S(4), ui.S(170), ui.S(36)), L"Скачать модель",
+                      Kind::Secondary))
+            translatecard::DownloadModel();
+        cols.Note(b, 2.0f,
+                  L"Кольцо выделенного и окно разметки снимка переводят на этом компьютере: Argos Translate через "
+                  L"установленный Python, в его процессе сеть отключена. Модель скачивается один раз, около 100 МБ, "
+                  L"ваш текст при этом не отправляется. С Google текст уходит на его серверы (картинки - никогда), "
+                  L"похожее на токен, ключ или пароль не отправляется. Адрес неофициальный и может перестать работать.",
+                  c.faint);
     });
     cols.Card(L"Окна: раскладка и Alt + мышь", 3.2f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Alt + мышь: тащить и размер");

@@ -69,6 +69,8 @@ struct Config {
     COLORREF customBg = RGB(27, 20, 32), customAccent = RGB(255, 122, 107), customAccent2 = RGB(232, 96, 140),
              customGold = RGB(255, 211, 110);
     bool tourDone = false;  // тур по студии уже показан
+    std::wstring profile;   // simple, dev, expert; пусто - ещё не выбирали (core/profile)
+    int profileAsk = 0;     // 1 - экран профилей при каждом открытии студии
     // горячие углы: левый верхний, правый верхний, левый нижний, правый нижний;
     // значение - действие (desktop, tasks, screen_off...) или путь к программе, пусто - ничего
     std::wstring corners[4] = {L"", L"", L"desktop", L"tasks"};
@@ -80,7 +82,7 @@ struct Config {
     bool mediaToast = true;
     bool winFx = true;
     bool winRing = true;              // Alt + ` - кольцо открытых окон
-    bool selectionRing = true;        // Ctrl + Alt + Пробел - кольцо выделенного текста (app/selring)
+    bool selectionRing = true;        // Ctrl + Alt + Пробел - кольцо выделенного текста (ring/selring)
     bool deskDouble = true;           // двойной клик по пустому столу - целое кольцо вокруг курсора
     bool batteryGlow = true;          // свечение у нижнего края: мало заряда, подключили зарядку
     int batteryLow = 15;              // с какого процента заряд считается низким
@@ -100,7 +102,7 @@ struct Config {
     // игра без маски: окно на весь монитор (в том числе без рамки), процесс рисует через Direct3D, Vulkan или
     // OpenGL, и это не браузер и не плеер
     bool gameFullscreen = true;
-    // показ экрана (desk/share): включать самому, пока запущена программа трансляции или показа (имена exe через
+    // показ экрана (desktop/share): включать самому, пока запущена программа трансляции или показа (имена exe через
     // |); share_hide - окна RadialMenu мимо захвата экрана (вы их видите, зрители нет)
     bool shareAuto = true;
     std::wstring shareApps = L"obs64.exe|obs32.exe|CptHost.exe|Streamlabs OBS.exe|XSplit.Core.exe";
@@ -153,6 +155,9 @@ struct Config {
     bool devWatch = true;      // в Unreal: видеопамять, шейдеры, сборки UBT - сообщать
     // сеть: сторож связи, смена выходного узла, проверка маршрута игры
     bool netWatch = true;   // следить за интернетом и предлагать починку при обрыве
+    bool netSecurity = true;  // локальные фоновые проверки брандмауэра и шифрования Wi-Fi
+    bool netChanges = true, netVpnWatch = false, netVpnBlock = false, transferGentle = true;
+    std::wstring netVpnRoute, netVpnApps;  // выбранный туннель; полные пути exe через |
     bool netExit = true;    // сообщать, когда выходной узел (страна) сменился
     bool netGame = true;    // при запуске игры проверить, идёт ли она через туннель, и пинг
     int netInterval = 20;   // раз во сколько секунд проверять связь
@@ -174,7 +179,7 @@ struct Config {
     // пульт: экран ПК на телефоне (касание - щелчок в точку) и операции с файлами в открытых папках - по умолчанию нет
     bool phoneScreen = false;
     bool phoneFiles = false;
-    // Ж7: яркость по программе (life/appbright): exe=+N/-N от нынешней яркости или exe=N, через |
+    // Ж7: яркость по программе (desktop/appbright): exe=+N/-N от нынешней яркости или exe=N, через |
     bool brightByApp = true;
     std::wstring brightApps =
         L"figma.exe=+20|vlc.exe=+25|mpc-hc64.exe=+25|potplayermini64.exe=+25|sumatrapdf.exe=-15|acrobat.exe=-15|"
@@ -184,7 +189,7 @@ struct Config {
     std::wstring wingetSkip;
     bool wingetAccept = false;  // принимать соглашения пакетов за вас (по умолчанию - нет: такие - вручную)
     bool autoRepair = true;
-    bool autoReport = true;     // раз в неделю сам собрать отчёт картинкой (app/weekreport), итог - в дайджест
+    bool autoReport = true;     // раз в неделю сам собрать отчёт картинкой (system/auto/weekreport), итог - в дайджест
     bool autoBackup = true;     // раз в сутки копия radial.cfg в backups, если он поменялся (правка не из студии)
     bool toolsDiskWarn = true;  // карточка, когда на диске мало места (меньше 10% и меньше 20 ГБ)
     int lockPattern = 1;        // узор стекла при переходе: 0 - нет, 1 - соты, 2 - осколки
@@ -195,10 +200,11 @@ struct Config {
     std::wstring paletteKey = L"alt+space";  // её сочетание
     std::vector<std::wstring> rules;         // «если - то» (app/rules): строки rule = условие -> действия
     std::wstring procRules;   // постоянные правила процессов (И25): chrome.exe=below,eco | blender.exe=high
-    bool gamepad = true;      // геймпад: зажать View - кольцо, стик - сектор, A - открыть (desk/gamepad)
+    bool gamepad = true;      // геймпад: зажать View - кольцо, стик - сектор, A - открыть (modes/gamepad)
     bool clipHistory = true;  // история буфера: последние тексты и картинки
     bool clipSecrets = true;  // токены, ключи и номера карт не запоминать, из буфера стирать
     int clipSecretSec = 60;   // через сколько секунд стирать секрет из буфера
+    bool translateGoogle = false;  // перевод: разрешить Google там, где локально нельзя; текст уходит наружу
     bool winDrag = true;      // Alt + левая - тащить окно за любое место, Alt + правая - размер
     bool cpuBalance = true;   // тихий баланс процессора: фоновым обжорам - пониже приоритет
     bool noSleep = true;      // не спать, пока идёт сборка, загрузка или копирование

@@ -7,13 +7,14 @@
 #include <cmath>
 #include <ctime>
 
-#include "app/autos.h"
-#include "life/nightupd.h"
+#include "system/auto/autos.h"
+#include "system/auto/nightupd.h"
 #include "phone/phone.h"
 #include "app/autostart.h"
-#include "app/modestats.h"
-#include "app/toolsui.h"
-#include "app/weekreport.h"
+#include "modes/modestats.h"
+#include "system/ui/toolsui.h"
+#include "system/auto/weekreport.h"
+#include "core/profile.h"
 #include "core/bg.h"
 #include "core/elevate.h"
 #include "core/files.h"
@@ -239,7 +240,7 @@ void Studio::StatePage(const RectF& r) {
     if (working) RepaintIn(250);  // пока считается - изредка перерисовываемся, итог появится сам
 
     Header(col, L"Состояние",
-           L"Всё важное сейчас и что можно сделать в один клик. Подсчёт размеров: " +
+           L"Подсчёт размеров: " +
                (s.scanning ? std::wstring(L"идёт...") : Ago(s.at)));
     if (ui.Button(ID_STATE_REFRESH, RectF(col.GetRight() - ui.S(132), col.Y + ui.S(4), ui.S(132), ui.S(36)),
                   s.scanning ? L"Считаю" : L"Обновить", Kind::Secondary, L"", s.scanning)) {
@@ -338,7 +339,8 @@ void Studio::StatePage(const RectF& r) {
 
     // ---- пропущенные карточки (Л10) и заглушённые виды (Л11) ----
     if (float mh = MissedCards(x, y, w)) y += mh + gap;
-    if (float uh = UnusedFeatures(x, y, w)) y += uh + gap;
+    if (profile::Effective() >= profile::Dev)  // «Чем не пользуетесь» - про настройки, которых здесь не видно
+        if (float uh = UnusedFeatures(x, y, w)) y += uh + gap;
 
     // ---- важное сейчас (О4): те же дела, что в первом секторе кольца утилит, с кнопкой ----
     if (!stateImpAt_ || now - stateImpAt_ > 10000) {
@@ -995,7 +997,7 @@ void Studio::AutoPage(const RectF& r) {
     const UiColors& c = ui.C();
     RectF in = Inset(r, ui.S(28), ui.S(20));
     Header(Column(in, ui.S(900)), L"Автоматика",
-           L"Что программа делает сама, чтобы не приходилось лезть и искать. Всё можно выключить.");
+           L"Что программа делает сама");
     RectF view(in.X - ui.S(4), in.Y + ui.S(66), in.Width + ui.S(8), in.Height - ui.S(66));
     float off = ui.Scroll(ID_PAGE_SCROLL, view, pageContentH_);
     GraphicsState st = ui.G().Save();
@@ -1052,10 +1054,11 @@ void Studio::AutoPage(const RectF& r) {
                   c.faint);
     });
     std::vector<phone::KnownPhone> phones = phone::KnownPhones();
-    size_t shown = std::min<size_t>(phones.size(), 5);
-    int phoneRows = (int)shown + (phones.size() > shown ? 1 : 0);  // строка «и ещё N» с «Забыть все»
-    float extra = phoneRows > 1 ? (float)(phoneRows - 1) : 0;
-    cols.Card(L"Телефон рядом", 6.4f + extra, [&](const RectF& b) {
+    if (Demo() && getenv("RADIAL_NOPHONES")) phones.clear();  // снимок пустого списка
+    size_t shown = phones.size();
+    int phoneRows = (int)shown * 4;
+    float extra = phoneRows > 1 ? (float)(phoneRows - 1) : 2.4f;  // пусто - место под картинку с подсказкой
+    cols.Card(L"Телефон рядом", 7.2f + extra, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Ждать запомненный телефон всегда");
         toggle(rr, ID_PHONE_ALWAYS, cfg.phoneAlways);
         rr = cols.Row(b, 1, L"Тачпад и клавиатура с телефона");
@@ -1064,7 +1067,18 @@ void Studio::AutoPage(const RectF& r) {
         toggle(rr, ID_PHONE_SCREEN, cfg.phoneScreen);
         rr = cols.Row(b, 3, L"Файлы: открыть, копировать, в Корзину");
         toggle(rr, ID_PHONE_FILES, cfg.phoneFiles);
-        if (phones.empty()) cols.Row(b, 4, L"Запомненных телефонов нет", 0.95f);
+        if (phones.empty()) {  // картинка images/empty/no-phone.png и как подключить
+            RectF er = cols.Row(b, 4, L"", 0.95f);
+            float ih = ui.S(112), iw = ui.S(132);  // поля у картинки прозрачные - бока обрезаются
+            RectF pic(er.X, er.Y + ui.S(4), iw, ih);
+            if (Bitmap* img = Img(ExeDir() + L"\\images\\empty\\no-phone.png", 640)) ui.Picture(img, pic, 0);
+            float tx = pic.X + iw + ui.S(18), tw = er.X + er.Width - tx;
+            ui.Text(L"Телефон ещё не подключён", RectF(tx, pic.Y + ui.S(6), tw, ui.S(24)), c.text, 14, true);
+            ui.Text(
+                L"Кольцо - «Телефон», отсканируйте QR и нажмите на странице «Запомнить этот телефон». "
+                L"Дальше он подключается сам.",
+                RectF(tx, pic.Y + ui.S(32), tw, ui.S(100)), c.muted, 12, false, ui::Left, true);
+        }
         long long now = (long long)time(nullptr);
         for (size_t i = 0; i < shown; ++i) {
             const phone::KnownPhone& p = phones[i];
@@ -1072,9 +1086,41 @@ void Studio::AutoPage(const RectF& r) {
             std::wstring when = days < 0    ? L"ещё не заходил"
                                 : days == 0 ? L"заходил сегодня"
                                             : L"заходил " + Plural((int)days, L"день", L"дня", L"дней") + L" назад";
-            rr = cols.Row(b, 4 + (int)i, (p.name.empty() ? L"Телефон" : p.name) + L", " + when, 0.7f);
-            if (ui.Button(ID_PHONE_DEV + (int)i, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
-                          L"Забыть", Kind::Secondary)) {
+            int base = 4 + (int)i * 4, id = ID_PHONE_DEV + (int)i * 8;
+            rr = cols.Row(b, (float)base, (p.name.empty() ? L"Телефон" : p.name) + L", " + when, 0.95f);
+            rr = cols.Row(b, (float)base + 1, L"", 0);
+            const wchar_t* labels[] = {L"Управление", L"Экран", L"Файлы"};
+            bool grants[] = {p.control, p.screen, p.files};
+            for (int k = 0; k < 3; ++k) {
+                float width = (rr.Width - ui.S(12)) / 3;
+                if (ui.Button(id + k, RectF(rr.X + k * (width + ui.S(6)), rr.Y + ui.S(4), width, ui.S(36)), labels[k],
+                              grants[k] ? Kind::Primary : Kind::Secondary)) {
+                    auto changed = p;
+                    if (k == 0) changed.control = !changed.control;
+                    if (k == 1) changed.screen = !changed.screen;
+                    if (k == 2) changed.files = !changed.files;
+                    Defer([this, changed] {
+                        Toast(phone::SetPhoneAccess(changed) ? L"Разрешения обновлены"
+                                                             : L"Не удалось сохранить разрешения");
+                    });
+                }
+            }
+            rr = cols.Row(b, (float)base + 2, L"", 0);
+            int duration = p.expires == 0 ? 0 : p.expires - now <= 3600 ? 1 : 2;
+            if (ui.Segmented(id + 3, RectF(rr.X, rr.Y + ui.S(3), rr.Width, ui.S(38)),
+                             {L"Постоянно", L"Гость: 1 ч", L"Гость: 24 ч"}, duration)) {
+                auto changed = p;
+                changed.expires = duration == 0 ? 0 : now + (duration == 1 ? 3600 : 86400);
+                Defer([this, changed] {
+                    Toast(phone::SetPhoneAccess(changed) ? L"Срок доступа сохранён" : L"Не удалось сохранить срок");
+                });
+            }
+            std::wstring expiry =
+                p.expires ? L"Доступ ещё " + std::to_wstring(std::max(0ll, (p.expires - now + 59) / 60)) + L" мин"
+                          : L"Постоянный ключ";
+            rr = cols.Row(b, (float)base + 3, expiry, 0.7f);
+            if (ui.Button(id + 4, RectF(rr.GetRight() - ui.S(150), rr.Y + ui.S(4), ui.S(150), ui.S(36)),
+                          L"Отозвать доступ", Kind::Secondary)) {
                 std::string key = p.key;
                 Defer([key] { phone::ForgetPhone(key); });
             }
@@ -1087,7 +1133,8 @@ void Studio::AutoPage(const RectF& r) {
         }
         cols.Note(b, 5.0f + extra,
                   L"Пока телефон смотрит экран, по краю экрана красная рамка и карточка «Стоп». "
-                  L"Запомнить телефон - кнопка на его странице (после QR); не заходил 60 дней - забывается сам. Когда "
+                  L"Кнопки разрешений независимы; общие переключатели выше остаются главным ограничением. "
+                  L"Гостевой срок не продлевается от активности. Отзыв закрывает текущие соединения. Когда "
                   L"«ждать всегда» включено, страница из "
                   L"закладки открывается без QR, пока ноутбук в своей (частной) сети; сервер пускает только "
                   L"запомненные телефоны. Папки ПК для телефона - phone_share в radial.cfg.",
@@ -1113,11 +1160,11 @@ void Studio::AutoPage(const RectF& r) {
         toggle(rr, ID_AUTO_POWER, cfg.autoPower);
         if (was != cfg.autoPower) autos::OnPower();
         cols.Row(b, 1, L"Сейчас: " + autos::PowerStatus(), 0.95f);
-        cols.Note(
-            b, 2.0f,
-            L"От батареи - экономия энергии, на зарядке - сбалансированный, в игре и Unreal на зарядке - "
-            L"максимальная производительность (от батареи - сбалансированный). Тот же ползунок, что в Параметрах.",
-            c.faint);
+        cols.Note(b, 2.0f,
+                  L"От батареи - экономия энергии, на зарядке - сбалансированный. В игре и Unreal на зарядке - "
+                  L"максимум, но только пока процессор занят: простой полторы минуты - снова сбалансированный, тише. "
+                  L"Тот же ползунок, что в Параметрах.",
+                  c.faint);
     });
     cols.Card(L"Дайджест", 3.2f, [&](const RectF& b) {
         RectF rr = cols.Row(b, 0, L"Несрочное - одной карточкой вечером");
